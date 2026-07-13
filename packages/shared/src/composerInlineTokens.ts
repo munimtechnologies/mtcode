@@ -1,3 +1,5 @@
+import { parseComposerThreadLink } from "./composerTrigger.ts";
+
 export type ComposerInlineToken =
   | {
       readonly type: "mention";
@@ -8,6 +10,16 @@ export type ComposerInlineToken =
     }
   | {
       readonly type: "skill";
+      readonly value: string;
+      readonly source: string;
+      readonly start: number;
+      readonly end: number;
+    }
+  | {
+      readonly type: "thread";
+      readonly environmentId: string;
+      readonly threadId: string;
+      readonly title: string;
       readonly value: string;
       readonly source: string;
       readonly start: number;
@@ -35,11 +47,43 @@ const FILE_LINK_TOKEN_REGEX = new RegExp(
   `(^|\\s)\\[((?:\\\\.|[^\\]\\\\]){0,${MAX_FILE_LINK_LABEL_LENGTH}})\\]\\(([^)\\s]+)\\)(?=\\s)`,
   "g",
 );
+const THREAD_LINK_TOKEN_REGEX = new RegExp(
+  `(^|\\s)\\[((?:\\\\.|[^\\]\\\\]){0,${MAX_FILE_LINK_LABEL_LENGTH}})\\]\\((t3-thread:\\/\\/\\/[^)\\s]+)\\)(?=\\s)`,
+  "g",
+);
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
 // Autocomplete emits canonical file links, so ambiguous bare @scope/package text stays a package.
 const SCOPED_PACKAGE_REFERENCE_REGEX =
   /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?:\/[^\s@"]+)*$/;
+
+function collectThreadTokens(text: string): ComposerInlineToken[] {
+  const matches: ComposerInlineToken[] = [];
+
+  for (const match of text.matchAll(THREAD_LINK_TOKEN_REGEX)) {
+    const fullMatch = match[0];
+    const prefix = match[1] ?? "";
+    const title = (match[2] ?? "").replace(/\\(.)/g, "$1");
+    const destination = match[3] ?? "";
+    const reference = parseComposerThreadLink(destination);
+    if (reference && title) {
+      const start = (match.index ?? 0) + prefix.length;
+      const end = start + fullMatch.length - prefix.length;
+      matches.push({
+        type: "thread",
+        environmentId: reference.environmentId,
+        threadId: reference.threadId,
+        title,
+        value: title,
+        source: text.slice(start, end),
+        start,
+        end,
+      });
+    }
+  }
+
+  return matches;
+}
 
 function collectMentionTokens(text: string): ComposerInlineToken[] {
   const matches: ComposerInlineToken[] = [];
@@ -98,7 +142,7 @@ export function collectComposerInlineTokens(
   text: string,
   options: CollectComposerInlineTokensOptions = {},
 ): ReadonlyArray<ComposerInlineToken> {
-  const matches = collectMentionTokens(text);
+  const matches = [...collectMentionTokens(text), ...collectThreadTokens(text)];
 
   for (const match of text.matchAll(SKILL_TOKEN_REGEX)) {
     const fullMatch = match[0];

@@ -37,4 +37,5 @@ export * from "./usage.ts";
 export * from "./accountLimits.ts";
 export * from "./pluginMarketplace.ts";
 export * from "./skillInventory.ts";
+export * from "./threadReference.ts";
 export * from "./rpc.ts";

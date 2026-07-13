@@ -21,6 +21,13 @@ Do not switch to global browser skills, Chrome, Node REPL browser automation, st
 const browserToolInstructions = (browserToolsAvailable: boolean): string =>
   browserToolsAvailable ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "";
 
+const T3_CODE_THREAD_REFERENCE_INSTRUCTIONS = `
+
+## T3 Code thread references
+
+The user may reference another chat with a \`t3-thread\` link. Do not treat the link as a web URL and do not assume its contents. Use the read-only \`thread_read\` tool from the \`t3-code\` MCP server with the referenced thread id. Follow \`nextCursor\` until you have read as much of the transcript as the task requires.
+`;
+
 export const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
 ): string => `<collaboration_mode># Plan Mode (Conversational)
@@ -152,6 +159,7 @@ Only produce at most one \`<proposed_plan>\` block per turn, and only when you a
 
 If the user stays in Plan mode and asks for revisions after a prior \`<proposed_plan>\`, any new \`<proposed_plan>\` must be a complete replacement. If the user indicates that the prior plan is not acceptable but does not provide enough information to produce a complete replacement, address the concern and continue planning without producing a \`<proposed_plan>\` block. If the follow-up neither requires changes nor calls the plan into question (e.g. clarifying question), answer it before the block, then reproduce the prior \`<proposed_plan>\` unchanged.
 ${browserToolInstructions(browserToolsAvailable)}
+${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}
 </collaboration_mode>`;
 
 export const codexDefaultModeDeveloperInstructions = (
@@ -168,6 +176,7 @@ Use the \`request_user_input\` tool only when it is listed in the available tool
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 ${browserToolInstructions(browserToolsAvailable)}
+${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}
 </collaboration_mode>`;
 
 export interface CodexRuntimeInfo {
