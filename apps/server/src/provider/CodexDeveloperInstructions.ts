@@ -25,7 +25,7 @@ const T3_CODE_THREAD_REFERENCE_INSTRUCTIONS = `
 
 ## T3 Code thread references
 
-The user may reference another chat with a \`t3-thread\` link. Do not treat the link as a web URL and do not assume its contents. Use the read-only \`thread_read\` tool from the \`t3-code\` MCP server with the referenced thread id. Follow \`nextCursor\` until you have read as much of the transcript as the task requires.
+The user may reference another chat with a \`t3-thread\` link. Do not treat the link as a web URL and do not assume its contents. Use the read-only \`thread_read\` tool from the \`t3-code\` MCP server. For \`t3-thread:///ENVIRONMENT_ID/THREAD_ID\`, pass the final \`THREAD_ID\` path segment as \`threadId\`; the tool also accepts the full link. Follow \`nextCursor\` until you have read as much of the transcript as the task requires.
 `;
 
 export const codexPlanModeDeveloperInstructions = (

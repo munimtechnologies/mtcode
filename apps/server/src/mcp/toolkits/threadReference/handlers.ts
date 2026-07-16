@@ -8,9 +8,10 @@ import {
   ThreadReferenceUnavailableError,
   type EnvironmentId,
   type OrchestrationThread,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { collectComposerThreadReferences } from "@t3tools/shared/composerInlineTokens";
+import { parseComposerThreadLink } from "@t3tools/shared/composerTrigger";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -116,38 +117,56 @@ export function hasUserThreadReference(
   );
 }
 
+export function normalizeThreadReferenceThreadId(
+  input: ThreadId,
+  environmentId: EnvironmentId,
+): ThreadId {
+  const parsedLink = parseComposerThreadLink(input);
+  if (parsedLink?.environmentId === environmentId) {
+    return ThreadId.make(parsedLink.threadId);
+  }
+
+  const environmentPrefix = `${environmentId}/`;
+  if (input.startsWith(environmentPrefix)) {
+    const threadId = input.slice(environmentPrefix.length);
+    if (threadId && !threadId.includes("/")) {
+      try {
+        return ThreadId.make(decodeURIComponent(threadId));
+      } catch {
+        return input;
+      }
+    }
+  }
+
+  return input;
+}
+
 export const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
   input: ThreadReferenceReadInput,
 ) {
   const invocation = yield* McpInvocationContext.McpInvocationContext;
+  const threadId = normalizeThreadReferenceThreadId(input.threadId, invocation.environmentId);
+  const normalizedInput = { ...input, threadId };
   if (!invocation.capabilities.has("thread-reference")) {
-    return yield* new ThreadReferenceUnavailableError({ threadId: input.threadId });
+    return yield* new ThreadReferenceUnavailableError({ threadId });
   }
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const sourceThreadOption = yield* snapshotQuery
     .getThreadDetailById(invocation.threadId)
-    .pipe(
-      Effect.mapError(
-        (cause) => new ThreadReferenceUnavailableError({ threadId: input.threadId, cause }),
-      ),
-    );
+    .pipe(Effect.mapError((cause) => new ThreadReferenceUnavailableError({ threadId, cause })));
   if (
     Option.isNone(sourceThreadOption) ||
-    !hasUserThreadReference(sourceThreadOption.value, invocation.environmentId, input.threadId)
+    !hasUserThreadReference(sourceThreadOption.value, invocation.environmentId, threadId)
   ) {
-    return yield* new ThreadReferenceUnavailableError({ threadId: input.threadId });
+    return yield* new ThreadReferenceUnavailableError({ threadId });
   }
   const threadOption = yield* snapshotQuery
-    .getThreadDetailById(input.threadId)
-    .pipe(
-      Effect.mapError(
-        (cause) => new ThreadReferenceUnavailableError({ threadId: input.threadId, cause }),
-      ),
-    );
+    .getThreadDetailById(threadId)
+    .pipe(Effect.mapError((cause) => new ThreadReferenceUnavailableError({ threadId, cause })));
   if (Option.isNone(threadOption)) {
-    return yield* new ThreadReferenceNotFoundError({ threadId: input.threadId });
+    return yield* new ThreadReferenceNotFoundError({ threadId });
   }
-  const page = buildThreadReferencePage(threadOption.value, input);
+  const page = buildThreadReferencePage(threadOption.value, normalizedInput);
   if ("_tag" in page) {
     return yield* page;
   }

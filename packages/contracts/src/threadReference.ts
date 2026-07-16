@@ -22,7 +22,8 @@ export type ThreadReferenceCursor = typeof ThreadReferenceCursor.Type;
 
 export const ThreadReferenceReadInput = Schema.Struct({
   threadId: ThreadId.annotate({
-    description: "Thread id from a t3-thread reference in the user's message.",
+    description:
+      "Referenced thread id. Prefer the final THREAD_ID path segment; full t3-thread:///ENVIRONMENT_ID/THREAD_ID links and ENVIRONMENT_ID/THREAD_ID are also accepted.",
   }),
   cursor: Schema.optional(ThreadReferenceCursor).annotate({
     description: "nextCursor from the previous page. Omit for the first page.",

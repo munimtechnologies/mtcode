@@ -19,6 +19,7 @@ import { ProjectionSnapshotQuery } from "../../../orchestration/Services/Project
 import {
   buildThreadReferencePage,
   hasUserThreadReference,
+  normalizeThreadReferenceThreadId,
   threadRead,
   ThreadReferenceToolkitHandlersLive,
 } from "./handlers.ts";
@@ -208,19 +209,44 @@ it("only authorizes user-supplied references from the invoking environment", () 
   ).toBe(false);
 });
 
+it("normalizes model-facing thread reference inputs", () => {
+  expect(normalizeThreadReferenceThreadId(thread.id, environmentId)).toBe(thread.id);
+  expect(
+    normalizeThreadReferenceThreadId(ThreadId.make(`${environmentId}/${thread.id}`), environmentId),
+  ).toBe(thread.id);
+  expect(
+    normalizeThreadReferenceThreadId(
+      ThreadId.make(`t3-thread:///${environmentId}/${thread.id}`),
+      environmentId,
+    ),
+  ).toBe(thread.id);
+  expect(
+    normalizeThreadReferenceThreadId(
+      ThreadId.make(`t3-thread:///environment-2/${thread.id}`),
+      environmentId,
+    ),
+  ).toBe(`t3-thread:///environment-2/${thread.id}`);
+});
+
 it.effect("reads a referenced thread through the MCP toolkit", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
-    const result = yield* server.callTool({
-      name: "thread_read",
-      arguments: { threadId: thread.id },
-    });
-    expect(result.isError).toBe(false);
-    expect(result.structuredContent).toMatchObject({
-      threadId: thread.id,
-      title: thread.title,
-      totalMessages: 2,
-    });
+    for (const threadId of [
+      thread.id,
+      `${environmentId}/${thread.id}`,
+      `t3-thread:///${environmentId}/${thread.id}`,
+    ]) {
+      const result = yield* server.callTool({
+        name: "thread_read",
+        arguments: { threadId },
+      });
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent).toMatchObject({
+        threadId: thread.id,
+        title: thread.title,
+        totalMessages: 2,
+      });
+    }
   }).pipe(
     Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
     Effect.provideService(McpSchema.McpServerClient, mcpServerClient),

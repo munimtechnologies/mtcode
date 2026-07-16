@@ -10,7 +10,7 @@ import { ProjectionSnapshotQuery } from "../../../orchestration/Services/Project
 
 export const ThreadReadTool = Tool.make("thread_read", {
   description:
-    "Read a T3 Code chat thread referenced by a t3-thread link in the user's message. Pass the threadId from that link. The transcript is paginated; when nextCursor is non-null, call thread_read again with that cursor to continue. Do not call this for unrelated threads that the user did not reference.",
+    "Read a T3 Code chat thread referenced by a t3-thread link in the user's message. For t3-thread:///ENVIRONMENT_ID/THREAD_ID, pass the final THREAD_ID as threadId. The full t3-thread link and ENVIRONMENT_ID/THREAD_ID are also accepted. The transcript is paginated; when nextCursor is non-null, call thread_read again with that cursor to continue. Do not call this for unrelated threads that the user did not reference.",
   parameters: ThreadReferenceReadInput,
   success: ThreadReferenceReadResult,
   failure: ThreadReferenceReadError,
