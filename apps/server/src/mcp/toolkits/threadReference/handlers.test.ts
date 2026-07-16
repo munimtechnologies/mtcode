@@ -166,6 +166,21 @@ it("only authorizes user-supplied references from the invoking environment", () 
         ...currentThread,
         messages: [
           makeMessage(
+            "message-punctuated-reference",
+            `Continue from [Referenced work](t3-thread:///${environmentId}/${thread.id}), please.`,
+          ),
+        ],
+      },
+      environmentId,
+      thread.id,
+    ),
+  ).toBe(true);
+  expect(
+    hasUserThreadReference(
+      {
+        ...currentThread,
+        messages: [
+          makeMessage(
             "message-assistant-reference",
             `[Referenced work](t3-thread:///${environmentId}/${thread.id})`,
             "assistant",

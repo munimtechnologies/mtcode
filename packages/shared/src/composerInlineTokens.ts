@@ -50,7 +50,7 @@ const FILE_LINK_TOKEN_REGEX = new RegExp(
   "g",
 );
 const THREAD_LINK_TOKEN_REGEX = new RegExp(
-  `(^|\\s)\\[((?:\\\\.|[^\\]\\\\]){0,${MAX_FILE_LINK_LABEL_LENGTH}})\\]\\((t3-thread:\\/\\/\\/[^)\\s]+)\\)(?=\\s|$)`,
+  `(^|\\s)\\[((?:\\\\.|[^\\]\\\\]){0,${MAX_FILE_LINK_LABEL_LENGTH}})\\]\\((t3-thread:\\/\\/\\/[^)\\s]+)\\)`,
   "g",
 );
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;

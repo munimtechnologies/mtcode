@@ -178,4 +178,25 @@ describe("collectComposerInlineTokens", () => {
       },
     ]);
   });
+
+  it.each([".", ",", ";", ":", "!", "?", ")", '"'])(
+    "collects a thread reference followed by %s without consuming the punctuation",
+    (punctuation) => {
+      const reference = "[chat](t3-thread:///environment-1/thread-1)";
+      const text = `Read ${reference}${punctuation}`;
+      const referenceEnd = 5 + reference.length;
+
+      expect(collectComposerInlineTokens(text)).toMatchObject([
+        {
+          type: "thread",
+          environmentId: "environment-1",
+          threadId: "thread-1",
+          source: reference,
+          start: 5,
+          end: referenceEnd,
+        },
+      ]);
+      expect(text.slice(referenceEnd)).toBe(punctuation);
+    },
+  );
 });
