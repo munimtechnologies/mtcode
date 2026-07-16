@@ -79,7 +79,7 @@ export class ThreadReferenceInvalidCursorError extends Schema.TaggedErrorClass<T
 
 export class ThreadReferenceUnavailableError extends Schema.TaggedErrorClass<ThreadReferenceUnavailableError>()(
   "ThreadReferenceUnavailableError",
-  { threadId: ThreadId },
+  { threadId: ThreadId, cause: Schema.optional(Schema.Defect()) },
 ) {
   override get message(): string {
     return `Referenced thread '${this.threadId}' could not be read.`;

@@ -14,10 +14,12 @@ import * as Option from "effect/Option";
 import { McpSchema, McpServer } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import { PersistenceSqlError } from "../../../persistence/Errors.ts";
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   buildThreadReferencePage,
   hasUserThreadReference,
+  threadRead,
   ThreadReferenceToolkitHandlersLive,
 } from "./handlers.ts";
 import { ThreadReferenceToolkit } from "./tools.ts";
@@ -143,6 +145,19 @@ it("continues pagination across an empty message at a page boundary", () => {
   expect(second.nextCursor).toBeNull();
 });
 
+it.each([":", "0:", ":0", "0:0:garbage"])("rejects malformed cursor %s", (cursor) => {
+  expect(
+    buildThreadReferencePage(thread, {
+      threadId: thread.id,
+      cursor,
+      maxChars: 1_000,
+    } as never),
+  ).toMatchObject({
+    _tag: "ThreadReferenceInvalidCursorError",
+    cursor,
+  });
+});
+
 it("only authorizes user-supplied references from the invoking environment", () => {
   expect(hasUserThreadReference(currentThread, environmentId, thread.id)).toBe(true);
   expect(
@@ -220,3 +235,26 @@ it.effect("rejects a thread that was not referenced by the invoking user", () =>
     Effect.provide(TestLayer),
   ),
 );
+
+it.effect("preserves projection failures when a referenced thread cannot be loaded", () => {
+  const repositoryError = new PersistenceSqlError({
+    operation: "getThreadDetailById",
+    detail: "database unavailable",
+  });
+  return Effect.gen(function* () {
+    const error = yield* Effect.flip(threadRead({ threadId: thread.id }));
+    expect(error).toMatchObject({
+      _tag: "ThreadReferenceUnavailableError",
+      threadId: thread.id,
+    });
+    expect(error.cause).toBe(repositoryError);
+  }).pipe(
+    Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+    Effect.provideService(ProjectionSnapshotQuery, {
+      getThreadDetailById: (threadId: ThreadId) =>
+        threadId === currentThread.id
+          ? Effect.succeed(Option.some(currentThread))
+          : Effect.fail(repositoryError),
+    } as never),
+  );
+});

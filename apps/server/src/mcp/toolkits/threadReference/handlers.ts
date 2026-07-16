@@ -28,7 +28,9 @@ function decodeCursor(
   thread: OrchestrationThread,
 ): TranscriptPosition | null {
   if (!input.cursor) return { messageIndex: 0, textOffset: 0 };
-  const [messageIndexText, textOffsetText] = input.cursor.split(":");
+  const cursorMatch = /^(\d+):(\d+)$/.exec(input.cursor);
+  if (!cursorMatch) return null;
+  const [, messageIndexText, textOffsetText] = cursorMatch;
   const messageIndex = Number(messageIndexText);
   const textOffset = Number(textOffsetText);
   const message = thread.messages[messageIndex];
@@ -114,7 +116,7 @@ export function hasUserThreadReference(
   );
 }
 
-const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
+export const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
   input: ThreadReferenceReadInput,
 ) {
   const invocation = yield* McpInvocationContext.McpInvocationContext;
@@ -124,7 +126,11 @@ const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const sourceThreadOption = yield* snapshotQuery
     .getThreadDetailById(invocation.threadId)
-    .pipe(Effect.mapError(() => new ThreadReferenceUnavailableError({ threadId: input.threadId })));
+    .pipe(
+      Effect.mapError(
+        (cause) => new ThreadReferenceUnavailableError({ threadId: input.threadId, cause }),
+      ),
+    );
   if (
     Option.isNone(sourceThreadOption) ||
     !hasUserThreadReference(sourceThreadOption.value, invocation.environmentId, input.threadId)
@@ -133,7 +139,11 @@ const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
   }
   const threadOption = yield* snapshotQuery
     .getThreadDetailById(input.threadId)
-    .pipe(Effect.mapError(() => new ThreadReferenceUnavailableError({ threadId: input.threadId })));
+    .pipe(
+      Effect.mapError(
+        (cause) => new ThreadReferenceUnavailableError({ threadId: input.threadId, cause }),
+      ),
+    );
   if (Option.isNone(threadOption)) {
     return yield* new ThreadReferenceNotFoundError({ threadId: input.threadId });
   }
