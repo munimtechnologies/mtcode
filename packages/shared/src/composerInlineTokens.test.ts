@@ -165,4 +165,17 @@ describe("collectComposerInlineTokens", () => {
   it("ignores malformed thread links", () => {
     expect(collectComposerInlineTokens("Read [chat](t3-thread:///missing) first")).toEqual([]);
   });
+
+  it("collects a complete thread reference at the end of the prompt", () => {
+    expect(
+      collectComposerInlineTokens("Read [chat](t3-thread:///environment-1/thread-1)"),
+    ).toMatchObject([
+      {
+        type: "thread",
+        environmentId: "environment-1",
+        threadId: "thread-1",
+        title: "chat",
+      },
+    ]);
+  });
 });

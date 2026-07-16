@@ -6,8 +6,11 @@ import {
   type ThreadReferenceReadResult,
   type ThreadReferenceTranscriptMessage,
   ThreadReferenceUnavailableError,
+  type EnvironmentId,
   type OrchestrationThread,
+  type ThreadId,
 } from "@t3tools/contracts";
+import { collectComposerThreadReferences } from "@t3tools/shared/composerInlineTokens";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -35,7 +38,7 @@ function decodeCursor(
     !Number.isSafeInteger(textOffset) ||
     messageIndex < 0 ||
     textOffset < 0 ||
-    (!validEndCursor && (!message || textOffset >= message.text.length))
+    (!validEndCursor && (!message || textOffset > message.text.length))
   ) {
     return null;
   }
@@ -96,6 +99,21 @@ export function buildThreadReferencePage(
   };
 }
 
+export function hasUserThreadReference(
+  sourceThread: OrchestrationThread,
+  environmentId: EnvironmentId,
+  targetThreadId: ThreadId,
+): boolean {
+  return sourceThread.messages.some(
+    (message) =>
+      message.role === "user" &&
+      collectComposerThreadReferences(message.text).some(
+        (reference) =>
+          reference.environmentId === environmentId && reference.threadId === targetThreadId,
+      ),
+  );
+}
+
 const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
   input: ThreadReferenceReadInput,
 ) {
@@ -104,6 +122,15 @@ const threadRead = Effect.fn("ThreadReferenceToolkit.threadRead")(function* (
     return yield* new ThreadReferenceUnavailableError({ threadId: input.threadId });
   }
   const snapshotQuery = yield* ProjectionSnapshotQuery;
+  const sourceThreadOption = yield* snapshotQuery
+    .getThreadDetailById(invocation.threadId)
+    .pipe(Effect.mapError(() => new ThreadReferenceUnavailableError({ threadId: input.threadId })));
+  if (
+    Option.isNone(sourceThreadOption) ||
+    !hasUserThreadReference(sourceThreadOption.value, invocation.environmentId, input.threadId)
+  ) {
+    return yield* new ThreadReferenceUnavailableError({ threadId: input.threadId });
+  }
   const threadOption = yield* snapshotQuery
     .getThreadDetailById(input.threadId)
     .pipe(Effect.mapError(() => new ThreadReferenceUnavailableError({ threadId: input.threadId })));

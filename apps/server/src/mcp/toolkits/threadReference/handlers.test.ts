@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import {
+  EnvironmentId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
@@ -14,7 +15,11 @@ import { McpSchema, McpServer } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { buildThreadReferencePage, ThreadReferenceToolkitHandlersLive } from "./handlers.ts";
+import {
+  buildThreadReferencePage,
+  hasUserThreadReference,
+  ThreadReferenceToolkitHandlersLive,
+} from "./handlers.ts";
 import { ThreadReferenceToolkit } from "./tools.ts";
 
 const TestLayer = McpServer.toolkit(ThreadReferenceToolkit).pipe(
@@ -22,9 +27,13 @@ const TestLayer = McpServer.toolkit(ThreadReferenceToolkit).pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
 );
 
-const makeMessage = (id: string, text: string): OrchestrationMessage => ({
+const makeMessage = (
+  id: string,
+  text: string,
+  role: OrchestrationMessage["role"] = "user",
+): OrchestrationMessage => ({
   id: MessageId.make(id),
-  role: "user",
+  role,
   text,
   turnId: null,
   streaming: false,
@@ -32,12 +41,53 @@ const makeMessage = (id: string, text: string): OrchestrationMessage => ({
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
 
+const currentThreadId = ThreadId.make("thread-current");
+const environmentId = EnvironmentId.make("environment-1");
 const thread = {
   id: ThreadId.make("thread-referenced"),
   projectId: ProjectId.make("project-1"),
   title: "Referenced work",
   messages: [makeMessage("message-1", "abcdef"), makeMessage("message-2", "ghijkl")],
 } as unknown as OrchestrationThread;
+const currentThread = {
+  ...thread,
+  id: currentThreadId,
+  messages: [
+    makeMessage(
+      "message-reference",
+      `[Referenced work](t3-thread:///${environmentId}/${thread.id})`,
+    ),
+  ],
+} as OrchestrationThread;
+const invocation = {
+  environmentId,
+  threadId: currentThreadId,
+  providerSessionId: "provider-session-1",
+  providerInstanceId: ProviderInstanceId.make("codex"),
+  capabilities: new Set(["thread-reference"] as const),
+  issuedAt: 1,
+  expiresAt: Number.MAX_SAFE_INTEGER,
+};
+const mcpServerClient = {
+  clientId: 1,
+  initializePayload: {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "test", version: "1" },
+  },
+  getClient: Effect.die("unused"),
+};
+const projectionQueryFor = (sourceThread: OrchestrationThread) =>
+  ({
+    getThreadDetailById: (threadId: ThreadId) =>
+      Effect.succeed(
+        threadId === sourceThread.id
+          ? Option.some(sourceThread)
+          : threadId === thread.id
+            ? Option.some(thread)
+            : Option.none(),
+      ),
+  }) as never;
 
 it("paginates within a message without losing transcript text", () => {
   const first = buildThreadReferencePage(thread, {
@@ -67,6 +117,67 @@ it("paginates within a message without losing transcript text", () => {
   expect(longSecond.nextCursor).toBeNull();
 });
 
+it("continues pagination across an empty message at a page boundary", () => {
+  const emptyMessageThread = {
+    ...thread,
+    messages: [
+      makeMessage("message-full", "a".repeat(1_000)),
+      makeMessage("message-empty", ""),
+      makeMessage("message-tail", "tail"),
+    ],
+  };
+  const first = buildThreadReferencePage(emptyMessageThread, {
+    threadId: thread.id,
+    maxChars: 1_000,
+  });
+  if ("_tag" in first) throw new Error("unexpected cursor error");
+  expect(first.nextCursor).toBe("1:0");
+
+  const second = buildThreadReferencePage(emptyMessageThread, {
+    threadId: thread.id,
+    cursor: first.nextCursor!,
+    maxChars: 1_000,
+  });
+  if ("_tag" in second) throw new Error("unexpected cursor error");
+  expect(second.messages.map(({ text }) => text)).toEqual(["", "tail"]);
+  expect(second.nextCursor).toBeNull();
+});
+
+it("only authorizes user-supplied references from the invoking environment", () => {
+  expect(hasUserThreadReference(currentThread, environmentId, thread.id)).toBe(true);
+  expect(
+    hasUserThreadReference(
+      {
+        ...currentThread,
+        messages: [
+          makeMessage(
+            "message-assistant-reference",
+            `[Referenced work](t3-thread:///${environmentId}/${thread.id})`,
+            "assistant",
+          ),
+        ],
+      },
+      environmentId,
+      thread.id,
+    ),
+  ).toBe(false);
+  expect(
+    hasUserThreadReference(
+      {
+        ...currentThread,
+        messages: [
+          makeMessage(
+            "message-other-environment",
+            `[Referenced work](t3-thread:///environment-2/${thread.id})`,
+          ),
+        ],
+      },
+      environmentId,
+      thread.id,
+    ),
+  ).toBe(false);
+});
+
 it.effect("reads a referenced thread through the MCP toolkit", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
@@ -81,27 +192,31 @@ it.effect("reads a referenced thread through the MCP toolkit", () =>
       totalMessages: 2,
     });
   }).pipe(
-    Effect.provideService(McpInvocationContext.McpInvocationContext, {
-      environmentId: "environment-1" as never,
-      threadId: ThreadId.make("thread-current"),
-      providerSessionId: "provider-session-1",
-      providerInstanceId: ProviderInstanceId.make("codex"),
-      capabilities: new Set(["thread-reference"] as const),
-      issuedAt: 1,
-      expiresAt: Number.MAX_SAFE_INTEGER,
-    }),
-    Effect.provideService(McpSchema.McpServerClient, {
-      clientId: 1,
-      initializePayload: {
-        protocolVersion: "2025-03-26",
-        capabilities: {},
-        clientInfo: { name: "test", version: "1" },
-      },
-      getClient: Effect.die("unused"),
-    }),
-    Effect.provideService(ProjectionSnapshotQuery, {
-      getThreadDetailById: () => Effect.succeed(Option.some(thread)),
-    } as never),
+    Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+    Effect.provideService(McpSchema.McpServerClient, mcpServerClient),
+    Effect.provideService(ProjectionSnapshotQuery, projectionQueryFor(currentThread)),
+    Effect.provide(TestLayer),
+  ),
+);
+
+it.effect("rejects a thread that was not referenced by the invoking user", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server.callTool({
+      name: "thread_read",
+      arguments: { threadId: thread.id },
+    });
+    expect(result.isError).toBe(true);
+  }).pipe(
+    Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+    Effect.provideService(McpSchema.McpServerClient, mcpServerClient),
+    Effect.provideService(
+      ProjectionSnapshotQuery,
+      projectionQueryFor({
+        ...currentThread,
+        messages: [makeMessage("message-without-reference", "No thread reference here.")],
+      }),
+    ),
     Effect.provide(TestLayer),
   ),
 );
