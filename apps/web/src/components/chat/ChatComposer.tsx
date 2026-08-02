@@ -106,6 +106,8 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
+import { useVoiceTranscription } from "../../hooks/useVoiceTranscription";
+import { VoiceTranscriptionPanel } from "./VoiceTranscriptionPanel";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -200,6 +202,7 @@ import {
   LockOpenIcon,
   PenLineIcon,
   SparklesIcon,
+  MicIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -1253,6 +1256,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [composerDraftTarget, setComposerDraftPrompt],
   );
+
+  const appendVoiceTranscript = useCallback(
+    (transcript: string) => {
+      const currentPrompt = promptRef.current;
+      const boundary = currentPrompt.length > 0 && !/\s$/.test(currentPrompt) ? " " : "";
+      const nextPrompt = `${currentPrompt}${boundary}${transcript}`;
+      promptRef.current = nextPrompt;
+      setPrompt(nextPrompt);
+      const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+      setComposerCursor(nextCursor);
+      setComposerTrigger(null);
+      scheduleComposerFocus();
+    },
+    [promptRef, scheduleComposerFocus, setPrompt],
+  );
+  const voiceTranscription = useVoiceTranscription({
+    config: {
+      provider: settings.voiceTranscriptionProvider,
+      baseUrl: settings.voiceTranscriptionBaseUrl,
+      model: settings.voiceTranscriptionModel,
+      apiKey: settings.voiceTranscriptionApiKey,
+    },
+    onTranscript: appendVoiceTranscript,
+  });
 
   const addComposerImage = useCallback(
     (image: ComposerImageAttachment) => {
@@ -3086,6 +3113,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             </div>
           </div>
 
+          {settings.voiceTranscriptionEnabled && voiceTranscription.status !== "idle" ? (
+            <VoiceTranscriptionPanel
+              status={voiceTranscription.status}
+              elapsedMs={voiceTranscription.elapsedMs}
+              levels={voiceTranscription.levels}
+              onStop={voiceTranscription.stop}
+            />
+          ) : settings.voiceTranscriptionEnabled && voiceTranscription.error ? (
+            <p className="mx-4 mb-2 text-xs text-destructive" role="alert">
+              {voiceTranscription.error}
+            </p>
+          ) : null}
+
           {/* Bottom toolbar */}
           {isComposerCollapsedMobile ? null : activePendingApproval ? (
             <div className="flex items-center justify-end gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
@@ -3182,6 +3222,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                {settings.voiceTranscriptionEnabled &&
+                voiceTranscription.status === "idle" &&
+                !isComposerApprovalState &&
+                pendingUserInputs.length === 0 ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          disabled={isConnecting || projectSelectionRequired}
+                          className="rounded-full text-muted-foreground"
+                          onClick={() => void voiceTranscription.start()}
+                          aria-label="Start dictation"
+                        >
+                          <MicIcon className="size-4" />
+                        </Button>
+                      }
+                    />
+                    <TooltipPopup side="top">Start dictation</TooltipPopup>
+                  </Tooltip>
+                ) : null}
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}

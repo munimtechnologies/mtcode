@@ -39,8 +39,10 @@ import {
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
+import { forwardWhisperTranscription, MAX_TRANSCRIPTION_AUDIO_BYTES } from "./transcription.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+const TRANSCRIPTION_PATH = "/api/transcription";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
@@ -185,6 +187,50 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           HttpServerResponse.text("Trace export failed.", { status: 502 }),
         ),
       );
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+export const transcriptionRouteLayer = HttpRouter.add(
+  "POST",
+  TRANSCRIPTION_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const declaredLength = Number(request.headers["content-length"] ?? "0");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_TRANSCRIPTION_AUDIO_BYTES) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "The recording exceeds the 25 MB limit." },
+        { status: 413 },
+      );
+    }
+
+    const body = yield* request.arrayBuffer;
+    const audio = new Uint8Array(body);
+    const result = yield* Effect.tryPromise(() =>
+      forwardWhisperTranscription({
+        audio,
+        audioMimeType: request.headers["content-type"] ?? "audio/webm",
+        baseUrl: request.headers["x-t3-transcription-base-url"] ?? "",
+        model: request.headers["x-t3-transcription-model"] ?? "",
+        apiKey: request.headers["x-t3-transcription-api-key"] ?? "",
+      }),
+    ).pipe(
+      Effect.orElseSucceed(() => ({
+        ok: false as const,
+        status: 502,
+        message: "Transcription failed unexpectedly.",
+      })),
+    );
+
+    return result.ok
+      ? HttpServerResponse.jsonUnsafe({ text: result.text })
+      : HttpServerResponse.jsonUnsafe({ error: result.message }, { status: result.status });
   }).pipe(
     Effect.catchTags({
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
