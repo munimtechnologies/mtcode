@@ -41,16 +41,17 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 import {
   forwardVoiceTranscription,
+  listVoiceTranscriptionModels,
   MAX_TRANSCRIPTION_AUDIO_BYTES,
   readTranscriptionAudio,
   resolveTranscriptionProvider,
-  TranscriptionApiKeyMissingError,
-  TranscriptionEmptyAudioError,
+  transcriptionEnvironmentApiKeyStatus,
   TranscriptionProviderUnsupportedError,
 } from "./transcription.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const TRANSCRIPTION_PATH = "/api/transcription";
+const TRANSCRIPTION_MODELS_PATH = "/api/transcription/models";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
@@ -204,7 +205,26 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   ),
 );
 
-export const transcriptionRouteLayer = HttpRouter.add(
+const transcriptionConfigRouteLayer = HttpRouter.add(
+  "GET",
+  TRANSCRIPTION_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const [openai, groq] = yield* Effect.all([
+      transcriptionEnvironmentApiKeyStatus("openai"),
+      transcriptionEnvironmentApiKeyStatus("groq"),
+    ]);
+    return HttpServerResponse.jsonUnsafe({ openai, groq });
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
+);
+
+const transcriptionUploadRouteLayer = HttpRouter.add(
   "POST",
   TRANSCRIPTION_PATH,
   Effect.gen(function* () {
@@ -231,6 +251,7 @@ export const transcriptionRouteLayer = HttpRouter.add(
       audioMimeType: request.headers["content-type"] ?? "audio/webm",
       provider,
       apiKey: request.headers["x-t3-transcription-api-key"] ?? "",
+      model: request.headers["x-t3-transcription-model"] ?? "",
     });
     return HttpServerResponse.jsonUnsafe({ text });
   }).pipe(
@@ -246,6 +267,8 @@ export const transcriptionRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
       TranscriptionEmptyAudioError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
+      TranscriptionModelMissingError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
       TranscriptionProviderError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
       TranscriptionProviderUnsupportedError: (error) =>
@@ -256,6 +279,48 @@ export const transcriptionRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
     }),
   ),
+);
+
+const transcriptionModelsRouteLayer = HttpRouter.add(
+  "GET",
+  TRANSCRIPTION_MODELS_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const provider = resolveTranscriptionProvider(
+      request.headers["x-t3-transcription-provider"] ?? "",
+    );
+    if (!provider) {
+      return yield* new TranscriptionProviderUnsupportedError();
+    }
+    const models = yield* listVoiceTranscriptionModels({
+      provider,
+      apiKey: request.headers["x-t3-transcription-api-key"] ?? "",
+    });
+    return HttpServerResponse.jsonUnsafe({ models });
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+      TranscriptionApiKeyMissingError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
+      TranscriptionProviderError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+      TranscriptionProviderUnsupportedError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
+      TranscriptionRequestError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+      TranscriptionResponseError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+    }),
+  ),
+);
+
+export const transcriptionRouteLayer = Layer.mergeAll(
+  transcriptionConfigRouteLayer,
+  transcriptionModelsRouteLayer,
+  transcriptionUploadRouteLayer,
 );
 
 export const assetRouteLayer = HttpRouter.add(

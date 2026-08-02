@@ -45,6 +45,7 @@ const clientSettings: ClientSettings = {
   voiceTranscriptionEnabled: true,
   voiceTranscriptionProvider: "openai",
   voiceTranscriptionApiKey: "",
+  voiceTranscriptionModel: "",
   wordWrap: true,
 };
 

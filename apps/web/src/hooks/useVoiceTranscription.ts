@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { transcribeVoiceRecording, type VoiceTranscriptionConfig } from "../lib/voiceTranscription";
 
-const LEVEL_COUNT = 36;
+const LEVEL_COUNT = 160;
 const MAX_RECORDING_MS = 5 * 60 * 1_000;
 const MIME_TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
+const FLAT_LEVELS = Array<number>(LEVEL_COUNT).fill(0);
 
 export type VoiceTranscriptionStatus = "idle" | "recording" | "transcribing";
 
@@ -22,10 +23,11 @@ export function useVoiceTranscription({
 }) {
   const [status, setStatus] = useState<VoiceTranscriptionStatus>("idle");
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [levels, setLevels] = useState<readonly number[]>(() => Array(LEVEL_COUNT).fill(0.12));
+  const [levels, setLevels] = useState<readonly number[]>(FLAT_LEVELS);
   const [error, setError] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const startingRef = useRef(false);
+  const cancelStartingRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const intervalsRef = useRef<number[]>([]);
@@ -54,6 +56,7 @@ export function useVoiceTranscription({
     return () => {
       mountedRef.current = false;
       startingRef.current = false;
+      cancelStartingRef.current = true;
       const recorder = recorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
       cleanupCapture();
@@ -61,27 +64,51 @@ export function useVoiceTranscription({
   }, [cleanupCapture]);
 
   const stop = useCallback(() => {
+    if (startingRef.current) {
+      cancelStartingRef.current = true;
+      cleanupCapture();
+      if (mountedRef.current) {
+        setStatus("idle");
+        setElapsedMs(0);
+      }
+      return;
+    }
     const recorder = recorderRef.current;
     if (recorder?.state === "recording") recorder.stop();
-  }, []);
+  }, [cleanupCapture]);
 
   const start = useCallback(async () => {
     if (startingRef.current || status !== "idle") return;
     startingRef.current = true;
     setError(null);
+    setElapsedMs(0);
+    setLevels(FLAT_LEVELS);
+    if (!configRef.current.model.trim()) {
+      startingRef.current = false;
+      setError("Select a transcription model in Settings.");
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       startingRef.current = false;
       setError("Microphone recording is not supported on this device.");
       return;
     }
 
+    cancelStartingRef.current = false;
+    setStatus("recording");
     try {
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      if (audioContext.state === "suspended") {
+        void audioContext.resume().catch(() => undefined);
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      if (!mountedRef.current) {
+      if (!mountedRef.current || cancelStartingRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         startingRef.current = false;
+        cancelStartingRef.current = false;
         return;
       }
 
@@ -121,22 +148,29 @@ export function useVoiceTranscription({
           });
       });
 
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 128;
+      analyser.fftSize = 256;
+      const silentOutput = audioContext.createGain();
+      silentOutput.gain.value = 0;
       audioContext.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Uint8Array(analyser.frequencyBinCount);
+      analyser.connect(silentOutput);
+      silentOutput.connect(audioContext.destination);
+      if (audioContext.state === "suspended") {
+        void audioContext.resume().catch(() => undefined);
+      }
+      const samples = new Uint8Array(analyser.fftSize);
       intervalsRef.current.push(
         window.setInterval(() => {
-          analyser.getByteFrequencyData(samples);
-          setLevels(
-            Array.from({ length: LEVEL_COUNT }, (_, index) => {
-              const sampleIndex = Math.floor((index / LEVEL_COUNT) * samples.length);
-              return Math.max(0.1, (samples[sampleIndex] ?? 0) / 255);
-            }),
-          );
-        }, 80),
+          analyser.getByteTimeDomainData(samples);
+          let squaredAmplitude = 0;
+          for (const sample of samples) {
+            const amplitude = (sample - 128) / 128;
+            squaredAmplitude += amplitude * amplitude;
+          }
+          const rootMeanSquare = Math.sqrt(squaredAmplitude / samples.length);
+          const nextLevel = Math.min(1, Math.max(0, (rootMeanSquare - 0.008) * 9));
+          setLevels((current) => [...current.slice(1), nextLevel]);
+        }, 50),
       );
       startedAtRef.current = Date.now();
       intervalsRef.current.push(
@@ -145,10 +179,13 @@ export function useVoiceTranscription({
       timeoutRef.current = window.setTimeout(() => recorder.stop(), MAX_RECORDING_MS);
       recorder.start(250);
       startingRef.current = false;
-      setStatus("recording");
     } catch (cause) {
       startingRef.current = false;
       cleanupCapture();
+      if (cancelStartingRef.current) {
+        cancelStartingRef.current = false;
+        return;
+      }
       setStatus("idle");
       setError(
         cause instanceof DOMException && cause.name === "NotAllowedError"
