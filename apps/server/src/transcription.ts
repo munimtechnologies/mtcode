@@ -195,9 +195,10 @@ export const forwardVoiceTranscription = Effect.fn("voiceTranscription.forward")
       }),
     ),
     Effect.timeout("2 minutes"),
-    Effect.catchTag("TimeoutError", (cause) =>
-      Effect.fail(new TranscriptionRequestError({ provider: input.provider, cause })),
-    ),
+    Effect.catchTags({
+      TimeoutError: (cause) =>
+        Effect.fail(new TranscriptionRequestError({ provider: input.provider, cause })),
+    }),
   );
   return payload.text.trim();
 });
