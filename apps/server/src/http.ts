@@ -39,7 +39,13 @@ import {
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
-import { forwardWhisperTranscription, MAX_TRANSCRIPTION_AUDIO_BYTES } from "./transcription.ts";
+import {
+  forwardVoiceTranscription,
+  MAX_TRANSCRIPTION_AUDIO_BYTES,
+  readTranscriptionAudio,
+  resolveTranscriptionProvider,
+  TranscriptionInputError,
+} from "./transcription.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const TRANSCRIPTION_PATH = "/api/transcription";
@@ -210,32 +216,38 @@ export const transcriptionRouteLayer = HttpRouter.add(
       );
     }
 
-    const body = yield* request.arrayBuffer;
-    const audio = new Uint8Array(body);
-    const result = yield* Effect.tryPromise(() =>
-      forwardWhisperTranscription({
-        audio,
-        audioMimeType: request.headers["content-type"] ?? "audio/webm",
-        baseUrl: request.headers["x-t3-transcription-base-url"] ?? "",
-        model: request.headers["x-t3-transcription-model"] ?? "",
-        apiKey: request.headers["x-t3-transcription-api-key"] ?? "",
-      }),
-    ).pipe(
-      Effect.orElseSucceed(() => ({
-        ok: false as const,
-        status: 502,
-        message: "Transcription failed unexpectedly.",
-      })),
+    const provider = resolveTranscriptionProvider(
+      request.headers["x-t3-transcription-provider"] ?? "",
     );
+    if (!provider) {
+      return yield* new TranscriptionInputError({ reason: "invalid_provider" });
+    }
 
-    return result.ok
-      ? HttpServerResponse.jsonUnsafe({ text: result.text })
-      : HttpServerResponse.jsonUnsafe({ error: result.message }, { status: result.status });
+    const audio = yield* readTranscriptionAudio(request.stream);
+    const text = yield* forwardVoiceTranscription({
+      audio,
+      audioMimeType: request.headers["content-type"] ?? "audio/webm",
+      provider,
+      apiKey: request.headers["x-t3-transcription-api-key"] ?? "",
+    });
+    return HttpServerResponse.jsonUnsafe({ text });
   }).pipe(
     Effect.catchTags({
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
       EnvironmentInternalError: HttpServerRespondable.toResponse,
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+      TranscriptionAudioTooLargeError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 413 })),
+      TranscriptionBodyReadError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
+      TranscriptionInputError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
+      TranscriptionProviderError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+      TranscriptionRequestError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+      TranscriptionResponseError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
     }),
   ),
 );

@@ -1,37 +1,126 @@
-const TRANSCRIPTION_PATH = "/audio/transcriptions";
+import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 export const MAX_TRANSCRIPTION_AUDIO_BYTES = 25 * 1024 * 1024;
 
-export interface WhisperTranscriptionInput {
+const PROVIDERS = {
+  openai: {
+    endpoint: "https://api.openai.com/v1/audio/transcriptions",
+    model: "gpt-4o-mini-transcribe",
+  },
+  groq: {
+    endpoint: "https://api.groq.com/openai/v1/audio/transcriptions",
+    model: "whisper-large-v3-turbo",
+  },
+} as const satisfies Record<VoiceTranscriptionProvider, { endpoint: string; model: string }>;
+
+export interface VoiceTranscriptionInput {
   readonly audio: Uint8Array;
   readonly audioMimeType: string;
-  readonly baseUrl: string;
-  readonly model: string;
+  readonly provider: VoiceTranscriptionProvider;
   readonly apiKey: string;
 }
 
-type TranscriptionFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-
-export type WhisperTranscriptionResult =
-  | { readonly ok: true; readonly text: string }
-  | { readonly ok: false; readonly status: number; readonly message: string };
-
-export function resolveWhisperTranscriptionUrl(baseUrl: string): URL | null {
-  try {
-    const url = new URL(baseUrl.trim());
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.username || url.password) return null;
-    url.search = "";
-    url.hash = "";
-    url.pathname = url.pathname.replace(/\/$/, "");
-    if (!url.pathname.endsWith(TRANSCRIPTION_PATH)) {
-      url.pathname += TRANSCRIPTION_PATH;
-    }
-    return url;
-  } catch {
-    return null;
+export class TranscriptionAudioTooLargeError extends Schema.TaggedErrorClass<TranscriptionAudioTooLargeError>()(
+  "TranscriptionAudioTooLargeError",
+  { receivedBytes: Schema.Number },
+) {
+  override get message(): string {
+    return "The recording exceeds the 25 MB limit.";
   }
 }
+
+export class TranscriptionBodyReadError extends Schema.TaggedErrorClass<TranscriptionBodyReadError>()(
+  "TranscriptionBodyReadError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not read the recording.";
+  }
+}
+
+export class TranscriptionInputError extends Schema.TaggedErrorClass<TranscriptionInputError>()(
+  "TranscriptionInputError",
+  { reason: Schema.Literals(["empty_audio", "invalid_provider", "missing_api_key"]) },
+) {
+  override get message(): string {
+    if (this.reason === "empty_audio") return "The recording was empty.";
+    if (this.reason === "invalid_provider") return "Select OpenAI or Groq for transcription.";
+    return "Add an API key for the selected transcription provider.";
+  }
+}
+
+export class TranscriptionRequestError extends Schema.TaggedErrorClass<TranscriptionRequestError>()(
+  "TranscriptionRequestError",
+  {
+    provider: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Could not reach the transcription provider.";
+  }
+}
+
+export class TranscriptionProviderError extends Schema.TaggedErrorClass<TranscriptionProviderError>()(
+  "TranscriptionProviderError",
+  {
+    provider: Schema.String,
+    providerStatus: Schema.Int,
+  },
+) {
+  override get message(): string {
+    return "The transcription provider rejected the request. Check the provider and API key.";
+  }
+}
+
+export class TranscriptionResponseError extends Schema.TaggedErrorClass<TranscriptionResponseError>()(
+  "TranscriptionResponseError",
+  {
+    provider: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "The transcription provider returned an invalid response.";
+  }
+}
+
+const TranscriptionResponse = Schema.Struct({ text: Schema.String });
+
+export function resolveTranscriptionProvider(provider: string): VoiceTranscriptionProvider | null {
+  return provider === "openai" || provider === "groq" ? provider : null;
+}
+
+export function transcriptionProviderConfig(provider: VoiceTranscriptionProvider) {
+  return PROVIDERS[provider];
+}
+
+export const readTranscriptionAudio = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
+  stream.pipe(
+    Stream.mapError((cause) => new TranscriptionBodyReadError({ cause })),
+    Stream.runFoldEffect(
+      () => ({ chunks: [] as Uint8Array[], size: 0 }),
+      (accumulator, chunk) => {
+        const size = accumulator.size + chunk.byteLength;
+        return size > MAX_TRANSCRIPTION_AUDIO_BYTES
+          ? Effect.fail(new TranscriptionAudioTooLargeError({ receivedBytes: size }))
+          : Effect.succeed({ chunks: [...accumulator.chunks, chunk], size });
+      },
+    ),
+    Effect.map(({ chunks, size }) => {
+      const audio = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        audio.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return audio;
+    }),
+  );
 
 function audioFileExtension(mimeType: string): string {
   if (mimeType.includes("ogg")) return "ogg";
@@ -40,74 +129,50 @@ function audioFileExtension(mimeType: string): string {
   return "webm";
 }
 
-export async function forwardWhisperTranscription(
-  input: WhisperTranscriptionInput,
-  fetchImpl: TranscriptionFetch = globalThis.fetch,
-): Promise<WhisperTranscriptionResult> {
-  const endpoint = resolveWhisperTranscriptionUrl(input.baseUrl);
-  if (!endpoint) {
-    return { ok: false, status: 400, message: "Enter a valid HTTP transcription endpoint." };
-  }
-  if (!input.model.trim()) {
-    return { ok: false, status: 400, message: "Enter a transcription model." };
-  }
+export const forwardVoiceTranscription = Effect.fn("voiceTranscription.forward")(function* (
+  input: VoiceTranscriptionInput,
+) {
   if (input.audio.byteLength === 0) {
-    return { ok: false, status: 400, message: "The recording was empty." };
+    return yield* new TranscriptionInputError({ reason: "empty_audio" });
   }
   if (input.audio.byteLength > MAX_TRANSCRIPTION_AUDIO_BYTES) {
-    return { ok: false, status: 413, message: "The recording exceeds the 25 MB limit." };
+    return yield* new TranscriptionAudioTooLargeError({
+      receivedBytes: input.audio.byteLength,
+    });
+  }
+  const apiKey = input.apiKey.trim();
+  if (!apiKey) {
+    return yield* new TranscriptionInputError({ reason: "missing_api_key" });
   }
 
+  const providerConfig = transcriptionProviderConfig(input.provider);
   const mimeType = input.audioMimeType.split(";", 1)[0]?.trim() || "audio/webm";
   const form = new FormData();
-  form.set("model", input.model.trim());
+  form.set("model", providerConfig.model);
   form.set(
     "file",
     new Blob([input.audio], { type: mimeType }),
     `recording.${audioFileExtension(mimeType)}`,
   );
 
-  let response: Response;
-  try {
-    response = await fetchImpl(endpoint, {
-      method: "POST",
-      headers: input.apiKey ? { authorization: `Bearer ${input.apiKey}` } : undefined,
-      body: form,
-      signal: AbortSignal.timeout(120_000),
+  const httpClient = yield* HttpClient.HttpClient;
+  const response = yield* HttpClientRequest.post(providerConfig.endpoint).pipe(
+    HttpClientRequest.bearerToken(apiKey),
+    HttpClientRequest.bodyFormData(form),
+    httpClient.execute,
+    Effect.timeout("2 minutes"),
+    Effect.mapError((cause) => new TranscriptionRequestError({ provider: input.provider, cause })),
+  );
+
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new TranscriptionProviderError({
+      provider: input.provider,
+      providerStatus: response.status,
     });
-  } catch {
-    return { ok: false, status: 502, message: "Could not reach the transcription provider." };
   }
 
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    return { ok: false, status: 502, message: "The transcription provider returned invalid JSON." };
-  }
-
-  if (!response.ok) {
-    const providerMessage =
-      typeof payload === "object" &&
-      payload !== null &&
-      "error" in payload &&
-      typeof payload.error === "object" &&
-      payload.error !== null &&
-      "message" in payload.error &&
-      typeof payload.error.message === "string"
-        ? payload.error.message
-        : null;
-    return {
-      ok: false,
-      status: 502,
-      message: providerMessage?.slice(0, 300) || "The transcription provider rejected the request.",
-    };
-  }
-
-  const text =
-    typeof payload === "object" && payload !== null && "text" in payload ? payload.text : undefined;
-  if (typeof text !== "string") {
-    return { ok: false, status: 502, message: "The transcription response did not contain text." };
-  }
-  return { ok: true, text: text.trim() };
-}
+  const payload = yield* HttpClientResponse.schemaBodyJson(TranscriptionResponse)(response).pipe(
+    Effect.mapError((cause) => new TranscriptionResponseError({ provider: input.provider, cause })),
+  );
+  return payload.text.trim();
+});

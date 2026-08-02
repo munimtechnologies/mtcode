@@ -3,13 +3,8 @@ import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
 
-export const GROQ_TRANSCRIPTION_BASE_URL = "https://api.groq.com/openai/v1";
-export const GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo";
-
 export interface VoiceTranscriptionConfig {
   readonly provider: VoiceTranscriptionProvider;
-  readonly baseUrl: string;
-  readonly model: string;
   readonly apiKey: string;
 }
 
@@ -17,6 +12,9 @@ export async function transcribeVoiceRecording(
   audio: Blob,
   config: VoiceTranscriptionConfig,
 ): Promise<string> {
+  const apiKey = config.apiKey.trim();
+  if (!apiKey) throw new Error("Add an API key for the selected transcription provider.");
+
   const bearerToken = await readDesktopPrimaryBearerToken();
   const response = await globalThis.fetch(resolvePrimaryEnvironmentHttpUrl("/api/transcription"), {
     method: "POST",
@@ -24,9 +22,8 @@ export async function transcribeVoiceRecording(
     headers: {
       ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
       "content-type": audio.type || "audio/webm",
-      "x-t3-transcription-base-url": config.baseUrl,
-      "x-t3-transcription-model": config.model,
-      ...(config.apiKey ? { "x-t3-transcription-api-key": config.apiKey } : {}),
+      "x-t3-transcription-provider": config.provider,
+      "x-t3-transcription-api-key": apiKey,
     },
     body: audio,
   });

@@ -25,6 +25,7 @@ export function useVoiceTranscription({
   const [levels, setLevels] = useState<readonly number[]>(() => Array(LEVEL_COUNT).fill(0.12));
   const [error, setError] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const startingRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const intervalsRef = useRef<number[]>([]);
@@ -52,6 +53,7 @@ export function useVoiceTranscription({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      startingRef.current = false;
       const recorder = recorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
       cleanupCapture();
@@ -64,9 +66,11 @@ export function useVoiceTranscription({
   }, []);
 
   const start = useCallback(async () => {
-    if (status !== "idle") return;
+    if (startingRef.current || status !== "idle") return;
+    startingRef.current = true;
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      startingRef.current = false;
       setError("Microphone recording is not supported on this device.");
       return;
     }
@@ -77,24 +81,31 @@ export function useVoiceTranscription({
       });
       if (!mountedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
+        startingRef.current = false;
         return;
       }
 
+      streamRef.current = stream;
       const mimeType = supportedMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks: Blob[] = [];
-      streamRef.current = stream;
+      let recordingFailed = false;
       recorderRef.current = recorder;
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) chunks.push(event.data);
       });
       recorder.addEventListener("error", () => {
-        if (mountedRef.current) setError("The microphone stopped unexpectedly.");
+        recordingFailed = true;
+        cleanupCapture();
+        if (mountedRef.current) {
+          setStatus("idle");
+          setError("The microphone stopped unexpectedly.");
+        }
       });
       recorder.addEventListener("stop", () => {
         const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
         cleanupCapture();
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || recordingFailed) return;
         setStatus("transcribing");
         void transcribeVoiceRecording(blob, configRef.current)
           .then((text) => {
@@ -133,8 +144,10 @@ export function useVoiceTranscription({
       );
       timeoutRef.current = window.setTimeout(() => recorder.stop(), MAX_RECORDING_MS);
       recorder.start(250);
+      startingRef.current = false;
       setStatus("recording");
     } catch (cause) {
+      startingRef.current = false;
       cleanupCapture();
       setStatus("idle");
       setError(
