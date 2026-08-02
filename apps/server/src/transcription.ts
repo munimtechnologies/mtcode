@@ -42,13 +42,29 @@ export class TranscriptionBodyReadError extends Schema.TaggedErrorClass<Transcri
   }
 }
 
-export class TranscriptionInputError extends Schema.TaggedErrorClass<TranscriptionInputError>()(
-  "TranscriptionInputError",
-  { reason: Schema.Literals(["empty_audio", "invalid_provider", "missing_api_key"]) },
+export class TranscriptionEmptyAudioError extends Schema.TaggedErrorClass<TranscriptionEmptyAudioError>()(
+  "TranscriptionEmptyAudioError",
+  {},
 ) {
   override get message(): string {
-    if (this.reason === "empty_audio") return "The recording was empty.";
-    if (this.reason === "invalid_provider") return "Select OpenAI or Groq for transcription.";
+    return "The recording was empty.";
+  }
+}
+
+export class TranscriptionProviderUnsupportedError extends Schema.TaggedErrorClass<TranscriptionProviderUnsupportedError>()(
+  "TranscriptionProviderUnsupportedError",
+  {},
+) {
+  override get message(): string {
+    return "Select OpenAI or Groq for transcription.";
+  }
+}
+
+export class TranscriptionApiKeyMissingError extends Schema.TaggedErrorClass<TranscriptionApiKeyMissingError>()(
+  "TranscriptionApiKeyMissingError",
+  {},
+) {
+  override get message(): string {
     return "Add an API key for the selected transcription provider.";
   }
 }
@@ -133,7 +149,7 @@ export const forwardVoiceTranscription = Effect.fn("voiceTranscription.forward")
   input: VoiceTranscriptionInput,
 ) {
   if (input.audio.byteLength === 0) {
-    return yield* new TranscriptionInputError({ reason: "empty_audio" });
+    return yield* new TranscriptionEmptyAudioError();
   }
   if (input.audio.byteLength > MAX_TRANSCRIPTION_AUDIO_BYTES) {
     return yield* new TranscriptionAudioTooLargeError({
@@ -142,7 +158,7 @@ export const forwardVoiceTranscription = Effect.fn("voiceTranscription.forward")
   }
   const apiKey = input.apiKey.trim();
   if (!apiKey) {
-    return yield* new TranscriptionInputError({ reason: "missing_api_key" });
+    return yield* new TranscriptionApiKeyMissingError();
   }
 
   const providerConfig = transcriptionProviderConfig(input.provider);

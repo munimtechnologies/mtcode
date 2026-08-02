@@ -44,7 +44,9 @@ import {
   MAX_TRANSCRIPTION_AUDIO_BYTES,
   readTranscriptionAudio,
   resolveTranscriptionProvider,
-  TranscriptionInputError,
+  TranscriptionApiKeyMissingError,
+  TranscriptionEmptyAudioError,
+  TranscriptionProviderUnsupportedError,
 } from "./transcription.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
@@ -220,7 +222,7 @@ export const transcriptionRouteLayer = HttpRouter.add(
       request.headers["x-t3-transcription-provider"] ?? "",
     );
     if (!provider) {
-      return yield* new TranscriptionInputError({ reason: "invalid_provider" });
+      return yield* new TranscriptionProviderUnsupportedError();
     }
 
     const audio = yield* readTranscriptionAudio(request.stream);
@@ -238,12 +240,16 @@ export const transcriptionRouteLayer = HttpRouter.add(
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
       TranscriptionAudioTooLargeError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 413 })),
+      TranscriptionApiKeyMissingError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
       TranscriptionBodyReadError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
-      TranscriptionInputError: (error) =>
+      TranscriptionEmptyAudioError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
       TranscriptionProviderError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
+      TranscriptionProviderUnsupportedError: (error) =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 })),
       TranscriptionRequestError: (error) =>
         Effect.succeed(HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 502 })),
       TranscriptionResponseError: (error) =>
