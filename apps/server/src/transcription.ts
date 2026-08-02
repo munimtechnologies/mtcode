@@ -122,9 +122,11 @@ export const readTranscriptionAudio = <E, R>(stream: Stream.Stream<Uint8Array, E
       () => ({ chunks: [] as Uint8Array[], size: 0 }),
       (accumulator, chunk) => {
         const size = accumulator.size + chunk.byteLength;
-        return size > MAX_TRANSCRIPTION_AUDIO_BYTES
-          ? Effect.fail(new TranscriptionAudioTooLargeError({ receivedBytes: size }))
-          : Effect.succeed({ chunks: [...accumulator.chunks, chunk], size });
+        if (size > MAX_TRANSCRIPTION_AUDIO_BYTES) {
+          return Effect.fail(new TranscriptionAudioTooLargeError({ receivedBytes: size }));
+        }
+        accumulator.chunks.push(chunk);
+        return Effect.succeed({ chunks: accumulator.chunks, size });
       },
     ),
     Effect.map(({ chunks, size }) => {
@@ -172,23 +174,30 @@ export const forwardVoiceTranscription = Effect.fn("voiceTranscription.forward")
   );
 
   const httpClient = yield* HttpClient.HttpClient;
-  const response = yield* HttpClientRequest.post(providerConfig.endpoint).pipe(
+  const payload = yield* HttpClientRequest.post(providerConfig.endpoint).pipe(
     HttpClientRequest.bearerToken(apiKey),
     HttpClientRequest.bodyFormData(form),
     httpClient.execute,
-    Effect.timeout("2 minutes"),
     Effect.mapError((cause) => new TranscriptionRequestError({ provider: input.provider, cause })),
-  );
-
-  if (response.status < 200 || response.status >= 300) {
-    return yield* new TranscriptionProviderError({
-      provider: input.provider,
-      providerStatus: response.status,
-    });
-  }
-
-  const payload = yield* HttpClientResponse.schemaBodyJson(TranscriptionResponse)(response).pipe(
-    Effect.mapError((cause) => new TranscriptionResponseError({ provider: input.provider, cause })),
+    Effect.flatMap((response) =>
+      Effect.gen(function* () {
+        if (response.status < 200 || response.status >= 300) {
+          return yield* new TranscriptionProviderError({
+            provider: input.provider,
+            providerStatus: response.status,
+          });
+        }
+        return yield* HttpClientResponse.schemaBodyJson(TranscriptionResponse)(response).pipe(
+          Effect.mapError(
+            (cause) => new TranscriptionResponseError({ provider: input.provider, cause }),
+          ),
+        );
+      }),
+    ),
+    Effect.timeout("2 minutes"),
+    Effect.catchTag("TimeoutError", (cause) =>
+      Effect.fail(new TranscriptionRequestError({ provider: input.provider, cause })),
+    ),
   );
   return payload.text.trim();
 });
