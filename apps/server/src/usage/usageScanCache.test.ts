@@ -22,6 +22,7 @@ function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
       outputTokens: 50,
       reasoningTokens: 0,
     },
+    recordCount: 1,
     reportedCostUsd: null,
     dedupeKey: "msg_1:",
     ...overrides,
