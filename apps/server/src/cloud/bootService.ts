@@ -360,7 +360,7 @@ export class BootServiceUnsupportedError extends Schema.TaggedErrorClass<BootSer
   { platform: Schema.String },
 ) {
   override get message(): string {
-    return `Background setup supports Linux with systemd and macOS with launchd; this machine reports '${this.platform}'.`;
+    return `Background setup supports Linux with systemd, macOS with launchd, and Windows; this machine reports '${this.platform}'.`;
   }
 }
 
@@ -399,16 +399,52 @@ export class BootServiceUpdatePendingError extends Schema.TaggedErrorClass<BootS
   }
 }
 
+/**
+ * Windows only. cmd.exe expands percent signs even inside quotes, so a path
+ * containing one would install cleanly and then never start.
+ */
+export class BootServicePathHasPercentError extends Schema.TaggedErrorClass<BootServicePathHasPercentError>()(
+  "BootServicePathHasPercentError",
+  { pathLabel: Schema.String },
+) {
+  override get message(): string {
+    return (
+      `The path to ${this.pathLabel} contains a percent sign, and the Windows command ` +
+      "shell would rewrite it before the service could start. Move it to a path without " +
+      "one, then run this again."
+    );
+  }
+}
+
+/** Windows only. The Startup entry exists but Windows Settings has it switched off. */
+export class BootServiceStartupEntryDisabledError extends Schema.TaggedErrorClass<BootServiceStartupEntryDisabledError>()(
+  "BootServiceStartupEntryDisabledError",
+  { shortcutName: Schema.String },
+) {
+  override get message(): string {
+    return (
+      `"${this.shortcutName}" is switched off under Startup apps in Windows Settings. ` +
+      "Turn it back on, then run this again."
+    );
+  }
+}
+
 export type BootServiceError =
   | BootServiceUnsupportedError
   | BootServiceCommandError
   | BootServiceInstallError
-  | BootServiceUpdatePendingError;
+  | BootServiceUpdatePendingError
+  | BootServicePathHasPercentError
+  | BootServiceStartupEntryDisabledError;
+
+export type BootServiceKind = "systemd" | "launchd" | "win32-startup-shortcut";
 
 export interface BootServiceStatus {
   readonly supported: boolean;
   readonly installed: boolean;
   readonly current: boolean;
+  readonly kind: BootServiceKind;
+  /** The systemd unit on Linux, LaunchAgent on macOS, or Startup shortcut on Windows. */
   readonly unitPath: string;
   readonly logPath: string;
 }
@@ -646,10 +682,18 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const status: BootService["Service"]["status"] = Effect.gen(function* () {
     if (detectedManager === undefined) {
-      return { supported: false, installed: false, current: false, unitPath, logPath };
+      return {
+        supported: false,
+        installed: false,
+        current: false,
+        kind: "systemd",
+        unitPath,
+        logPath,
+      };
     }
+    const base = { kind: detectedManager.kind, unitPath, logPath } as const;
     if (!(yield* fs.exists(unitPath))) {
-      return { supported: true, installed: false, current: false, unitPath, logPath };
+      return { supported: true, installed: false, current: false, ...base };
     }
     const [unit, launcherExists, runtimeEntryExists, runtimeSentinel, stateText] =
       yield* Effect.all([
@@ -671,8 +715,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         runtimeSentinel.value.trim() === input.cliVersion &&
         state?.activeVersion === input.cliVersion &&
         state?.update?.status !== "pending",
-      unitPath,
-      logPath,
+      ...base,
     };
   }).pipe(
     Effect.mapError((cause) => new BootServiceInstallError({ cause })),

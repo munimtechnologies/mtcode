@@ -11,12 +11,23 @@ import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
-export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
-  BootService.layer({
+export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) => {
+  const input = {
     baseDir: config.baseDir,
     logsDir: config.logsDir,
     cliVersion: packageJson.version,
-  }).pipe(Layer.provide(ProcessRunner.layer));
+  };
+  // Windows has no systemd, so it gets its own backend. Loading it lazily keeps
+  // the Linux path free of any Windows import.
+  return Layer.unwrap(
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      if (platform !== "win32") return BootService.layer(input);
+      const windows = yield* Effect.promise(() => import("../cloud/bootServiceWindows.ts"));
+      return windows.layer(input);
+    }),
+  ).pipe(Layer.provide(ProcessRunner.layer));
+};
 
 export type ServiceReconcileResult =
   | {
@@ -49,15 +60,17 @@ export function formatServiceStatus(
   cliVersion: string,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
+    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, or Windows";
   }
   if (!status.installed) {
     return "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
   }
+  const locationLabel =
+    status.kind === "systemd" ? "Unit" : status.kind === "launchd" ? "LaunchAgent" : "Shortcut";
   return [
     "T3 Code service",
     `  Status: ${status.current ? `installed · t3@${cliVersion}` : "needs an update or repair"}`,
-    `  Unit: ${status.unitPath}`,
+    `  ${locationLabel}: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...(status.current ? [] : ["  Next: Run `npx t3@latest service update`."]),
   ].join("\n");
@@ -72,6 +85,30 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
   return yield* run.pipe(Effect.provide(bootServiceLayer(config)));
 });
 
+/** Windows only. The blink at sign-in looks alarming until you know what it is. */
+const WINDOWS_SERVICE_NOTICE = [
+  'A small window named "T3 Code Server" blinks once when you sign in. That is expected.',
+  "It appears under Startup apps in Windows Settings, where you can switch it off.",
+  "It starts at sign-in, not at boot, and it stops when you sign out.",
+].join("\n");
+
+/** Shared by install and update. The Linux output is unchanged. */
+const reportReconcileResult = Effect.fn("cli.service.report")(function* (
+  result: ServiceReconcileResult,
+  unchangedMessage: string,
+) {
+  if (!result.changed) {
+    yield* Console.log(unchangedMessage);
+    return;
+  }
+  yield* Console.log(
+    `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+  );
+  if ((yield* HostProcessPlatform) === "win32") {
+    yield* Console.log(WINDOWS_SERVICE_NOTICE);
+  }
+});
+
 const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe(
   Command.withDescription("Install T3 Code as a background service for this user."),
   Command.withHandler((flags) =>
@@ -79,14 +116,9 @@ const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe
       flags,
       Effect.gen(function* () {
         const result = yield* reconcileService();
-        if (!result.changed) {
-          yield* Console.log(
-            `T3 Code service is already installed with t3@${packageJson.version}.`,
-          );
-          return;
-        }
-        yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+        yield* reportReconcileResult(
+          result,
+          `T3 Code service is already installed with t3@${packageJson.version}.`,
         );
       }),
     ),
@@ -102,12 +134,9 @@ const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
       flags,
       Effect.gen(function* () {
         const result = yield* reconcileService();
-        if (!result.changed) {
-          yield* Console.log(`T3 Code service is already using t3@${packageJson.version}.`);
-          return;
-        }
-        yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+        yield* reportReconcileResult(
+          result,
+          `T3 Code service is already using t3@${packageJson.version}.`,
         );
       }),
     ),
@@ -153,8 +182,8 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     yield* Console.log("T3 Code is already set up to run in the background on this machine.");
     return true;
   }
-  // A LaunchAgent starts at login and dies at logout; there is no
-  // enable-linger equivalent on macOS. Do not promise more than that.
+  // LaunchAgent / Startup shortcut start at login/sign-in and die at logout.
+  // systemd can linger; do not promise that on macOS or Windows.
   const platform = yield* HostProcessPlatform;
   const wanted = yield* Prompt.run(
     Prompt.confirm({
@@ -163,8 +192,11 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
         : platform === "darwin"
           ? "Run T3 Code in the background whenever you log in to this Mac? " +
             "It stays reachable through T3 Connect while you are logged in."
-          : "Run T3 Code in the background whenever this machine boots? " +
-            "It stays reachable through T3 Connect even after you log out.",
+          : platform === "win32"
+            ? "Run T3 Code in the background whenever you sign in to Windows? " +
+              "It starts again after every reboot, and stops when you sign out."
+            : "Run T3 Code in the background whenever this machine boots? " +
+              "It stays reachable through T3 Connect even after you log out.",
       initial: true,
     }),
   );
@@ -176,6 +208,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     yield* Console.log(
       `Background service ${result.previouslyInstalled ? "updated" : "installed"}. Logs: ${result.plan.logPath}`,
     );
+    if (platform === "win32") yield* Console.log(WINDOWS_SERVICE_NOTICE);
   }
   return true;
 });
@@ -194,6 +227,10 @@ export const recoverServiceOnboardingOffer = <R>(
         Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
       BootServiceUpdatePendingError: (error) =>
         Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
+      BootServicePathHasPercentError: (error) =>
+        Console.warn(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
+      BootServiceStartupEntryDisabledError: (error) =>
+        Console.warn(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
     }),
   );
 
