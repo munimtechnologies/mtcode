@@ -44,11 +44,6 @@ export function UsagePage() {
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
 
-  // Hold the content until every environment is terminal. Rendering merged
-  // totals while devices are still answering makes every number on the page
-  // jump as each one lands.
-  const settling = isPending || isPartial;
-
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
     [window.sinceDay, window.untilDay],
@@ -167,13 +162,16 @@ export function UsagePage() {
               </div>
             </div>
 
-            {settling ? (
+            {isPending ? (
               <>
                 {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
                 <UsageSkeleton resolution={isPast24Hours ? "hour" : "day"} />
               </>
             ) : (
               <>
+                {isPartial && environments.length > 1 ? (
+                  <UsageDeviceStrip environments={environments} />
+                ) : null}
                 <UsageCoverageNotice
                   environments={environments}
                   duplicateSources={merged.duplicateSources}
@@ -472,8 +470,7 @@ function Metric({
 /**
  * Says plainly when the totals are incomplete: an environment that failed, or
  * one whose transcripts another environment already reported. Environments
- * that are still answering never reach this notice; the page shows the
- * loading skeleton until every one is terminal.
+ * that are still answering are reflected in the device strip above it.
  */
 function UsageCoverageNotice({
   environments,
@@ -495,10 +492,10 @@ function UsageCoverageNotice({
   return (
     <div className="flex flex-col gap-1 border border-border px-3 py-2 text-xs text-muted-foreground">
       {failed.map((environment) => (
-        <span key={environment.label}>{environment.label} could not report usage.</span>
+        <span key={environment.environmentId}>{environment.label} could not report usage.</span>
       ))}
       {stale.map((environment) => (
-        <span key={environment.label}>
+        <span key={environment.environmentId}>
           {environment.label} runs an older server version and is excluded from totals.
         </span>
       ))}
@@ -513,9 +510,8 @@ function UsageCoverageNotice({
 }
 
 /**
- * Per-device progress while the page waits for every environment to answer.
- * Only rendered with two or more devices; a lone device has nothing to
- * enumerate.
+ * Per-device progress while at least one environment is still answering. Only
+ * rendered with two or more devices; a lone device has nothing to enumerate.
  */
 function UsageDeviceStrip({
   environments,
@@ -573,8 +569,8 @@ const SKELETON_BAR_HEIGHTS = [34, 58, 41, 72, 22, 12, 49, 63, 80, 38, 55, 26, 44
 
 /**
  * Static stand-in with the loaded page's shape: headline, provider split,
- * chart and metrics strip. No shimmer; blocks fill in exactly once when the
- * last device answers.
+ * chart and metrics strip. No shimmer; content appears when the first device
+ * answers.
  */
 function UsageSkeleton({ resolution }: { readonly resolution: "day" | "hour" }) {
   return (
