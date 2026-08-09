@@ -696,12 +696,15 @@ export const connectCommand = Command.make("connect", {
         // fail the command, just tell the user what happened and move on.
         const background = yield* recoverServiceOnboardingOffer(offerServiceDuringOnboarding);
         if (background) {
+          // macOS/Windows stop at sign-out; only Linux systemd typically survives logout.
           const platform = yield* HostProcessPlatform;
-          yield* Console.log(
+          const reach =
             platform === "darwin"
-              ? "\n✓ Background service ready\n\nT3 Code will stay reachable while you are logged in to this Mac."
-              : "\n✓ Background service ready\n\nT3 Code will stay reachable after you log out.",
-          );
+              ? "T3 Code will stay reachable while you are logged in to this Mac."
+              : platform === "win32"
+                ? "T3 Code will start again every time you sign in to Windows."
+                : "T3 Code will stay reachable after you log out.";
+          yield* Console.log(`\n✓ Background service ready\n\n${reach}`);
           return;
         }
         const serveCommand = yield* resolveCliCommand("serve");
