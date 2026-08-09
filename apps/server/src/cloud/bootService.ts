@@ -371,13 +371,20 @@ export class BootServiceCommandError extends Schema.TaggedErrorClass<BootService
     exitCode: Schema.optional(Schema.Number),
     stdoutLength: Schema.optional(Schema.Number),
     stderrLength: Schema.optional(Schema.Number),
+    /** Windows only. The launcher that would not stop, and how long we waited. */
+    pid: Schema.optional(Schema.Number),
+    timeoutSeconds: Schema.optional(Schema.Number),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
+    const detail =
+      this.pid === undefined || this.timeoutSeconds === undefined
+        ? ""
+        : ` (process ${this.pid} did not exit within ${this.timeoutSeconds}s)`;
     return this.exitCode === undefined
-      ? `Background setup failed while ${this.step}.`
-      : `Background setup failed while ${this.step} (exit code ${this.exitCode}).`;
+      ? `Background setup failed while ${this.step}${detail}.`
+      : `Background setup failed while ${this.step}${detail} (exit code ${this.exitCode}).`;
   }
 }
 
@@ -400,8 +407,10 @@ export class BootServiceUpdatePendingError extends Schema.TaggedErrorClass<BootS
 }
 
 /**
- * Windows only. cmd.exe expands percent signs even inside quotes, so a path
- * containing one would install cleanly and then never start.
+ * Windows only. The command shell expands `%VAR%` on its command line, so a path
+ * holding one would be rewritten before the service could start. This carries
+ * which path is at fault, because the generic install error hides its cause and
+ * the user has to know what to move.
  */
 export class BootServicePathHasPercentError extends Schema.TaggedErrorClass<BootServicePathHasPercentError>()(
   "BootServicePathHasPercentError",
@@ -410,8 +419,8 @@ export class BootServicePathHasPercentError extends Schema.TaggedErrorClass<Boot
   override get message(): string {
     return (
       `The path to ${this.pathLabel} contains a percent sign, and the Windows command ` +
-      "shell would rewrite it before the service could start. Move it to a path without " +
-      "one, then run this again."
+      "shell would rewrite it before the service could start. Move T3 Code to a path " +
+      "without one, or set T3CODE_HOME to such a path, then run this again."
     );
   }
 }
