@@ -4,7 +4,7 @@ Usage reports summarize local Claude Code, Codex, and Grok Build activity. Open 
 
 ![Usage report with simulated Grok activity](./assets/usage-report-grok-simulated.jpeg)
 
-_Example report with simulated Grok data._
+_Example report with randomized simulated Grok data._
 
 Choose a 7, 30, or 90 day window to see API-rate-equivalent cost, processed tokens, providers, models, and recent days. Subscription plans bill separately, so the cost shown is not necessarily an amount charged to your account.
 
