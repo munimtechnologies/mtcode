@@ -412,7 +412,10 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
       totals,
       recordCount: Math.max(1, int(usage["modelCalls"])),
       reportedCostUsd: grokCostUsd(usage, aggregateUsage, rows.length === 1),
-      dedupeKey: `${sessionId}:${eventId ?? timestampMs}:${model}:${usageSignature}`,
+      dedupeKey:
+        sessionId.length > 0 || eventId !== null
+          ? `${sessionId}:${eventId ?? timestampMs}:${model}:${usageSignature}`
+          : null,
     });
   }
 

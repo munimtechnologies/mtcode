@@ -21,6 +21,7 @@ import {
   type UsageSummaryInput,
   UsageReadError,
 } from "@t3tools/contracts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -121,6 +122,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
+  const hostEnvironment = yield* HostProcessEnvironment;
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
 
@@ -219,7 +221,7 @@ export const make = Effect.gen(function* () {
     const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
     const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
     const grokHome = path.resolve(
-      expandHomePath(process.env["GROK_HOME"] ?? path.join(NodeOS.homedir(), ".grok")),
+      expandHomePath(hostEnvironment["GROK_HOME"] ?? path.join(NodeOS.homedir(), ".grok")),
     );
 
     return [

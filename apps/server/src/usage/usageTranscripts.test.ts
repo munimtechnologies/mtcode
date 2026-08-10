@@ -324,6 +324,18 @@ describe("parseGrokLine", () => {
     expect(record?.reportedCostUsd).toBeNull();
   });
 
+  it("does not deduplicate identity-less updates by their payload", () => {
+    const parsed = JSON.parse(grokLine()) as {
+      params: { sessionId?: string; _meta?: { eventId?: string } };
+    };
+    delete parsed.params.sessionId;
+    delete parsed.params._meta;
+
+    const [record] = parseGrokLine(JSON.stringify(parsed));
+
+    expect(record?.dedupeKey).toBeNull();
+  });
+
   it("ignores malformed and non-usage updates", () => {
     expect(parseGrokLine("not json")).toEqual([]);
     expect(parseGrokLine(JSON.stringify({ method: "session/update", params: {} }))).toEqual([]);
