@@ -384,10 +384,13 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
       ? (params["_meta"] as Record<string, unknown>)
       : null;
   const eventId = typeof meta?.["eventId"] === "string" ? meta["eventId"] : null;
-  const rows = Object.entries(modelUsageValue as Record<string, unknown>);
-  const records: UsageRecord[] = [];
+  const rows: Array<{
+    readonly model: string;
+    readonly usage: Record<string, unknown>;
+    readonly totals: UsageTokenTotals;
+  }> = [];
 
-  for (const [model, usageValue] of rows) {
+  for (const [model, usageValue] of Object.entries(modelUsageValue as Record<string, unknown>)) {
     if (model.length === 0 || typeof usageValue !== "object" || usageValue === null) continue;
     const usage = usageValue as Record<string, unknown>;
     const inputTokens = int(usage["inputTokens"]);
@@ -402,7 +405,11 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
       reasoningTokens: Math.min(outputTokens, int(usage["reasoningTokens"])),
     };
     if (totalTokens(totals) === 0) continue;
+    rows.push({ model, usage, totals });
+  }
 
+  const records: UsageRecord[] = [];
+  for (const { model, usage, totals } of rows) {
     const usageSignature = JSON.stringify(usage);
     records.push({
       provider: "grok",

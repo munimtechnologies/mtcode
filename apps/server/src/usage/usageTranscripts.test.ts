@@ -241,6 +241,7 @@ describe("parseGrokLine", () => {
   function grokLine(
     overrides: {
       costIsPartial?: boolean;
+      costUsdTicks?: number;
       modelUsage?: Record<string, Record<string, unknown>>;
     } = {},
   ): string {
@@ -256,6 +257,7 @@ describe("parseGrokLine", () => {
         update: {
           usage: {
             costIsPartial: overrides.costIsPartial,
+            costUsdTicks: overrides.costUsdTicks,
             modelUsage: overrides.modelUsage ?? {
               "grok-4.5": {
                 inputTokens: 13_887,
@@ -317,6 +319,21 @@ describe("parseGrokLine", () => {
     expect(records.map((record) => record.model)).toEqual(["grok-build", "grok-build-fast"]);
     expect(records.map((record) => record.reportedCostUsd)).toEqual([0.001, 0.002]);
     expect(records.map((record) => record.recordCount)).toEqual([1, 3]);
+  });
+
+  it("uses aggregate cost when only one model row has billable usage", () => {
+    const [record] = parseGrokLine(
+      grokLine({
+        costUsdTicks: 10_000_000,
+        modelUsage: {
+          "grok-build": { inputTokens: 100, outputTokens: 10 },
+          "empty-stub": { inputTokens: 0, outputTokens: 0 },
+        },
+      }),
+    );
+
+    expect(record?.model).toBe("grok-build");
+    expect(record?.reportedCostUsd).toBe(0.001);
   });
 
   it("does not present a partial provider cost as complete", () => {
