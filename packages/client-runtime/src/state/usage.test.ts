@@ -70,6 +70,28 @@ function status(
 }
 
 describe("usage state", () => {
+  it("treats a waiting failure as reporting during retry", () => {
+    const failed = AsyncResult.failure<UsageSummary, string>(Cause.fail("offline"));
+    const retrying = status(ENVIRONMENT_B, AsyncResult.waitingFrom(Option.some(failed)));
+
+    expect(retrying).toMatchObject({
+      isPending: true,
+      error: null,
+      summary: null,
+    });
+    expect(deriveUsageState([retrying])).toMatchObject({
+      isPending: true,
+      isPartial: false,
+    });
+
+    const partial = deriveUsageState([
+      status(ENVIRONMENT_A, AsyncResult.success(summary(10))),
+      retrying,
+    ]);
+    expect(partial).toMatchObject({ isPending: false, isPartial: true });
+    expect(partial.merged.costUsd).toBe(10);
+  });
+
   it("renders partial totals, then excludes a failed environment's previous success", () => {
     const pendingA = status(ENVIRONMENT_A, AsyncResult.initial(true));
     const pendingB = status(ENVIRONMENT_B, AsyncResult.initial(true));

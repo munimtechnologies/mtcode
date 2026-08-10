@@ -18,13 +18,13 @@ export interface DerivedUsageState {
   readonly isPartial: boolean;
 }
 
-/** Maps only the current result; a failure's cached previous success is not current usage. */
+/** A waiting failure is retrying; only a settled failure should surface as an error. */
 export function environmentUsageStatus<E>(input: {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly result: AsyncResult.AsyncResult<UsageSummary, E>;
 }): EnvironmentUsageStatus {
-  const failed = AsyncResult.isFailure(input.result);
+  const failed = AsyncResult.isFailure(input.result) && !input.result.waiting;
   return {
     environmentId: input.environmentId,
     label: input.label,
