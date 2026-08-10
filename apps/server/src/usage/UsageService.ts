@@ -87,6 +87,11 @@ const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeScanCacheFile = Schema.encodeEffect(ScanCacheJson);
 
+export function readGrokHomeOverride(environment: NodeJS.ProcessEnv): string | undefined {
+  const value = environment["GROK_HOME"]?.trim();
+  return value === "" ? undefined : value;
+}
+
 export class UsageService extends Context.Service<
   UsageService,
   {
@@ -221,7 +226,7 @@ export const make = Effect.gen(function* () {
     const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
     const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
     const grokHome = path.resolve(
-      expandHomePath(hostEnvironment["GROK_HOME"] ?? path.join(NodeOS.homedir(), ".grok")),
+      expandHomePath(readGrokHomeOverride(hostEnvironment) ?? path.join(NodeOS.homedir(), ".grok")),
     );
 
     return [

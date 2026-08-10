@@ -174,7 +174,9 @@ export function decodeScanCache(document: unknown): ScanCache {
         !Number.isFinite(cacheCreation) ||
         !Number.isFinite(output) ||
         !Number.isFinite(reasoning) ||
-        !Number.isFinite(recordCount)
+        !Number.isFinite(recordCount) ||
+        !Number.isInteger(recordCount) ||
+        recordCount <= 0
       ) {
         corrupt = true;
         break;
