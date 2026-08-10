@@ -39,6 +39,7 @@ import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { parseRateTable, type RateTable } from "./usagePricing.ts";
+import { readOpenCodeUsage } from "./usageOpenCode.ts";
 import {
   listTranscriptFiles,
   readDirectoryVolumeId,
@@ -218,10 +219,24 @@ export const make = Effect.gen(function* () {
     const claudeHome = yield* resolveClaudeHomePath(settings.providers.claudeAgent);
     const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
     const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
+    const openCodeDataDir = path.join(
+      process.env.XDG_DATA_HOME?.trim() || path.join(NodeOS.homedir(), ".local", "share"),
+      "opencode",
+    );
 
     return [
-      { provider: "claude" as const, dir: claudeDir },
-      { provider: "codex" as const, dir: path.join(codexLayout.sharedHomePath, "sessions") },
+      { provider: "claude" as const, dir: claudeDir, kind: "jsonl" as const },
+      {
+        provider: "codex" as const,
+        dir: path.join(codexLayout.sharedHomePath, "sessions"),
+        kind: "jsonl" as const,
+      },
+      {
+        provider: "opencode" as const,
+        dir: openCodeDataDir,
+        databasePath: path.join(openCodeDataDir, "opencode.db"),
+        kind: "opencodeSqlite" as const,
+      },
     ];
   });
 
@@ -353,10 +368,11 @@ export const make = Effect.gen(function* () {
     const livePaths = new Set<string>();
     const walkedRoots: string[] = [];
 
-    for (const { provider, dir } of dirs) {
+    for (const source of dirs) {
+      const { provider, dir } = source;
       const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
       const exists = yield* fileSystem
-        .exists(dir)
+        .exists(source.kind === "jsonl" ? dir : source.databasePath)
         .pipe(Effect.catchCause(() => Effect.succeed(false)));
 
       if (!exists) {
@@ -368,6 +384,42 @@ export const make = Effect.gen(function* () {
           malformedRecords: 0,
           distinctSessions: 0,
           message: "No transcript directory on this environment.",
+        });
+        continue;
+      }
+
+      if (source.kind === "opencodeSqlite") {
+        const result = yield* Effect.promise(() =>
+          readOpenCodeUsage(source.databasePath, windowStartMs),
+        );
+        if (result === null) {
+          sources.push({
+            fingerprint: { hostId, provider, resolvedHomePath: dir, volumeId },
+            status: "failed",
+            scannedFiles: 0,
+            skippedFiles: 1,
+            malformedRecords: 0,
+            distinctSessions: 0,
+            message: "OpenCode usage database could not be read.",
+          });
+          continue;
+        }
+
+        const sessionIds = new Set<string>();
+        for (const record of result.records) {
+          if (aggregator.add(record) && record.sessionId.length > 0) {
+            sessionIds.add(record.sessionId);
+          }
+        }
+        sources.push({
+          fingerprint: { hostId, provider, resolvedHomePath: dir, volumeId },
+          status: result.malformedRecords > 0 ? "partial" : "ok",
+          scannedFiles: 1,
+          skippedFiles: 0,
+          malformedRecords: result.malformedRecords,
+          distinctSessions: sessionIds.size,
+          message:
+            result.malformedRecords > 0 ? "Some OpenCode usage records could not be parsed." : null,
         });
         continue;
       }
