@@ -324,17 +324,23 @@ function writeCsvCache(cachePath: string, csv: string): void {
   }
 }
 
+/** Per-account cache path so a desktop login switch cannot reuse another user's CSV. */
+export function cursorExportCachePath(cacheDir: string, userId: string): string {
+  const safeUserId = userId.replace(/[^A-Za-z0-9_-]/g, "_");
+  return NodePath.join(cacheDir, `usage-cursor-export.${safeUserId}.csv`);
+}
+
 /**
  * Loads Cursor usage records, preferring a fresh on-disk CSV and refreshing
  * from the dashboard export API when needed.
  */
 export function loadCursorUsageRecords(options: {
-  readonly httpClient: HttpClient.HttpClient;
-  readonly cachePath: string;
+  readonly cacheDir: string;
   readonly homeDir?: string;
   readonly nowMs: number;
-}): Effect.Effect<CursorExportLoadResult> {
+}): Effect.Effect<CursorExportLoadResult, never, HttpClient.HttpClient> {
   return Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
     const nowMs = options.nowMs;
     const auth = readLocalCursorExportAuth(options.homeDir);
     if (auth === null) {
@@ -346,8 +352,9 @@ export function loadCursorUsageRecords(options: {
       };
     }
 
-    const cached = readCsvCache(options.cachePath);
-    if (cached !== null && isFreshCsvCache(options.cachePath, nowMs)) {
+    const cachePath = cursorExportCachePath(options.cacheDir, auth.userId);
+    const cached = readCsvCache(cachePath);
+    if (cached !== null && isFreshCsvCache(cachePath, nowMs)) {
       return {
         status: "ok" as const,
         userId: auth.userId,
@@ -368,7 +375,7 @@ export function loadCursorUsageRecords(options: {
       ),
     );
 
-    const fetched = yield* options.httpClient.execute(request).pipe(
+    const fetched = yield* httpClient.execute(request).pipe(
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap((response) => response.text),
       Effect.timeout(15_000),
@@ -376,7 +383,7 @@ export function loadCursorUsageRecords(options: {
     );
 
     if (fetched !== null && fetched.startsWith("Date,")) {
-      writeCsvCache(options.cachePath, fetched);
+      writeCsvCache(cachePath, fetched);
       return {
         status: "ok" as const,
         userId: auth.userId,
@@ -385,7 +392,7 @@ export function loadCursorUsageRecords(options: {
       };
     }
 
-    // Network failed; serve stale cache when present so the page still works offline.
+    // Network failed; serve this account's stale cache when present.
     if (cached !== null) {
       return {
         status: "ok" as const,

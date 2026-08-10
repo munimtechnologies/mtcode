@@ -463,10 +463,22 @@ function UsageCoverageNotice(props: {
     props.merged.staleEnvironments.includes(environment.environmentId),
   );
   const duplicateSources = props.merged.duplicateSources;
+  const uncovered = props.environments.flatMap((environment) => {
+    if (environment.summary === null) return [];
+    return environment.summary.sources
+      .filter((source) => source.status === "missing" || source.status === "failed")
+      .map((source) => ({
+        key: `${environment.environmentId}:${source.fingerprint.provider}:${source.status}`,
+        text: `${environment.label}: ${PROVIDER_LABEL[source.fingerprint.provider]} ${
+          source.status === "missing" ? "is uncovered" : "could not be loaded"
+        }${source.message ? ` (${source.message})` : ""}.`,
+      }));
+  });
   if (
     failed.length === 0 &&
     stale.length === 0 &&
     duplicateSources.length === 0 &&
+    uncovered.length === 0 &&
     !props.isPartial
   ) {
     return null;
@@ -487,6 +499,11 @@ function UsageCoverageNotice(props: {
       {stale.map((environment) => (
         <Text key={environment.environmentId} className="text-sm text-foreground-muted">
           {environment.label} runs an older server version and is excluded from totals.
+        </Text>
+      ))}
+      {uncovered.map((entry) => (
+        <Text key={entry.key} className="text-sm text-foreground-muted">
+          {entry.text}
         </Text>
       ))}
       {duplicateSources.length > 0 ? (

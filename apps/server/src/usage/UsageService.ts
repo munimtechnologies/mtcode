@@ -73,15 +73,22 @@ const MAX_HOURLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CACHE_RETENTION_DAYS = 90;
 
 function toCursorUsageSource(
-  hostId: string,
   result: CursorExportLoadResult,
   distinctSessions = 0,
 ): UsageSource {
   const resolvedHomePath =
     result.userId !== null ? `cursor-export:${result.userId}` : "cursor-export";
+  // Cursor export is account-scoped, not host-local. A fixed host/volume keeps
+  // the same Cursor login from double-counting across machines.
+  const fingerprint = {
+    hostId: "cursor-account",
+    provider: "cursor" as const,
+    resolvedHomePath,
+    volumeId: "",
+  };
   if (result.status === "ok") {
     return {
-      fingerprint: { hostId, provider: "cursor", resolvedHomePath, volumeId: "" },
+      fingerprint,
       status: "ok",
       scannedFiles: result.fromCache ? 0 : 1,
       skippedFiles: 0,
@@ -91,7 +98,7 @@ function toCursorUsageSource(
     };
   }
   return {
-    fingerprint: { hostId, provider: "cursor", resolvedHomePath, volumeId: "" },
+    fingerprint,
     status: result.status,
     scannedFiles: 0,
     skippedFiles: 0,
@@ -161,7 +168,7 @@ export const make = Effect.gen(function* () {
 
   const ratesCachePath = path.join(config.stateDir, "usage-model-rates.json");
   const scanCachePath = path.join(config.stateDir, "usage-scan-cache.json");
-  const cursorExportCachePath = path.join(config.stateDir, "usage-cursor-export.csv");
+  const cursorExportCacheDir = config.stateDir;
   let rates: RateTable = new Map();
   let ratesFetchedAtMs: number | null = null;
   let ratesStatus: UsageSummary["pricing"]["status"] = "unavailable";
@@ -448,10 +455,9 @@ export const make = Effect.gen(function* () {
     // when Cursor desktop is signed in on this machine. Failures stay soft so
     // Claude/Codex still render.
     const cursorExport = yield* loadCursorUsageRecords({
-      httpClient,
-      cachePath: cursorExportCachePath,
+      cacheDir: cursorExportCacheDir,
       nowMs: startedAtMs,
-    });
+    }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
     const cursorSessionIds = new Set<string>();
     if (cursorExport.status === "ok") {
       for (const record of cursorExport.records) {
@@ -460,7 +466,7 @@ export const make = Effect.gen(function* () {
         }
       }
     }
-    sources.push(toCursorUsageSource(hostId, cursorExport, cursorSessionIds.size));
+    sources.push(toCursorUsageSource(cursorExport, cursorSessionIds.size));
 
     const pruned = pruneScanCache(fileCache, {
       livePaths,

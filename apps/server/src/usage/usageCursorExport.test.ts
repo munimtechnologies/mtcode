@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  cursorExportCachePath,
   parseCursorUsageCsv,
   sessionTokenFromAccessToken,
   userIdFromAccessTokenJwt,
@@ -30,6 +31,17 @@ describe("sessionTokenFromAccessToken", () => {
       userId: "user_xyz",
       sessionToken: `user_xyz%3A%3A${accessToken}`,
     });
+  });
+});
+
+describe("cursorExportCachePath", () => {
+  it("scopes the CSV cache file to the Cursor user id", () => {
+    expect(cursorExportCachePath("/tmp/state", "user_abc")).toBe(
+      "/tmp/state/usage-cursor-export.user_abc.csv",
+    );
+    expect(cursorExportCachePath("/tmp/state", "user/../evil")).toBe(
+      "/tmp/state/usage-cursor-export.user____evil.csv",
+    );
   });
 });
 

@@ -394,7 +394,10 @@ export function UsagePage() {
                       <tbody>
                         {recentPeriods.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                            <td
+                              colSpan={PROVIDER_ORDER.length + 3}
+                              className="py-6 text-center text-muted-foreground"
+                            >
                               No activity in this window.
                             </td>
                           </tr>
@@ -488,7 +491,23 @@ function UsageCoverageNotice({
   const stale = environments.filter((environment) =>
     staleEnvironments.includes(environment.environmentId),
   );
-  if (failed.length === 0 && stale.length === 0 && duplicateSources.length === 0) {
+  const uncovered = environments.flatMap((environment) => {
+    if (environment.summary === null) return [];
+    return environment.summary.sources
+      .filter((source) => source.status === "missing" || source.status === "failed")
+      .map((source) => ({
+        key: `${environment.environmentId}:${source.fingerprint.provider}:${source.status}`,
+        text: `${environment.label}: ${PROVIDER_LABEL[source.fingerprint.provider]} ${
+          source.status === "missing" ? "is uncovered" : "could not be loaded"
+        }${source.message ? ` (${source.message})` : ""}.`,
+      }));
+  });
+  if (
+    failed.length === 0 &&
+    stale.length === 0 &&
+    duplicateSources.length === 0 &&
+    uncovered.length === 0
+  ) {
     return null;
   }
 
@@ -501,6 +520,9 @@ function UsageCoverageNotice({
         <span key={environment.label}>
           {environment.label} runs an older server version and is excluded from totals.
         </span>
+      ))}
+      {uncovered.map((entry) => (
+        <span key={entry.key}>{entry.text}</span>
       ))}
       {duplicateSources.length > 0 ? (
         <span>

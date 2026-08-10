@@ -40,6 +40,8 @@ function summary(
     homePath: string;
     volumeId?: string;
     distinctSessions?: number;
+    status?: "ok" | "missing" | "failed";
+    message?: string | null;
   }[],
   contractVersion: number = USAGE_CONTRACT_VERSION,
 ): UsageSummary {
@@ -57,12 +59,12 @@ function summary(
         resolvedHomePath: source.homePath,
         volumeId: source.volumeId ?? `vol-${source.hostId}`,
       },
-      status: "ok" as const,
+      status: source.status ?? ("ok" as const),
       scannedFiles: 1,
       skippedFiles: 0,
       malformedRecords: 0,
       distinctSessions: source.distinctSessions ?? 1,
-      message: null,
+      message: source.message ?? null,
     })),
     pricing: { status: "fresh", source: "litellm", fetchedAt: null, knownModels: 10 },
     scanDurationMs: 1,
@@ -143,8 +145,9 @@ describe("mergeUsage", () => {
   it("dedupes Cursor export fingerprints across worktree environments", () => {
     const sharedCursor = {
       provider: "cursor" as const,
-      hostId: "mac",
+      hostId: "cursor-account",
       homePath: "cursor-export:user_abc",
+      volumeId: "",
     };
     const merged = mergeUsage(
       [
@@ -168,6 +171,60 @@ describe("mergeUsage", () => {
 
     expect(merged.costUsd).toBe(3);
     expect(merged.providers.map((provider) => provider.provider)).toEqual(["cursor"]);
+  });
+
+  it("dedupes Cursor exports across different host machines", () => {
+    const cursorAccount = {
+      provider: "cursor" as const,
+      hostId: "cursor-account",
+      homePath: "cursor-export:user_abc",
+      volumeId: "",
+    };
+    const merged = mergeUsage(
+      [
+        environment(
+          "laptop",
+          summary([bucket({ provider: "cursor", costUsd: 5 })], [cursorAccount]),
+        ),
+        environment(
+          "desktop",
+          summary([bucket({ provider: "cursor", costUsd: 5 })], [cursorAccount]),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+
+    expect(merged.costUsd).toBe(5);
+    expect(merged.duplicateSources).toHaveLength(1);
+  });
+
+  it("does not let a failed Cursor source block a successful sibling", () => {
+    const cursorAccount = {
+      provider: "cursor" as const,
+      hostId: "cursor-account",
+      homePath: "cursor-export:user_abc",
+      volumeId: "",
+    };
+    const merged = mergeUsage(
+      [
+        environment(
+          "env-a",
+          summary([], [{ ...cursorAccount, status: "failed", message: "export failed" }]),
+        ),
+        environment(
+          "env-b",
+          summary(
+            [bucket({ provider: "cursor", model: "composer-2", costUsd: 4 })],
+            [cursorAccount],
+          ),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+
+    expect(merged.costUsd).toBe(4);
+    expect(merged.providers.map((provider) => provider.provider)).toEqual(["cursor"]);
+    expect(merged.duplicateSources).toHaveLength(0);
   });
 
   it("excludes an environment reporting an older contract version", () => {
