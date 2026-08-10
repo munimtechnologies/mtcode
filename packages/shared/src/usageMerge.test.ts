@@ -140,6 +140,36 @@ describe("mergeUsage", () => {
     ]);
   });
 
+  it("dedupes Cursor export fingerprints across worktree environments", () => {
+    const sharedCursor = {
+      provider: "cursor" as const,
+      hostId: "mac",
+      homePath: "cursor-export:user_abc",
+    };
+    const merged = mergeUsage(
+      [
+        environment(
+          "env-a",
+          summary(
+            [bucket({ provider: "cursor", model: "composer-2", costUsd: 3 })],
+            [sharedCursor],
+          ),
+        ),
+        environment(
+          "env-b",
+          summary(
+            [bucket({ provider: "cursor", model: "composer-2", costUsd: 3 })],
+            [sharedCursor],
+          ),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+
+    expect(merged.costUsd).toBe(3);
+    expect(merged.providers.map((provider) => provider.provider)).toEqual(["cursor"]);
+  });
+
   it("excludes an environment reporting an older contract version", () => {
     const merged = mergeUsage(
       [
