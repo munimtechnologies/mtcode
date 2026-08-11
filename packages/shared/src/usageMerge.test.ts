@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { mergeUsage, type EnvironmentUsage } from "./usageMerge.ts";
+import { isCursorCoverageGap, mergeUsage, type EnvironmentUsage } from "./usageMerge.ts";
 
 function bucket(overrides: Partial<UsageBucket> = {}): UsageBucket {
   return {
@@ -225,6 +225,104 @@ describe("mergeUsage", () => {
     expect(merged.costUsd).toBe(4);
     expect(merged.providers.map((provider) => provider.provider)).toEqual(["cursor"]);
     expect(merged.duplicateSources).toHaveLength(0);
+  });
+
+  it("prefers a richer Cursor export over a stale empty sibling", () => {
+    // env-a sorts first and reports ok from a stale cache with no in-window
+    // rows; env-b fetched a fresher export for the same account.
+    const cursorAccount = {
+      provider: "cursor" as const,
+      hostId: "cursor-account",
+      homePath: "cursor-export:user_abc",
+      volumeId: "",
+    };
+    const merged = mergeUsage(
+      [
+        environment(
+          "env-a",
+          summary([], [{ ...cursorAccount, distinctSessions: 0 }]),
+        ),
+        environment(
+          "env-b",
+          summary(
+            [bucket({ provider: "cursor", model: "composer-2", costUsd: 7, records: 3 })],
+            [{ ...cursorAccount, distinctSessions: 2 }],
+          ),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+
+    expect(merged.costUsd).toBe(7);
+    expect(merged.contributingEnvironments).toEqual(["env-b"]);
+    expect(merged.duplicateSources).toEqual(["env-a: cursor-export:user_abc"]);
+  });
+
+  it("keeps the first Cursor owner when sibling richness ties", () => {
+    const cursorAccount = {
+      provider: "cursor" as const,
+      hostId: "cursor-account",
+      homePath: "cursor-export:user_abc",
+      volumeId: "",
+    };
+    const merged = mergeUsage(
+      [
+        environment(
+          "env-a",
+          summary(
+            [bucket({ provider: "cursor", model: "composer-2", costUsd: 3, records: 2 })],
+            [{ ...cursorAccount, distinctSessions: 1 }],
+          ),
+        ),
+        environment(
+          "env-b",
+          summary(
+            [bucket({ provider: "cursor", model: "composer-2", costUsd: 3, records: 2 })],
+            [{ ...cursorAccount, distinctSessions: 1 }],
+          ),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+
+    expect(merged.costUsd).toBe(3);
+    expect(merged.contributingEnvironments).toEqual(["env-a"]);
+  });
+
+  it("treats only Cursor missing/failed sources as coverage gaps", () => {
+    expect(
+      isCursorCoverageGap({
+        fingerprint: {
+          hostId: "mac",
+          provider: "claude",
+          resolvedHomePath: "/a/.claude",
+          volumeId: "vol",
+        },
+        status: "missing",
+      }),
+    ).toBe(false);
+    expect(
+      isCursorCoverageGap({
+        fingerprint: {
+          hostId: "cursor-account",
+          provider: "cursor",
+          resolvedHomePath: "cursor-export:user_abc",
+          volumeId: "",
+        },
+        status: "missing",
+      }),
+    ).toBe(true);
+    expect(
+      isCursorCoverageGap({
+        fingerprint: {
+          hostId: "cursor-account",
+          provider: "cursor",
+          resolvedHomePath: "cursor-export:user_abc",
+          volumeId: "",
+        },
+        status: "ok",
+      }),
+    ).toBe(false);
   });
 
   it("excludes an environment reporting an older contract version", () => {

@@ -1,5 +1,4 @@
 import { useNavigation } from "@react-navigation/native";
-import type { DailyTotals, MergedUsage } from "@t3tools/shared/usageMerge";
 import {
   enumerateDays,
   enumerateHourStarts,
@@ -11,6 +10,11 @@ import {
   formatUsd,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
+import {
+  isCursorCoverageGap,
+  type DailyTotals,
+  type MergedUsage,
+} from "@t3tools/shared/usageMerge";
 import { useMemo, useState } from "react";
 import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -450,8 +454,8 @@ function ModelsSection(props: { readonly merged: MergedUsage }) {
 
 /**
  * Says plainly when the totals are incomplete: an environment still answering,
- * one that failed, or one whose transcripts another environment already
- * reported.
+ * one that failed, a Cursor soft-fail, or a transcript directory another
+ * environment already reported. Claude/Codex missing homes stay quiet.
  */
 function UsageCoverageNotice(props: {
   readonly environments: readonly EnvironmentUsageStatus[];
@@ -465,14 +469,12 @@ function UsageCoverageNotice(props: {
   const duplicateSources = props.merged.duplicateSources;
   const uncovered = props.environments.flatMap((environment) => {
     if (environment.summary === null) return [];
-    return environment.summary.sources
-      .filter((source) => source.status === "missing" || source.status === "failed")
-      .map((source) => ({
-        key: `${environment.environmentId}:${source.fingerprint.provider}:${source.status}`,
-        text: `${environment.label}: ${PROVIDER_LABEL[source.fingerprint.provider]} ${
-          source.status === "missing" ? "is uncovered" : "could not be loaded"
-        }${source.message ? ` (${source.message})` : ""}.`,
-      }));
+    return environment.summary.sources.filter(isCursorCoverageGap).map((source) => ({
+      key: `${environment.environmentId}:${source.fingerprint.provider}:${source.status}`,
+      text: `${environment.label}: ${PROVIDER_LABEL[source.fingerprint.provider]} ${
+        source.status === "missing" ? "is uncovered" : "could not be loaded"
+      }${source.message ? ` (${source.message})` : ""}.`,
+    }));
   });
   if (
     failed.length === 0 &&

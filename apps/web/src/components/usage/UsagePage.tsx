@@ -19,6 +19,7 @@ import {
   formatUsd,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
+import { isCursorCoverageGap } from "@t3tools/shared/usageMerge";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
@@ -473,10 +474,10 @@ function Metric({
 }
 
 /**
- * Says plainly when the totals are incomplete: an environment that failed, or
- * one whose transcripts another environment already reported. Environments
- * that are still answering never reach this notice; the page shows the
- * loading skeleton until every one is terminal.
+ * Says plainly when the totals are incomplete: an environment that failed, a
+ * Cursor soft-fail (desktop not signed in / export error), or a transcript
+ * directory another environment already reported. Claude/Codex missing homes
+ * are normal when those agents are unused and stay out of this notice.
  */
 function UsageCoverageNotice({
   environments,
@@ -493,14 +494,12 @@ function UsageCoverageNotice({
   );
   const uncovered = environments.flatMap((environment) => {
     if (environment.summary === null) return [];
-    return environment.summary.sources
-      .filter((source) => source.status === "missing" || source.status === "failed")
-      .map((source) => ({
-        key: `${environment.environmentId}:${source.fingerprint.provider}:${source.status}`,
-        text: `${environment.label}: ${PROVIDER_LABEL[source.fingerprint.provider]} ${
-          source.status === "missing" ? "is uncovered" : "could not be loaded"
-        }${source.message ? ` (${source.message})` : ""}.`,
-      }));
+    return environment.summary.sources.filter(isCursorCoverageGap).map((source) => ({
+      key: `${environment.environmentId}:${source.fingerprint.provider}:${source.status}`,
+      text: `${environment.label}: ${PROVIDER_LABEL[source.fingerprint.provider]} ${
+        source.status === "missing" ? "is uncovered" : "could not be loaded"
+      }${source.message ? ` (${source.message})` : ""}.`,
+    }));
   });
   if (
     failed.length === 0 &&
