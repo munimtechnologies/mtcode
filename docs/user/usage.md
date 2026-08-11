@@ -10,6 +10,9 @@ aggregated usage totals. Subscription billing is separate from the raw token cos
 provider records a cost, T3 Code uses it. Otherwise, it estimates cost from the available model rate
 table and marks models it cannot price.
 
+For OpenCode, T3 Code honors `OPENCODE_DB` and discovers databases created by channel installs in
+OpenCode's data directory. In-memory OpenCode databases cannot be inspected by another process.
+
 Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period. The **7 days**,
 **30 days**, and **90 days** ranges use daily resolution. Cost and token toggles update both the
 headline and chart, and refreshing rescans every connected environment.

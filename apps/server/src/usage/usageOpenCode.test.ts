@@ -6,7 +6,11 @@ import * as NodeSqlite from "node:sqlite";
 
 import { describe, expect, it } from "@effect/vitest";
 
-import { parseOpenCodeUsageRow, readOpenCodeUsage } from "./usageOpenCode.ts";
+import {
+  parseOpenCodeUsageRow,
+  readOpenCodeUsage,
+  resolveOpenCodeDatabasePaths,
+} from "./usageOpenCode.ts";
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -64,10 +68,82 @@ describe("parseOpenCodeUsageRow", () => {
           reasoningTokens: 0,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
-          costUsd: null,
+          costUsd: 0,
         }),
       ),
     ).toBeNull();
+  });
+});
+
+describe("resolveOpenCodeDatabasePaths", () => {
+  const dataDir = NodePath.resolve("opencode-data");
+
+  it("honors absolute and data-directory-relative OPENCODE_DB overrides", () => {
+    const absoluteOverride = NodePath.resolve("custom-opencode.db");
+    expect(
+      resolveOpenCodeDatabasePaths({
+        dataDir,
+        databaseOverride: absoluteOverride,
+        disableChannelDatabase: undefined,
+        directoryEntries: ["opencode.db"],
+        path: NodePath,
+      }),
+    ).toEqual([absoluteOverride]);
+    expect(
+      resolveOpenCodeDatabasePaths({
+        dataDir,
+        databaseOverride: "custom/opencode.db",
+        disableChannelDatabase: undefined,
+        directoryEntries: ["opencode.db"],
+        path: NodePath,
+      }),
+    ).toEqual([NodePath.join(dataDir, "custom/opencode.db")]);
+  });
+
+  it("discovers stable and channel databases while ignoring SQLite sidecars", () => {
+    expect(
+      resolveOpenCodeDatabasePaths({
+        dataDir,
+        databaseOverride: undefined,
+        disableChannelDatabase: undefined,
+        directoryEntries: [
+          "opencode-nightly.db",
+          "opencode.db-wal",
+          "opencode.db",
+          "opencode-canary.db",
+          "notes.txt",
+        ],
+        path: NodePath,
+      }),
+    ).toEqual([
+      NodePath.join(dataDir, "opencode-canary.db"),
+      NodePath.join(dataDir, "opencode-nightly.db"),
+      NodePath.join(dataDir, "opencode.db"),
+    ]);
+  });
+
+  it("uses only the stable database when channels are disabled", () => {
+    expect(
+      resolveOpenCodeDatabasePaths({
+        dataDir,
+        databaseOverride: undefined,
+        disableChannelDatabase: "true",
+        directoryEntries: ["opencode-canary.db"],
+        path: NodePath,
+      }),
+    ).toEqual([NodePath.join(dataDir, "opencode.db")]);
+  });
+
+  it("does not try to attach to another process's in-memory database", () => {
+    expect(
+      resolveOpenCodeDatabasePaths({
+        dataDir,
+        databaseOverride: ":memory:",
+        disableChannelDatabase: undefined,
+        directoryEntries: [],
+        path: NodePath,
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -107,6 +183,18 @@ describe("readOpenCodeUsage", () => {
         "ses_01",
         2001,
         JSON.stringify({ role: "user", content: "not usage" }),
+      );
+      insert.run(
+        "msg_placeholder",
+        "ses_placeholder",
+        2002,
+        JSON.stringify({
+          role: "assistant",
+          providerID: "openai",
+          modelID: "gpt-5",
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          cost: 0,
+        }),
       );
       database.close();
       database = undefined;

@@ -13,6 +13,9 @@ import type { UsageRecord } from "./usageTranscripts.ts";
 // external without asking its resolver to load a module Node cannot provide.
 const BUN_SQLITE_MODULE_ID: string = "bun:sqlite";
 
+const OPEN_CODE_STABLE_DATABASE = "opencode.db";
+const OPEN_CODE_CHANNEL_DATABASE = /^opencode-[a-zA-Z0-9._-]+\.db$/;
+
 const OPEN_CODE_USAGE_QUERY = `
   SELECT
     id AS messageId,
@@ -70,6 +73,47 @@ export interface OpenCodeUsageRead {
   readonly malformedRecords: number;
 }
 
+export interface ResolveOpenCodeDatabasePathsInput {
+  readonly dataDir: string;
+  readonly databaseOverride: string | undefined;
+  readonly disableChannelDatabase: string | undefined;
+  readonly directoryEntries: readonly string[];
+  readonly path: {
+    readonly isAbsolute: (value: string) => boolean;
+    readonly join: (first: string, ...segments: readonly string[]) => string;
+  };
+}
+
+/** Mirrors OpenCode's explicit override and discovers compile-time channel databases. */
+export function resolveOpenCodeDatabasePaths({
+  dataDir,
+  databaseOverride,
+  disableChannelDatabase,
+  directoryEntries,
+  path,
+}: ResolveOpenCodeDatabasePathsInput): readonly string[] {
+  const override = databaseOverride?.trim();
+  if (override) {
+    if (override === ":memory:") return [];
+    return [path.isAbsolute(override) ? override : path.join(dataDir, override)];
+  }
+
+  const stableDatabasePath = path.join(dataDir, OPEN_CODE_STABLE_DATABASE);
+  const channelsDisabled = ["1", "true"].includes(
+    disableChannelDatabase?.trim().toLowerCase() ?? "",
+  );
+  if (channelsDisabled) return [stableDatabasePath];
+
+  const databaseNames = directoryEntries.filter(
+    (entry) => entry === OPEN_CODE_STABLE_DATABASE || OPEN_CODE_CHANNEL_DATABASE.test(entry),
+  );
+  if (databaseNames.length === 0) return [stableDatabasePath];
+
+  return [...new Set(databaseNames)]
+    .sort((left, right) => left.localeCompare(right))
+    .map((entry) => path.join(dataDir, entry));
+}
+
 function nonNegativeInt(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
@@ -78,9 +122,13 @@ function finiteNonNegative(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-/** Converts one assistant-message projection into the shared usage shape. */
-export function parseOpenCodeUsageRow(value: unknown): UsageRecord | null {
-  if (typeof value !== "object" || value === null) return null;
+type OpenCodeUsageRowParse =
+  | { readonly _tag: "Malformed" }
+  | { readonly _tag: "Placeholder" }
+  | { readonly _tag: "Record"; readonly record: UsageRecord };
+
+function decodeOpenCodeUsageRow(value: unknown): OpenCodeUsageRowParse {
+  if (typeof value !== "object" || value === null) return { _tag: "Malformed" };
   const row = value as OpenCodeUsageRow;
   if (
     typeof row.messageId !== "string" ||
@@ -93,7 +141,7 @@ export function parseOpenCodeUsageRow(value: unknown): UsageRecord | null {
     typeof row.modelId !== "string" ||
     row.modelId.length === 0
   ) {
-    return null;
+    return { _tag: "Malformed" };
   }
 
   const uncachedInputTokens = nonNegativeInt(row.inputTokens);
@@ -106,28 +154,34 @@ export function parseOpenCodeUsageRow(value: unknown): UsageRecord | null {
   // shared contract treats reasoning as a subset of output, so combine them in
   // outputTokens while retaining the reasoning slice for the token-mix UI.
   const outputTokens = generatedOutputTokens + reasoningTokens;
-  if (
-    uncachedInputTokens + cachedInputTokens + cacheCreationTokens + outputTokens === 0 &&
-    finiteNonNegative(row.costUsd) === null
-  ) {
-    return null;
+  if (uncachedInputTokens + cachedInputTokens + cacheCreationTokens + outputTokens === 0) {
+    return { _tag: "Placeholder" };
   }
 
   return {
-    provider: "opencode",
-    timestampMs: row.timestampMs,
-    model: `${row.providerId}/${row.modelId}`,
-    sessionId: row.sessionId,
-    totals: {
-      uncachedInputTokens,
-      cachedInputTokens,
-      cacheCreationTokens,
-      outputTokens,
-      reasoningTokens,
+    _tag: "Record",
+    record: {
+      provider: "opencode",
+      timestampMs: row.timestampMs,
+      model: `${row.providerId}/${row.modelId}`,
+      sessionId: row.sessionId,
+      totals: {
+        uncachedInputTokens,
+        cachedInputTokens,
+        cacheCreationTokens,
+        outputTokens,
+        reasoningTokens,
+      },
+      reportedCostUsd: finiteNonNegative(row.costUsd),
+      dedupeKey: `opencode:${row.messageId}`,
     },
-    reportedCostUsd: finiteNonNegative(row.costUsd),
-    dedupeKey: `opencode:${row.messageId}`,
   };
+}
+
+/** Converts one assistant-message projection into the shared usage shape. */
+export function parseOpenCodeUsageRow(value: unknown): UsageRecord | null {
+  const parsed = decodeOpenCodeUsageRow(value);
+  return parsed._tag === "Record" ? parsed.record : null;
 }
 
 async function openDatabase(databasePath: string): Promise<SqliteDatabase> {
@@ -169,9 +223,9 @@ export async function readOpenCodeUsage(
     const records: UsageRecord[] = [];
     let malformedRecords = 0;
     for (const row of rows) {
-      const record = parseOpenCodeUsageRow(row);
-      if (record === null) malformedRecords += 1;
-      else records.push(record);
+      const parsed = decodeOpenCodeUsageRow(row);
+      if (parsed._tag === "Record") records.push(parsed.record);
+      else if (parsed._tag === "Malformed") malformedRecords += 1;
     }
 
     const [malformed] = database.statement(OPEN_CODE_MALFORMED_QUERY).all(sinceMs);
