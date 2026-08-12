@@ -2,8 +2,10 @@
  * Read-only OpenCode usage database access.
  *
  * OpenCode stores one usage-bearing JSON object per assistant message in its
- * global SQLite database. Only the scalar fields needed for usage reporting are
- * selected; prompts, responses, and tool output never leave the database.
+ * global SQLite database. Both its legacy `message` projection and current
+ * `session_message` projection are supported. Only the scalar fields needed for
+ * usage reporting are selected; prompts, responses, and tool output never leave
+ * the database.
  *
  * @module usageOpenCode
  */
@@ -16,7 +18,13 @@ const BUN_SQLITE_MODULE_ID: string = "bun:sqlite";
 const OPEN_CODE_STABLE_DATABASE = "opencode.db";
 const OPEN_CODE_CHANNEL_DATABASE = /^opencode-[a-zA-Z0-9._-]+\.db$/;
 
-const OPEN_CODE_USAGE_QUERY = `
+const OPEN_CODE_MESSAGE_TABLES_QUERY = `
+  SELECT name
+  FROM sqlite_master
+  WHERE type = 'table' AND name IN ('session_message', 'message')
+`;
+
+const OPEN_CODE_LEGACY_USAGE_QUERY = `
   SELECT
     id AS messageId,
     session_id AS sessionId,
@@ -35,11 +43,51 @@ const OPEN_CODE_USAGE_QUERY = `
     AND json_extract(data, '$.role') = 'assistant'
 `;
 
-const OPEN_CODE_MALFORMED_QUERY = `
+const OPEN_CODE_LEGACY_MALFORMED_QUERY = `
   SELECT COUNT(*) AS records
   FROM message
   WHERE time_created >= ? AND NOT json_valid(data)
 `;
+
+const OPEN_CODE_CURRENT_USAGE_QUERY = `
+  SELECT
+    id AS messageId,
+    session_id AS sessionId,
+    time_created AS timestampMs,
+    json_extract(data, '$.model.providerID') AS providerId,
+    json_extract(data, '$.model.id') AS modelId,
+    json_extract(data, '$.tokens.input') AS inputTokens,
+    json_extract(data, '$.tokens.output') AS outputTokens,
+    json_extract(data, '$.tokens.reasoning') AS reasoningTokens,
+    json_extract(data, '$.tokens.cache.read') AS cacheReadTokens,
+    json_extract(data, '$.tokens.cache.write') AS cacheWriteTokens,
+    json_extract(data, '$.cost') AS costUsd
+  FROM session_message
+  WHERE time_created >= ?
+    AND type = 'assistant'
+    AND json_valid(data)
+`;
+
+const OPEN_CODE_CURRENT_MALFORMED_QUERY = `
+  SELECT COUNT(*) AS records
+  FROM session_message
+  WHERE time_created >= ?
+    AND type = 'assistant'
+    AND NOT json_valid(data)
+`;
+
+const OPEN_CODE_TABLE_QUERIES = {
+  session_message: {
+    usage: OPEN_CODE_CURRENT_USAGE_QUERY,
+    malformed: OPEN_CODE_CURRENT_MALFORMED_QUERY,
+  },
+  message: {
+    usage: OPEN_CODE_LEGACY_USAGE_QUERY,
+    malformed: OPEN_CODE_LEGACY_MALFORMED_QUERY,
+  },
+} as const;
+
+type OpenCodeMessageTable = keyof typeof OPEN_CODE_TABLE_QUERIES;
 
 interface OpenCodeUsageRow {
   readonly messageId?: unknown;
@@ -59,8 +107,12 @@ interface CountRow {
   readonly records?: unknown;
 }
 
+interface TableNameRow {
+  readonly name?: unknown;
+}
+
 interface SqliteStatement {
-  readonly all: (sinceMs: number) => readonly unknown[];
+  readonly all: (...parameters: readonly number[]) => readonly unknown[];
 }
 
 interface SqliteDatabase {
@@ -191,7 +243,7 @@ async function openDatabase(databasePath: string): Promise<SqliteDatabase> {
     return {
       statement: (sql) => {
         const statement = database.query(sql);
-        return { all: (sinceMs) => statement.all(sinceMs) };
+        return { all: (...parameters) => statement.all(...parameters) };
       },
       close: () => database.close(),
     };
@@ -202,7 +254,7 @@ async function openDatabase(databasePath: string): Promise<SqliteDatabase> {
   return {
     statement: (sql) => {
       const statement = database.prepare(sql);
-      return { all: (sinceMs) => statement.all(sinceMs) };
+      return { all: (...parameters) => statement.all(...parameters) };
     },
     close: () => database.close(),
   };
@@ -219,18 +271,41 @@ export async function readOpenCodeUsage(
   let database: SqliteDatabase | undefined;
   try {
     database = await openDatabase(databasePath);
-    const rows = database.statement(OPEN_CODE_USAGE_QUERY).all(sinceMs);
-    const records: UsageRecord[] = [];
+    const tableRows = database.statement(OPEN_CODE_MESSAGE_TABLES_QUERY).all();
+    const tables = new Set<OpenCodeMessageTable>();
+    for (const row of tableRows) {
+      const name = (row as TableNameRow).name;
+      if (name === "session_message" || name === "message") tables.add(name);
+    }
+    if (tables.size === 0) return null;
+
+    // Current databases can contain both projections. Prefer the current row
+    // when an upgraded database carries the same message ID in each table.
+    const recordsByKey = new Map<string, UsageRecord>();
     let malformedRecords = 0;
-    for (const row of rows) {
-      const parsed = decodeOpenCodeUsageRow(row);
-      if (parsed._tag === "Record") records.push(parsed.record);
-      else if (parsed._tag === "Malformed") malformedRecords += 1;
+    for (const table of ["session_message", "message"] as const) {
+      if (!tables.has(table)) continue;
+      const queries = OPEN_CODE_TABLE_QUERIES[table];
+      const rows = database.statement(queries.usage).all(sinceMs);
+      for (const row of rows) {
+        const parsed = decodeOpenCodeUsageRow(row);
+        if (parsed._tag === "Record") {
+          const dedupeKey = parsed.record.dedupeKey;
+          if (dedupeKey === null) {
+            malformedRecords += 1;
+          } else if (!recordsByKey.has(dedupeKey)) {
+            recordsByKey.set(dedupeKey, parsed.record);
+          }
+        } else if (parsed._tag === "Malformed") {
+          malformedRecords += 1;
+        }
+      }
+
+      const [malformed] = database.statement(queries.malformed).all(sinceMs);
+      malformedRecords += nonNegativeInt((malformed as CountRow | undefined)?.records);
     }
 
-    const [malformed] = database.statement(OPEN_CODE_MALFORMED_QUERY).all(sinceMs);
-    const invalidJsonRecords = nonNegativeInt((malformed as CountRow | undefined)?.records);
-    return { records, malformedRecords: malformedRecords + invalidJsonRecords };
+    return { records: [...recordsByKey.values()], malformedRecords };
   } catch {
     return null;
   } finally {
