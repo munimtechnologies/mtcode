@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  ActivityIcon,
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
   SettingsIcon,
@@ -125,11 +126,13 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const { isMobile, setOpenMobile } = useSidebar();
   const currentFooterPage = useLocation({
     select: (location) =>
-      location.pathname === "/usage"
-        ? "usage"
-        : location.pathname === "/pull-requests"
-          ? "pull-requests"
-          : null,
+      location.pathname === "/status"
+        ? "status"
+        : location.pathname === "/usage"
+          ? "usage"
+          : location.pathname === "/pull-requests"
+            ? "pull-requests"
+            : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -211,6 +214,25 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
                 </Tooltip>
               </SidebarMenuItem>
             ) : null}
+            <SidebarMenuItem className="shrink-0">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <SidebarMenuButton
+                      aria-label="Status"
+                      onClick={() => {
+                        closeMobileSidebar();
+                        void navigate({ to: "/status" });
+                      }}
+                      size="icon"
+                    >
+                      <ActivityIcon />
+                    </SidebarMenuButton>
+                  }
+                />
+                <TooltipPopup side="top">Status</TooltipPopup>
+              </Tooltip>
+            </SidebarMenuItem>
             <SidebarMenuItem className="shrink-0">
               <Tooltip>
                 <TooltipTrigger
