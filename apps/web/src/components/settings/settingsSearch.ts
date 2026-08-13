@@ -8,6 +8,7 @@ export type SettingsPath =
   | "/settings/integrations"
   | "/settings/source-control"
   | "/settings/connections"
+  | "/settings/computer-use"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -32,6 +33,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
+  "/settings/computer-use": "Computer Use",
   "/settings/archived": "Archive",
 };
 
@@ -230,6 +232,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Remote environments",
     to: "/settings/connections",
+  },
+  {
+    id: "computer-use-enabled",
+    title: "Enable Computer Use",
+    to: "/settings/computer-use",
+    targetId: "computer-use",
+  },
+  {
+    id: "computer-use-agent-cursor",
+    title: "Agent cursor overlay",
+    to: "/settings/computer-use",
+    targetId: "computer-use",
+  },
+  {
+    id: "computer-use-browser",
+    title: "Browser control",
+    to: "/settings/computer-use",
+    targetId: "computer-use",
   },
   {
     id: "archive",
