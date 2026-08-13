@@ -3,6 +3,9 @@ export const PICK_THEME_FILES_CHANNEL = "desktop:pick-theme-files";
 export const SET_THEME_CHANNEL = "desktop:set-theme";
 export const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+export const GET_COMPUTER_USE_PERMISSIONS_CHANNEL = "desktop:get-computer-use-permissions";
+export const OPEN_COMPUTER_USE_PRIVACY_SETTINGS_CHANNEL =
+  "desktop:open-computer-use-privacy-settings";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
 export const GET_WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:get-window-fullscreen-state";
 export const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
