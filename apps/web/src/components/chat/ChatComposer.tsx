@@ -18,6 +18,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { appendVoiceTranscript as appendVoiceTranscriptText } from "@t3tools/shared/voiceTranscription";
@@ -671,6 +672,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
   } = props;
   const isSendDisabled = sendDisabledReason !== null;
+  const voiceTranscriptionTargetKey =
+    typeof composerDraftTarget === "string"
+      ? composerDraftTarget
+      : scopedThreadKey(composerDraftTarget);
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -979,6 +984,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const stashPulseKeyRef = useRef(0);
   const stashPulseTimeoutRef = useRef<number | null>(null);
   const submitComposerRef = useRef<(event?: { preventDefault: () => void }) => void>(() => {});
+  const voiceTranscriptionTargetKeyRef = useRef(voiceTranscriptionTargetKey);
+  const voiceTranscriptionOriginTargetKeyRef = useRef<string | null>(null);
+  voiceTranscriptionTargetKeyRef.current = voiceTranscriptionTargetKey;
   /**
    * Snapshots currently being encoded, keyed by target+prompt+image ids.
    * Keyed rather than boolean so a genuinely different prompt (or a different
@@ -1269,6 +1277,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const appendVoiceTranscriptToPrompt = useCallback(
     (transcript: string) => {
+      if (
+        voiceTranscriptionOriginTargetKeyRef.current === null ||
+        voiceTranscriptionOriginTargetKeyRef.current !== voiceTranscriptionTargetKeyRef.current
+      ) {
+        return false;
+      }
       const currentPrompt = promptRef.current;
       const nextPrompt = appendVoiceTranscriptText(currentPrompt, transcript);
       if (nextPrompt === currentPrompt) return false;
@@ -1278,6 +1292,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerCursor(nextCursor);
       setComposerTrigger(null);
       scheduleComposerFocus();
+      voiceTranscriptionOriginTargetKeyRef.current = null;
       return true;
     },
     [promptRef, scheduleComposerFocus, setPrompt],
@@ -1295,17 +1310,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const voiceTranscriptionReady =
     settings.voiceTranscriptionEnabled && settings.voiceTranscriptionModel.trim().length > 0;
+  const startVoiceTranscription = useCallback(async () => {
+    voiceTranscriptionOriginTargetKeyRef.current = voiceTranscriptionTargetKeyRef.current;
+    await voiceTranscription.start();
+  }, [voiceTranscription.start]);
+  const cancelVoiceTranscription = useCallback(() => {
+    voiceTranscriptionOriginTargetKeyRef.current = null;
+    voiceTranscription.cancel();
+  }, [voiceTranscription.cancel]);
+
+  useEffect(() => {
+    const activeTargetKey = voiceTranscriptionTargetKey;
+    return () => {
+      if (voiceTranscriptionOriginTargetKeyRef.current !== activeTargetKey) return;
+      voiceTranscriptionOriginTargetKeyRef.current = null;
+      voiceTranscription.cancel();
+    };
+  }, [voiceTranscription.cancel, voiceTranscriptionTargetKey]);
 
   useEffect(() => {
     if (voiceTranscription.status !== "recording") return;
     const cancelOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      voiceTranscription.cancel();
+      cancelVoiceTranscription();
     };
     window.addEventListener("keydown", cancelOnEscape);
     return () => window.removeEventListener("keydown", cancelOnEscape);
-  }, [voiceTranscription.cancel, voiceTranscription.status]);
+  }, [cancelVoiceTranscription, voiceTranscription.status]);
 
   const addComposerImage = useCallback(
     (image: ComposerImageAttachment) => {
@@ -3189,7 +3221,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   elapsedMs={voiceTranscription.elapsedMs}
                   levels={voiceTranscription.levels}
                   sendDisabled={voiceTranscriptionSendDisabled}
-                  onCancel={voiceTranscription.cancel}
+                  onCancel={cancelVoiceTranscription}
                   onStop={() => voiceTranscription.stop("insert")}
                   onSend={() => voiceTranscription.stop("send")}
                 />
@@ -3289,7 +3321,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             variant="ghost"
                             disabled={isConnecting || projectSelectionRequired}
                             className="rounded-full text-muted-foreground"
-                            onClick={() => void voiceTranscription.start()}
+                            onClick={() => void startVoiceTranscription()}
                             aria-label="Start dictation"
                           >
                             <MicIcon className="size-4" />

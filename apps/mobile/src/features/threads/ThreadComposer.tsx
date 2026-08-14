@@ -530,6 +530,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   // ── Handle command selection ──────────────────────────────
   const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
+  const voiceTranscriptionTargetKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
+  const voiceTranscriptionTargetKeyRef = useRef(voiceTranscriptionTargetKey);
+  const voiceTranscriptionOriginTargetKeyRef = useRef<string | null>(null);
+  voiceTranscriptionTargetKeyRef.current = voiceTranscriptionTargetKey;
 
   const sendCurrentDraft = useCallback(async () => {
     const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
@@ -559,10 +563,17 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const voiceTranscriptionSettings = useMobileVoiceTranscriptionSettings();
   const appendVoiceTranscriptToDraft = useCallback(
     (transcript: string) => {
+      if (
+        voiceTranscriptionOriginTargetKeyRef.current === null ||
+        voiceTranscriptionOriginTargetKeyRef.current !== voiceTranscriptionTargetKeyRef.current
+      ) {
+        return false;
+      }
       const nextDraft = appendVoiceTranscriptText(draftMessage, transcript);
       if (nextDraft === draftMessage) return false;
       setComposerSelection({ start: nextDraft.length, end: nextDraft.length });
       onChangeDraftMessage(nextDraft);
+      voiceTranscriptionOriginTargetKeyRef.current = null;
       return true;
     },
     [draftMessage, onChangeDraftMessage],
@@ -576,6 +587,22 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   });
   const voiceTranscriptionReady =
     voiceTranscriptionSettings.loaded && voiceTranscriptionSettings.apiKey.trim().length > 0;
+  const startVoiceTranscription = useCallback(async () => {
+    voiceTranscriptionOriginTargetKeyRef.current = voiceTranscriptionTargetKeyRef.current;
+    await voiceTranscription.start();
+  }, [voiceTranscription.start]);
+  const cancelVoiceTranscription = useCallback(async () => {
+    voiceTranscriptionOriginTargetKeyRef.current = null;
+    await voiceTranscription.cancel();
+  }, [voiceTranscription.cancel]);
+  useEffect(() => {
+    const activeTargetKey = voiceTranscriptionTargetKey;
+    return () => {
+      if (voiceTranscriptionOriginTargetKeyRef.current !== activeTargetKey) return;
+      voiceTranscriptionOriginTargetKeyRef.current = null;
+      void voiceTranscription.cancel();
+    };
+  }, [voiceTranscription.cancel, voiceTranscriptionTargetKey]);
   const handleSend = useCallback(async () => {
     if (voiceTranscription.status === "recording") {
       await voiceTranscription.stop("send");
@@ -794,7 +821,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               elapsedMs={voiceTranscription.elapsedMs}
               levels={voiceTranscription.levels}
               sendDisabled={false}
-              onCancel={() => void voiceTranscription.cancel()}
+              onCancel={() => void cancelVoiceTranscription()}
               onStop={() => void voiceTranscription.stop("insert")}
               onSend={() => void voiceTranscription.stop("send")}
             />
@@ -880,7 +907,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                         accessibilityLabel="Start dictation"
                         className="h-9 w-9"
                         icon="mic"
-                        onPress={() => void voiceTranscription.start()}
+                        onPress={() => void startVoiceTranscription()}
                       />
                     ) : null}
                     {showStopAction ? (
@@ -913,7 +940,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       <ComposerToolbarButton
                         accessibilityLabel="Start dictation"
                         icon="mic"
-                        onPress={() => void voiceTranscription.start()}
+                        onPress={() => void startVoiceTranscription()}
                         showChevron={false}
                       />
                     ) : null}

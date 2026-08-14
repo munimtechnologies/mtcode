@@ -473,6 +473,11 @@ export function useSettingsRestore(onRestored?: () => void) {
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
   const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
+  const isVoiceTranscriptionDirty =
+    settings.voiceTranscriptionEnabled !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled ||
+    settings.voiceTranscriptionProvider !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider ||
+    settings.voiceTranscriptionApiKey !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey ||
+    settings.voiceTranscriptionModel !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel;
 
   const changedSettingLabels = useMemo(
     () => [
@@ -532,10 +537,12 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(isVoiceTranscriptionDirty ? ["Voice dictation"] : []),
     ],
     [
       isTextGenerationModelDirty,
       isBackgroundActivityDirty,
+      isVoiceTranscriptionDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
@@ -650,6 +657,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+      voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
+      voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
+      voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
+      voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,

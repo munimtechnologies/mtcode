@@ -81,12 +81,8 @@ export function useVoiceTranscription({
         action,
       );
       if (startingRef.current) {
-        cancelStartingRef.current = true;
-        cleanupCapture();
-        if (mountedRef.current) {
-          setStatus("idle");
-          setElapsedMs(0);
-        }
+        // Permission acquisition is already in flight. Preserve the requested
+        // action and apply it as soon as MediaRecorder starts.
         return;
       }
       const recorder = recorderRef.current;
@@ -167,12 +163,12 @@ export function useVoiceTranscription({
       });
       recorder.addEventListener("stop", () => {
         const durationMs = Date.now() - startedAtRef.current;
-        const action = terminalActionRef.current ?? "insert";
-        terminalActionRef.current = null;
+        const requestedAction = terminalActionRef.current ?? "insert";
         const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
         cleanupCapture();
         if (!mountedRef.current || recordingFailed) return;
-        if (action === "abort" || durationMs < MIN_RECORDING_MS || blob.size === 0) {
+        if (requestedAction === "abort" || durationMs < MIN_RECORDING_MS || blob.size === 0) {
+          terminalActionRef.current = null;
           setStatus("idle");
           setElapsedMs(0);
           return;
@@ -182,15 +178,18 @@ export function useVoiceTranscription({
         void transcribeVoiceRecording(blob, configRef.current)
           .then((text) => {
             if (!mountedRef.current) return;
-            if (text) {
-              if (action === "send") onTranscriptSendRef.current(text);
+            const finalAction = terminalActionRef.current ?? requestedAction;
+            if (text && finalAction !== "abort") {
+              if (finalAction === "send") onTranscriptSendRef.current(text);
               else onTranscriptInsertRef.current(text);
             }
+            terminalActionRef.current = null;
             setStatus("idle");
             setElapsedMs(0);
           })
           .catch((cause: unknown) => {
             if (!mountedRef.current) return;
+            terminalActionRef.current = null;
             setError(cause instanceof Error ? cause.message : "Voice transcription failed.");
             setStatus("idle");
           });
@@ -230,6 +229,13 @@ export function useVoiceTranscription({
       }, MAX_RECORDING_MS);
       recorder.start(250);
       startingRef.current = false;
+      const pendingAction = terminalActionRef.current;
+      if (
+        (pendingAction === "insert" || pendingAction === "send") &&
+        recorder.state === "recording"
+      ) {
+        recorder.stop();
+      }
     } catch (cause) {
       startingRef.current = false;
       cleanupCapture();

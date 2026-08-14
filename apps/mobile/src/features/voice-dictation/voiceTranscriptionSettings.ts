@@ -44,7 +44,7 @@ export function loadMobileVoiceTranscriptionSettings(): Promise<void> {
       publish({
         apiKey: "",
         error: "Could not read the saved API key.",
-        loaded: true,
+        loaded: false,
         saving: false,
       });
     })

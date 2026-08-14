@@ -68,9 +68,8 @@ export function useMobileVoiceTranscription(input: {
         action,
       );
       if (startingRef.current) {
-        cancelStartingRef.current = true;
-        clearRecordingTimeout();
-        if (mountedRef.current) setStatus("idle");
+        // Permission and recorder preparation are already in flight. Keep the
+        // requested terminal action and apply it as soon as recording starts.
         return;
       }
       if (statusRef.current !== "recording" || stopInFlightRef.current) return;
@@ -79,11 +78,13 @@ export function useMobileVoiceTranscription(input: {
       try {
         const beforeStop = await recorder.getStatus();
         await recorder.stop();
-        const terminalAction = terminalActionRef.current ?? "insert";
         const uri = recorder.uri;
-        terminalActionRef.current = null;
         await resetAudioMode();
-        if (terminalAction === "abort" || beforeStop.durationMillis < MIN_RECORDING_MS || !uri) {
+        if (
+          terminalActionRef.current === "abort" ||
+          beforeStop.durationMillis < MIN_RECORDING_MS ||
+          !uri
+        ) {
           if (mountedRef.current) {
             setStatus("idle");
             setLevels(FLAT_LEVELS);
@@ -94,8 +95,9 @@ export function useMobileVoiceTranscription(input: {
         if (mountedRef.current) setStatus("transcribing");
         const text = await transcribeMobileVoiceRecording(uri, apiKeyRef.current);
         if (!mountedRef.current) return;
-        if (text) {
-          if (terminalAction === "send") onTranscriptSendRef.current(text);
+        const finalAction = resolveVoiceTranscriptionAction(terminalActionRef.current, "insert");
+        if (text && finalAction !== "abort") {
+          if (finalAction === "send") onTranscriptSendRef.current(text);
           else onTranscriptInsertRef.current(text);
         }
         setStatus("idle");
@@ -120,6 +122,7 @@ export function useMobileVoiceTranscription(input: {
     if (startingRef.current) {
       cancelStartingRef.current = true;
       clearRecordingTimeout();
+      statusRef.current = "idle";
       if (mountedRef.current) setStatus("idle");
       return;
     }
@@ -153,6 +156,7 @@ export function useMobileVoiceTranscription(input: {
     terminalActionRef.current = null;
     setError(null);
     setLevels(FLAT_LEVELS);
+    statusRef.current = "recording";
     setStatus("recording");
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
@@ -162,6 +166,7 @@ export function useMobileVoiceTranscription(input: {
       if (cancelStartingRef.current || !mountedRef.current) {
         startingRef.current = false;
         cancelStartingRef.current = false;
+        statusRef.current = "idle";
         if (mountedRef.current) setStatus("idle");
         return;
       }
@@ -171,14 +176,19 @@ export function useMobileVoiceTranscription(input: {
         startingRef.current = false;
         cancelStartingRef.current = false;
         await resetAudioMode();
+        statusRef.current = "idle";
         if (mountedRef.current) setStatus("idle");
         return;
       }
       recorder.record();
       startingRef.current = false;
+      const pendingAction = terminalActionRef.current;
       timeoutRef.current = setTimeout(() => {
         void stopRef.current("insert");
       }, MAX_RECORDING_MS);
+      if (pendingAction === "insert" || pendingAction === "send") {
+        void stopRef.current(pendingAction);
+      }
     } catch (cause) {
       startingRef.current = false;
       await resetAudioMode();
@@ -188,6 +198,7 @@ export function useMobileVoiceTranscription(input: {
       }
       if (!mountedRef.current) return;
       setError(cause instanceof Error ? cause.message : "Could not start the microphone.");
+      statusRef.current = "idle";
       setStatus("idle");
     }
   }, [recorder, resetAudioMode]);
