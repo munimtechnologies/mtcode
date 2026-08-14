@@ -77,7 +77,10 @@ import {
 } from "./use-thread-settings-sheet-presentation";
 import { MobileVoiceTranscriptionPanel } from "../voice-dictation/MobileVoiceTranscriptionPanel";
 import { useMobileVoiceTranscription } from "../voice-dictation/useMobileVoiceTranscription";
-import { useMobileVoiceTranscriptionSettings } from "../voice-dictation/voiceTranscriptionSettings";
+import {
+  activeMobileVoiceTranscriptionConfig,
+  useMobileVoiceTranscriptionSettings,
+} from "../voice-dictation/voiceTranscriptionSettings";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -561,6 +564,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.selectedThread.title,
   ]);
   const voiceTranscriptionSettings = useMobileVoiceTranscriptionSettings();
+  const voiceTranscriptionConfig = activeMobileVoiceTranscriptionConfig(voiceTranscriptionSettings);
   const appendVoiceTranscriptToDraft = useCallback(
     (transcript: string) => {
       if (
@@ -579,14 +583,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [draftMessage, onChangeDraftMessage],
   );
   const voiceTranscription = useMobileVoiceTranscription({
-    apiKey: voiceTranscriptionSettings.apiKey,
+    ...voiceTranscriptionConfig,
     onTranscriptInsert: appendVoiceTranscriptToDraft,
     onTranscriptSend: (transcript) => {
       if (appendVoiceTranscriptToDraft(transcript)) void sendCurrentDraft();
     },
   });
   const voiceTranscriptionReady =
-    voiceTranscriptionSettings.loaded && voiceTranscriptionSettings.apiKey.trim().length > 0;
+    voiceTranscriptionSettings.loaded && voiceTranscriptionConfig.apiKey.trim().length > 0;
   const startVoiceTranscription = useCallback(async () => {
     if (showStopAction) return;
     voiceTranscriptionOriginTargetKeyRef.current = voiceTranscriptionTargetKeyRef.current;

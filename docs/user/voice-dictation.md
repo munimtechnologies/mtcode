@@ -31,6 +31,10 @@ larger than 25 MB are rejected.
 
 ## iPhone and Android
 
-Open **Settings** → **Voice Dictation** and save an OpenAI API key. The key is kept in the device's
-secure store. Native recordings use `gpt-4o-mini-transcribe` and are sent directly from the mobile
-app to OpenAI. Clearing the saved key removes the microphone from the composer.
+Open **Settings** → **Voice Dictation**, choose **OpenAI** or **Groq**, select a model, and save the
+provider's API key. Each provider keeps its own key and model in the device's secure store. OpenAI
+defaults to `gpt-4o-transcribe`; Groq defaults to `whisper-large-v3-turbo`. You can also enter a
+custom compatible model ID without waiting for an app update.
+
+Native recordings are sent directly from the mobile app to the selected provider. Clearing the
+selected provider's saved key removes the microphone from the composer.

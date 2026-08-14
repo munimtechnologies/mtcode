@@ -1,17 +1,48 @@
+import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
 import * as SecureStore from "expo-secure-store";
 import { useEffect, useSyncExternalStore } from "react";
 
-const OPENAI_API_KEY_STORAGE_KEY = "t3code.voice-transcription.openai-api-key";
+import {
+  type MobileVoiceTranscriptionConfig,
+  mobileVoiceTranscriptionProviderConfig,
+} from "./mobileVoiceTranscription";
+
+const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "t3code.voice-transcription.openai-api-key";
+const SETTINGS_STORAGE_KEY = "t3code.voice-transcription.settings.v2";
+
+export interface MobileVoiceTranscriptionProviderSettings {
+  readonly apiKey: string;
+  readonly model: string;
+}
+
+export type MobileVoiceTranscriptionProviderSettingsMap = Readonly<
+  Record<VoiceTranscriptionProvider, MobileVoiceTranscriptionProviderSettings>
+>;
 
 export interface MobileVoiceTranscriptionSettingsSnapshot {
-  readonly apiKey: string;
+  readonly provider: VoiceTranscriptionProvider;
+  readonly providers: MobileVoiceTranscriptionProviderSettingsMap;
   readonly error: string | null;
   readonly loaded: boolean;
   readonly saving: boolean;
 }
 
+function defaultProviderSettings(): MobileVoiceTranscriptionProviderSettingsMap {
+  return {
+    openai: {
+      apiKey: "",
+      model: mobileVoiceTranscriptionProviderConfig("openai").defaultModel,
+    },
+    groq: {
+      apiKey: "",
+      model: mobileVoiceTranscriptionProviderConfig("groq").defaultModel,
+    },
+  };
+}
+
 let snapshot: MobileVoiceTranscriptionSettingsSnapshot = {
-  apiKey: "",
+  provider: "openai",
+  providers: defaultProviderSettings(),
   error: null,
   loaded: false,
   saving: false,
@@ -30,20 +61,85 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
+function normalizeProvider(value: unknown): VoiceTranscriptionProvider {
+  return value === "groq" ? "groq" : "openai";
+}
+
+function normalizeProviderSettings(
+  value: unknown,
+  provider: VoiceTranscriptionProvider,
+): MobileVoiceTranscriptionProviderSettings {
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as { readonly apiKey?: unknown; readonly model?: unknown })
+      : null;
+  const model = typeof candidate?.model === "string" ? candidate.model.trim() : "";
+  return {
+    apiKey: typeof candidate?.apiKey === "string" ? candidate.apiKey.trim() : "",
+    model: model || mobileVoiceTranscriptionProviderConfig(provider).defaultModel,
+  };
+}
+
+function parseStoredSettings(
+  value: string,
+): Pick<MobileVoiceTranscriptionSettingsSnapshot, "provider" | "providers"> {
+  const parsed = JSON.parse(value) as {
+    readonly provider?: unknown;
+    readonly providers?: { readonly openai?: unknown; readonly groq?: unknown };
+  };
+  return {
+    provider: normalizeProvider(parsed.provider),
+    providers: {
+      openai: normalizeProviderSettings(parsed.providers?.openai, "openai"),
+      groq: normalizeProviderSettings(parsed.providers?.groq, "groq"),
+    },
+  };
+}
+
 export function loadMobileVoiceTranscriptionSettings(): Promise<void> {
   if (snapshot.loaded) return Promise.resolve();
   if (loadPromise) return loadPromise;
   const loadRevision = revision;
-  loadPromise = SecureStore.getItemAsync(OPENAI_API_KEY_STORAGE_KEY)
-    .then((apiKey) => {
+  loadPromise = Promise.all([
+    SecureStore.getItemAsync(SETTINGS_STORAGE_KEY),
+    SecureStore.getItemAsync(LEGACY_OPENAI_API_KEY_STORAGE_KEY),
+  ])
+    .then(([storedSettings, legacyOpenAiApiKey]) => {
       if (revision !== loadRevision) return;
-      publish({ apiKey: apiKey ?? "", error: null, loaded: true, saving: false });
+      if (storedSettings) {
+        try {
+          const parsed = parseStoredSettings(storedSettings);
+          publish({ ...parsed, error: null, loaded: true, saving: false });
+          return;
+        } catch {
+          publish({
+            provider: "openai",
+            providers: defaultProviderSettings(),
+            error: "Saved voice dictation settings were invalid. Save them again.",
+            loaded: true,
+            saving: false,
+          });
+          return;
+        }
+      }
+      const providers = defaultProviderSettings();
+      publish({
+        provider: "openai",
+        providers: {
+          ...providers,
+          openai: { ...providers.openai, apiKey: legacyOpenAiApiKey?.trim() ?? "" },
+        },
+        error: null,
+        loaded: true,
+        saving: false,
+      });
     })
     .catch(() => {
       if (revision !== loadRevision) return;
       publish({
-        apiKey: "",
-        error: "Could not read the saved API key.",
+        provider: "openai",
+        providers: defaultProviderSettings(),
+        error: "Could not read the saved voice dictation settings.",
         loaded: false,
         saving: false,
       });
@@ -54,26 +150,47 @@ export function loadMobileVoiceTranscriptionSettings(): Promise<void> {
   return loadPromise;
 }
 
-export async function saveMobileVoiceTranscriptionApiKey(apiKey: string): Promise<void> {
-  const normalized = apiKey.trim();
+export async function saveMobileVoiceTranscriptionSettings(input: {
+  readonly provider: VoiceTranscriptionProvider;
+  readonly providers: MobileVoiceTranscriptionProviderSettingsMap;
+}): Promise<void> {
+  const providers: MobileVoiceTranscriptionProviderSettingsMap = {
+    openai: normalizeProviderSettings(input.providers.openai, "openai"),
+    groq: normalizeProviderSettings(input.providers.groq, "groq"),
+  };
   revision += 1;
+  const previous = snapshot;
   publish({ ...snapshot, error: null, saving: true });
   try {
-    if (normalized) {
-      await SecureStore.setItemAsync(OPENAI_API_KEY_STORAGE_KEY, normalized);
-    } else {
-      await SecureStore.deleteItemAsync(OPENAI_API_KEY_STORAGE_KEY);
-    }
-    publish({ apiKey: normalized, error: null, loaded: true, saving: false });
-  } catch {
+    await SecureStore.setItemAsync(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ provider: input.provider, providers }),
+    );
+    await SecureStore.deleteItemAsync(LEGACY_OPENAI_API_KEY_STORAGE_KEY).catch(() => undefined);
     publish({
-      ...snapshot,
-      error: "Could not save the API key.",
+      provider: input.provider,
+      providers,
+      error: null,
       loaded: true,
       saving: false,
     });
-    throw new Error("Could not save the API key.");
+  } catch {
+    publish({ ...previous, error: "Could not save voice dictation settings.", saving: false });
+    throw new Error("Could not save voice dictation settings.");
   }
+}
+
+export function activeMobileVoiceTranscriptionConfig(
+  settings: Pick<MobileVoiceTranscriptionSettingsSnapshot, "provider" | "providers">,
+): MobileVoiceTranscriptionConfig {
+  return {
+    provider: settings.provider,
+    ...settings.providers[settings.provider],
+  };
+}
+
+export function getMobileVoiceTranscriptionSettingsSnapshot(): MobileVoiceTranscriptionSettingsSnapshot {
+  return snapshot;
 }
 
 export function useMobileVoiceTranscriptionSettings() {

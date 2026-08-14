@@ -46,7 +46,10 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
-import { useMobileVoiceTranscriptionSettings } from "../voice-dictation/voiceTranscriptionSettings";
+import {
+  activeMobileVoiceTranscriptionConfig,
+  useMobileVoiceTranscriptionSettings,
+} from "../voice-dictation/voiceTranscriptionSettings";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -529,6 +532,7 @@ function GeneralSettingsSection() {
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
   const voiceTranscription = useMobileVoiceTranscriptionSettings();
+  const voiceTranscriptionConfig = activeMobileVoiceTranscriptionConfig(voiceTranscription);
 
   return (
     <SettingsSection title="General">
@@ -537,7 +541,7 @@ function GeneralSettingsSection() {
         icon="mic"
         label="Voice Dictation"
         value={
-          voiceTranscription.loaded && voiceTranscription.apiKey.trim().length > 0
+          voiceTranscription.loaded && voiceTranscriptionConfig.apiKey.trim().length > 0
             ? "Enabled"
             : "Set up"
         }

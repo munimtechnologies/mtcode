@@ -11,7 +11,10 @@ import {
 } from "expo-audio";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { transcribeMobileVoiceRecording } from "./mobileVoiceTranscription";
+import {
+  type MobileVoiceTranscriptionConfig,
+  transcribeMobileVoiceRecording,
+} from "./mobileVoiceTranscription";
 
 const LEVEL_COUNT = 36;
 const FLAT_LEVELS = Array<number>(LEVEL_COUNT).fill(0);
@@ -21,7 +24,9 @@ const MAX_RECORDING_MS = 5 * 60 * 1_000;
 export type MobileVoiceTranscriptionStatus = "idle" | "recording" | "transcribing";
 
 export function useMobileVoiceTranscription(input: {
+  readonly provider: MobileVoiceTranscriptionConfig["provider"];
   readonly apiKey: string;
+  readonly model: string;
   readonly onTranscriptInsert: (text: string) => void;
   readonly onTranscriptSend: (text: string) => void;
 }) {
@@ -43,13 +48,21 @@ export function useMobileVoiceTranscription(input: {
   const transcriptionAttemptRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  const apiKeyRef = useRef(input.apiKey);
+  const configRef = useRef<MobileVoiceTranscriptionConfig>({
+    provider: input.provider,
+    apiKey: input.apiKey,
+    model: input.model,
+  });
   const onTranscriptInsertRef = useRef(input.onTranscriptInsert);
   const onTranscriptSendRef = useRef(input.onTranscriptSend);
   const startRef = useRef<() => Promise<void>>(async () => undefined);
   const stopRef = useRef<(action?: "insert" | "send") => Promise<void>>(async () => undefined);
   statusRef.current = status;
-  apiKeyRef.current = input.apiKey;
+  configRef.current = {
+    provider: input.provider,
+    apiKey: input.apiKey,
+    model: input.model,
+  };
   onTranscriptInsertRef.current = input.onTranscriptInsert;
   onTranscriptSendRef.current = input.onTranscriptSend;
 
@@ -100,7 +113,7 @@ export function useMobileVoiceTranscription(input: {
         if (mountedRef.current) setStatus("transcribing");
         statusRef.current = "transcribing";
         transcriptionAttempt = ++transcriptionAttemptRef.current;
-        const text = await transcribeMobileVoiceRecording(uri, apiKeyRef.current);
+        const text = await transcribeMobileVoiceRecording(uri, configRef.current);
         if (!mountedRef.current || transcriptionAttempt !== transcriptionAttemptRef.current) {
           return;
         }
@@ -183,8 +196,8 @@ export function useMobileVoiceTranscription(input: {
       return;
     }
     if (statusRef.current !== "idle") return;
-    if (!apiKeyRef.current.trim()) {
-      setError("Save an OpenAI API key in Settings first.");
+    if (!configRef.current.apiKey.trim()) {
+      setError("Save an API key in Settings first.");
       return;
     }
 
