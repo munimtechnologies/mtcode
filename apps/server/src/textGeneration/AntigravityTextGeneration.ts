@@ -71,7 +71,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     readonly modelSelection: ModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const binary = settings.binaryPath || "agy";
-    const args = ["--dangerously-skip-permissions", "--output-format", "stream-json", "-p", prompt];
+    const args = ["-p", "--dangerously-skip-permissions", "--output-format", "stream-json"];
 
     if (modelSelection.model) {
       args.unshift("--model", modelSelection.model);
@@ -85,6 +85,9 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       cwd,
       env: processEnv,
       shell: spawnCommand.shell,
+      stdin: {
+        stream: Stream.encodeText(Stream.make(prompt)),
+      },
     });
 
     const processHandle = yield* commandSpawner

@@ -11,6 +11,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -129,6 +130,7 @@ export function makeAntigravityAdapter(
     const managedNativeEventLogger =
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
 
+    const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("antigravity");
     const sessions = new Map<ThreadId, AntigravitySessionContext>();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -214,7 +216,12 @@ export function makeAntigravityAdapter(
             threadId,
             status: "ready",
             provider: PROVIDER,
+            providerInstanceId: boundInstanceId,
             runtimeMode: input.runtimeMode,
+            model:
+              input.modelSelection?.instanceId === boundInstanceId
+                ? input.modelSelection.model
+                : undefined,
             createdAt,
             updatedAt: createdAt,
           };
@@ -281,8 +288,13 @@ export function makeAntigravityAdapter(
             args.push("--dangerously-skip-permissions");
           }
 
-          if (input.modelSelection?.model) {
-            args.push("--model", input.modelSelection.model);
+          const selectedModel =
+            input.modelSelection?.instanceId === boundInstanceId
+              ? input.modelSelection.model
+              : undefined;
+
+          if (selectedModel) {
+            args.push("--model", selectedModel);
           }
 
           if (settings.effort) {
@@ -331,6 +343,9 @@ export function makeAntigravityAdapter(
             cwd: ctx.cwd,
             env: processEnv,
             shell: spawnCommand.shell,
+            stdin: {
+              stream: Stream.empty,
+            },
           });
 
           const processHandle = yield* childProcessSpawner.spawn(command).pipe(
@@ -368,6 +383,7 @@ export function makeAntigravityAdapter(
           };
 
           const monitorEffect = Effect.gen(function* () {
+            yield* Stream.runDrain(processHandle.stderr).pipe(Effect.forkChild);
             const stdoutLines = processHandle.stdout.pipe(Stream.decodeText(), Stream.splitLines);
 
             yield* Stream.runForEach(stdoutLines, (line) =>
@@ -533,7 +549,13 @@ export function makeAntigravityAdapter(
           }).pipe(
             Effect.catchCause((cause) =>
               Effect.gen(function* () {
-                ctx.activeProcess = undefined;
+                if (Cause.hasInterruptsOnly(cause)) {
+                  return yield* Effect.failCause(cause);
+                }
+                if (ctx.activeProcess) {
+                  yield* ctx.activeProcess.kill();
+                  ctx.activeProcess = undefined;
+                }
                 ctx.activeTurnId = undefined;
                 const completedStamp = yield* makeEventStamp();
                 yield* publishEvent({
@@ -564,32 +586,35 @@ export function makeAntigravityAdapter(
       );
 
     const interruptTurn: AntigravityAdapterShape["interruptTurn"] = (threadId, turnId) =>
-      Effect.gen(function* () {
-        const ctx = sessions.get(threadId);
-        if (!ctx) return;
+      withThreadLock(
+        threadId,
+        Effect.gen(function* () {
+          const ctx = sessions.get(threadId);
+          if (!ctx) return;
 
-        if (ctx.activeProcess) {
-          yield* ctx.activeProcess.kill();
-          ctx.activeProcess = undefined;
-        }
+          if (ctx.activeProcess) {
+            yield* ctx.activeProcess.kill();
+            ctx.activeProcess = undefined;
+          }
 
-        const effectiveTurnId = turnId ?? ctx.activeTurnId;
-        if (effectiveTurnId) {
-          ctx.activeTurnId = undefined;
-          const stamp = yield* makeEventStamp();
+          const effectiveTurnId = turnId ?? ctx.activeTurnId;
+          if (effectiveTurnId) {
+            ctx.activeTurnId = undefined;
+            const stamp = yield* makeEventStamp();
 
-          yield* publishEvent({
-            ...stamp,
-            provider: PROVIDER,
-            threadId,
-            turnId: effectiveTurnId,
-            type: "turn.aborted",
-            payload: {
-              reason: "Turn interrupted by user",
-            },
-          });
-        }
-      });
+            yield* publishEvent({
+              ...stamp,
+              provider: PROVIDER,
+              threadId,
+              turnId: effectiveTurnId,
+              type: "turn.aborted",
+              payload: {
+                reason: "Turn interrupted by user",
+              },
+            });
+          }
+        }),
+      );
 
     const respondToRequest: AntigravityAdapterShape["respondToRequest"] = () => Effect.void;
 
