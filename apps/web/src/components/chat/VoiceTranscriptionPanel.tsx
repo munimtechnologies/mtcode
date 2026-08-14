@@ -43,8 +43,8 @@ export function VoiceTranscriptionPanel({
         <Button
           type="button"
           size="icon-sm"
-          variant="ghost"
-          className="shrink-0 rounded-full text-muted-foreground"
+          variant="ghost-muted"
+          className="shrink-0 rounded-full"
           onClick={onCancel}
           aria-label="Cancel transcription"
         >
@@ -65,8 +65,8 @@ export function VoiceTranscriptionPanel({
       <Button
         type="button"
         size="icon-sm"
-        variant="ghost"
-        className="shrink-0 rounded-full text-muted-foreground"
+        variant="ghost-muted"
+        className="shrink-0 rounded-full"
         onClick={onCancel}
         aria-label="Cancel dictation"
       >
@@ -98,7 +98,7 @@ export function VoiceTranscriptionPanel({
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <span className="shrink-0 text-sm tabular-nums text-muted-foreground">
+      <span aria-hidden className="shrink-0 text-sm tabular-nums text-muted-foreground">
         {formatElapsed(elapsedMs)}
       </span>
       <Button

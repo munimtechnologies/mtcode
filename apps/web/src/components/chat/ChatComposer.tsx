@@ -3197,7 +3197,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ) : null}
 
           {/* Bottom toolbar */}
-          {isComposerCollapsedMobile ? null : activePendingApproval ? (
+          {isComposerCollapsedMobile &&
+          voiceTranscription.status === "idle" ? null : activePendingApproval ? (
             <div className="flex items-center justify-end gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
               <ComposerPendingApprovalActions
                 requestId={activePendingApproval.requestId}
@@ -3319,11 +3320,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           <Button
                             type="button"
                             size="icon-sm"
-                            variant="ghost"
+                            variant="ghost-muted"
                             disabled={
                               phase === "running" || isConnecting || projectSelectionRequired
                             }
-                            className="rounded-full text-muted-foreground"
+                            className="rounded-full"
                             onClick={() => void startVoiceTranscription()}
                             aria-label="Start dictation"
                           >

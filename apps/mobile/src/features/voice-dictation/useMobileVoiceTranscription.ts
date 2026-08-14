@@ -97,6 +97,7 @@ export function useMobileVoiceTranscription(input: {
         await recorder.stop();
         const uri = recorder.uri;
         await resetAudioMode();
+        if (!mountedRef.current) return;
         if (
           terminalActionRef.current === "abort" ||
           beforeStop.durationMillis < MIN_RECORDING_MS ||
