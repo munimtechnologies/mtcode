@@ -785,6 +785,8 @@ const AntigravitySettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   dangerouslySkipPermissions: Schema.optionalKey(Schema.Boolean),
   effort: Schema.optionalKey(TrimmedString),
+  accountEmail: Schema.optionalKey(TrimmedString),
+  subscriptionLabel: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 

@@ -249,10 +249,12 @@ export const checkAntigravityProviderStatus = Effect.fn("checkAntigravityProvide
         installed: true,
         version,
         status: "ready",
-        auth: {
-          status: "authenticated",
-          ...account,
-        },
+        auth: account.email
+          ? {
+              status: "authenticated",
+              ...account,
+            }
+          : { status: "unknown" },
       },
     });
   },

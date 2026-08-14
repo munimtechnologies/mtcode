@@ -300,6 +300,23 @@ export function makeAntigravityAdapter(
                   cause,
                 }),
             ),
+            Effect.tapError((error) =>
+              Effect.gen(function* () {
+                ctx.activeTurnId = undefined;
+                const completedStamp = yield* makeEventStamp();
+                yield* publishEvent({
+                  ...completedStamp,
+                  provider: PROVIDER,
+                  threadId,
+                  turnId,
+                  type: "turn.completed",
+                  payload: {
+                    state: "failed",
+                    errorMessage: error.detail,
+                  },
+                });
+              }),
+            ),
           );
 
           const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
@@ -318,6 +335,23 @@ export function makeAntigravityAdapter(
                   detail: `Failed to spawn Antigravity CLI process (${binary})`,
                   cause,
                 }),
+            ),
+            Effect.tapError((error) =>
+              Effect.gen(function* () {
+                ctx.activeTurnId = undefined;
+                const completedStamp = yield* makeEventStamp();
+                yield* publishEvent({
+                  ...completedStamp,
+                  provider: PROVIDER,
+                  threadId,
+                  turnId,
+                  type: "turn.completed",
+                  payload: {
+                    state: "failed",
+                    errorMessage: error.detail,
+                  },
+                });
+              }),
             ),
           );
 
