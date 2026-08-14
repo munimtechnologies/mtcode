@@ -37,6 +37,7 @@ export function useMobileVoiceTranscription(input: {
   const statusRef = useRef(status);
   const startingRef = useRef(false);
   const cancelStartingRef = useRef(false);
+  const restartAfterCancellationRef = useRef(false);
   const stopInFlightRef = useRef(false);
   const terminalActionRef = useRef<VoiceTranscriptionAction | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,6 +45,7 @@ export function useMobileVoiceTranscription(input: {
   const apiKeyRef = useRef(input.apiKey);
   const onTranscriptInsertRef = useRef(input.onTranscriptInsert);
   const onTranscriptSendRef = useRef(input.onTranscriptSend);
+  const startRef = useRef<() => Promise<void>>(async () => undefined);
   const stopRef = useRef<(action?: "insert" | "send") => Promise<void>>(async () => undefined);
   statusRef.current = status;
   apiKeyRef.current = input.apiKey;
@@ -145,7 +147,11 @@ export function useMobileVoiceTranscription(input: {
   }, [clearRecordingTimeout, recorder, resetAudioMode]);
 
   const start = useCallback(async () => {
-    if (startingRef.current || statusRef.current !== "idle") return;
+    if (startingRef.current) {
+      if (cancelStartingRef.current) restartAfterCancellationRef.current = true;
+      return;
+    }
+    if (statusRef.current !== "idle") return;
     if (!apiKeyRef.current.trim()) {
       setError("Save an OpenAI API key in Settings first.");
       return;
@@ -153,6 +159,7 @@ export function useMobileVoiceTranscription(input: {
 
     startingRef.current = true;
     cancelStartingRef.current = false;
+    restartAfterCancellationRef.current = false;
     terminalActionRef.current = null;
     setError(null);
     setLevels(FLAT_LEVELS);
@@ -168,6 +175,11 @@ export function useMobileVoiceTranscription(input: {
         cancelStartingRef.current = false;
         statusRef.current = "idle";
         if (mountedRef.current) setStatus("idle");
+        const shouldRestart = restartAfterCancellationRef.current;
+        restartAfterCancellationRef.current = false;
+        if (shouldRestart && mountedRef.current) {
+          queueMicrotask(() => void startRef.current());
+        }
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
@@ -178,6 +190,11 @@ export function useMobileVoiceTranscription(input: {
         await resetAudioMode();
         statusRef.current = "idle";
         if (mountedRef.current) setStatus("idle");
+        const shouldRestart = restartAfterCancellationRef.current;
+        restartAfterCancellationRef.current = false;
+        if (shouldRestart && mountedRef.current) {
+          queueMicrotask(() => void startRef.current());
+        }
         return;
       }
       recorder.record();
@@ -194,6 +211,13 @@ export function useMobileVoiceTranscription(input: {
       await resetAudioMode();
       if (cancelStartingRef.current) {
         cancelStartingRef.current = false;
+        statusRef.current = "idle";
+        if (mountedRef.current) setStatus("idle");
+        const shouldRestart = restartAfterCancellationRef.current;
+        restartAfterCancellationRef.current = false;
+        if (shouldRestart && mountedRef.current) {
+          queueMicrotask(() => void startRef.current());
+        }
         return;
       }
       if (!mountedRef.current) return;
@@ -202,6 +226,7 @@ export function useMobileVoiceTranscription(input: {
       setStatus("idle");
     }
   }, [recorder, resetAudioMode]);
+  startRef.current = start;
 
   useEffect(() => {
     if (status !== "recording") return;
@@ -215,6 +240,7 @@ export function useMobileVoiceTranscription(input: {
     return () => {
       mountedRef.current = false;
       terminalActionRef.current = "abort";
+      restartAfterCancellationRef.current = false;
       clearRecordingTimeout();
       if (recorder.isRecording) void recorder.stop().catch(() => undefined);
       void resetAudioMode();

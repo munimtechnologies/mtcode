@@ -33,8 +33,10 @@ export function useVoiceTranscription({
   const [levels, setLevels] = useState<readonly number[]>(FLAT_LEVELS);
   const [error, setError] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const statusRef = useRef(status);
   const startingRef = useRef(false);
   const cancelStartingRef = useRef(false);
+  const restartAfterCancellationRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const intervalsRef = useRef<number[]>([]);
@@ -45,6 +47,8 @@ export function useVoiceTranscription({
   const configRef = useRef(config);
   const onTranscriptInsertRef = useRef(onTranscriptInsert);
   const onTranscriptSendRef = useRef(onTranscriptSend);
+  const startRef = useRef<() => Promise<void>>(async () => undefined);
+  statusRef.current = status;
   configRef.current = config;
   onTranscriptInsertRef.current = onTranscriptInsert;
   onTranscriptSendRef.current = onTranscriptSend;
@@ -67,6 +71,7 @@ export function useVoiceTranscription({
       mountedRef.current = false;
       startingRef.current = false;
       cancelStartingRef.current = true;
+      restartAfterCancellationRef.current = false;
       terminalActionRef.current = "abort";
       const recorder = recorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
@@ -97,6 +102,7 @@ export function useVoiceTranscription({
       cancelStartingRef.current = true;
       cleanupCapture();
       if (mountedRef.current) {
+        statusRef.current = "idle";
         setStatus("idle");
         setElapsedMs(0);
       }
@@ -107,7 +113,11 @@ export function useVoiceTranscription({
   }, [cleanupCapture]);
 
   const start = useCallback(async () => {
-    if (startingRef.current || status !== "idle") return;
+    if (startingRef.current) {
+      if (cancelStartingRef.current) restartAfterCancellationRef.current = true;
+      return;
+    }
+    if (statusRef.current !== "idle") return;
     startingRef.current = true;
     terminalActionRef.current = null;
     setError(null);
@@ -125,6 +135,8 @@ export function useVoiceTranscription({
     }
 
     cancelStartingRef.current = false;
+    restartAfterCancellationRef.current = false;
+    statusRef.current = "recording";
     setStatus("recording");
     try {
       const audioContext = new AudioContext();
@@ -140,6 +152,11 @@ export function useVoiceTranscription({
         startingRef.current = false;
         cancelStartingRef.current = false;
         terminalActionRef.current = null;
+        const shouldRestart = restartAfterCancellationRef.current;
+        restartAfterCancellationRef.current = false;
+        if (shouldRestart && mountedRef.current) {
+          queueMicrotask(() => void startRef.current());
+        }
         return;
       }
 
@@ -242,6 +259,11 @@ export function useVoiceTranscription({
       terminalActionRef.current = null;
       if (cancelStartingRef.current) {
         cancelStartingRef.current = false;
+        const shouldRestart = restartAfterCancellationRef.current;
+        restartAfterCancellationRef.current = false;
+        if (shouldRestart && mountedRef.current) {
+          queueMicrotask(() => void startRef.current());
+        }
         return;
       }
       setStatus("idle");
@@ -251,7 +273,8 @@ export function useVoiceTranscription({
           : "Could not start the microphone.",
       );
     }
-  }, [cleanupCapture, status]);
+  }, [cleanupCapture]);
+  startRef.current = start;
 
   return { status, elapsedMs, levels, error, start, stop, cancel } as const;
 }

@@ -1661,6 +1661,9 @@ function VoiceDictationSettingsSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const [environmentApiKeys, setEnvironmentApiKeys] = useState({ openai: false, groq: false });
+  const [environmentStatusLoading, setEnvironmentStatusLoading] = useState(true);
+  const [environmentStatusError, setEnvironmentStatusError] = useState<string | null>(null);
+  const [environmentStatusAttempt, setEnvironmentStatusAttempt] = useState(0);
   const [models, setModels] = useState<readonly string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -1670,15 +1673,25 @@ function VoiceDictationSettingsSection() {
 
   useEffect(() => {
     let active = true;
+    setEnvironmentStatusLoading(true);
+    setEnvironmentStatusError(null);
     void readVoiceTranscriptionEnvironmentStatus()
       .then((status) => {
-        if (active) setEnvironmentApiKeys(status);
+        if (!active) return;
+        setEnvironmentApiKeys(status);
+        setEnvironmentStatusLoading(false);
       })
-      .catch(() => undefined);
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setEnvironmentStatusLoading(false);
+        setEnvironmentStatusError(
+          cause instanceof Error ? cause.message : "Could not check server transcription keys.",
+        );
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [environmentStatusAttempt]);
 
   const providerLabel = provider === "openai" ? "OpenAI" : "Groq";
   const environmentVariable = TRANSCRIPTION_API_KEY_ENV[provider];
@@ -1729,7 +1742,11 @@ function VoiceDictationSettingsSection() {
   }, [model, models, updateSettings]);
 
   const modelDescription = !hasApiKey
-    ? `Save an API key to load ${providerLabel} transcription models.`
+    ? environmentStatusLoading
+      ? `Checking the connected server for ${environmentVariable}…`
+      : environmentStatusError
+        ? `${environmentStatusError} Add a client key or retry the server check.`
+        : `Save an API key to load ${providerLabel} transcription models.`
     : modelsLoading
       ? `Loading models available from ${providerLabel}…`
       : modelsError
@@ -1772,26 +1789,41 @@ function VoiceDictationSettingsSection() {
       <SettingsRow
         title={`${providerLabel} API key`}
         description={
-          hasEnvironmentApiKey
-            ? `${environmentVariable} is configured on the connected server. A client key overrides it.`
-            : `Stored in this client's settings. You can also set ${environmentVariable} on the server.`
+          environmentStatusLoading
+            ? `Checking whether ${environmentVariable} is configured on the connected server.`
+            : environmentStatusError
+              ? `${environmentStatusError} You can still enter a client key.`
+              : hasEnvironmentApiKey
+                ? `${environmentVariable} is configured on the connected server. A client key overrides it.`
+                : `Stored in this client's settings. You can also set ${environmentVariable} on the server.`
         }
         control={
-          <Input
-            type="password"
-            autoComplete="off"
-            className="w-full sm:w-64"
-            value={apiKey}
-            onChange={(event) =>
-              updateSettings({
-                voiceTranscriptionApiKey: event.target.value,
-                voiceTranscriptionModel: "",
-                voiceTranscriptionEnabled: false,
-              })
-            }
-            placeholder={hasEnvironmentApiKey ? `Using ${environmentVariable}` : "Required"}
-            aria-label={`${providerLabel} transcription API key`}
-          />
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <Input
+              type="password"
+              autoComplete="off"
+              className="w-full sm:w-64"
+              value={apiKey}
+              onChange={(event) =>
+                updateSettings({
+                  voiceTranscriptionApiKey: event.target.value,
+                  voiceTranscriptionModel: "",
+                  voiceTranscriptionEnabled: false,
+                })
+              }
+              placeholder={hasEnvironmentApiKey ? `Using ${environmentVariable}` : "Required"}
+              aria-label={`${providerLabel} transcription API key`}
+            />
+            {environmentStatusError ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setEnvironmentStatusAttempt((attempt) => attempt + 1)}
+              >
+                Retry
+              </Button>
+            ) : null}
+          </div>
         }
       />
       <SettingsRow
