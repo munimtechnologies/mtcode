@@ -1,3 +1,4 @@
+import type { PointerEventHandler } from "react";
 import { ArrowUpIcon, LoaderCircleIcon, SquareIcon, XIcon } from "lucide-react";
 
 import type { VoiceTranscriptionStatus } from "../../hooks/useVoiceTranscription";
@@ -8,11 +9,16 @@ function formatElapsed(elapsedMs: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
+  event.preventDefault();
+};
+
 export function VoiceTranscriptionPanel({
   status,
   elapsedMs,
   levels,
   sendDisabled,
+  preserveComposerFocusOnPointerDown,
   onCancel,
   onStop,
   onSend,
@@ -21,10 +27,14 @@ export function VoiceTranscriptionPanel({
   readonly elapsedMs: number;
   readonly levels: readonly number[];
   readonly sendDisabled: boolean;
+  readonly preserveComposerFocusOnPointerDown?: boolean;
   readonly onCancel: () => void;
   readonly onStop: () => void;
   readonly onSend: () => void;
 }) {
+  const pointerFocusProps = preserveComposerFocusOnPointerDown
+    ? { onPointerDown: preventPointerFocus }
+    : undefined;
   const waveformPath = levels
     .map((level, index) => {
       if (level <= 0.01) return "";
@@ -45,6 +55,7 @@ export function VoiceTranscriptionPanel({
           size="icon-sm"
           variant="ghost-muted"
           className="shrink-0 rounded-full"
+          {...pointerFocusProps}
           onClick={onCancel}
           aria-label="Cancel transcription"
         >
@@ -67,6 +78,7 @@ export function VoiceTranscriptionPanel({
         size="icon-sm"
         variant="ghost-muted"
         className="shrink-0 rounded-full"
+        {...pointerFocusProps}
         onClick={onCancel}
         aria-label="Cancel dictation"
       >
@@ -106,6 +118,7 @@ export function VoiceTranscriptionPanel({
         size="icon-sm"
         variant="secondary"
         className="shrink-0 rounded-full"
+        {...pointerFocusProps}
         onClick={onStop}
         aria-label="Stop dictation"
       >
@@ -116,6 +129,7 @@ export function VoiceTranscriptionPanel({
         size="icon-sm"
         disabled={sendDisabled}
         className="shrink-0 rounded-full"
+        {...pointerFocusProps}
         onClick={onSend}
         aria-label="Transcribe and send"
       >

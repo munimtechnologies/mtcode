@@ -1893,7 +1893,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposerAfterTranscription = useCallback(
     (event?: { preventDefault: () => void }) => {
-      if (voiceTranscriptionSendDisabled) {
+      if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
       }
@@ -1918,10 +1918,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       activeThreadId,
       blurMobileComposerAfterSend,
+      isSendDisabled,
+      noProviderAvailable,
       onSend,
       shouldBlurMobileComposerOnSubmit,
-      voiceTranscriptionSendDisabled,
     ],
+  );
+  const submitVoiceTranscript = useCallback(
+    (event?: { preventDefault: () => void }) => {
+      if (voiceTranscriptionSendDisabled) {
+        event?.preventDefault();
+        return;
+      }
+      submitComposerAfterTranscription(event);
+    },
+    [submitComposerAfterTranscription, voiceTranscriptionSendDisabled],
   );
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }) => {
@@ -1944,7 +1955,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       voiceTranscriptionSendDisabled,
     ],
   );
-  submitComposerRef.current = submitComposerAfterTranscription;
+  submitComposerRef.current = submitVoiceTranscript;
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -3228,6 +3239,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   elapsedMs={voiceTranscription.elapsedMs}
                   levels={voiceTranscription.levels}
                   sendDisabled={voiceTranscriptionSendDisabled}
+                  preserveComposerFocusOnPointerDown={isMobileViewport}
                   onCancel={cancelVoiceTranscription}
                   onStop={() => voiceTranscription.stop("insert")}
                   onSend={() => voiceTranscription.stop("send")}
