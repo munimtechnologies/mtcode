@@ -40,6 +40,7 @@ export function useMobileVoiceTranscription(input: {
   const restartAfterCancellationRef = useRef(false);
   const stopInFlightRef = useRef(false);
   const terminalActionRef = useRef<VoiceTranscriptionAction | null>(null);
+  const transcriptionAttemptRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const apiKeyRef = useRef(input.apiKey);
@@ -65,6 +66,7 @@ export function useMobileVoiceTranscription(input: {
 
   const stop = useCallback(
     async (action: "insert" | "send" = "insert") => {
+      let transcriptionAttempt: number | null = null;
       terminalActionRef.current = resolveVoiceTranscriptionAction(
         terminalActionRef.current,
         action,
@@ -88,6 +90,7 @@ export function useMobileVoiceTranscription(input: {
           !uri
         ) {
           if (mountedRef.current) {
+            statusRef.current = "idle";
             setStatus("idle");
             setLevels(FLAT_LEVELS);
           }
@@ -95,24 +98,41 @@ export function useMobileVoiceTranscription(input: {
         }
 
         if (mountedRef.current) setStatus("transcribing");
+        statusRef.current = "transcribing";
+        transcriptionAttempt = ++transcriptionAttemptRef.current;
         const text = await transcribeMobileVoiceRecording(uri, apiKeyRef.current);
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || transcriptionAttempt !== transcriptionAttemptRef.current) {
+          return;
+        }
         const finalAction = resolveVoiceTranscriptionAction(terminalActionRef.current, "insert");
         if (text && finalAction !== "abort") {
           if (finalAction === "send") onTranscriptSendRef.current(text);
           else onTranscriptInsertRef.current(text);
         }
+        statusRef.current = "idle";
         setStatus("idle");
         setLevels(FLAT_LEVELS);
       } catch (cause) {
+        if (
+          transcriptionAttempt !== null &&
+          transcriptionAttempt !== transcriptionAttemptRef.current
+        ) {
+          return;
+        }
         await resetAudioMode();
         if (!mountedRef.current) return;
         setError(cause instanceof Error ? cause.message : "Voice transcription failed.");
+        statusRef.current = "idle";
         setStatus("idle");
         setLevels(FLAT_LEVELS);
       } finally {
-        stopInFlightRef.current = false;
-        terminalActionRef.current = null;
+        if (
+          transcriptionAttempt === null ||
+          transcriptionAttempt === transcriptionAttemptRef.current
+        ) {
+          stopInFlightRef.current = false;
+          terminalActionRef.current = null;
+        }
       }
     },
     [clearRecordingTimeout, recorder, resetAudioMode],
@@ -126,6 +146,17 @@ export function useMobileVoiceTranscription(input: {
       clearRecordingTimeout();
       statusRef.current = "idle";
       if (mountedRef.current) setStatus("idle");
+      return;
+    }
+    if (statusRef.current === "transcribing") {
+      transcriptionAttemptRef.current += 1;
+      stopInFlightRef.current = false;
+      terminalActionRef.current = null;
+      statusRef.current = "idle";
+      if (mountedRef.current) {
+        setStatus("idle");
+        setLevels(FLAT_LEVELS);
+      }
       return;
     }
     if (statusRef.current !== "recording" || stopInFlightRef.current) return;
@@ -241,6 +272,7 @@ export function useMobileVoiceTranscription(input: {
       mountedRef.current = false;
       terminalActionRef.current = "abort";
       restartAfterCancellationRef.current = false;
+      transcriptionAttemptRef.current += 1;
       clearRecordingTimeout();
       if (recorder.isRecording) void recorder.stop().catch(() => undefined);
       void resetAudioMode();

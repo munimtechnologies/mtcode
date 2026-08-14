@@ -40,6 +40,16 @@ export function VoiceTranscriptionPanel({
         role="status"
         aria-label="Processing recording"
       >
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0 rounded-full text-muted-foreground"
+          onClick={onCancel}
+          aria-label="Cancel transcription"
+        >
+          <XIcon className="size-4" />
+        </Button>
         <LoaderCircleIcon className="size-4 animate-spin" />
         Processing recording…
       </div>

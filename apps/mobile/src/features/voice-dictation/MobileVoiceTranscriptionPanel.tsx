@@ -23,6 +23,12 @@ export function MobileVoiceTranscriptionPanel(props: {
   if (props.status === "transcribing") {
     return (
       <View className="min-h-11 flex-1 flex-row items-center justify-center gap-2 px-2">
+        <ControlPill
+          accessibilityLabel="Cancel transcription"
+          className="h-9 w-9"
+          icon="xmark"
+          onPress={props.onCancel}
+        />
         <ActivityIndicator size="small" />
         <Text className="text-sm text-foreground-muted">Processing recording…</Text>
       </View>

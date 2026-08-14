@@ -42,6 +42,7 @@ export function useVoiceTranscription({
   const intervalsRef = useRef<number[]>([]);
   const timeoutRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
+  const transcriptionAttemptRef = useRef(0);
   const terminalActionRef = useRef<VoiceTranscriptionAction | null>(null);
   const mountedRef = useRef(true);
   const configRef = useRef(config);
@@ -72,6 +73,7 @@ export function useVoiceTranscription({
       startingRef.current = false;
       cancelStartingRef.current = true;
       restartAfterCancellationRef.current = false;
+      transcriptionAttemptRef.current += 1;
       terminalActionRef.current = "abort";
       const recorder = recorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
@@ -106,6 +108,14 @@ export function useVoiceTranscription({
         setStatus("idle");
         setElapsedMs(0);
       }
+      return;
+    }
+    if (statusRef.current === "transcribing") {
+      transcriptionAttemptRef.current += 1;
+      terminalActionRef.current = null;
+      statusRef.current = "idle";
+      setStatus("idle");
+      setElapsedMs(0);
       return;
     }
     const recorder = recorderRef.current;
@@ -186,28 +196,37 @@ export function useVoiceTranscription({
         if (!mountedRef.current || recordingFailed) return;
         if (requestedAction === "abort" || durationMs < MIN_RECORDING_MS || blob.size === 0) {
           terminalActionRef.current = null;
+          statusRef.current = "idle";
           setStatus("idle");
           setElapsedMs(0);
           return;
         }
 
+        const transcriptionAttempt = ++transcriptionAttemptRef.current;
+        statusRef.current = "transcribing";
         setStatus("transcribing");
         void transcribeVoiceRecording(blob, configRef.current)
           .then((text) => {
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || transcriptionAttempt !== transcriptionAttemptRef.current) {
+              return;
+            }
             const finalAction = terminalActionRef.current ?? requestedAction;
             if (text && finalAction !== "abort") {
               if (finalAction === "send") onTranscriptSendRef.current(text);
               else onTranscriptInsertRef.current(text);
             }
             terminalActionRef.current = null;
+            statusRef.current = "idle";
             setStatus("idle");
             setElapsedMs(0);
           })
           .catch((cause: unknown) => {
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || transcriptionAttempt !== transcriptionAttemptRef.current) {
+              return;
+            }
             terminalActionRef.current = null;
             setError(cause instanceof Error ? cause.message : "Voice transcription failed.");
+            statusRef.current = "idle";
             setStatus("idle");
           });
       });
