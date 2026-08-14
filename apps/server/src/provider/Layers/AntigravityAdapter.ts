@@ -154,6 +154,14 @@ export function makeAntigravityAdapter(
     const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
       Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
 
+    const removeThreadSemaphore = (threadId: string) =>
+      SynchronizedRef.update(threadLocksRef, (current) => {
+        if (!current.has(threadId)) return current;
+        const next = new Map(current);
+        next.delete(threadId);
+        return next;
+      });
+
     const publishEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
 
@@ -359,172 +367,194 @@ export function makeAntigravityAdapter(
             kill: () => Effect.asVoid(Effect.ignore(processHandle.kill())),
           };
 
-          yield* Effect.forkChild(
-            Effect.gen(function* () {
-              const stdoutLines = processHandle.stdout.pipe(Stream.decodeText(), Stream.splitLines);
+          const monitorEffect = Effect.gen(function* () {
+            const stdoutLines = processHandle.stdout.pipe(Stream.decodeText(), Stream.splitLines);
 
-              yield* Stream.runForEach(stdoutLines, (line) =>
-                Effect.gen(function* () {
-                  const trimmed = line.trim();
-                  if (!trimmed) return;
+            yield* Stream.runForEach(stdoutLines, (line) =>
+              Effect.gen(function* () {
+                const trimmed = line.trim();
+                if (!trimmed) return;
 
-                  const decoded = decodeJsonExit(trimmed);
-                  if (
-                    Exit.isSuccess(decoded) &&
-                    typeof decoded.value === "object" &&
-                    decoded.value !== null
-                  ) {
-                    const data = decoded.value as Record<string, unknown>;
-                    const stamp = yield* makeEventStamp();
+                const decoded = decodeJsonExit(trimmed);
+                if (
+                  Exit.isSuccess(decoded) &&
+                  typeof decoded.value === "object" &&
+                  decoded.value !== null
+                ) {
+                  const data = decoded.value as Record<string, unknown>;
+                  const stamp = yield* makeEventStamp();
 
-                    if (nativeEventLogger) {
-                      yield* nativeEventLogger.write(data, threadId);
+                  if (nativeEventLogger) {
+                    yield* nativeEventLogger.write(data, threadId);
+                  }
+
+                  if (data.event === "init") {
+                    if (typeof data.conversation_id === "string") {
+                      ctx.antigravityConversationId = data.conversation_id;
                     }
+                    yield* publishEvent({
+                      ...stamp,
+                      provider: PROVIDER,
+                      threadId,
+                      turnId,
+                      type: "session.state.changed",
+                      payload: { state: "running" },
+                    });
+                  } else if (
+                    data.event === "step_update" &&
+                    typeof data.step_update === "object" &&
+                    data.step_update !== null
+                  ) {
+                    const step = data.step_update as Record<string, unknown>;
 
-                    if (data.event === "init") {
-                      if (typeof data.conversation_id === "string") {
-                        ctx.antigravityConversationId = data.conversation_id;
+                    if (step.step_type === "agent_response") {
+                      if (typeof step.text_delta === "string") {
+                        yield* publishEvent({
+                          ...stamp,
+                          provider: PROVIDER,
+                          threadId,
+                          turnId,
+                          type: "content.delta",
+                          payload: {
+                            streamKind: "assistant_text",
+                            delta: step.text_delta,
+                          },
+                        });
                       }
-                      yield* publishEvent({
-                        ...stamp,
-                        provider: PROVIDER,
-                        threadId,
-                        turnId,
-                        type: "session.state.changed",
-                        payload: { state: "running" },
-                      });
-                    } else if (
-                      data.event === "step_update" &&
-                      typeof data.step_update === "object" &&
-                      data.step_update !== null
-                    ) {
-                      const step = data.step_update as Record<string, unknown>;
 
-                      if (step.step_type === "agent_response") {
-                        if (typeof step.text_delta === "string") {
-                          yield* publishEvent({
-                            ...stamp,
-                            provider: PROVIDER,
-                            threadId,
-                            turnId,
-                            type: "content.delta",
-                            payload: {
-                              streamKind: "assistant_text",
-                              delta: step.text_delta,
-                            },
-                          });
-                        }
-
-                        if (
-                          step.state === "DONE" &&
-                          typeof step.usage === "object" &&
-                          step.usage !== null
-                        ) {
-                          const usage = step.usage as Record<string, unknown>;
-                          const count = (v: unknown): number | undefined =>
-                            typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
-                          const usedTokens = count(usage.total_tokens) ?? 0;
-                          const usageSnapshot: ThreadTokenUsageSnapshot = {
-                            usedTokens,
-                            ...(count(usage.input_tokens) !== undefined
-                              ? { inputTokens: count(usage.input_tokens) }
-                              : {}),
-                            ...(count(usage.output_tokens) !== undefined
-                              ? { outputTokens: count(usage.output_tokens) }
-                              : {}),
-                            ...(count(usage.thinking_tokens) !== undefined
-                              ? { reasoningOutputTokens: count(usage.thinking_tokens) }
-                              : {}),
-                            compactsAutomatically: true,
-                          };
-                          yield* publishEvent({
-                            ...stamp,
-                            provider: PROVIDER,
-                            threadId,
-                            turnId,
-                            type: "thread.token-usage.updated",
-                            payload: { usage: usageSnapshot },
-                          });
-                        }
-                      } else if (step.step_type === "tool" && typeof step.tool_name === "string") {
-                        const toolItemType = toolNameToItemType(step.tool_name);
-                        const toolInfo =
-                          typeof step.tool_info === "object" && step.tool_info !== null
-                            ? (step.tool_info as Record<string, unknown>)
-                            : undefined;
-                        const toolDetail = toolParamsToDetail(toolInfo?.parameters);
-                        const itemId = RuntimeItemId.make(`step-${step.step_index}`);
-
-                        if (step.state === "ACTIVE") {
-                          yield* publishEvent({
-                            ...stamp,
-                            provider: PROVIDER,
-                            threadId,
-                            turnId,
-                            itemId,
-                            type: "item.started",
-                            payload: {
-                              itemType: toolItemType,
-                              status: "inProgress",
-                              title: step.tool_name,
-                              ...(toolDetail ? { detail: toolDetail } : {}),
-                              ...(toolInfo ? { data: toolInfo } : {}),
-                            },
-                          });
-                        } else if (step.state === "DONE") {
-                          yield* publishEvent({
-                            ...stamp,
-                            provider: PROVIDER,
-                            threadId,
-                            turnId,
-                            itemId,
-                            type: "item.completed",
-                            payload: {
-                              itemType: toolItemType,
-                              status: "completed",
-                              title: step.tool_name,
-                              ...(toolDetail ? { detail: toolDetail } : {}),
-                              ...(toolInfo ? { data: toolInfo } : {}),
-                            },
-                          });
-                        }
+                      if (
+                        step.state === "DONE" &&
+                        typeof step.usage === "object" &&
+                        step.usage !== null
+                      ) {
+                        const usage = step.usage as Record<string, unknown>;
+                        const count = (v: unknown): number | undefined =>
+                          typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+                        const usedTokens = count(usage.total_tokens) ?? 0;
+                        const usageSnapshot: ThreadTokenUsageSnapshot = {
+                          usedTokens,
+                          ...(count(usage.input_tokens) !== undefined
+                            ? { inputTokens: count(usage.input_tokens) }
+                            : {}),
+                          ...(count(usage.output_tokens) !== undefined
+                            ? { outputTokens: count(usage.output_tokens) }
+                            : {}),
+                          ...(count(usage.thinking_tokens) !== undefined
+                            ? { reasoningOutputTokens: count(usage.thinking_tokens) }
+                            : {}),
+                          compactsAutomatically: true,
+                        };
+                        yield* publishEvent({
+                          ...stamp,
+                          provider: PROVIDER,
+                          threadId,
+                          turnId,
+                          type: "thread.token-usage.updated",
+                          payload: { usage: usageSnapshot },
+                        });
                       }
-                    } else if (
-                      data.event === "result" &&
-                      typeof data.result === "object" &&
-                      data.result !== null
-                    ) {
-                      const resultObj = data.result as Record<string, unknown>;
-                      if (typeof resultObj.conversation_id === "string") {
-                        ctx.antigravityConversationId = resultObj.conversation_id;
+                    } else if (step.step_type === "tool" && typeof step.tool_name === "string") {
+                      const toolItemType = toolNameToItemType(step.tool_name);
+                      const toolInfo =
+                        typeof step.tool_info === "object" && step.tool_info !== null
+                          ? (step.tool_info as Record<string, unknown>)
+                          : undefined;
+                      const toolDetail = toolParamsToDetail(toolInfo?.parameters);
+                      const itemId = RuntimeItemId.make(`step-${step.step_index}`);
+
+                      if (step.state === "ACTIVE") {
+                        yield* publishEvent({
+                          ...stamp,
+                          provider: PROVIDER,
+                          threadId,
+                          turnId,
+                          itemId,
+                          type: "item.started",
+                          payload: {
+                            itemType: toolItemType,
+                            status: "inProgress",
+                            title: step.tool_name,
+                            ...(toolDetail ? { detail: toolDetail } : {}),
+                            ...(toolInfo ? { data: toolInfo } : {}),
+                          },
+                        });
+                      } else if (step.state === "DONE") {
+                        yield* publishEvent({
+                          ...stamp,
+                          provider: PROVIDER,
+                          threadId,
+                          turnId,
+                          itemId,
+                          type: "item.completed",
+                          payload: {
+                            itemType: toolItemType,
+                            status: "completed",
+                            title: step.tool_name,
+                            ...(toolDetail ? { detail: toolDetail } : {}),
+                            ...(toolInfo ? { data: toolInfo } : {}),
+                          },
+                        });
                       }
+                    }
+                  } else if (
+                    data.event === "result" &&
+                    typeof data.result === "object" &&
+                    data.result !== null
+                  ) {
+                    const resultObj = data.result as Record<string, unknown>;
+                    if (typeof resultObj.conversation_id === "string") {
+                      ctx.antigravityConversationId = resultObj.conversation_id;
                     }
                   }
-                }),
-              );
+                }
+              }),
+            );
 
-              const exitCode = yield* processHandle.exitCode;
-              const completedStamp = yield* makeEventStamp();
-              const isSuccess = exitCode === 0;
+            const exitCode = yield* processHandle.exitCode;
+            const completedStamp = yield* makeEventStamp();
+            const isSuccess = exitCode === 0;
 
-              ctx.activeProcess = undefined;
-              ctx.activeTurnId = undefined;
+            ctx.activeProcess = undefined;
+            ctx.activeTurnId = undefined;
 
-              yield* publishEvent({
-                ...completedStamp,
-                provider: PROVIDER,
-                threadId,
-                turnId,
-                type: "turn.completed",
-                payload: {
-                  state: isSuccess ? "completed" : "failed",
-                  ...(!isSuccess
-                    ? { errorMessage: `Antigravity CLI process exited with code ${exitCode}` }
-                    : {}),
-                },
-              });
-            }),
+            yield* publishEvent({
+              ...completedStamp,
+              provider: PROVIDER,
+              threadId,
+              turnId,
+              type: "turn.completed",
+              payload: {
+                state: isSuccess ? "completed" : "failed",
+                ...(!isSuccess
+                  ? { errorMessage: `Antigravity CLI process exited with code ${exitCode}` }
+                  : {}),
+              },
+            });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.gen(function* () {
+                ctx.activeProcess = undefined;
+                ctx.activeTurnId = undefined;
+                const completedStamp = yield* makeEventStamp();
+                yield* publishEvent({
+                  ...completedStamp,
+                  provider: PROVIDER,
+                  threadId,
+                  turnId,
+                  type: "turn.completed",
+                  payload: {
+                    state: "failed",
+                    errorMessage: "Antigravity CLI process monitor failed.",
+                  },
+                });
+                yield* Effect.logWarning("Antigravity process monitor failed", {
+                  cause,
+                });
+              }),
+            ),
           );
+
+          yield* Effect.forkChild(monitorEffect);
 
           return {
             threadId,
@@ -577,6 +607,7 @@ export function makeAntigravityAdapter(
 
         yield* Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore);
         sessions.delete(ctx.threadId);
+        yield* removeThreadSemaphore(ctx.threadId);
 
         const stamp = yield* makeEventStamp();
         yield* publishEvent({

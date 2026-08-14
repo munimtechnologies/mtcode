@@ -166,7 +166,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     }
 
     const jsonSnippet = extractJsonObject(responseText);
-    const decodeOutput = Schema.decodeEffect(outputSchemaJson);
+    const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
     return yield* decodeOutput(jsonSnippet).pipe(
       Effect.catchTags({
         SchemaError: (cause) =>
