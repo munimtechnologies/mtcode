@@ -130,15 +130,9 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     );
 
     if (exitCode !== 0) {
-      const stderrDetail = stderr.trim();
-      const stdoutDetail = stdout.trim();
-      const detail = stderrDetail.length > 0 ? stderrDetail : stdoutDetail;
       return yield* new TextGenerationError({
         operation,
-        detail:
-          detail.length > 0
-            ? `Antigravity CLI command failed: ${detail}`
-            : `Antigravity CLI command failed with code ${exitCode}.`,
+        detail: `Antigravity CLI command failed with code ${exitCode}.`,
       });
     }
 

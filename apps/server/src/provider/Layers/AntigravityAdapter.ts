@@ -34,7 +34,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type AntigravityAdapterShape } from "../Services/AntigravityAdapter.ts";
-import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("antigravity");
 const decodeJsonExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -117,10 +117,17 @@ export function makeAntigravityAdapter(
   options?: AntigravityAdapterLiveOptions,
 ) {
   return Effect.gen(function* () {
-    const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("antigravity");
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const crypto = yield* Crypto.Crypto;
     const processEnv = options?.environment ?? process.env;
+
+    const nativeEventLogger =
+      options?.nativeEventLogger ??
+      (options?.nativeEventLogPath !== undefined
+        ? yield* makeEventNdjsonLogger(options.nativeEventLogPath, { stream: "native" })
+        : undefined);
+    const managedNativeEventLogger =
+      options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
 
     const sessions = new Map<ThreadId, AntigravitySessionContext>();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
@@ -237,6 +244,12 @@ export function makeAntigravityAdapter(
         Effect.gen(function* () {
           const threadId = input.threadId;
           const ctx = yield* requireSession(threadId);
+
+          if (ctx.activeProcess) {
+            yield* ctx.activeProcess.kill();
+            ctx.activeProcess = undefined;
+          }
+
           const turnId = yield* nextTurnId;
 
           ctx.activeTurnId = turnId;
@@ -329,6 +342,10 @@ export function makeAntigravityAdapter(
                   ) {
                     const data = decoded.value as Record<string, unknown>;
                     const stamp = yield* makeEventStamp();
+
+                    if (nativeEventLogger) {
+                      yield* nativeEventLogger.write(data, threadId);
+                    }
 
                     if (data.event === "init") {
                       if (typeof data.conversation_id === "string") {
@@ -591,7 +608,12 @@ export function makeAntigravityAdapter(
       Effect.forEach(Array.from(sessions.values()), stopSessionInternal, { discard: true });
 
     yield* Effect.addFinalizer(() =>
-      Effect.ignore(stopAll()).pipe(Effect.tap(() => PubSub.shutdown(runtimeEventPubSub))),
+      Effect.ignore(stopAll()).pipe(
+        Effect.tap(() => PubSub.shutdown(runtimeEventPubSub)),
+        Effect.tap(() =>
+          managedNativeEventLogger ? managedNativeEventLogger.close() : Effect.void,
+        ),
+      ),
     );
 
     const streamEvents = Stream.fromPubSub(runtimeEventPubSub);

@@ -71,17 +71,17 @@ const ANTIGRAVITY_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
 function resolveAntigravityAccount(
   settings: AntigravitySettings,
   environment: NodeJS.ProcessEnv = process.env,
-): { readonly email: string; readonly label: string; readonly type: string } {
+): { readonly email?: string; readonly label?: string; readonly type?: string } {
   const email =
     settings.accountEmail?.trim() ||
     environment.ANTIGRAVITY_ACCOUNT_EMAIL ||
     environment.GOOGLE_ACCOUNT_EMAIL ||
-    "kbrianps@gmail.com";
-  const label = settings.subscriptionLabel?.trim() || "Gemini Pro Subscription";
+    undefined;
+  const label = settings.subscriptionLabel?.trim() || undefined;
   return {
-    email,
-    label,
-    type: "oauth",
+    ...(email ? { email } : {}),
+    ...(label ? { label } : {}),
+    type: email ? "oauth" : "antigravity",
   };
 }
 
@@ -91,7 +91,6 @@ export function buildInitialAntigravityProviderSnapshot(
   return Effect.gen(function* () {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
     const models = antigravityModelsFromSettings(settings.customModels);
-    const account = resolveAntigravityAccount(settings);
 
     if (!settings.enabled) {
       return buildServerProvider({
@@ -118,12 +117,7 @@ export function buildInitialAntigravityProviderSnapshot(
         installed: true,
         version: null,
         status: "warning",
-        auth: {
-          status: "authenticated",
-          email: account.email,
-          label: account.label,
-          type: account.type,
-        },
+        auth: { status: "unknown" },
         message: "Checking Antigravity CLI availability...",
       },
     });
@@ -257,9 +251,7 @@ export const checkAntigravityProviderStatus = Effect.fn("checkAntigravityProvide
         status: "ready",
         auth: {
           status: "authenticated",
-          email: account.email,
-          label: account.label,
-          type: account.type,
+          ...account,
         },
       },
     });
