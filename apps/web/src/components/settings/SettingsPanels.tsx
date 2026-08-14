@@ -63,7 +63,11 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  getClientSettings,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -124,6 +128,7 @@ import {
   durationToSeconds,
   formatDiagnosticsDescription,
   getChangedTypographySettingLabels,
+  hasChangedVoiceTranscriptionSettings,
   normalizeIntervalSeconds,
   PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
   hasChangedBackgroundActivitySettings,
@@ -132,6 +137,8 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
+  shouldRestoreVoiceTranscriptionDefaults,
+  voiceTranscriptionModelOptions,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -473,11 +480,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
   const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
-  const isVoiceTranscriptionDirty =
-    settings.voiceTranscriptionEnabled !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled ||
-    settings.voiceTranscriptionProvider !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider ||
-    settings.voiceTranscriptionApiKey !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey ||
-    settings.voiceTranscriptionModel !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel;
+  const isVoiceTranscriptionDirty = hasChangedVoiceTranscriptionSettings(settings);
 
   const changedSettingLabels = useMemo(
     () => [
@@ -584,6 +587,11 @@ export function useSettingsRestore(onRestored?: () => void) {
     );
     if (!confirmed) return;
 
+    const shouldResetVoiceTranscription = shouldRestoreVoiceTranscriptionDefaults({
+      wasIncludedInConfirmation: isVoiceTranscriptionDirty,
+      liveSettings: getClientSettings(),
+    });
+
     // Only touch the theme keys that are actually dirty, so a theme-storage
     // failure cannot block restoring unrelated settings. Preferences are
     // re-read after the confirmation dialog: they may have changed (another
@@ -657,10 +665,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-      voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
-      voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
-      voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
-      voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
+      ...(shouldResetVoiceTranscription
+        ? {
+            voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
+            voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
+            voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
+            voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
+          }
+        : {}),
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -674,6 +686,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   }, [
     changedSettingLabels,
     clearThemeHalves,
+    isVoiceTranscriptionDirty,
     onRestored,
     setFollowSystem,
     setTheme,
@@ -1670,6 +1683,7 @@ function VoiceDictationSettingsSection() {
   const provider = settings.voiceTranscriptionProvider;
   const apiKey = settings.voiceTranscriptionApiKey;
   const model = settings.voiceTranscriptionModel;
+  const selectableModels = voiceTranscriptionModelOptions(models, model);
 
   useEffect(() => {
     let active = true;
@@ -1735,12 +1749,6 @@ function VoiceDictationSettingsSection() {
     };
   }, [apiKey, hasApiKey, provider]);
 
-  useEffect(() => {
-    if (models.length > 0 && model && !models.includes(model)) {
-      updateSettings({ voiceTranscriptionEnabled: false, voiceTranscriptionModel: "" });
-    }
-  }, [model, models, updateSettings]);
-
   const modelDescription = !hasApiKey
     ? environmentStatusLoading
       ? `Checking the connected server for ${environmentVariable}…`
@@ -1753,7 +1761,9 @@ function VoiceDictationSettingsSection() {
         ? modelsError
         : models.length === 0
           ? `${providerLabel} did not return any models.`
-          : "Choose a model. The microphone appears in the composer after that.";
+          : model && !models.includes(model)
+            ? "The saved model was not returned by the provider. Keep it or choose another model."
+            : "Choose a model. The microphone appears in the composer after that.";
 
   return (
     <SettingsSection title="Voice dictation">
@@ -1832,7 +1842,7 @@ function VoiceDictationSettingsSection() {
         control={
           <Select
             value={model}
-            disabled={modelsLoading || models.length === 0}
+            disabled={modelsLoading || selectableModels.length === 0}
             onValueChange={(value) => {
               if (value !== null) {
                 updateSettings({
@@ -1848,7 +1858,7 @@ function VoiceDictationSettingsSection() {
               </SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
-              {models.map((availableModel) => (
+              {selectableModels.map((availableModel) => (
                 <SelectItem hideIndicator key={availableModel} value={availableModel}>
                   {availableModel}
                 </SelectItem>

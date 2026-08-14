@@ -565,6 +565,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   ]);
   const voiceTranscriptionSettings = useMobileVoiceTranscriptionSettings();
   const voiceTranscriptionConfig = activeMobileVoiceTranscriptionConfig(voiceTranscriptionSettings);
+  const voiceTranscriptionSendDisabled = showStopAction;
   const appendVoiceTranscriptToDraft = useCallback(
     (transcript: string) => {
       if (
@@ -586,7 +587,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     ...voiceTranscriptionConfig,
     onTranscriptInsert: appendVoiceTranscriptToDraft,
     onTranscriptSend: (transcript) => {
-      if (appendVoiceTranscriptToDraft(transcript)) void sendCurrentDraft();
+      if (appendVoiceTranscriptToDraft(transcript) && !voiceTranscriptionSendDisabled) {
+        void sendCurrentDraft();
+      }
     },
   });
   const voiceTranscriptionReady =
@@ -610,12 +613,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   }, [voiceTranscription.cancel, voiceTranscriptionTargetKey]);
   const handleSend = useCallback(async () => {
     if (voiceTranscription.status === "recording") {
+      if (voiceTranscriptionSendDisabled) return;
       await voiceTranscription.stop("send");
       return;
     }
     if (voiceTranscription.status === "transcribing") return;
     await sendCurrentDraft();
-  }, [sendCurrentDraft, voiceTranscription.status, voiceTranscription.stop]);
+  }, [
+    sendCurrentDraft,
+    voiceTranscription.status,
+    voiceTranscription.stop,
+    voiceTranscriptionSendDisabled,
+  ]);
   const handleCommandSelect = useCallback(
     (item: ComposerCommandItem) => {
       if (!composerTrigger) return;
@@ -825,10 +834,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               status={voiceTranscription.status}
               elapsedMs={voiceTranscription.elapsedMs}
               levels={voiceTranscription.levels}
-              sendDisabled={false}
+              sendDisabled={voiceTranscriptionSendDisabled}
               onCancel={() => void cancelVoiceTranscription()}
               onStop={() => void voiceTranscription.stop("insert")}
-              onSend={() => void voiceTranscription.stop("send")}
+              onSend={() => {
+                if (!voiceTranscriptionSendDisabled) void voiceTranscription.stop("send");
+              }}
             />
           ) : (
             <>
