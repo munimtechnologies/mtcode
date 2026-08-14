@@ -93,6 +93,11 @@ import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings } from "./settings.ts";
 import type {
+  ComputerHistoryClearScope,
+  ComputerHistoryStatus,
+  ComputerHistoryTimeline,
+} from "./computerHistory.ts";
+import type {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlPublishRepositoryInput,
@@ -1125,6 +1130,25 @@ export interface DesktopBridge {
    * needed so the app appears in the list.
    */
   openComputerUsePrivacySettings?: (pane: DesktopComputerUsePrivacyPane) => Promise<boolean>;
+  /**
+   * Computer History daemon status (recording phase, paths, accessibility).
+   * Optional for older desktop builds.
+   */
+  getComputerHistoryStatus?: () => Promise<ComputerHistoryStatus>;
+  /** Timeline of summarized Computer History memories. */
+  getComputerHistoryTimeline?: () => Promise<ComputerHistoryTimeline>;
+  /** Patch Computer History settings on disk and sync the recorder daemon. */
+  patchComputerHistorySettings?: (patch: {
+    enabled?: boolean;
+    paused?: boolean;
+    mirrorToCodex?: boolean;
+  }) => Promise<ComputerHistoryStatus>;
+  /** Delete history (events + derived memories) for a time scope. */
+  clearComputerHistory?: (scope: ComputerHistoryClearScope) => Promise<ComputerHistoryTimeline>;
+  /** Reveal a memory markdown file in Finder / Explorer / file manager. */
+  revealComputerHistoryMemory?: (path: string) => Promise<boolean>;
+  /** Delete one timeline memory (and its Codex mirror copy when present). */
+  deleteComputerHistoryMemory?: (path: string) => Promise<ComputerHistoryTimeline>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
