@@ -3191,7 +3191,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           {voiceTranscription.status === "idle" &&
           voiceTranscriptionReady &&
           voiceTranscription.error ? (
-            <p className="mx-4 mb-2 text-xs text-destructive" role="alert">
+            <p className="mx-3 mb-2 text-xs text-destructive sm:mx-4" role="alert">
               {voiceTranscription.error}
             </p>
           ) : null}
@@ -3325,6 +3325,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               phase === "running" || isConnecting || projectSelectionRequired
                             }
                             className="rounded-full"
+                            onPointerDown={
+                              isMobileViewport ? (event) => event.preventDefault() : undefined
+                            }
                             onClick={() => void startVoiceTranscription()}
                             aria-label="Start dictation"
                           >
