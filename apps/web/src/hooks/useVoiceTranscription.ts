@@ -1,8 +1,13 @@
+import {
+  resolveVoiceTranscriptionAction,
+  type VoiceTranscriptionAction,
+} from "@t3tools/shared/voiceTranscription";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { transcribeVoiceRecording, type VoiceTranscriptionConfig } from "../lib/voiceTranscription";
 
 const LEVEL_COUNT = 160;
+const MIN_RECORDING_MS = 250;
 const MAX_RECORDING_MS = 5 * 60 * 1_000;
 const MIME_TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
 const FLAT_LEVELS = Array<number>(LEVEL_COUNT).fill(0);
@@ -16,10 +21,12 @@ function supportedMimeType(): string | undefined {
 
 export function useVoiceTranscription({
   config,
-  onTranscript,
+  onTranscriptInsert,
+  onTranscriptSend,
 }: {
   readonly config: VoiceTranscriptionConfig;
-  readonly onTranscript: (text: string) => void;
+  readonly onTranscriptInsert: (text: string) => void;
+  readonly onTranscriptSend: (text: string) => void;
 }) {
   const [status, setStatus] = useState<VoiceTranscriptionStatus>("idle");
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -33,11 +40,14 @@ export function useVoiceTranscription({
   const intervalsRef = useRef<number[]>([]);
   const timeoutRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
+  const terminalActionRef = useRef<VoiceTranscriptionAction | null>(null);
   const mountedRef = useRef(true);
   const configRef = useRef(config);
-  const onTranscriptRef = useRef(onTranscript);
+  const onTranscriptInsertRef = useRef(onTranscriptInsert);
+  const onTranscriptSendRef = useRef(onTranscriptSend);
   configRef.current = config;
-  onTranscriptRef.current = onTranscript;
+  onTranscriptInsertRef.current = onTranscriptInsert;
+  onTranscriptSendRef.current = onTranscriptSend;
 
   const cleanupCapture = useCallback(() => {
     for (const interval of intervalsRef.current) window.clearInterval(interval);
@@ -57,13 +67,36 @@ export function useVoiceTranscription({
       mountedRef.current = false;
       startingRef.current = false;
       cancelStartingRef.current = true;
+      terminalActionRef.current = "abort";
       const recorder = recorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
       cleanupCapture();
     };
   }, [cleanupCapture]);
 
-  const stop = useCallback(() => {
+  const stop = useCallback(
+    (action: Exclude<VoiceTranscriptionAction, "abort"> = "insert") => {
+      terminalActionRef.current = resolveVoiceTranscriptionAction(
+        terminalActionRef.current,
+        action,
+      );
+      if (startingRef.current) {
+        cancelStartingRef.current = true;
+        cleanupCapture();
+        if (mountedRef.current) {
+          setStatus("idle");
+          setElapsedMs(0);
+        }
+        return;
+      }
+      const recorder = recorderRef.current;
+      if (recorder?.state === "recording") recorder.stop();
+    },
+    [cleanupCapture],
+  );
+
+  const cancel = useCallback(() => {
+    terminalActionRef.current = "abort";
     if (startingRef.current) {
       cancelStartingRef.current = true;
       cleanupCapture();
@@ -80,6 +113,7 @@ export function useVoiceTranscription({
   const start = useCallback(async () => {
     if (startingRef.current || status !== "idle") return;
     startingRef.current = true;
+    terminalActionRef.current = null;
     setError(null);
     setElapsedMs(0);
     setLevels(FLAT_LEVELS);
@@ -109,6 +143,7 @@ export function useVoiceTranscription({
         stream.getTracks().forEach((track) => track.stop());
         startingRef.current = false;
         cancelStartingRef.current = false;
+        terminalActionRef.current = null;
         return;
       }
 
@@ -124,20 +159,33 @@ export function useVoiceTranscription({
       recorder.addEventListener("error", () => {
         recordingFailed = true;
         cleanupCapture();
+        terminalActionRef.current = null;
         if (mountedRef.current) {
           setStatus("idle");
           setError("The microphone stopped unexpectedly.");
         }
       });
       recorder.addEventListener("stop", () => {
+        const durationMs = Date.now() - startedAtRef.current;
+        const action = terminalActionRef.current ?? "insert";
+        terminalActionRef.current = null;
         const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
         cleanupCapture();
         if (!mountedRef.current || recordingFailed) return;
+        if (action === "abort" || durationMs < MIN_RECORDING_MS || blob.size === 0) {
+          setStatus("idle");
+          setElapsedMs(0);
+          return;
+        }
+
         setStatus("transcribing");
         void transcribeVoiceRecording(blob, configRef.current)
           .then((text) => {
             if (!mountedRef.current) return;
-            if (text) onTranscriptRef.current(text);
+            if (text) {
+              if (action === "send") onTranscriptSendRef.current(text);
+              else onTranscriptInsertRef.current(text);
+            }
             setStatus("idle");
             setElapsedMs(0);
           })
@@ -176,12 +224,16 @@ export function useVoiceTranscription({
       intervalsRef.current.push(
         window.setInterval(() => setElapsedMs(Date.now() - startedAtRef.current), 250),
       );
-      timeoutRef.current = window.setTimeout(() => recorder.stop(), MAX_RECORDING_MS);
+      timeoutRef.current = window.setTimeout(() => {
+        terminalActionRef.current = terminalActionRef.current ?? "insert";
+        if (recorder.state === "recording") recorder.stop();
+      }, MAX_RECORDING_MS);
       recorder.start(250);
       startingRef.current = false;
     } catch (cause) {
       startingRef.current = false;
       cleanupCapture();
+      terminalActionRef.current = null;
       if (cancelStartingRef.current) {
         cancelStartingRef.current = false;
         return;
@@ -195,5 +247,5 @@ export function useVoiceTranscription({
     }
   }, [cleanupCapture, status]);
 
-  return { status, elapsedMs, levels, error, start, stop } as const;
+  return { status, elapsedMs, levels, error, start, stop, cancel } as const;
 }

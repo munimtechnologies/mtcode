@@ -20,6 +20,7 @@ import {
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import { appendVoiceTranscript as appendVoiceTranscriptText } from "@t3tools/shared/voiceTranscription";
 import {
   memo,
   type ReactNode,
@@ -203,7 +204,6 @@ import {
   PenLineIcon,
   SparklesIcon,
   MicIcon,
-  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -978,6 +978,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const dragDepthRef = useRef(0);
   const stashPulseKeyRef = useRef(0);
   const stashPulseTimeoutRef = useRef<number | null>(null);
+  const submitComposerRef = useRef<(event?: { preventDefault: () => void }) => void>(() => {});
   /**
    * Snapshots currently being encoded, keyed by target+prompt+image ids.
    * Keyed rather than boolean so a genuinely different prompt (or a different
@@ -1244,6 +1245,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectSelectionRequired ||
     environmentUnavailable !== null ||
     !composerSendState.hasSendableContent;
+  const voiceTranscriptionSendDisabled =
+    phase === "running" ||
+    isSendBusy ||
+    isSendDisabled ||
+    isConnecting ||
+    noProviderAvailable ||
+    projectSelectionRequired ||
+    environmentUnavailable !== null;
   const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -1258,17 +1267,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, setComposerDraftPrompt],
   );
 
-  const appendVoiceTranscript = useCallback(
+  const appendVoiceTranscriptToPrompt = useCallback(
     (transcript: string) => {
       const currentPrompt = promptRef.current;
-      const boundary = currentPrompt.length > 0 && !/\s$/.test(currentPrompt) ? " " : "";
-      const nextPrompt = `${currentPrompt}${boundary}${transcript}`;
+      const nextPrompt = appendVoiceTranscriptText(currentPrompt, transcript);
+      if (nextPrompt === currentPrompt) return false;
       promptRef.current = nextPrompt;
       setPrompt(nextPrompt);
       const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
       setComposerCursor(nextCursor);
       setComposerTrigger(null);
       scheduleComposerFocus();
+      return true;
     },
     [promptRef, scheduleComposerFocus, setPrompt],
   );
@@ -1278,8 +1288,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       apiKey: settings.voiceTranscriptionApiKey,
       model: settings.voiceTranscriptionModel,
     },
-    onTranscript: appendVoiceTranscript,
+    onTranscriptInsert: appendVoiceTranscriptToPrompt,
+    onTranscriptSend: (transcript) => {
+      if (appendVoiceTranscriptToPrompt(transcript)) submitComposerRef.current();
+    },
   });
+  const voiceTranscriptionReady =
+    settings.voiceTranscriptionEnabled && settings.voiceTranscriptionModel.trim().length > 0;
+
+  useEffect(() => {
+    if (voiceTranscription.status !== "recording") return;
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      voiceTranscription.cancel();
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  }, [voiceTranscription.cancel, voiceTranscription.status]);
 
   const addComposerImage = useCallback(
     (image: ComposerImageAttachment) => {
@@ -1832,7 +1858,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     showPlanFollowUpPrompt,
   ]);
 
-  const submitComposer = useCallback(
+  const submitComposerAfterTranscription = useCallback(
     (event?: { preventDefault: () => void }) => {
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
@@ -1865,6 +1891,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       shouldBlurMobileComposerOnSubmit,
     ],
   );
+  const submitComposer = useCallback(
+    (event?: { preventDefault: () => void }) => {
+      if (voiceTranscription.status === "recording") {
+        event?.preventDefault();
+        voiceTranscription.stop("send");
+        return;
+      }
+      if (voiceTranscription.status === "transcribing") {
+        event?.preventDefault();
+        return;
+      }
+      submitComposerAfterTranscription(event);
+    },
+    [submitComposerAfterTranscription, voiceTranscription.status, voiceTranscription.stop],
+  );
+  submitComposerRef.current = submitComposerAfterTranscription;
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -3114,7 +3156,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
 
           {voiceTranscription.status === "idle" &&
-          settings.voiceTranscriptionEnabled &&
+          voiceTranscriptionReady &&
           voiceTranscription.error ? (
             <p className="mx-4 mb-2 text-xs text-destructive" role="alert">
               {voiceTranscription.error}
@@ -3146,6 +3188,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   status={voiceTranscription.status}
                   elapsedMs={voiceTranscription.elapsedMs}
                   levels={voiceTranscription.levels}
+                  sendDisabled={voiceTranscriptionSendDisabled}
+                  onCancel={voiceTranscription.cancel}
+                  onStop={() => voiceTranscription.stop("insert")}
+                  onSend={() => voiceTranscription.stop("send")}
                 />
               ) : null}
               <div
@@ -3223,76 +3269,63 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
 
               {/* Right side: send / stop button */}
-              <div
-                data-chat-composer-actions="right"
-                data-chat-composer-primary-actions-compact={
-                  isComposerPrimaryActionsCompact ? "true" : "false"
-                }
-                className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
-              >
-                {settings.voiceTranscriptionEnabled &&
-                !isComposerApprovalState &&
-                pendingUserInputs.length === 0 &&
-                voiceTranscription.status !== "transcribing" ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type="button"
-                          size="icon-sm"
-                          variant="ghost"
-                          disabled={isConnecting || projectSelectionRequired}
-                          className="rounded-full text-muted-foreground"
-                          onClick={() =>
-                            voiceTranscription.status === "recording"
-                              ? voiceTranscription.stop()
-                              : void voiceTranscription.start()
-                          }
-                          aria-label={
-                            voiceTranscription.status === "recording"
-                              ? "Stop dictation"
-                              : "Start dictation"
-                          }
-                        >
-                          {voiceTranscription.status === "recording" ? (
-                            <SquareIcon className="size-3 fill-current" />
-                          ) : (
-                            <MicIcon className="size-4" />
-                          )}
-                        </Button>
-                      }
-                    />
-                    <TooltipPopup side="top">
-                      {voiceTranscription.status === "recording"
-                        ? "Stop dictation"
-                        : "Start dictation"}
-                    </TooltipPopup>
-                  </Tooltip>
-                ) : null}
-                <ComposerFooterPrimaryActions
-                  compact={isComposerPrimaryActionsCompact}
-                  activeContextWindow={activeContextWindow}
-                  activeThreadProviderDisplayName={activeThreadProviderDisplayName}
-                  pendingAction={pendingPrimaryAction}
-                  isRunning={phase === "running"}
-                  showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
-                  promptHasText={prompt.trim().length > 0}
-                  isSendBusy={isSendBusy}
-                  sendDisabledReason={sendDisabledReason}
-                  isConnecting={isConnecting}
-                  isEnvironmentUnavailable={
-                    environmentUnavailable !== null ||
-                    noProviderAvailable ||
-                    projectSelectionRequired
+              {voiceTranscription.status === "idle" ? (
+                <div
+                  data-chat-composer-actions="right"
+                  data-chat-composer-primary-actions-compact={
+                    isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  isPreparingWorktree={isPreparingWorktree}
-                  hasSendableContent={composerSendState.hasSendableContent}
-                  preserveComposerFocusOnPointerDown={isMobileViewport}
-                  onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                  onInterrupt={handleInterruptPrimaryAction}
-                  onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
-                />
-              </div>
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                >
+                  {voiceTranscriptionReady &&
+                  !isComposerApprovalState &&
+                  pendingUserInputs.length === 0 ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            disabled={isConnecting || projectSelectionRequired}
+                            className="rounded-full text-muted-foreground"
+                            onClick={() => void voiceTranscription.start()}
+                            aria-label="Start dictation"
+                          >
+                            <MicIcon className="size-4" />
+                          </Button>
+                        }
+                      />
+                      <TooltipPopup side="top">Start dictation</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
+                  <ComposerFooterPrimaryActions
+                    compact={isComposerPrimaryActionsCompact}
+                    activeContextWindow={activeContextWindow}
+                    activeThreadProviderDisplayName={activeThreadProviderDisplayName}
+                    pendingAction={pendingPrimaryAction}
+                    isRunning={phase === "running"}
+                    showPlanFollowUpPrompt={
+                      pendingUserInputs.length === 0 && showPlanFollowUpPrompt
+                    }
+                    promptHasText={prompt.trim().length > 0}
+                    isSendBusy={isSendBusy}
+                    sendDisabledReason={sendDisabledReason}
+                    isConnecting={isConnecting}
+                    isEnvironmentUnavailable={
+                      environmentUnavailable !== null ||
+                      noProviderAvailable ||
+                      projectSelectionRequired
+                    }
+                    isPreparingWorktree={isPreparingWorktree}
+                    hasSendableContent={composerSendState.hasSendableContent}
+                    preserveComposerFocusOnPointerDown={isMobileViewport}
+                    onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                    onInterrupt={handleInterruptPrimaryAction}
+                    onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
+                  />
+                </div>
+              ) : null}
             </div>
           )}
         </div>
