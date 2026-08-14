@@ -182,6 +182,7 @@ export function useMobileVoiceTranscription(input: {
       // Cancellation is best-effort; the audio is discarded either way.
     } finally {
       await resetAudioMode();
+      statusRef.current = "idle";
       stopInFlightRef.current = false;
       terminalActionRef.current = null;
       if (mountedRef.current) {

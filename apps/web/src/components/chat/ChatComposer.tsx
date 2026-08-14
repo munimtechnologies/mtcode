@@ -1893,7 +1893,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposerAfterTranscription = useCallback(
     (event?: { preventDefault: () => void }) => {
-      if (noProviderAvailable || isSendDisabled) {
+      if (voiceTranscriptionSendDisabled) {
         event?.preventDefault();
         return;
       }
@@ -1918,16 +1918,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       activeThreadId,
       blurMobileComposerAfterSend,
-      isSendDisabled,
-      noProviderAvailable,
       onSend,
       shouldBlurMobileComposerOnSubmit,
+      voiceTranscriptionSendDisabled,
     ],
   );
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }) => {
       if (voiceTranscription.status === "recording") {
         event?.preventDefault();
+        if (voiceTranscriptionSendDisabled) return;
         voiceTranscription.stop("send");
         return;
       }
@@ -1937,7 +1937,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       submitComposerAfterTranscription(event);
     },
-    [submitComposerAfterTranscription, voiceTranscription.status, voiceTranscription.stop],
+    [
+      submitComposerAfterTranscription,
+      voiceTranscription.status,
+      voiceTranscription.stop,
+      voiceTranscriptionSendDisabled,
+    ],
   );
   submitComposerRef.current = submitComposerAfterTranscription;
   const expandMobileComposer = useCallback(() => {
