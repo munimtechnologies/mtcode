@@ -128,7 +128,7 @@ export function VoiceTranscriptionPanel({
         type="button"
         size="icon-sm"
         disabled={sendDisabled}
-        className="shrink-0 rounded-full"
+        className="shrink-0 rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover"
         {...pointerFocusProps}
         onClick={onSend}
         aria-label="Transcribe and send"
