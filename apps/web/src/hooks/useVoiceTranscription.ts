@@ -285,6 +285,7 @@ export function useVoiceTranscription({
         }
         return;
       }
+      statusRef.current = "idle";
       setStatus("idle");
       setError(
         cause instanceof DOMException && cause.name === "NotAllowedError"

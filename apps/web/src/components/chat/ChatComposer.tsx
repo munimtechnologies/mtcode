@@ -1329,7 +1329,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [voiceTranscription.cancel, voiceTranscriptionTargetKey]);
 
   useEffect(() => {
-    if (voiceTranscription.status !== "recording") return;
+    if (voiceTranscription.status === "idle") return;
     const cancelOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
