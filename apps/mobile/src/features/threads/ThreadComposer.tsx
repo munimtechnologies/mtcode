@@ -588,9 +588,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const voiceTranscriptionReady =
     voiceTranscriptionSettings.loaded && voiceTranscriptionSettings.apiKey.trim().length > 0;
   const startVoiceTranscription = useCallback(async () => {
+    if (showStopAction) return;
     voiceTranscriptionOriginTargetKeyRef.current = voiceTranscriptionTargetKeyRef.current;
     await voiceTranscription.start();
-  }, [voiceTranscription.start]);
+  }, [showStopAction, voiceTranscription.start]);
   const cancelVoiceTranscription = useCallback(async () => {
     voiceTranscriptionOriginTargetKeyRef.current = null;
     await voiceTranscription.cancel();
@@ -906,6 +907,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       <ControlPill
                         accessibilityLabel="Start dictation"
                         className="h-9 w-9"
+                        disabled={showStopAction}
                         icon="mic"
                         onPress={() => void startVoiceTranscription()}
                       />
@@ -939,6 +941,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     {voiceTranscriptionReady ? (
                       <ComposerToolbarButton
                         accessibilityLabel="Start dictation"
+                        disabled={showStopAction}
                         icon="mic"
                         onPress={() => void startVoiceTranscription()}
                         showChevron={false}

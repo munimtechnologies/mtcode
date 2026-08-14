@@ -1311,9 +1311,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const voiceTranscriptionReady =
     settings.voiceTranscriptionEnabled && settings.voiceTranscriptionModel.trim().length > 0;
   const startVoiceTranscription = useCallback(async () => {
+    if (phase === "running") return;
     voiceTranscriptionOriginTargetKeyRef.current = voiceTranscriptionTargetKeyRef.current;
     await voiceTranscription.start();
-  }, [voiceTranscription.start]);
+  }, [phase, voiceTranscription.start]);
   const cancelVoiceTranscription = useCallback(() => {
     voiceTranscriptionOriginTargetKeyRef.current = null;
     voiceTranscription.cancel();
@@ -3319,7 +3320,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             type="button"
                             size="icon-sm"
                             variant="ghost"
-                            disabled={isConnecting || projectSelectionRequired}
+                            disabled={
+                              phase === "running" || isConnecting || projectSelectionRequired
+                            }
                             className="rounded-full text-muted-foreground"
                             onClick={() => void startVoiceTranscription()}
                             aria-label="Start dictation"
