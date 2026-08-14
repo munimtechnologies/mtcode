@@ -23,6 +23,7 @@ import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsComputerUseRouteImport } from './routes/settings.computer-use'
+import { Route as SettingsComputerHistoryRouteImport } from './routes/settings.computer-history'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
@@ -100,6 +101,11 @@ const SettingsComputerUseRoute = SettingsComputerUseRouteImport.update({
   path: '/computer-use',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsComputerHistoryRoute = SettingsComputerHistoryRouteImport.update({
+  id: '/computer-history',
+  path: '/computer-history',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/computer-history': typeof SettingsComputerHistoryRoute
   '/settings/computer-use': typeof SettingsComputerUseRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -169,6 +176,7 @@ export interface FileRoutesByTo {
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/computer-history': typeof SettingsComputerHistoryRoute
   '/settings/computer-use': typeof SettingsComputerUseRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/computer-history': typeof SettingsComputerHistoryRoute
   '/settings/computer-use': typeof SettingsComputerUseRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/computer-history'
     | '/settings/computer-use'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/computer-history'
     | '/settings/computer-use'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -262,6 +273,7 @@ export interface FileRouteTypes {
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/computer-history'
     | '/settings/computer-use'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -385,6 +397,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsComputerUseRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/computer-history': {
+      id: '/settings/computer-history'
+      path: '/computer-history'
+      fullPath: '/settings/computer-history'
+      preLoaderRoute: typeof SettingsComputerHistoryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/archived': {
       id: '/settings/archived'
       path: '/archived'
@@ -456,6 +475,7 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 interface SettingsRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsArchivedRoute: typeof SettingsArchivedRoute
+  SettingsComputerHistoryRoute: typeof SettingsComputerHistoryRoute
   SettingsComputerUseRoute: typeof SettingsComputerUseRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
@@ -469,6 +489,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsArchivedRoute: SettingsArchivedRoute,
+  SettingsComputerHistoryRoute: SettingsComputerHistoryRoute,
   SettingsComputerUseRoute: SettingsComputerUseRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,

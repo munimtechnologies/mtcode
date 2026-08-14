@@ -13,6 +13,7 @@ import {
   BlocksIcon,
   BotIcon,
   GitBranchIcon,
+  HistoryIcon,
   KeyboardIcon,
   Link2Icon,
   MonitorIcon,
@@ -55,6 +56,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
   "/settings/computer-use": MonitorIcon,
+  "/settings/computer-history": HistoryIcon,
   "/settings/archived": ArchiveIcon,
 };
 
