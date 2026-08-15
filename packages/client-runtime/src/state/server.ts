@@ -714,6 +714,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
+    providerWorkspaceCapabilities: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:provider-workspace-capabilities",
+      tag: WS_METHODS.serverListProviderWorkspaceCapabilities,
+      staleTimeMs: 300_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

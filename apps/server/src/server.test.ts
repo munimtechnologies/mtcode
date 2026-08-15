@@ -18,6 +18,7 @@ import {
   ExternalLauncherCommandNotFoundError,
   OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
+  type OrchestrationProjectShell,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
@@ -57,6 +58,7 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -3403,6 +3405,77 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       if (rpcError._tag === "EnvironmentAuthorizationError") {
         assert.equal(rpcError.requiredScope, "orchestration:read");
       }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("resolves provider workspace capabilities from the thread worktree", () =>
+    Effect.gen(function* () {
+      const requestedCwds = yield* Ref.make<ReadonlyArray<string>>([]);
+      const projectShell = {
+        id: defaultProjectId,
+        title: "Default Project",
+        workspaceRoot: "/tmp/default-project",
+        defaultModelSelection,
+        scripts: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      } satisfies OrchestrationProjectShell;
+      const threadShell = makeDefaultOrchestrationThreadShell({
+        worktreePath: "/tmp/worktrees/default-thread",
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === defaultProjectId ? Option.some(projectShell) : Option.none(),
+              ),
+            getThreadShellById: (threadId) =>
+              Effect.succeed(
+                threadId === defaultThreadId ? Option.some(threadShell) : Option.none(),
+              ),
+          },
+          providerRegistry: {
+            listWorkspaceCapabilities: ({ cwd }) =>
+              Ref.update(requestedCwds, (cwds) => [...cwds, cwd]).pipe(
+                Effect.as({ slashCommands: [{ name: "deploy" }], skills: [] }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const responses = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            withThread: client[WS_METHODS.serverListProviderWorkspaceCapabilities]({
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              projectId: defaultProjectId,
+              threadId: defaultThreadId,
+            }),
+            withoutThread: client[WS_METHODS.serverListProviderWorkspaceCapabilities]({
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              projectId: defaultProjectId,
+            }),
+            unknownThread: client[WS_METHODS.serverListProviderWorkspaceCapabilities]({
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              projectId: defaultProjectId,
+              threadId: ThreadId.make("thread-from-another-project"),
+            }),
+          }),
+        ),
+      );
+
+      assert.deepStrictEqual(yield* Ref.get(requestedCwds), [
+        "/tmp/worktrees/default-thread",
+        "/tmp/default-project",
+      ]);
+      assert.deepStrictEqual(
+        responses.withThread.slashCommands.map((command) => command.name),
+        ["deploy"],
+      );
+      assert.deepStrictEqual(responses.unknownThread.slashCommands, []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
