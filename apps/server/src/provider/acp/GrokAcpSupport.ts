@@ -221,9 +221,14 @@ export function applyGrokAcpModelSelection<E>(input: {
       reasoningEffort: input.currentReasoningEffort,
     });
   }
-  const reasoningEffort = shouldSwitchReasoningEffort
-    ? input.requestedReasoningEffort
-    : input.currentReasoningEffort;
+  // An explicit request always wins. Without one, the effort carries over only
+  // when the model does not change: levels are per model, so carrying (say)
+  // `xhigh` from Grok 4.6 onto Grok 4.5 applies a level that model never
+  // advertised and leaves its session config with nothing selected. Sending no
+  // effort lets Grok apply the target model's own default instead.
+  const reasoningEffort =
+    input.requestedReasoningEffort ??
+    (shouldSwitchModel ? undefined : input.currentReasoningEffort);
   return input.runtime
     .setSessionModel(
       modelId,

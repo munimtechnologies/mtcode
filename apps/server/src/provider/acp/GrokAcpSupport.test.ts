@@ -198,6 +198,42 @@ describe("applyGrokAcpModelSelection", () => {
     }),
   );
 
+  it.effect("does not carry the previous model's effort onto a different model", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      const result = yield* applyGrokAcpModelSelection({
+        runtime,
+        currentModelId: "grok-mock-4.6",
+        requestedModelId: "grok-mock-4.5",
+        // `xhigh` exists on 4.6 but not on 4.5; sending it applies a level that
+        // model never advertised, so the switch must leave the effort unset.
+        currentReasoningEffort: "xhigh",
+        requestedReasoningEffort: undefined,
+        mapError: (cause) => cause.message,
+      });
+      expect(modelCalls).toEqual([{ modelId: "grok-mock-4.5" }]);
+      expect(result).toEqual({ modelId: "grok-mock-4.5", reasoningEffort: undefined });
+    }),
+  );
+
+  it.effect("still sends an explicit effort that matches the previous model's effort", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      const result = yield* applyGrokAcpModelSelection({
+        runtime,
+        currentModelId: "grok-mock-4.6",
+        requestedModelId: "grok-mock-4.5",
+        currentReasoningEffort: "medium",
+        requestedReasoningEffort: "medium",
+        mapError: (cause) => cause.message,
+      });
+      expect(modelCalls).toEqual([
+        { modelId: "grok-mock-4.5", meta: { reasoningEffort: "medium" } },
+      ]);
+      expect(result).toEqual({ modelId: "grok-mock-4.5", reasoningEffort: "medium" });
+    }),
+  );
+
   it.effect("skips set_model when neither the model nor the effort changes", () =>
     Effect.gen(function* () {
       const { runtime, modelCalls } = makeRecordingRuntime();
