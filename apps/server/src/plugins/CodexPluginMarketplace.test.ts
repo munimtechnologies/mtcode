@@ -42,7 +42,10 @@ const unusedHttpClient = HttpClient.make(() =>
 
 const makeTestMarketplace = makeWithOptions({
   readCursorMarketplaceHtml: () =>
-    new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+    new PluginMarketplaceUnavailableError({
+      reason: "marketplaces_unavailable",
+      cause: new Error("Marketplace unavailable in test."),
+    }),
 }).pipe(Effect.provideService(HttpClient.HttpClient, unusedHttpClient));
 
 const testLayer = it.layer(NodeServices.layer);
@@ -59,9 +62,15 @@ testLayer("CodexPluginMarketplace", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-marketplace-" });
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-outside-" });
       yield* fs.makeDirectory(path.join(root, ".codex-plugin"), { recursive: true });
       yield* fs.makeDirectory(path.join(root, "skills", "computer-use"), { recursive: true });
       yield* fs.makeDirectory(path.join(root, "assets"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(outside, "SKILL.md"),
+        "---\nname: escaped\ndescription: Must not be returned.\n---",
+      );
+      yield* fs.symlink(outside, path.join(root, "skills", "escaped"));
       yield* fs.writeFileString(
         path.join(root, ".codex-plugin", "plugin.json"),
         // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -69,6 +78,7 @@ testLayer("CodexPluginMarketplace", (it) => {
           name: "computer-use",
           version: "1.0.1000633",
           description: "Control local apps.",
+          homepage: "https://user:secret@/computer-use?token=hidden",
           skills: "./skills",
           mcpServers: "./.mcp.json",
           apps: "./.app.json",
@@ -127,25 +137,40 @@ testLayer("CodexPluginMarketplace", (it) => {
       };
       // @effect-diagnostics-next-line preferSchemaOverJson:off
       const catalogJson = JSON.stringify({ installed: [record], available: [] });
+      let codexCommand = "/tools/custom-codex";
       let codexEnvironment: NodeJS.ProcessEnv | undefined;
+      const observedCommands: Array<string> = [];
       const runner = ProcessRunner.ProcessRunner.of({
         run: (input) => {
-          if (input.command !== "/tools/custom-codex") {
+          observedCommands.push(input.command);
+          if (input.command !== codexCommand) {
             return Effect.succeed(unavailableProcessOutput);
           }
           codexEnvironment = input.env;
+          if (input.args.includes("remove")) {
+            return Effect.succeed({
+              ...unavailableProcessOutput,
+              stderr: "token=never-return-this-token /private/workspace",
+            });
+          }
           return Effect.succeed(processOutput(catalogJson));
         },
       });
       const marketplace = yield* makeWithOptions({
-        commands: {
-          codex: {
-            command: "/tools/custom-codex",
-            env: { ...process.env, CODEX_HOME: "/custom/codex-home" },
-          },
-        },
+        resolveCommand: (harness) =>
+          Effect.succeed(
+            harness === "codex"
+              ? {
+                  command: codexCommand,
+                  env: { ...process.env, CODEX_HOME: "/custom/codex-home" },
+                }
+              : undefined,
+          ),
         readCursorMarketplaceHtml: () =>
-          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
       }).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, runner),
         Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
@@ -160,6 +185,8 @@ testLayer("CodexPluginMarketplace", (it) => {
       assert.strictEqual(catalog.plugins[0]?.logoDataUrl, null);
       expect(logo.dataUrl).toMatch(/^data:image\/png;base64,/u);
       expect(detail.logoDataUrl).toBe(logo.dataUrl);
+      expect(detail.homepage).not.toContain("secret");
+      expect(detail.homepage).not.toContain("hidden");
       assert.strictEqual(codexEnvironment?.CODEX_HOME, "/custom/codex-home");
       assert.deepStrictEqual(detail.skills, [
         {
@@ -186,6 +213,14 @@ testLayer("CodexPluginMarketplace", (it) => {
       ]);
       assert.deepStrictEqual(detail.defaultPrompts, ["Play a playlist to help me focus"]);
       expect(detail.mcpServers[0]?.environmentVariables).not.toContain("never-return-this-value");
+      codexCommand = "/tools/updated-codex";
+      const error = yield* marketplace.remove(`codex:${record.pluginId}`).pipe(Effect.flip);
+      assert.strictEqual(observedCommands.at(-1), "/tools/updated-codex");
+      if (error._tag !== "PluginMarketplaceOperationError") {
+        return assert.fail(`Expected an operation error, received ${error._tag}.`);
+      }
+      assert.strictEqual(error.detail, "The provider exited with status 1.");
+      expect(error.detail).not.toContain("never-return-this-token");
     }),
   );
 
@@ -244,7 +279,7 @@ testLayer("CodexPluginMarketplace", (it) => {
           }),
         complete: () => Effect.void,
         disconnect: () => Effect.void,
-      } satisfies McpOAuthRuntime;
+      } satisfies McpOAuthRuntime["Service"];
       const runner = ProcessRunner.ProcessRunner.of({
         run: (input) =>
           Effect.succeed(
@@ -256,7 +291,10 @@ testLayer("CodexPluginMarketplace", (it) => {
       const marketplace = yield* makeWithOptions({
         mcpOAuthRuntime: oauthRuntime,
         readCursorMarketplaceHtml: () =>
-          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
       }).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, runner),
         Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
@@ -358,7 +396,7 @@ testLayer("CodexPluginMarketplace", (it) => {
             source: {
               source: "url",
               url: "https://github.com/figma/mcp-server-guide.git",
-              sha: "abc123",
+              ref: "feature/oauth-preview",
             },
           },
         ],
@@ -382,33 +420,33 @@ testLayer("CodexPluginMarketplace", (it) => {
           { type: "blob", path: "skills/design-to-code/SKILL.md" },
         ],
       });
+      const remoteUrls: Array<string> = [];
       const marketplace = yield* makeWithOptions({
         readCursorMarketplaceHtml: () =>
-          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
         readRemoteText: (url) =>
-          Effect.succeed(
-            url.includes("/git/trees/")
-              ? tree
-              : url.endsWith("/.claude-plugin/plugin.json")
-                ? JSON.stringify({
-                    name: "figma",
-                    version: "2.2.95",
-                    description: "Figma plugin for design workflows",
-                    author: { name: "Figma" },
-                  })
-                : url.endsWith("/skills/design-to-code/SKILL.md")
-                  ? [
-                      "---",
-                      "name: design-to-code",
-                      "description: Turn Figma designs into implementation-ready code.",
-                      "---",
-                    ].join("\n")
-                  : url.endsWith("/.mcp.json")
-                    ? JSON.stringify({
-                        mcpServers: { figma: { type: "http", url: "https://mcp.figma.com/mcp" } },
-                      })
-                    : null,
-          ),
+          Effect.sync(() => {
+            remoteUrls.push(url);
+            return url.includes("/commits/")
+              ? '{"sha":"abc123"}'
+              : url.includes("/git/trees/")
+                ? tree
+                : url.endsWith("/.claude-plugin/plugin.json")
+                  ? '{"name":"figma","version":"2.2.95","description":"Figma plugin for design workflows","author":{"name":"Figma"}}'
+                  : url.endsWith("/skills/design-to-code/SKILL.md")
+                    ? [
+                        "---",
+                        "name: design-to-code",
+                        "description: Turn Figma designs into implementation-ready code.",
+                        "---",
+                      ].join("\n")
+                    : url.endsWith("/.mcp.json")
+                      ? '{"mcpServers":{"figma":{"type":"http","url":"https://mcp.figma.com/mcp"}}}'
+                      : null;
+          }),
       }).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, runner),
         Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
@@ -422,6 +460,10 @@ testLayer("CodexPluginMarketplace", (it) => {
       assert.strictEqual(detail.extensions[0]?.kind, "hook");
       assert.strictEqual(detail.contents.hookCount, 1);
       expect(detail.logoUrl).toMatch(/Figma%20Icon\.svg$/u);
+      expect(remoteUrls).toContain(
+        "https://api.github.com/repos/figma/mcp-server-guide/commits/feature%2Foauth-preview",
+      );
+      expect(remoteUrls.some((url) => url.includes("/abc123/"))).toBe(true);
     }),
   );
 
@@ -586,6 +628,7 @@ testLayer("CodexPluginMarketplace", (it) => {
       // @effect-diagnostics-next-line preferSchemaOverJson:off
       const catalogJson = JSON.stringify({ installed: [record], available: [] });
       let runtimeInstalled = false;
+      let failLegacyRemoval = false;
       const runtime = {
         installed: () =>
           Effect.succeed(
@@ -612,13 +655,16 @@ testLayer("CodexPluginMarketplace", (it) => {
             runtimeRemovals.push(pluginId);
             runtimeInstalled = false;
           }),
-      } satisfies CodexPluginRuntime;
+      } satisfies CodexPluginRuntime["Service"];
       const runner = ProcessRunner.ProcessRunner.of({
         run: (input) =>
           Effect.sync(() => {
             commands.push({ command: input.command, args: input.args });
             if (input.command === "codex" && input.args[1] === "list") {
               return processOutput(catalogJson);
+            }
+            if (input.args.includes("remove") && failLegacyRemoval) {
+              return unavailableProcessOutput;
             }
             return processOutput("");
           }),
@@ -627,7 +673,10 @@ testLayer("CodexPluginMarketplace", (it) => {
         makeWithOptions({
           codexPluginRuntime: runtime,
           readCursorMarketplaceHtml: () =>
-            new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+            new PluginMarketplaceUnavailableError({
+              reason: "marketplaces_unavailable",
+              cause: new Error("Marketplace unavailable in test."),
+            }),
         }).pipe(
           Effect.provideService(ProcessRunner.ProcessRunner, runner),
           Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
@@ -652,11 +701,11 @@ testLayer("CodexPluginMarketplace", (it) => {
 
       const installedMarketplace = yield* makeMarketplace();
       assert.strictEqual((yield* installedMarketplace.detail(publicId)).installed, true);
-      assert.deepStrictEqual(yield* installedMarketplace.remove(publicId), {
-        pluginId: publicId,
-        installed: false,
-      });
+      failLegacyRemoval = true;
+      const removalError = yield* installedMarketplace.remove(publicId).pipe(Effect.flip);
+      assert.strictEqual(removalError._tag, "PluginMarketplaceOperationError");
       assert.deepStrictEqual(runtimeRemovals, ["hyperframes@openai-curated-remote"]);
+      assert.strictEqual((yield* installedMarketplace.detail(publicId)).installed, false);
     }),
   );
 
@@ -761,7 +810,10 @@ testLayer("CodexPluginMarketplace", (it) => {
       const marketplace = yield* makeWithOptions({
         platform: "darwin",
         readCursorMarketplaceHtml: () =>
-          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
       }).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, runner),
         Effect.provideService(HttpClient.HttpClient, unusedHttpClient),

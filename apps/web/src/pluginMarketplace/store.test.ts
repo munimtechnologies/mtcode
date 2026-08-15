@@ -117,6 +117,26 @@ describe("plugin marketplace store", () => {
     expect(usePluginMarketplaceStore.getState().catalogStatus).toBe("ready");
   });
 
+  it("queues forced catalog refreshes behind an in-flight request", async () => {
+    let resolveFirst: ((value: { plugins: PluginMarketplacePlugin[] }) => void) | undefined;
+    vi.mocked(fetchPluginMarketplaceCatalog)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ plugins: [{ ...summary, installed: true, enabled: true }] });
+
+    const first = usePluginMarketplaceStore.getState().loadCatalog(true);
+    const forced = usePluginMarketplaceStore.getState().loadCatalog(true);
+    resolveFirst?.({ plugins: [summary] });
+    await Promise.all([first, forced]);
+
+    expect(fetchPluginMarketplaceCatalog).toHaveBeenCalledTimes(2);
+    expect(usePluginMarketplaceStore.getState().plugins[0]?.installed).toBe(true);
+  });
+
   it("runs a real install mutation and refreshes catalog and details", async () => {
     vi.mocked(installPlugin).mockResolvedValue({ pluginId: summary.id, installed: true });
     vi.mocked(fetchPluginMarketplaceCatalog).mockResolvedValue({

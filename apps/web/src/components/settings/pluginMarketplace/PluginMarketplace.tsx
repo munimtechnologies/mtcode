@@ -17,7 +17,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "~/components/ui/empty";
-import { Input } from "~/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "~/components/ui/popover";
 import {
   Select,
@@ -262,10 +262,11 @@ export function PluginMarketplace() {
           </p>
         </div>
         <div className="flex min-w-0 items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-5 -translate-y-1/2 text-muted-foreground sm:size-4" />
-            <Input
-              nativeInput
+          <InputGroup className="min-w-0 flex-1">
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+            <InputGroupInput
               type="search"
               name="plugin-search"
               value={query}
@@ -273,9 +274,8 @@ export function PluginMarketplace() {
               placeholder="Search plugins"
               aria-label="Search plugins"
               size="lg"
-              className="[&_[data-slot=input]]:pl-10"
             />
-          </div>
+          </InputGroup>
           <Popover>
             <PopoverTrigger
               render={

@@ -402,7 +402,7 @@ export function selectMentionedCodexPlugins<T extends CodexPluginMentionCandidat
   plugins: ReadonlyArray<T>,
 ): ReadonlyArray<T> {
   const mentions = new Set(
-    [...prompt.matchAll(/(?:^|\s)\$([\w:-]+)/gu)].map((match) =>
+    [...prompt.matchAll(/(?<![\w$])\$([\w:-]+)/gu)].map((match) =>
       normalizePluginMention(match[1] ?? ""),
     ),
   );

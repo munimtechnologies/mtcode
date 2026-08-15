@@ -1,6 +1,7 @@
 import { assert, describe, it } from "vite-plus/test";
 
 import {
+  makeDevelopmentMacSigningSteps,
   makeDevelopmentLauncherSource,
   resolveElectronBinaryPath,
   resolveMacLauncherIconPaths,
@@ -77,6 +78,31 @@ describe("electron development launcher", () => {
       'const char *electronPath = "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron";',
     );
     assert.notInclude(source, "node_modules/electron");
+  });
+
+  it("signs nested macOS code inside-out before the entitled Electron executable and app", () => {
+    const appBundlePath = "/runtime/T3 Code (Dev).app";
+    const entitlementsPath = "/runtime/entitlements.dev.plist";
+    const frameworkPath = `${appBundlePath}/Contents/Frameworks/Electron Framework.framework`;
+    const helperPath = `${frameworkPath}/Versions/A/Helpers/Electron Helper.app`;
+    const steps = makeDevelopmentMacSigningSteps({
+      appBundlePath,
+      entitlementsPath,
+      nestedBundlePaths: [frameworkPath, helperPath],
+    });
+
+    assert.deepEqual(
+      steps.map(({ targetPath }) => targetPath),
+      [helperPath, frameworkPath, `${appBundlePath}/Contents/MacOS/Electron`, appBundlePath],
+    );
+    assert.include(steps[0].args, "--preserve-metadata=entitlements");
+    assert.notInclude(steps[0].args, "--entitlements");
+    assert.deepEqual(steps[2].args.slice(-3), [
+      "--entitlements",
+      entitlementsPath,
+      `${appBundlePath}/Contents/MacOS/Electron`,
+    ]);
+    assert.deepEqual(steps[3].args.slice(-3), ["--entitlements", entitlementsPath, appBundlePath]);
   });
 
   it("encodes non-printable environment bytes as fixed-width C escapes", () => {

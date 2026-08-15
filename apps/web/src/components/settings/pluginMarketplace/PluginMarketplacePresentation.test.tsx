@@ -45,6 +45,15 @@ describe("plugin marketplace presentation", () => {
     expect(markup).toContain('src="data:image/png;base64,aWNvbg=="');
   });
 
+  it("uses readable fallback logo text in light and dark themes", () => {
+    const markup = renderToStaticMarkup(
+      <PluginLogo plugin={{ ...plugin, hasLocalLogo: false, logoDataUrl: null, logoUrl: null }} />,
+    );
+
+    expect(markup).toMatch(/text-(?:blue|emerald|violet|amber|rose|cyan)-700/);
+    expect(markup).toMatch(/dark:text-(?:blue|emerald|violet|amber|rose|cyan)-300/);
+  });
+
   it("labels harness badges with each real bundle capability", () => {
     const markup = renderToStaticMarkup(<HarnessSupportBadges support={plugin.support} />);
 

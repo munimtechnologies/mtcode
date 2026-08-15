@@ -240,7 +240,7 @@ export type PluginMarketplaceUnavailableReason = typeof PluginMarketplaceUnavail
 
 export class PluginMarketplaceUnavailableError extends Schema.TaggedErrorClass<PluginMarketplaceUnavailableError>()(
   "PluginMarketplaceUnavailableError",
-  { reason: PluginMarketplaceUnavailableReason },
+  { reason: PluginMarketplaceUnavailableReason, cause: Schema.Defect() },
   { httpApiStatus: 503 },
 ) {
   [HttpServerRespondable.symbol]() {

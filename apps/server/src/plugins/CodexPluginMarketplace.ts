@@ -47,15 +47,16 @@ import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { ServerConfig } from "../config.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 import {
   makeMcpOAuthRuntime,
+  McpOAuthRuntime,
   type McpOAuthHarness,
-  type McpOAuthRuntime,
   type McpOAuthRuntimeError,
   type McpOAuthRuntimeOptions,
   type McpOAuthServerStatus,
@@ -222,6 +223,8 @@ const GitHubTree = Schema.Struct({
   ),
 });
 const decodeGitHubTreeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(GitHubTree));
+const GitHubCommit = Schema.Struct({ sha: Schema.String });
+const decodeGitHubCommitJson = Schema.decodeUnknownEffect(Schema.fromJsonString(GitHubCommit));
 
 const PluginManifestAuthor = Schema.Union([
   Schema.String,
@@ -312,19 +315,42 @@ class CodexPluginRuntimeError extends Schema.TaggedErrorClass<CodexPluginRuntime
   "CodexPluginRuntimeError",
   {
     operation: Schema.Literals(["installed", "install", "remove"]),
-    detail: Schema.String,
+    pluginRef: Schema.optional(Schema.String),
+    cause: Schema.Defect(),
   },
-) {}
+) {
+  override get message(): string {
+    const target = this.pluginRef === undefined ? "" : ` for '${this.pluginRef}'`;
+    return `Codex plugin runtime operation '${this.operation}' failed${target}.`;
+  }
+}
 const isCodexPluginRuntimeError = Schema.is(CodexPluginRuntimeError);
 
-export interface CodexPluginRuntime {
-  readonly installed: () => Effect.Effect<
-    ReadonlyArray<CodexRuntimePlugin>,
-    CodexPluginRuntimeError
-  >;
-  readonly install: (pluginName: string) => Effect.Effect<void, CodexPluginRuntimeError>;
-  readonly remove: (pluginId: string) => Effect.Effect<void, CodexPluginRuntimeError>;
+export class CodexPluginRuntime extends Context.Service<
+  CodexPluginRuntime,
+  {
+    readonly installed: () => Effect.Effect<
+      ReadonlyArray<CodexRuntimePlugin>,
+      CodexPluginRuntimeError
+    >;
+    readonly install: (pluginName: string) => Effect.Effect<void, CodexPluginRuntimeError>;
+    readonly remove: (pluginId: string) => Effect.Effect<void, CodexPluginRuntimeError>;
+  }
+>()("t3/plugins/CodexPluginMarketplace/CodexPluginRuntime") {}
+
+interface PluginProviderCommand {
+  readonly command: string;
+  readonly env: NodeJS.ProcessEnv;
 }
+
+class PluginProviderCommands extends Context.Service<
+  PluginProviderCommands,
+  {
+    readonly resolve: (
+      harness: McpOAuthHarness,
+    ) => Effect.Effect<PluginProviderCommand | undefined>;
+  }
+>()("t3/plugins/CodexPluginMarketplace/PluginProviderCommands") {}
 
 const SkillFrontmatter = Schema.Struct({
   name: Schema.optional(Schema.String),
@@ -496,14 +522,20 @@ function resolveNativeMcpStatus(
     ...(harness === "claude" ? [`plugin:${packageName.toLocaleLowerCase()}:${serverId}`] : []),
   ]);
   const endpoint = normalizedMcpEndpoint(server.url);
+  const packageNameLower = packageName.toLocaleLowerCase();
   return (
     statuses.find((status) => names.has(status.name.toLocaleLowerCase())) ??
     statuses.find(
-      (status) => harness === "claude" && status.name.toLocaleLowerCase().endsWith(`:${serverId}`),
-    ) ??
-    statuses.find(
       (status) => endpoint !== null && normalizedMcpEndpoint(status.url) === endpoint,
     ) ??
+    statuses.find((status) => {
+      const statusName = status.name.toLocaleLowerCase();
+      return (
+        harness === "claude" &&
+        statusName.includes(`:${packageNameLower}:`) &&
+        statusName.endsWith(`:${serverId}`)
+      );
+    }) ??
     null
   );
 }
@@ -513,16 +545,6 @@ function manifestDeveloper(manifest: PluginManifest, fallback = "Unknown"): stri
   if (interfaceDeveloper) return interfaceDeveloper;
   if (typeof manifest.author === "string") return cleanText(manifest.author, fallback);
   return cleanText(manifest.author?.name, fallback);
-}
-
-function safePluginPath(path: Path.Path, pluginRoot: string, relativePath: string): string | null {
-  if (!relativePath.startsWith("./")) return null;
-  const root = path.resolve(pluginRoot);
-  const resolved = path.resolve(root, relativePath);
-  const relative = path.relative(root, resolved);
-  if (relative === "" || relative === ".") return resolved;
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
-  return resolved;
 }
 
 function extractFrontmatter(markdown: string): string | null {
@@ -541,18 +563,14 @@ function sanitizeRemoteUrl(value: string | undefined): string | null {
     url.hash = "";
     return url.toString();
   } catch {
-    return value.split(/[?#]/u, 1)[0] ?? null;
+    return value.split(/[?#]/u, 1)[0]?.replace(/^([^:/?#]+:\/\/)[^/]*@/u, "$1") ?? null;
   }
 }
 
-function publicOperationDetail(stderr: string, code: number | null): string {
-  const detail = stderr
-    // eslint-disable-next-line no-control-regex -- Codex stderr can include ANSI color sequences.
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  const fallback = code === null ? "Codex did not report an exit status." : `Codex exited ${code}.`;
-  return (detail || fallback).slice(0, MAX_OPERATION_ERROR_LENGTH);
+function publicOperationDetail(code: number | null): string {
+  return code === null
+    ? "The provider did not report an exit status."
+    : `The provider exited with status ${code}.`;
 }
 
 function codexMarketplaceSourceType(record: CodexPluginRecord): "local" | "git" | "unknown" {
@@ -648,7 +666,8 @@ function remoteRawUrl(source: RemotePluginPreviewSource, relativePath: string): 
     .filter(Boolean)
     .map(encodeURIComponent)
     .join("/");
-  return `https://raw.githubusercontent.com/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/${encodeURIComponent(source.revision)}/${pathParts}`;
+  const revision = source.revision.split("/").map(encodeURIComponent).join("/");
+  return `https://raw.githubusercontent.com/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/${revision}/${pathParts}`;
 }
 
 function remoteBrowseUrl(source: RemotePluginPreviewSource, relativePath: string): string {
@@ -659,7 +678,8 @@ function remoteBrowseUrl(source: RemotePluginPreviewSource, relativePath: string
     .filter(Boolean)
     .map(encodeURIComponent)
     .join("/");
-  return `${source.repositoryUrl}/blob/${encodeURIComponent(source.revision)}/${pathParts}`;
+  const revision = source.revision.split("/").map(encodeURIComponent).join("/");
+  return `${source.repositoryUrl}/blob/${revision}/${pathParts}`;
 }
 
 function marketplaceExtension(
@@ -723,10 +743,11 @@ interface PluginMarketplaceOptions {
   >;
   readonly readRemoteText?: (url: string) => Effect.Effect<string | null>;
   readonly platform?: NodeJS.Platform;
-  readonly codexPluginRuntime?: CodexPluginRuntime;
-  readonly mcpOAuthRuntime?: McpOAuthRuntime;
+  readonly codexPluginRuntime?: CodexPluginRuntime["Service"];
+  readonly mcpOAuthRuntime?: McpOAuthRuntime["Service"];
   readonly commands?: McpOAuthRuntimeOptions["commands"];
-  readonly restrictToConfiguredCommands?: boolean;
+  readonly resolveCommand?: McpOAuthRuntimeOptions["resolveCommand"];
+  readonly cwd?: string;
   readonly onHarnessChanged?: (
     harness: Extract<PluginMarketplaceHarnessId, "codex" | "claude">,
   ) => Effect.Effect<void>;
@@ -741,8 +762,45 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     const cachedSnapshot = yield* Ref.make<CatalogSnapshot | null>(null);
     const snapshotLock = yield* Semaphore.make(1);
     const platform = options.platform ?? (yield* HostProcessPlatform);
-    const commandFor = (harness: McpOAuthHarness, fallback: string) =>
-      options.commands?.[harness] ?? { command: fallback, env: process.env };
+    const marketplaceCwd = options.cwd ?? process.cwd();
+    const commandFor = Effect.fn("CodexPluginMarketplace.commandFor")(function* (
+      harness: McpOAuthHarness,
+      fallback: string,
+    ) {
+      if (options.resolveCommand) return yield* options.resolveCommand(harness);
+      return options.commands?.[harness] ?? { command: fallback, env: process.env };
+    });
+
+    const safePluginAbsolutePath = Effect.fn("CodexPluginMarketplace.safePluginAbsolutePath")(
+      function* (pluginRoot: string, candidatePath: string) {
+        const [root, resolved] = yield* Effect.all(
+          [
+            fileSystem.realPath(path.resolve(pluginRoot)).pipe(Effect.option),
+            fileSystem.realPath(candidatePath).pipe(Effect.option),
+          ],
+          { concurrency: 2 },
+        );
+        if (Option.isNone(root) || Option.isNone(resolved)) return null;
+        const relative = path.relative(root.value, resolved.value);
+        if (relative === "" || relative === ".") return resolved.value;
+        if (
+          relative === ".." ||
+          relative.startsWith(`..${path.sep}`) ||
+          path.isAbsolute(relative)
+        ) {
+          return null;
+        }
+        return resolved.value;
+      },
+    );
+
+    const safePluginPath = Effect.fn("CodexPluginMarketplace.safePluginPath")(function* (
+      pluginRoot: string,
+      relativePath: string,
+    ) {
+      if (!relativePath.startsWith("./")) return null;
+      return yield* safePluginAbsolutePath(pluginRoot, path.resolve(pluginRoot, relativePath));
+    });
 
     const readJsonFile = Effect.fn("CodexPluginMarketplace.readJsonFile")(function* <
       S extends Schema.Top,
@@ -788,8 +846,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     ): Effect.fn.Return<ReadonlyArray<PluginMarketplaceSkill>> {
       if (!record.pluginRoot) return record.directSkills;
       const skillsPath = typeof manifest.skills === "string" ? manifest.skills : "./skills";
-      const skillsRoot = safePluginPath(
-        path,
+      const skillsRoot = yield* safePluginPath(
         record.pluginRoot,
         skillsPath.startsWith("./") ? skillsPath : `./${skillsPath}`,
       );
@@ -802,9 +859,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         entries,
         (entry) =>
           Effect.gen(function* () {
-            const markdown = yield* fileSystem
-              .readFileString(path.join(skillsRoot, entry, "SKILL.md"))
-              .pipe(Effect.option);
+            const skillPath = yield* safePluginAbsolutePath(
+              record.pluginRoot!,
+              path.join(skillsRoot, entry, "SKILL.md"),
+            );
+            if (!skillPath) return null;
+            const markdown = yield* fileSystem.readFileString(skillPath).pipe(Effect.option);
             if (Option.isNone(markdown)) return null;
             const frontmatter = extractFrontmatter(markdown.value);
             const metadata = frontmatter ? decodeSkillFrontmatter(frontmatter) : Option.none();
@@ -845,8 +905,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       if (!record.pluginRoot) return record.directMcpServers;
       const configuredPath =
         typeof manifest.mcpServers === "string" ? manifest.mcpServers : "./.mcp.json";
-      const mcpPath = safePluginPath(
-        path,
+      const mcpPath = yield* safePluginPath(
         record.pluginRoot,
         configuredPath.startsWith("./") ? configuredPath : `./${configuredPath}`,
       );
@@ -872,8 +931,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     ): Effect.fn.Return<ReadonlyArray<PluginMarketplaceApp>> {
       if (!record.pluginRoot) return [];
       const configuredPath = typeof manifest.apps === "string" ? manifest.apps : "./.app.json";
-      const appsPath = safePluginPath(
-        path,
+      const appsPath = yield* safePluginPath(
         record.pluginRoot,
         configuredPath.startsWith("./") ? configuredPath : `./${configuredPath}`,
       );
@@ -897,14 +955,20 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       kind: Extract<PluginMarketplaceExtensionKind, "command" | "agent" | "rule">,
     ): Effect.fn.Return<ReadonlyArray<PluginMarketplaceExtension>> {
       if (!record.pluginRoot) return [];
-      const root = path.join(record.pluginRoot, directory);
+      const root = yield* safePluginPath(record.pluginRoot, `./${directory}`);
+      if (!root) return [];
       const entries = yield* fileSystem.readDirectory(root).pipe(Effect.orElseSucceed(() => []));
       const markdownFiles = entries.filter((entry) => entry.toLocaleLowerCase().endsWith(".md"));
       return yield* Effect.forEach(
         markdownFiles,
         (entry) =>
           Effect.gen(function* () {
-            const markdown = yield* fileSystem.readFileString(path.join(root, entry));
+            const extensionPath = yield* safePluginAbsolutePath(
+              record.pluginRoot!,
+              path.join(root, entry),
+            );
+            if (!extensionPath) return null;
+            const markdown = yield* fileSystem.readFileString(extensionPath);
             const frontmatter = extractFrontmatter(markdown);
             const metadata = frontmatter ? decodeSkillFrontmatter(frontmatter) : Option.none();
             const id = entry.replace(/\.md$/iu, "");
@@ -918,7 +982,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         { concurrency: 16 },
       ).pipe(
         Effect.map((extensions) =>
-          extensions.flatMap((extension) => (Option.isSome(extension) ? [extension.value] : [])),
+          extensions.flatMap((extension) =>
+            Option.isSome(extension) && extension.value !== null ? [extension.value] : [],
+          ),
         ),
       );
     });
@@ -955,7 +1021,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     const findDefaultLogoPath = Effect.fn("CodexPluginMarketplace.findDefaultLogoPath")(function* (
       pluginRoot: string,
     ): Effect.fn.Return<string | null> {
-      const candidates = [
+      const relativeCandidates = [
         "assets/app-icon.png",
         "assets/app-icon.svg",
         "assets/logo.png",
@@ -966,13 +1032,13 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         "logo.svg",
         "icon.png",
         "icon.svg",
-      ].map((candidate) => path.join(pluginRoot, candidate));
-      const matches = yield* Effect.forEach(
-        candidates,
-        (candidate) => fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false)),
+      ];
+      const candidates = yield* Effect.forEach(
+        relativeCandidates,
+        (candidate) => safePluginPath(pluginRoot, `./${candidate}`),
         { concurrency: 10 },
       );
-      return candidates.find((_, index) => matches[index] === true) ?? null;
+      return candidates.find((candidate): candidate is string => candidate !== null) ?? null;
     });
 
     const readRemoteText = Effect.fn("CodexPluginMarketplace.readRemoteText")(function* (
@@ -1036,8 +1102,16 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     const loadRemotePreview = Effect.fn("CodexPluginMarketplace.loadRemotePreview")(function* (
       plugin: LoadedPlugin,
     ): Effect.fn.Return<PluginMarketplaceDetail> {
-      const source = plugin.record.remotePreviewSource;
+      let source = plugin.record.remotePreviewSource;
       if (!source || (!httpClient && !options.readRemoteText)) return plugin.detail;
+      if (source.revision.includes("/")) {
+        const commitUrl = `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/commits/${encodeURIComponent(source.revision)}`;
+        const commitRaw = yield* readRemoteText(commitUrl, 512 * 1024);
+        if (!commitRaw) return plugin.detail;
+        const commit = yield* decodeGitHubCommitJson(commitRaw).pipe(Effect.option);
+        if (Option.isNone(commit)) return plugin.detail;
+        source = { ...source, revision: commit.value.sha };
+      }
       const treeUrl = `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}/git/trees/${encodeURIComponent(source.revision)}?recursive=1`;
       const treeRaw = yield* readRemoteText(treeUrl, 8 * 1024 * 1024);
       if (!treeRaw) return plugin.detail;
@@ -1236,7 +1310,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       record: PluginSourceRecord,
     ): Effect.fn.Return<LoadedPlugin> {
       const manifestPath = record.pluginRoot
-        ? path.join(record.pluginRoot, record.manifestDirectory, "plugin.json")
+        ? yield* safePluginPath(record.pluginRoot, `./${record.manifestDirectory}/plugin.json`)
         : null;
       const manifest = manifestPath
         ? yield* readJsonFile(manifestPath, PluginManifest).pipe(
@@ -1284,8 +1358,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         manifest.interface?.logo ?? manifest.interface?.composerIcon ?? manifest.logo;
       const configuredLogoPath =
         logoRelativePath && record.pluginRoot
-          ? safePluginPath(
-              path,
+          ? yield* safePluginPath(
               record.pluginRoot,
               logoRelativePath.startsWith("./") ? logoRelativePath : `./${logoRelativePath}`,
             )
@@ -1379,15 +1452,19 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
 
     const readCodexPluginRecords = Effect.fn("CodexPluginMarketplace.readCodexPluginRecords")(
       function* () {
-        if (options.restrictToConfiguredCommands && !options.commands?.codex) {
-          return yield* new PluginMarketplaceUnavailableError({ reason: "codex_unavailable" });
+        const command = yield* commandFor("codex", "codex");
+        if (!command) {
+          return yield* new PluginMarketplaceUnavailableError({
+            reason: "codex_unavailable",
+            cause: new Error("No configured Codex provider is available."),
+          });
         }
-        const command = commandFor("codex", "codex");
         const [result, runtimeResult] = yield* Effect.all(
           [
             processRunner.run({
               command: command.command,
               args: ["plugin", "list", "--available", "--json"],
+              cwd: marketplaceCwd,
               env: command.env,
               timeout: "30 seconds",
               maxOutputBytes: 8 * 1024 * 1024,
@@ -1399,15 +1476,19 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           { concurrency: 2 },
         ).pipe(
           Effect.mapError(
-            () => new PluginMarketplaceUnavailableError({ reason: "codex_unavailable" }),
+            (cause) =>
+              new PluginMarketplaceUnavailableError({ reason: "codex_unavailable", cause }),
           ),
         );
         if (result.code !== 0 || result.stdoutInvalidUtf8 || result.stdoutTruncated) {
-          return yield* new PluginMarketplaceUnavailableError({ reason: "codex_unavailable" });
+          return yield* new PluginMarketplaceUnavailableError({
+            reason: "codex_unavailable",
+            cause: new Error(`Codex catalog command exited with status ${result.code}.`),
+          });
         }
         const decoded = yield* decodeCodexPluginListJson(result.stdout).pipe(
           Effect.mapError(
-            () => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid" }),
+            (cause) => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid", cause }),
           ),
         );
         const runtimeInventoryKnown = runtimeResult !== null && Result.isSuccess(runtimeResult);
@@ -1467,17 +1548,19 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
 
     const readClaudePluginRecords = Effect.fn("CodexPluginMarketplace.readClaudePluginRecords")(
       function* () {
-        if (options.restrictToConfiguredCommands && !options.commands?.claude) {
+        const command = yield* commandFor("claude", "claude");
+        if (!command) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "marketplaces_unavailable",
+            cause: new Error("No configured Claude Code provider is available."),
           });
         }
-        const command = commandFor("claude", "claude");
         const [pluginsResult, marketplacesResult] = yield* Effect.all(
           [
             processRunner.run({
               command: command.command,
               args: ["plugin", "list", "--available", "--json"],
+              cwd: marketplaceCwd,
               env: command.env,
               timeout: "30 seconds",
               maxOutputBytes: 8 * 1024 * 1024,
@@ -1485,6 +1568,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             processRunner.run({
               command: command.command,
               args: ["plugin", "marketplace", "list", "--json"],
+              cwd: marketplaceCwd,
               env: command.env,
               timeout: "30 seconds",
               maxOutputBytes: 1024 * 1024,
@@ -1499,11 +1583,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         ) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "marketplaces_unavailable",
+            cause: new Error(`Claude plugin command exited with status ${pluginsResult.code}.`),
           });
         }
         const pluginList = yield* decodeClaudePluginListJson(pluginsResult.stdout).pipe(
           Effect.mapError(
-            () => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid" }),
+            (cause) => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid", cause }),
           ),
         );
         const marketplaces =
@@ -1517,10 +1602,14 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         );
         const marketplaceMetadata = new Map<string, MarketplaceManifestPlugin>();
         for (const marketplace of marketplaces) {
-          const manifest = yield* readJsonFile(
-            path.join(marketplace.installLocation, ".claude-plugin", "marketplace.json"),
-            MarketplaceManifest,
-          ).pipe(Effect.option);
+          const manifestPath = yield* safePluginPath(
+            marketplace.installLocation,
+            "./.claude-plugin/marketplace.json",
+          );
+          if (!manifestPath) continue;
+          const manifest = yield* readJsonFile(manifestPath, MarketplaceManifest).pipe(
+            Effect.option,
+          );
           if (Option.isNone(manifest)) continue;
           for (const plugin of manifest.value.plugins) {
             marketplaceMetadata.set(`${plugin.name}@${marketplace.name}`, plugin);
@@ -1546,50 +1635,52 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           });
         }
 
-        return [...available.values()].map((plugin): PluginSourceRecord => {
-          const installedPlugin = installed.get(plugin.pluginId);
-          const metadata = marketplaceMetadata.get(plugin.pluginId);
-          const marketplaceRoot = marketplaceRoots.get(plugin.marketplaceName);
-          const localSource = typeof plugin.source === "string" ? plugin.source : null;
-          const marketplacePath =
-            marketplaceRoot && localSource?.startsWith("./")
-              ? safePluginPath(path, marketplaceRoot, localSource)
-              : null;
-          const author = metadata?.author;
-          const developer =
-            typeof author === "string" ? author : cleanText(author?.name, "Claude Marketplace");
-          const previewSource = remotePluginPreviewSource(plugin.source);
-          const homepage = sanitizeRemoteUrl(metadata?.homepage);
-          return {
-            pluginId: publicPluginId("claude", plugin.pluginId),
-            sourcePluginId: plugin.pluginId,
-            harness: "claude",
-            name: plugin.name,
-            marketplaceName: plugin.marketplaceName,
-            version: installedPlugin?.version ?? metadata?.version ?? "Latest",
-            installed: installedPlugin !== undefined,
-            enabled: installedPlugin?.enabled ?? false,
-            pluginRoot: installedPlugin?.installPath ?? marketplacePath,
-            manifestDirectory: ".claude-plugin",
-            marketplaceSourceType: localSource ? "local" : "git",
-            installPolicy: "AVAILABLE",
-            authPolicy: "ON_INSTALL",
-            fallbackDescription: cleanText(metadata?.description, plugin.description),
-            fallbackDisplayName: cleanText(metadata?.displayName, displayNameFromId(plugin.name)),
-            fallbackDeveloper: developer,
-            fallbackCategory: normalizeCategory(metadata?.category),
-            fallbackHomepage: homepage,
-            fallbackRepository: previewSource?.repositoryUrl ?? null,
-            marketplaceUrl: null,
-            externalLogoUrl:
-              publicFaviconUrl(homepage) ?? githubAvatarUrl(previewSource?.repositoryUrl),
-            directSkills: [],
-            directMcpServers: [],
-            directExtensions: [],
-            remotePreviewSource: previewSource,
-            hasHooks: false,
-          };
-        });
+        return yield* Effect.forEach(available.values(), (plugin) =>
+          Effect.gen(function* () {
+            const installedPlugin = installed.get(plugin.pluginId);
+            const metadata = marketplaceMetadata.get(plugin.pluginId);
+            const marketplaceRoot = marketplaceRoots.get(plugin.marketplaceName);
+            const localSource = typeof plugin.source === "string" ? plugin.source : null;
+            const marketplacePath =
+              marketplaceRoot && localSource?.startsWith("./")
+                ? yield* safePluginPath(marketplaceRoot, localSource)
+                : null;
+            const author = metadata?.author;
+            const developer =
+              typeof author === "string" ? author : cleanText(author?.name, "Claude Marketplace");
+            const previewSource = remotePluginPreviewSource(plugin.source);
+            const homepage = sanitizeRemoteUrl(metadata?.homepage);
+            return {
+              pluginId: publicPluginId("claude", plugin.pluginId),
+              sourcePluginId: plugin.pluginId,
+              harness: "claude",
+              name: plugin.name,
+              marketplaceName: plugin.marketplaceName,
+              version: installedPlugin?.version ?? metadata?.version ?? "Latest",
+              installed: installedPlugin !== undefined,
+              enabled: installedPlugin?.enabled ?? false,
+              pluginRoot: installedPlugin?.installPath ?? marketplacePath,
+              manifestDirectory: ".claude-plugin",
+              marketplaceSourceType: localSource ? "local" : "git",
+              installPolicy: "AVAILABLE",
+              authPolicy: "ON_INSTALL",
+              fallbackDescription: cleanText(metadata?.description, plugin.description),
+              fallbackDisplayName: cleanText(metadata?.displayName, displayNameFromId(plugin.name)),
+              fallbackDeveloper: developer,
+              fallbackCategory: normalizeCategory(metadata?.category),
+              fallbackHomepage: homepage,
+              fallbackRepository: previewSource?.repositoryUrl ?? null,
+              marketplaceUrl: null,
+              externalLogoUrl:
+                publicFaviconUrl(homepage) ?? githubAvatarUrl(previewSource?.repositoryUrl),
+              directSkills: [],
+              directMcpServers: [],
+              directExtensions: [],
+              remotePreviewSource: previewSource,
+              hasHooks: false,
+            } satisfies PluginSourceRecord;
+          }),
+        );
       },
     );
 
@@ -1601,33 +1692,44 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               if (!httpClient) {
                 return yield* new PluginMarketplaceUnavailableError({
                   reason: "marketplaces_unavailable",
+                  cause: new Error("HTTP client is unavailable."),
                 });
               }
               const response = yield* httpClient.get("https://cursor.com/marketplace").pipe(
                 Effect.flatMap(HttpClientResponse.filterStatusOk),
                 Effect.mapError(
-                  () =>
-                    new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+                  (cause) =>
+                    new PluginMarketplaceUnavailableError({
+                      reason: "marketplaces_unavailable",
+                      cause,
+                    }),
                 ),
               );
               const body = yield* response.text.pipe(
                 Effect.mapError(
-                  () =>
-                    new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+                  (cause) =>
+                    new PluginMarketplaceUnavailableError({
+                      reason: "marketplaces_unavailable",
+                      cause,
+                    }),
                 ),
               );
               if (body.length > 8 * 1024 * 1024) {
-                return yield* new PluginMarketplaceUnavailableError({ reason: "catalog_invalid" });
+                return yield* new PluginMarketplaceUnavailableError({
+                  reason: "catalog_invalid",
+                  cause: new Error("Cursor marketplace response exceeded the size limit."),
+                });
               }
               return body;
             });
         const parsed = yield* Effect.try({
           try: () => parseCursorMarketplaceHtml(html),
-          catch: () => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid" }),
+          catch: (cause) =>
+            new PluginMarketplaceUnavailableError({ reason: "catalog_invalid", cause }),
         });
         const plugins = yield* decodeCursorMarketplacePlugins(parsed).pipe(
           Effect.mapError(
-            () => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid" }),
+            (cause) => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid", cause }),
           ),
         );
         const home = process.env.HOME ?? process.env.USERPROFILE;
@@ -1748,7 +1850,13 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         Result.isSuccess(result) ? [...result.success] : [],
       );
       if (sourceRecords.length === 0) {
-        return yield* new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" });
+        const causes = sourceResults.flatMap((result) =>
+          Result.isFailure(result) ? [result.failure] : [],
+        );
+        return yield* new PluginMarketplaceUnavailableError({
+          reason: "marketplaces_unavailable",
+          cause: causes.length === 1 ? causes[0] : new AggregateError(causes),
+        });
       }
       const sourcePlugins = yield* Effect.forEach(sourceRecords, loadPlugin, { concurrency: 16 });
       const loadedPlugins = sourcePlugins.map((plugin) => ({
@@ -1977,7 +2085,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             status: "unavailable",
             detail:
               result && Result.isFailure(result)
-                ? result.failure.detail
+                ? result.failure.message
                 : `${harness} MCP status is unavailable on this environment.`,
             authorizationUrl: null,
             callbackRequired: false,
@@ -2064,7 +2172,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               new PluginMarketplaceOperationError({
                 operation: "authenticate",
                 pluginId,
-                detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
               }),
           ),
         );
@@ -2099,7 +2207,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               new PluginMarketplaceOperationError({
                 operation: "authenticate",
                 pluginId,
-                detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
               }),
           ),
         );
@@ -2128,7 +2236,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               new PluginMarketplaceOperationError({
                 operation: "authenticate",
                 pluginId,
-                detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
               }),
           ),
         );
@@ -2152,7 +2260,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             new PluginMarketplaceOperationError({
               operation: "authenticate",
               pluginId,
-              detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+              detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
             }),
         ),
       );
@@ -2222,6 +2330,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         .run({
           command: "/usr/bin/open",
           args: [target],
+          cwd: marketplaceCwd,
           timeout: "30 seconds",
           maxOutputBytes: 64 * 1024,
         })
@@ -2239,7 +2348,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         return yield* new PluginMarketplaceOperationError({
           operation: "setup",
           pluginId,
-          detail: publicOperationDetail(result.stderr, result.code),
+          detail: publicOperationDetail(result.code),
         });
       }
       return { pluginId, action, opened: true } satisfies PluginMarketplaceSetupResult;
@@ -2284,6 +2393,10 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       }
       if (usesCodexRuntime && options.codexPluginRuntime) {
         const runtime = options.codexPluginRuntime;
+        const invalidateCodex = Effect.gen(function* () {
+          yield* invalidateSnapshot;
+          if (options.onHarnessChanged) yield* options.onHarnessChanged("codex");
+        });
         if (operation === "install") {
           yield* runtime.install(plugin.record.name).pipe(
             Effect.mapError(
@@ -2309,11 +2422,21 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         }
 
         if (plugin.record.codexLegacyInstalled) {
+          const codexCommand = yield* commandFor("codex", "codex");
+          if (!codexCommand) {
+            yield* invalidateCodex;
+            return yield* new PluginMarketplaceOperationError({
+              operation,
+              pluginId,
+              detail: "The configured Codex provider is unavailable.",
+            });
+          }
           const legacyRemoval = yield* processRunner
             .run({
-              command: commandFor("codex", "codex").command,
+              command: codexCommand.command,
               args: ["plugin", "remove", plugin.record.sourcePluginId, "--json"],
-              env: commandFor("codex", "codex").env,
+              cwd: marketplaceCwd,
+              env: codexCommand.env,
               timeout: "60 seconds",
               maxOutputBytes: 1024 * 1024,
             })
@@ -2326,33 +2449,42 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                     detail: `Codex could not remove the local ${plugin.detail.name} package.`,
                   }),
               ),
+              Effect.tapError(() => invalidateCodex),
             );
           if (legacyRemoval.code !== 0) {
+            yield* invalidateCodex;
             return yield* new PluginMarketplaceOperationError({
               operation,
               pluginId,
-              detail: publicOperationDetail(legacyRemoval.stderr, legacyRemoval.code),
+              detail: publicOperationDetail(legacyRemoval.code),
             });
           }
         }
 
-        yield* invalidateSnapshot;
-        if (options.onHarnessChanged) yield* options.onHarnessChanged("codex");
+        yield* invalidateCodex;
         return {
           pluginId,
           installed: operation === "install",
         } satisfies PluginMarketplaceMutationResult;
       }
       const command = operation === "install" ? "add" : "remove";
+      const providerCommand = yield* commandFor(plugin.record.harness, plugin.record.harness);
+      if (!providerCommand) {
+        return yield* new PluginMarketplaceOperationError({
+          operation,
+          pluginId,
+          detail: `The configured ${plugin.record.harness === "codex" ? "Codex" : "Claude Code"} provider is unavailable.`,
+        });
+      }
       const invocation =
         plugin.record.harness === "codex"
           ? {
-              command: commandFor("codex", "codex").command,
+              command: providerCommand.command,
               args: ["plugin", command, plugin.record.sourcePluginId, "--json"],
-              env: commandFor("codex", "codex").env,
+              env: providerCommand.env,
             }
           : {
-              command: commandFor("claude", "claude").command,
+              command: providerCommand.command,
               args: [
                 "plugin",
                 operation === "install" ? "install" : "uninstall",
@@ -2361,11 +2493,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 "user",
                 "--yes",
               ],
-              env: commandFor("claude", "claude").env,
+              env: providerCommand.env,
             };
       const result = yield* processRunner
         .run({
           ...invocation,
+          cwd: marketplaceCwd,
           timeout: "60 seconds",
           maxOutputBytes: 1024 * 1024,
         })
@@ -2383,7 +2516,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         return yield* new PluginMarketplaceOperationError({
           operation,
           pluginId,
-          detail: publicOperationDetail(result.stderr, result.code),
+          detail: publicOperationDetail(result.code),
         });
       }
       yield* invalidateSnapshot;
@@ -2410,21 +2543,42 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     });
   });
 
-const makeCodexPluginRuntime = (command = { command: "codex", env: process.env }) =>
+const makeCodexPluginRuntime = (
+  options: {
+    readonly command?: { readonly command: string; readonly env: NodeJS.ProcessEnv };
+    readonly resolveCommand?: () => Effect.Effect<
+      { readonly command: string; readonly env: NodeJS.ProcessEnv } | undefined
+    >;
+    readonly cwd?: string;
+  } = {},
+) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const cwd = options.cwd ?? process.cwd();
     const withClient = <A, E>(
+      operation: CodexPluginRuntimeError["operation"],
+      pluginRef: string | undefined,
       use: (client: CodexClient.CodexAppServerClient["Service"]) => Effect.Effect<A, E>,
     ) =>
       Effect.scoped(
         Effect.gen(function* () {
+          const command = options.resolveCommand
+            ? yield* options.resolveCommand()
+            : (options.command ?? { command: "codex", env: process.env });
+          if (!command) {
+            return yield* new CodexPluginRuntimeError({
+              operation,
+              ...(pluginRef === undefined ? {} : { pluginRef }),
+              cause: new Error("Codex provider is unavailable."),
+            });
+          }
           const spawnCommand = yield* resolveSpawnCommand(command.command, ["app-server"], {
             env: command.env,
             extendEnv: true,
           });
           const child = yield* spawner.spawn(
             ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-              cwd: process.cwd(),
+              cwd,
               env: command.env,
               extendEnv: true,
               shell: spawnCommand.shell,
@@ -2471,25 +2625,23 @@ const makeCodexPluginRuntime = (command = { command: "codex", env: process.env }
         })),
       );
 
-    return {
+    return CodexPluginRuntime.of({
       installed: () =>
-        withClient((client) =>
+        withClient("installed", undefined, (client) =>
           client
-            .request("plugin/installed", { cwds: [process.cwd()] })
+            .request("plugin/installed", { cwds: [cwd] })
             .pipe(Effect.map((response) => normalize(response.marketplaces))),
         ).pipe(
-          Effect.mapError(
-            () =>
-              new CodexPluginRuntimeError({
-                operation: "installed",
-                detail: "Codex could not report its installed runtime plugins.",
-              }),
+          Effect.mapError((cause) =>
+            isCodexPluginRuntimeError(cause)
+              ? cause
+              : new CodexPluginRuntimeError({ operation: "installed", cause }),
           ),
         ),
       install: (pluginName) =>
-        withClient((client) =>
+        withClient("install", pluginName, (client) =>
           Effect.gen(function* () {
-            const response = yield* client.request("plugin/list", { cwds: [process.cwd()] });
+            const response = yield* client.request("plugin/list", { cwds: [cwd] });
             const candidate = normalize(response.marketplaces).find(
               (plugin) =>
                 plugin.name.toLocaleLowerCase() === pluginName.toLocaleLowerCase() &&
@@ -2499,7 +2651,8 @@ const makeCodexPluginRuntime = (command = { command: "codex", env: process.env }
             if (!candidate?.remotePluginId) {
               return yield* new CodexPluginRuntimeError({
                 operation: "install",
-                detail: `Plugin '${pluginName}' was not found in the Codex runtime catalog.`,
+                pluginRef: pluginName,
+                cause: new Error("Plugin was not found in the Codex runtime catalog."),
               });
             }
             yield* client.request("plugin/install", {
@@ -2513,107 +2666,128 @@ const makeCodexPluginRuntime = (command = { command: "codex", env: process.env }
               ? error
               : new CodexPluginRuntimeError({
                   operation: "install",
-                  detail: `Codex could not install '${pluginName}' from its runtime catalog.`,
+                  pluginRef: pluginName,
+                  cause: error,
                 }),
           ),
         ),
       remove: (pluginId) =>
-        withClient((client) =>
+        withClient("remove", pluginId, (client) =>
           Effect.gen(function* () {
             yield* client.request("plugin/uninstall", { pluginId });
-            const installed = yield* client.request("plugin/installed", { cwds: [process.cwd()] });
+            const installed = yield* client.request("plugin/installed", { cwds: [cwd] });
             const remaining = normalize(installed.marketplaces).find(
               (plugin) => plugin.id === pluginId && plugin.installed,
             );
             if (remaining) {
               return yield* new CodexPluginRuntimeError({
                 operation: "remove",
-                detail: `Codex still reports '${pluginId}' as installed after removal.`,
+                pluginRef: pluginId,
+                cause: new Error("Plugin remains installed after removal."),
               });
             }
           }),
         ).pipe(
-          Effect.mapError(
-            () =>
-              new CodexPluginRuntimeError({
-                operation: "remove",
-                detail: `Codex could not uninstall '${pluginId}' from its runtime catalog.`,
-              }),
+          Effect.mapError((cause) =>
+            isCodexPluginRuntimeError(cause)
+              ? cause
+              : new CodexPluginRuntimeError({ operation: "remove", pluginRef: pluginId, cause }),
           ),
         ),
-    } satisfies CodexPluginRuntime;
+    });
   });
 
-export const make = Effect.gen(function* () {
-  const settingsService = yield* ServerSettingsService;
-  const settings = yield* settingsService.getSettings.pipe(Effect.orDie);
-  const configuredInstances = Object.values(settings.providerInstances).filter(
-    (instance) => instance.enabled !== false,
-  );
-  const singleInstance = (driver: string) => {
-    const matches = configuredInstances.filter((instance) => instance.driver === driver);
-    return matches.length === 1 ? matches[0] : undefined;
-  };
-  let commands: NonNullable<McpOAuthRuntimeOptions["commands"]> = {};
-  const codexInstance = singleInstance("codex");
-  const codexConfig = codexInstance
-    ? decodeCodexSettingsOption(codexInstance.config ?? {})
-    : Option.none();
-  if (Option.isSome(codexConfig) && codexInstance) {
-    const layout = yield* resolveCodexHomeLayout(codexConfig.value);
-    commands = {
-      ...commands,
-      codex: {
-        command: codexConfig.value.binaryPath,
+const makePluginProviderCommands = Effect.gen(function* () {
+  const settingsService = yield* ServerSettings.ServerSettingsService;
+  const path = yield* Path.Path;
+
+  const resolve = Effect.fn("PluginProviderCommands.resolve")(function* (
+    harness: McpOAuthHarness,
+  ): Effect.fn.Return<PluginProviderCommand | undefined> {
+    const settings = yield* settingsService.getSettings.pipe(Effect.orDie);
+    const driver = harness === "claude" ? "claudeAgent" : harness;
+    const matches = Object.values(settings.providerInstances).filter(
+      (instance) => instance.enabled !== false && instance.driver === driver,
+    );
+    if (matches.length !== 1) return undefined;
+    const instance = matches[0]!;
+    const environment = mergeProviderInstanceEnvironment(instance.environment ?? []);
+
+    if (harness === "codex") {
+      const config = decodeCodexSettingsOption(instance.config ?? {});
+      if (Option.isNone(config)) return undefined;
+      const layout = yield* resolveCodexHomeLayout(config.value).pipe(
+        Effect.provideService(Path.Path, path),
+      );
+      return {
+        command: config.value.binaryPath,
         env: {
-          ...mergeProviderInstanceEnvironment(codexInstance.environment ?? []),
+          ...environment,
           ...(layout.effectiveHomePath ? { CODEX_HOME: layout.effectiveHomePath } : {}),
         },
-      },
-    };
-  }
-  const claudeInstance = singleInstance("claudeAgent");
-  const claudeConfig = claudeInstance
-    ? decodeClaudeSettingsOption(claudeInstance.config ?? {})
-    : Option.none();
-  if (Option.isSome(claudeConfig) && claudeInstance) {
-    commands = {
-      ...commands,
-      claude: {
-        command: claudeConfig.value.binaryPath,
-        env: yield* makeClaudeEnvironment(
-          claudeConfig.value,
-          mergeProviderInstanceEnvironment(claudeInstance.environment ?? []),
+      };
+    }
+    if (harness === "claude") {
+      const config = decodeClaudeSettingsOption(instance.config ?? {});
+      if (Option.isNone(config)) return undefined;
+      return {
+        command: config.value.binaryPath,
+        env: yield* makeClaudeEnvironment(config.value, environment).pipe(
+          Effect.provideService(Path.Path, path),
         ),
-      },
-    };
-  }
-  const cursorInstance = singleInstance("cursor");
-  const cursorConfig = cursorInstance
-    ? decodeCursorSettingsOption(cursorInstance.config ?? {})
-    : Option.none();
-  if (Option.isSome(cursorConfig) && cursorInstance) {
-    commands = {
-      ...commands,
-      cursor: {
-        command: cursorConfig.value.binaryPath,
-        env: mergeProviderInstanceEnvironment(cursorInstance.environment ?? []),
-      },
-    };
-  }
-  const codexPluginRuntime = commands.codex
-    ? yield* makeCodexPluginRuntime(commands.codex)
-    : undefined;
-  const mcpOAuthRuntime = yield* makeMcpOAuthRuntime({ commands });
+      };
+    }
+    const config = decodeCursorSettingsOption(instance.config ?? {});
+    return Option.isSome(config)
+      ? { command: config.value.binaryPath, env: environment }
+      : undefined;
+  });
+
+  return PluginProviderCommands.of({ resolve });
+});
+
+export const make = Effect.gen(function* () {
+  const serverConfig = yield* ServerConfig;
+  const providerCommands = yield* PluginProviderCommands;
+  const codexPluginRuntime = yield* CodexPluginRuntime;
+  const mcpOAuthRuntime = yield* McpOAuthRuntime;
 
   return yield* makeWithOptions({
-    ...(codexPluginRuntime ? { codexPluginRuntime } : {}),
+    codexPluginRuntime,
     mcpOAuthRuntime,
-    commands,
-    restrictToConfiguredCommands: true,
+    resolveCommand: providerCommands.resolve,
+    cwd: serverConfig.cwd,
   });
 });
 
+const providerCommandsLayer = Layer.effect(PluginProviderCommands, makePluginProviderCommands);
+
+const runtimeLayer = Layer.merge(
+  Layer.effect(
+    CodexPluginRuntime,
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
+      const providerCommands = yield* PluginProviderCommands;
+      return yield* makeCodexPluginRuntime({
+        cwd: serverConfig.cwd,
+        resolveCommand: () => providerCommands.resolve("codex"),
+      });
+    }),
+  ),
+  Layer.effect(
+    McpOAuthRuntime,
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
+      const providerCommands = yield* PluginProviderCommands;
+      return yield* makeMcpOAuthRuntime({
+        cwd: serverConfig.cwd,
+        resolveCommand: providerCommands.resolve,
+      });
+    }),
+  ),
+).pipe(Layer.provide(providerCommandsLayer));
+
 export const layer = Layer.effect(CodexPluginMarketplace, make).pipe(
+  Layer.provide(Layer.merge(runtimeLayer, providerCommandsLayer)),
   Layer.provide(ProcessRunner.layer),
 );

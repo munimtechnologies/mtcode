@@ -7,13 +7,13 @@ import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { annotateEnvironmentRequest, requireEnvironmentScope } from "../auth/http.ts";
-import { CodexPluginMarketplace } from "./CodexPluginMarketplace.ts";
+import * as CodexPluginMarketplace from "./CodexPluginMarketplace.ts";
 
 export const pluginMarketplaceHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "plugins",
   Effect.fnUntraced(function* (handlers) {
-    const marketplace = yield* CodexPluginMarketplace;
+    const marketplace = yield* CodexPluginMarketplace.CodexPluginMarketplace;
 
     return handlers
       .handle(

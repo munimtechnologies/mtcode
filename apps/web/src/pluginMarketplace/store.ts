@@ -48,9 +48,11 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
 
   loadCatalog: async (force = false) => {
     if (!force && get().catalogStatus === "ready") return;
-    if (catalogRequest) return catalogRequest;
+    const predecessor = catalogRequest;
+    if (predecessor && !force) return predecessor;
 
     const request = (async () => {
+      if (predecessor) await predecessor.catch(() => undefined);
       set((state) => ({
         catalogStatus: state.plugins.length > 0 ? "ready" : "loading",
         catalogError: null,
@@ -70,21 +72,26 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
     try {
       await request;
     } finally {
-      catalogRequest = null;
+      if (catalogRequest === request) catalogRequest = null;
     }
   },
 
   loadDetail: async (pluginId, force = false) => {
     const current = get().details[pluginId];
     if (!force && current?.status === "ready") return;
-    const existing = detailRequests.get(pluginId);
-    if (existing) return existing;
+    const predecessor = detailRequests.get(pluginId);
+    if (predecessor && !force) return predecessor;
 
     const request = (async () => {
+      if (predecessor) await predecessor.catch(() => undefined);
       set((state) => ({
         details: {
           ...state.details,
-          [pluginId]: { status: "loading", plugin: current?.plugin ?? null, error: null },
+          [pluginId]: {
+            status: "loading",
+            plugin: state.details[pluginId]?.plugin ?? null,
+            error: null,
+          },
         },
       }));
       try {
@@ -100,8 +107,8 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
           details: {
             ...state.details,
             [pluginId]: {
-              status: current?.plugin ? "ready" : "error",
-              plugin: current?.plugin ?? null,
+              status: state.details[pluginId]?.plugin ? "ready" : "error",
+              plugin: state.details[pluginId]?.plugin ?? null,
               error: pluginMarketplaceErrorMessage(error),
             },
           },
@@ -113,7 +120,7 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
     try {
       await request;
     } finally {
-      detailRequests.delete(pluginId);
+      if (detailRequests.get(pluginId) === request) detailRequests.delete(pluginId);
     }
   },
 

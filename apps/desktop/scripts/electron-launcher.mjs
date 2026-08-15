@@ -20,7 +20,7 @@ export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 19;
+const LAUNCHER_VERSION = 20;
 const APPLE_EVENTS_USAGE_DESCRIPTION =
   "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.";
 const DEVELOPMENT_MAC_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -323,19 +323,89 @@ function patchHelperBundleInfoPlists(appBundlePath) {
   }
 }
 
-function signDevelopmentMacBundle(appBundlePath, runtimeDir) {
+function findNestedMacBundlePaths(appBundlePath) {
+  const nestedBundlePaths = [];
+  const directories = [NodePath.join(appBundlePath, "Contents", "Frameworks")];
+
+  while (directories.length > 0) {
+    const directory = directories.pop();
+    if (!directory || !NodeFS.existsSync(directory)) {
+      continue;
+    }
+
+    for (const entry of NodeFS.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const entryPath = NodePath.join(directory, entry.name);
+      directories.push(entryPath);
+      if (entry.name.endsWith(".app") || entry.name.endsWith(".framework")) {
+        nestedBundlePaths.push(entryPath);
+      }
+    }
+  }
+
+  return nestedBundlePaths;
+}
+
+export function makeDevelopmentMacSigningSteps({
+  appBundlePath,
+  entitlementsPath,
+  nestedBundlePaths,
+}) {
+  const depth = (path) => NodePath.relative(appBundlePath, path).split(NodePath.sep).length;
+  const nestedSigningSteps = [...new Set(nestedBundlePaths)]
+    .sort((left, right) => depth(right) - depth(left) || left.localeCompare(right))
+    .map((targetPath) => ({
+      targetPath,
+      args: [
+        "--force",
+        "--sign",
+        "-",
+        "--options",
+        "runtime",
+        "--preserve-metadata=entitlements",
+        targetPath,
+      ],
+    }));
+  const entitledSigningStep = (targetPath) => ({
+    targetPath,
+    args: [
+      "--force",
+      "--sign",
+      "-",
+      "--options",
+      "runtime",
+      "--entitlements",
+      entitlementsPath,
+      targetPath,
+    ],
+  });
+  const { runtimeElectronBinaryPath } = resolveMacLauncherPaths(appBundlePath);
+
+  return [
+    ...nestedSigningSteps,
+    entitledSigningStep(runtimeElectronBinaryPath),
+    entitledSigningStep(appBundlePath),
+  ];
+}
+
+function signDevelopmentMacBundle(appBundlePath, runtimeDir, includeNestedCode) {
   const entitlementsPath = NodePath.join(runtimeDir, "entitlements.dev.plist");
   NodeFS.writeFileSync(entitlementsPath, DEVELOPMENT_MAC_ENTITLEMENTS);
-  runChecked("codesign", [
-    "--force",
-    "--sign",
-    "-",
-    "--options",
-    "runtime",
-    "--entitlements",
-    entitlementsPath,
+  const signingSteps = makeDevelopmentMacSigningSteps({
     appBundlePath,
-  ]);
+    entitlementsPath,
+    nestedBundlePaths: includeNestedCode ? findNestedMacBundlePaths(appBundlePath) : [],
+  });
+
+  for (const { targetPath, args } of signingSteps) {
+    if (!includeNestedCode && targetPath !== appBundlePath) {
+      continue;
+    }
+    runChecked("codesign", args);
+  }
 }
 
 function readJson(path) {
@@ -391,7 +461,7 @@ function buildMacLauncher(electronBinaryPath) {
       // so refresh its fallback environment on every launch. Never let a value
       // captured by an older parent app override the live dev-runner environment.
       writeDevelopmentLauncherBinary(launcherBinaryPath, runtimeElectronBinaryPath, runtimeDir);
-      signDevelopmentMacBundle(targetAppBundlePath, runtimeDir);
+      signDevelopmentMacBundle(targetAppBundlePath, runtimeDir, false);
     }
     registerMacLauncherBundle(targetAppBundlePath);
     return launcherBinaryPath;
@@ -419,7 +489,7 @@ function buildMacLauncher(electronBinaryPath) {
     // Its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
     writeDevelopmentLauncherBinary(launcherBinaryPath, runtimeElectronBinaryPath, runtimeDir);
-    signDevelopmentMacBundle(targetAppBundlePath, runtimeDir);
+    signDevelopmentMacBundle(targetAppBundlePath, runtimeDir, true);
   }
   NodeFS.writeFileSync(metadataPath, `${JSON.stringify(expectedMetadata, null, 2)}\n`);
   registerMacLauncherBundle(targetAppBundlePath);

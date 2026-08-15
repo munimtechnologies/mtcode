@@ -93,4 +93,28 @@ it("accepts only the callback URI and state from the active OAuth request", () =
     ),
     false,
   );
+
+  const authorizationWithRedirectQuery =
+    "https://accounts.example.com/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A43123%2Fcallback%3Fsession%3DA";
+  assert.strictEqual(
+    validateMcpOAuthCallback(
+      authorizationWithRedirectQuery,
+      "http://127.0.0.1:43123/callback?session=A&code=authorization-code",
+    ),
+    true,
+  );
+  assert.strictEqual(
+    validateMcpOAuthCallback(
+      authorizationWithRedirectQuery,
+      "http://127.0.0.1:43123/callback?session=B&code=authorization-code",
+    ),
+    false,
+  );
+  assert.strictEqual(
+    validateMcpOAuthCallback(
+      authorizationWithRedirectQuery,
+      "http://127.0.0.1:43123/callback?session=A&session=B&code=authorization-code",
+    ),
+    false,
+  );
 });

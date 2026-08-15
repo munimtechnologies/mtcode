@@ -300,7 +300,8 @@ function McpAuthStatusBadge({
 function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
   const [authState, setAuthState] = useState<PluginMarketplaceMcpAuthState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(false);
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [authorizationUrls, setAuthorizationUrls] = useState<Readonly<Record<string, string>>>({});
   const [callbackUrls, setCallbackUrls] = useState<Readonly<Record<string, string>>>({});
   const requestGeneration = useRef(0);
@@ -315,8 +316,10 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
     if (!hasInstalledMcp) {
       setAuthState(null);
       setLoadError(null);
+      setLoadingAuth(false);
       return;
     }
+    setLoadingAuth(true);
     try {
       const state = await fetchPluginMcpAuth(plugin.id);
       if (requestGeneration.current !== generation) return;
@@ -325,6 +328,8 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
     } catch (error) {
       if (requestGeneration.current !== generation) return;
       setLoadError(pluginMarketplaceErrorMessage(error));
+    } finally {
+      if (requestGeneration.current === generation) setLoadingAuth(false);
     }
   }, [hasInstalledMcp, plugin.id]);
 
@@ -332,7 +337,8 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
     requestGeneration.current += 1;
     setAuthState(null);
     setLoadError(null);
-    setPendingKey(null);
+    setLoadingAuth(false);
+    setPendingKeys(new Set());
     setAuthorizationUrls({});
     setCallbackUrls({});
     void loadAuth();
@@ -366,11 +372,19 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
     const localApi = readLocalApi();
     if (localApi) await localApi.shell.openExternal(url);
   };
+  const setConnectionPending = (key: string, pending: boolean) => {
+    setPendingKeys((current) => {
+      const next = new Set(current);
+      if (pending) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
   const startConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
     const key = mcpAuthConnectionKey(connection);
     const reservedWindow = window.desktopBridge ? null : window.open("about:blank", "_blank");
     if (reservedWindow) reservedWindow.opener = null;
-    setPendingKey(key);
+    setConnectionPending(key, true);
     void startPluginMcpAuth(plugin.id, connection.harness, connection.serverId)
       .then(async (result) => {
         if (result.authorizationUrl) {
@@ -397,13 +411,13 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
         reservedWindow?.close();
         toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) });
       })
-      .finally(() => setPendingKey(null));
+      .finally(() => setConnectionPending(key, false));
   };
   const completeConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
     const key = mcpAuthConnectionKey(connection);
     const callbackUrl = callbackUrls[key]?.trim();
     if (!callbackUrl) return;
-    setPendingKey(key);
+    setConnectionPending(key, true);
     void completePluginMcpAuth(plugin.id, connection.harness, connection.serverId, callbackUrl)
       .then(async () => {
         setCallbackUrls((current) => ({ ...current, [key]: "" }));
@@ -413,11 +427,11 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
       .catch((error: unknown) =>
         toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
       )
-      .finally(() => setPendingKey(null));
+      .finally(() => setConnectionPending(key, false));
   };
   const disconnectConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
     const key = mcpAuthConnectionKey(connection);
-    setPendingKey(key);
+    setConnectionPending(key, true);
     void disconnectPluginMcpAuth(plugin.id, connection.harness, connection.serverId)
       .then(async () => {
         setAuthorizationUrls((current) => {
@@ -431,7 +445,7 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
       .catch((error: unknown) =>
         toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
       )
-      .finally(() => setPendingKey(null));
+      .finally(() => setConnectionPending(key, false));
   };
 
   return (
@@ -442,7 +456,7 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
       <div className="divide-y divide-foreground/8 overflow-hidden rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
         {authState?.connections.map((connection) => {
           const key = mcpAuthConnectionKey(connection);
-          const busy = pendingKey === key;
+          const busy = pendingKeys.has(key);
           const authorizationUrl =
             authorizationUrls[key] ?? connection.authorizationUrl ?? undefined;
           const showCallback = connection.callbackRequired && connection.status === "connecting";
@@ -546,15 +560,47 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
         {!authState ? (
           <SettingsRow
             className="rounded-none"
-            title="Checking MCP connections"
-            description="Reading authentication status from the installed harnesses."
+            title={loadError ? "MCP connections unavailable" : "Checking MCP connections"}
+            description={
+              loadError ? (
+                <span role="alert">{loadError}</span>
+              ) : (
+                "Reading authentication status from the installed harnesses."
+              )
+            }
+            control={
+              loadError ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={loadingAuth}
+                  onClick={() => void loadAuth()}
+                >
+                  <RefreshCwIcon />
+                  {loadingAuth ? "Retrying…" : "Try again"}
+                </Button>
+              ) : null
+            }
           />
         ) : null}
       </div>
-      {loadError ? (
-        <p className="px-4 text-destructive text-xs" role="alert">
-          {loadError}
-        </p>
+      {loadError && authState ? (
+        <div className="flex items-center justify-between gap-3 px-4">
+          <p className="text-destructive text-xs" role="alert">
+            {loadError}
+          </p>
+          {authState ? (
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              disabled={loadingAuth}
+              onClick={() => void loadAuth()}
+            >
+              <RefreshCwIcon />
+              {loadingAuth ? "Retrying…" : "Try again"}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
       <p className="px-3 text-pretty text-base/7 text-muted-foreground sm:px-4 sm:text-sm/5">
         Credentials stay in each harness&apos;s native OAuth store and are available to new chats.
@@ -661,8 +707,8 @@ function DetailLine({
 
 function McpServerRow({ server }: { readonly server: PluginMarketplaceMcpServer }) {
   return (
-    <Collapsible className="group/mcp">
-      <CollapsibleTrigger className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
+    <Collapsible>
+      <CollapsibleTrigger className="group/mcp flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
         <ServerIcon className="size-4 shrink-0" />
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-sm text-foreground">{server.name}</span>
@@ -709,8 +755,8 @@ function McpServerRow({ server }: { readonly server: PluginMarketplaceMcpServer 
 
 function SkillRow({ skill }: { readonly skill: PluginMarketplaceSkill }) {
   return (
-    <Collapsible className="group/skill">
-      <CollapsibleTrigger className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
+    <Collapsible>
+      <CollapsibleTrigger className="group/skill flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
         <SparklesIcon className="size-4 shrink-0" />
         <span className="min-w-0 flex-1">
           <span className="block font-medium text-sm text-foreground">{skill.name}</span>
@@ -772,8 +818,8 @@ function ExtensionIcon({ kind }: { readonly kind: PluginMarketplaceExtension["ki
 
 function ExtensionRow({ extension }: { readonly extension: PluginMarketplaceExtension }) {
   return (
-    <Collapsible className="group/extension">
-      <CollapsibleTrigger className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
+    <Collapsible>
+      <CollapsibleTrigger className="group/extension flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
         <ExtensionIcon kind={extension.kind} />
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-sm text-foreground">
@@ -876,8 +922,8 @@ function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetai
   const kinds = marketplacePluginKinds(plugin);
   return (
     <SettingsSection title="Details">
-      <Collapsible className="group/details rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
-        <CollapsibleTrigger className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
+      <Collapsible className="rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
+        <CollapsibleTrigger className="group/details flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
           <div className="min-w-0 flex-1">
             <p className="font-medium text-base text-foreground sm:text-sm">Advanced details</p>
             <p className="truncate text-base/7 text-muted-foreground sm:text-sm/5">
@@ -1030,7 +1076,7 @@ export function PluginDetail({ pluginId }: { readonly pluginId: string }) {
       </header>
 
       <InstallationSettings plugin={plugin} />
-      <McpAuthentication plugin={plugin} />
+      <McpAuthentication key={plugin.id} plugin={plugin} />
       {hasInstalledCodexComputerUse ? <ComputerUsePermissions plugin={plugin} /> : null}
       <PluginContents plugin={plugin} />
       <PluginInformation plugin={plugin} />

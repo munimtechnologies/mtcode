@@ -19,12 +19,12 @@ const HARNESS_ICONS: Readonly<Record<MarketplaceHarnessId, Icon>> = {
 };
 
 const FALLBACK_LOGO_STYLES = [
-  "bg-blue-500/16 text-blue-300",
-  "bg-emerald-500/16 text-emerald-300",
-  "bg-violet-500/16 text-violet-300",
-  "bg-amber-500/16 text-amber-300",
-  "bg-rose-500/16 text-rose-300",
-  "bg-cyan-500/16 text-cyan-300",
+  "bg-blue-500/16 text-blue-700 dark:text-blue-300",
+  "bg-emerald-500/16 text-emerald-700 dark:text-emerald-300",
+  "bg-violet-500/16 text-violet-700 dark:text-violet-300",
+  "bg-amber-500/16 text-amber-700 dark:text-amber-300",
+  "bg-rose-500/16 text-rose-700 dark:text-rose-300",
+  "bg-cyan-500/16 text-cyan-700 dark:text-cyan-300",
 ] as const;
 
 const localLogoRequests = new Map<string, Promise<string | null>>();

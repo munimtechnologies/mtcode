@@ -310,6 +310,12 @@ describe("selectMentionedCodexPlugins", () => {
       ["hyperframes@openai-curated"],
     );
     NodeAssert.deepStrictEqual(
+      selectMentionedCodexPlugins("Use ($hyperframes) for this video", plugins).map(
+        (plugin) => plugin.id,
+      ),
+      ["hyperframes@openai-curated"],
+    );
+    NodeAssert.deepStrictEqual(
       selectMentionedCodexPlugins("Do I have the HyperFrames plugin installed?", plugins),
       [],
     );
