@@ -278,6 +278,12 @@ export function useLegacySidebarEnabled(): boolean {
   return settingsHydrated && legacySidebarEnabled;
 }
 
+export function useTabsEnabled(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  const tabsEnabled = useClientSettingsValue().tabsEnabled;
+  return !settingsHydrated || tabsEnabled;
+}
+
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,

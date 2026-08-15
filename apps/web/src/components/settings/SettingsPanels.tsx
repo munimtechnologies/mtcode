@@ -1839,6 +1839,28 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          {...searchableSetting("workspace-tabs")}
+          description="Show open conversations as tabs in the workspace topbar."
+          resetAction={
+            settings.tabsEnabled !== DEFAULT_UNIFIED_SETTINGS.tabsEnabled ? (
+              <SettingResetButton
+                label="workspace tabs"
+                onClick={() =>
+                  updateSettings({ tabsEnabled: DEFAULT_UNIFIED_SETTINGS.tabsEnabled })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.tabsEnabled}
+              onCheckedChange={(checked) => updateSettings({ tabsEnabled: Boolean(checked) })}
+              aria-label="Workspace tabs"
+            />
+          }
+        />
+
+        <SettingsRow
           {...searchableSetting("auto-settle-merged-threads")}
           description="Settle a thread when its pull request merges. Closed pull requests still settle automatically."
           resetAction={
