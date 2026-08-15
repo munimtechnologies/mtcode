@@ -16,10 +16,12 @@ import * as TestClock from "effect/testing/TestClock";
 import { beforeEach } from "vite-plus/test";
 
 import {
+  ApprovalRequestId,
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { ServerConfig } from "../../config.ts";
@@ -61,6 +63,10 @@ const runtimeMock = {
     sessionCreateInputs: [] as Array<Record<string, unknown>>,
     authHeaders: [] as Array<string | null>,
     abortCalls: [] as string[],
+    questionRejectCalls: [] as string[],
+    lifecycleCalls: [] as string[],
+    questionRejectError: null as Error | null,
+    questionRejectHangs: false,
     closeCalls: [] as string[],
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     promptCalls: [] as Array<unknown>,
@@ -81,6 +87,10 @@ const runtimeMock = {
     this.state.sessionCreateInputs.length = 0;
     this.state.authHeaders.length = 0;
     this.state.abortCalls.length = 0;
+    this.state.questionRejectCalls.length = 0;
+    this.state.lifecycleCalls.length = 0;
+    this.state.questionRejectError = null;
+    this.state.questionRejectHangs = false;
     this.state.closeCalls.length = 0;
     this.state.revertCalls.length = 0;
     this.state.promptCalls.length = 0;
@@ -176,6 +186,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
         abort: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.abortCalls.push(sessionID);
+          runtimeMock.state.lifecycleCalls.push(`abort:${sessionID}`);
         },
         promptAsync: async (input: unknown) => {
           runtimeMock.state.promptCalls.push(input);
@@ -201,6 +212,18 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             targetIndex >= 0
               ? runtimeMock.state.messages.slice(0, targetIndex + 1)
               : runtimeMock.state.messages;
+        },
+      },
+      question: {
+        reject: async ({ requestID }: { requestID: string }) => {
+          runtimeMock.state.questionRejectCalls.push(requestID);
+          runtimeMock.state.lifecycleCalls.push(`reject:${requestID}`);
+          if (runtimeMock.state.questionRejectError) {
+            throw runtimeMock.state.questionRejectError;
+          }
+          if (runtimeMock.state.questionRejectHangs) {
+            await new Promise<never>(() => {});
+          }
         },
       },
       event: {
@@ -279,6 +302,22 @@ beforeEach(() => {
 
 const advanceTestClock = (ms: number) =>
   TestClock.adjust(`${ms} millis`).pipe(Effect.andThen(Effect.yieldNow));
+
+const pendingQuestionEvent = (requestId: string) => ({
+  type: "question.asked",
+  properties: {
+    id: requestId,
+    sessionID: "http://127.0.0.1:9999/session",
+    questions: [
+      {
+        header: "Scope",
+        question: "Which scope should be used?",
+        options: [{ label: "Focused", description: "Change only the affected adapter" }],
+        multiple: false,
+      },
+    ],
+  },
+});
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
@@ -624,6 +663,176 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.deepEqual(
         events.map((event) => event.type),
         ["session.started", "thread.started", "session.exited"],
+      );
+    }),
+  );
+
+  it.effect("rejects pending questions before interrupting a turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-interrupt-question");
+      const requestId = ApprovalRequestId.make("question-interrupt-1");
+      runtimeMock.state.subscribedEvents = [pendingQuestionEvent(requestId)];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* advanceTestClock(10);
+      yield* adapter.interruptTurn(threadId, TurnId.make("turn-opencode-interrupt-question"));
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
+        `reject:${requestId}`,
+        "abort:http://127.0.0.1:9999/session",
+      ]);
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        [
+          "session.started",
+          "thread.started",
+          "user-input.requested",
+          "user-input.resolved",
+          "turn.aborted",
+        ],
+      );
+
+      const response = yield* adapter
+        .respondToUserInput(threadId, requestId, {})
+        .pipe(Effect.result);
+      NodeAssert.equal(response._tag, "Failure");
+      NodeAssert.equal(response.failure._tag, "ProviderAdapterRequestError");
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects pending questions before stopping a session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-stop-question");
+      const requestId = ApprovalRequestId.make("question-stop-1");
+      runtimeMock.state.subscribedEvents = [pendingQuestionEvent(requestId)];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* advanceTestClock(10);
+      yield* adapter.stopSession(threadId);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
+        `reject:${requestId}`,
+        "abort:http://127.0.0.1:9999/session",
+      ]);
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        [
+          "session.started",
+          "thread.started",
+          "user-input.requested",
+          "user-input.resolved",
+          "session.exited",
+        ],
+      );
+    }),
+  );
+
+  it.effect("still interrupts when pending-question rejection fails", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-reject-question-failure");
+      const requestId = ApprovalRequestId.make("question-reject-failure-1");
+      runtimeMock.state.subscribedEvents = [pendingQuestionEvent(requestId)];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* advanceTestClock(10);
+      runtimeMock.state.questionRejectError = new Error("question rejection failed");
+
+      yield* adapter.interruptTurn(threadId, TurnId.make("turn-opencode-reject-question-failure"));
+
+      NodeAssert.deepEqual(runtimeMock.state.questionRejectCalls, [requestId]);
+      NodeAssert.deepEqual(runtimeMock.state.abortCalls, ["http://127.0.0.1:9999/session"]);
+      runtimeMock.state.questionRejectError = null;
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("still interrupts after pending-question rejection times out", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-reject-question-timeout");
+      const requestId = ApprovalRequestId.make("question-reject-timeout-1");
+      runtimeMock.state.subscribedEvents = [pendingQuestionEvent(requestId)];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* advanceTestClock(10);
+      runtimeMock.state.questionRejectHangs = true;
+      const interruptFiber = yield* adapter
+        .interruptTurn(threadId, TurnId.make("turn-opencode-reject-question-timeout"))
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* advanceTestClock(5_000);
+      yield* Fiber.join(interruptFiber);
+
+      NodeAssert.deepEqual(runtimeMock.state.questionRejectCalls, [requestId]);
+      NodeAssert.deepEqual(runtimeMock.state.abortCalls, ["http://127.0.0.1:9999/session"]);
+      runtimeMock.state.questionRejectHangs = false;
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects pending questions during bulk shutdown", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-stop-all-question");
+      const requestId = ApprovalRequestId.make("question-stop-all-1");
+      runtimeMock.state.subscribedEvents = [pendingQuestionEvent(requestId)];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* advanceTestClock(10);
+      yield* adapter.stopAll();
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
+        `reject:${requestId}`,
+        "abort:http://127.0.0.1:9999/session",
+      ]);
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["session.started", "thread.started", "user-input.requested", "user-input.resolved"],
       );
     }),
   );
