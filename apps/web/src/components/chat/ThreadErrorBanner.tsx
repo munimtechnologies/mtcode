@@ -45,7 +45,7 @@ function ThreadErrorCopyButton({ error }: { error: string }) {
           />
         }
       >
-        {isCopied ? <CheckIcon className="text-success!" /> : <CopyIcon />}
+        {isCopied ? <CheckIcon className="text-success!" /> : <CopyIcon className="text-error" />}
       </TooltipTrigger>
       <TooltipPopup side="top">{copyLabel}</TooltipPopup>
     </Tooltip>

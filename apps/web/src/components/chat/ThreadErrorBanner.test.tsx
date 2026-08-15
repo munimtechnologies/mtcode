@@ -92,6 +92,7 @@ describe("ThreadErrorBanner", () => {
 
     expect(markup).toContain('role="alert"');
     expect(markup).toContain('aria-label="Copy error"');
+    expect(markup).toContain("lucide-copy text-error");
     expect(markup).toContain('aria-label="Dismiss error"');
     expect(markup).not.toContain("controlAlignment");
     expect(markup).toContain("flex gap-2 items-start");
