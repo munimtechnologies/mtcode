@@ -68,7 +68,7 @@ function MarketplacePluginCard({
         params={{ pluginId: plugin.id }}
         aria-label={`${plugin.installed ? "Manage" : "View"} ${plugin.name}`}
         className={cn(
-          "group flex min-w-0 items-center gap-3 rounded-xl border border-foreground/8 bg-card/24 p-3 outline-none transition-colors hover:bg-foreground/4 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:bg-card/40",
+          "group flex min-w-0 items-center gap-3 rounded-xl border border-foreground/8 bg-card/24 p-3 outline-none transition-colors hover:bg-foreground/4 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:bg-card/40",
           featured && "sm:p-4",
         )}
       >

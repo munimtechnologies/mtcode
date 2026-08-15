@@ -648,12 +648,12 @@ export const make = (options: McpOAuthRuntimeOptions = {}) =>
               ),
             ),
           );
-          if (exitCode !== 0) {
+          if (exitCode !== 0 || (yield* Ref.get(authorizationUrl)) === null) {
             return yield* new McpOAuthAuthenticationFailedError({
               operation: "start",
               harness: "claude",
               serverName: session.name,
-              exitCode,
+              ...(exitCode === 0 ? {} : { exitCode }),
             });
           }
           yield* clearFailure(key);
