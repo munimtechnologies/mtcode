@@ -29,6 +29,14 @@ When a Codex message names an installed plugin, T3 Code forwards that plugin's e
 the turn, including in an existing thread. Start a new chat after changing MCP servers or apps so
 the harness can refresh those longer-lived connections.
 
+Remote HTTP MCP servers that require OAuth have an **MCP authentication** section after
+installation. Select **Connect** to open the provider's authorization page. Codex completes the
+loopback flow in the browser. Claude Code may ask you to paste the full callback URL back into the
+plugin page when the environment is remote. Connection status and **Disconnect** use each
+harness's native credential store, so T3 Code never keeps a separate copy of the access or refresh
+token. Cursor connections continue in Cursor's own settings. Local standard-input MCP servers do
+not use the HTTP OAuth flow.
+
 On macOS, the Computer Use detail page includes **Permission setup**. Open the signed Computer Use
 setup app there to grant Accessibility and Screen Recording, or jump directly to the Accessibility
 and Automation pages in System Settings. T3 Code declares its Automation purpose to macOS so the

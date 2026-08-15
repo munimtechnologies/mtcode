@@ -8,6 +8,7 @@ import {
   CommandIcon,
   ExternalLinkIcon,
   FileCodeIcon,
+  KeyRoundIcon,
   PackageOpenIcon,
   RefreshCwIcon,
   ServerIcon,
@@ -23,6 +24,8 @@ import type {
   PluginMarketplaceExtension,
   PluginMarketplaceInstallTarget,
   PluginMarketplaceMcpServer,
+  PluginMarketplaceMcpAuthConnection,
+  PluginMarketplaceMcpAuthState,
   PluginMarketplaceSetupAction,
   PluginMarketplaceSkill,
 } from "@t3tools/contracts";
@@ -37,9 +40,17 @@ import {
   EmptyTitle,
 } from "~/components/ui/empty";
 import { Skeleton } from "~/components/ui/skeleton";
+import { Input } from "~/components/ui/input";
 import { Switch } from "~/components/ui/switch";
 import { toastManager } from "~/components/ui/toast";
-import { openPluginSetup } from "~/pluginMarketplace/api";
+import { readLocalApi } from "~/localApi";
+import {
+  completePluginMcpAuth,
+  disconnectPluginMcpAuth,
+  fetchPluginMcpAuth,
+  openPluginSetup,
+  startPluginMcpAuth,
+} from "~/pluginMarketplace/api";
 import { MARKETPLACE_HARNESS_LABELS, marketplacePluginKinds } from "~/pluginMarketplace/catalog";
 import {
   pluginMarketplaceErrorMessage,
@@ -161,6 +172,7 @@ function InstallTargetRow({
 
   return (
     <SettingsRow
+      className="rounded-none"
       title={
         <span className="flex items-center gap-2">
           <HarnessIcon harness={target.harness} className="size-4 shrink-0" />
@@ -273,7 +285,12 @@ function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDe
           </Button>
         ) : null}
         {installable.length > 0 ? (
-          <Button size="sm" disabled={busy} onClick={() => changeMany(installable, true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => changeMany(installable, true)}
+          >
             {removable.length > 0 ? "Install available" : "Install on available"}
           </Button>
         ) : null}
@@ -282,7 +299,7 @@ function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDe
 
   return (
     <SettingsSection title="Installations" headerAction={headerAction}>
-      <div className="divide-y divide-foreground/8 rounded-xl border border-foreground/8 bg-card/24 px-1 dark:bg-card/40">
+      <div className="divide-y divide-foreground/8 overflow-hidden rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
         {plugin.installTargets.map((target) => (
           <InstallTargetRow key={target.pluginId} plugin={plugin} target={target} />
         ))}
@@ -294,6 +311,262 @@ function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDe
           : null}
         Provider capabilities are fixed when a chat starts, so start a new chat after changing an
         installation.
+      </p>
+    </SettingsSection>
+  );
+}
+
+function mcpAuthConnectionKey(connection: {
+  readonly harness: PluginMarketplaceMcpAuthConnection["harness"];
+  readonly serverId: string;
+}): string {
+  return `${connection.harness}:${connection.serverId}`;
+}
+
+function McpAuthStatusBadge({
+  connection,
+}: {
+  readonly connection: PluginMarketplaceMcpAuthConnection;
+}) {
+  const [label, variant] =
+    connection.status === "connected"
+      ? (["Connected", "success"] as const)
+      : connection.status === "not_connected"
+        ? (["Sign in required", "warning"] as const)
+        : connection.status === "connecting"
+          ? (["Waiting for sign-in", "info"] as const)
+          : connection.status === "failed"
+            ? (["Sign-in failed", "error"] as const)
+            : connection.status === "external"
+              ? (["Managed externally", "secondary"] as const)
+              : connection.status === "unsupported"
+                ? (["No OAuth required", "secondary"] as const)
+                : (["Unavailable", "secondary"] as const);
+  return (
+    <Badge size="sm" variant={variant}>
+      {label}
+    </Badge>
+  );
+}
+
+function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
+  const [authState, setAuthState] = useState<PluginMarketplaceMcpAuthState | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [authorizationUrls, setAuthorizationUrls] = useState<Readonly<Record<string, string>>>({});
+  const [callbackUrls, setCallbackUrls] = useState<Readonly<Record<string, string>>>({});
+  const hasInstalledMcp = plugin.installTargets.some(
+    (target) => target.installed && target.contents.mcpServerCount > 0,
+  );
+  const loadAuth = useCallback(async () => {
+    if (!hasInstalledMcp) return;
+    try {
+      setAuthState(await fetchPluginMcpAuth(plugin.id));
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(pluginMarketplaceErrorMessage(error));
+    }
+  }, [hasInstalledMcp, plugin.id]);
+
+  useEffect(() => {
+    void loadAuth();
+  }, [loadAuth]);
+
+  const hasPendingConnection = authState?.connections.some(
+    (connection) => connection.status === "connecting",
+  );
+  useEffect(() => {
+    if (!hasPendingConnection) return;
+    const timer = window.setInterval(() => void loadAuth(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [hasPendingConnection, loadAuth]);
+
+  if (!hasInstalledMcp) return null;
+  if (authState && authState.connections.length === 0 && !loadError) return null;
+
+  const openAuthorizationUrl = async (url: string) => {
+    const localApi = readLocalApi();
+    if (localApi) await localApi.shell.openExternal(url);
+  };
+  const startConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
+    const key = mcpAuthConnectionKey(connection);
+    setPendingKey(key);
+    void startPluginMcpAuth(plugin.id, connection.harness, connection.serverId)
+      .then(async (result) => {
+        if (result.authorizationUrl) {
+          setAuthorizationUrls((current) => ({ ...current, [key]: result.authorizationUrl! }));
+          await openAuthorizationUrl(result.authorizationUrl);
+        }
+        toastManager.add({
+          type: "success",
+          title: result.callbackRequired ? "Continue in your browser" : "Sign-in opened",
+          description: result.callbackRequired
+            ? "After approval, paste the full callback URL below."
+            : "Return here after the provider finishes authentication.",
+        });
+        await loadAuth();
+      })
+      .catch((error: unknown) =>
+        toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
+      )
+      .finally(() => setPendingKey(null));
+  };
+  const completeConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
+    const key = mcpAuthConnectionKey(connection);
+    const callbackUrl = callbackUrls[key]?.trim();
+    if (!callbackUrl) return;
+    setPendingKey(key);
+    void completePluginMcpAuth(plugin.id, connection.harness, connection.serverId, callbackUrl)
+      .then(async () => {
+        setCallbackUrls((current) => ({ ...current, [key]: "" }));
+        toastManager.add({ type: "success", title: "Callback sent to Claude Code" });
+        await loadAuth();
+      })
+      .catch((error: unknown) =>
+        toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
+      )
+      .finally(() => setPendingKey(null));
+  };
+  const disconnectConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
+    const key = mcpAuthConnectionKey(connection);
+    setPendingKey(key);
+    void disconnectPluginMcpAuth(plugin.id, connection.harness, connection.serverId)
+      .then(async () => {
+        setAuthorizationUrls((current) => {
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+        toastManager.add({ type: "success", title: `${connection.serverName} disconnected` });
+        await loadAuth();
+      })
+      .catch((error: unknown) =>
+        toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
+      )
+      .finally(() => setPendingKey(null));
+  };
+
+  return (
+    <SettingsSection
+      title="MCP authentication"
+      icon={<KeyRoundIcon className="size-4 text-muted-foreground" />}
+    >
+      <div className="divide-y divide-foreground/8 overflow-hidden rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
+        {authState?.connections.map((connection) => {
+          const key = mcpAuthConnectionKey(connection);
+          const busy = pendingKey === key;
+          const authorizationUrl = authorizationUrls[key];
+          const showCallback =
+            connection.harness === "claude" && connection.status === "connecting";
+          const control =
+            connection.status === "external" ? (
+              connection.marketplaceUrl ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  render={<a href={connection.marketplaceUrl} target="_blank" rel="noreferrer" />}
+                >
+                  <ExternalLinkIcon />
+                  Open in Cursor
+                </Button>
+              ) : null
+            ) : connection.canConnect || connection.status === "failed" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => startConnection(connection)}
+              >
+                <KeyRoundIcon />
+                {busy ? "Starting…" : "Connect"}
+              </Button>
+            ) : connection.status === "connecting" ? (
+              <div className="flex flex-wrap justify-end gap-2">
+                {authorizationUrl ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void openAuthorizationUrl(authorizationUrl)}
+                  >
+                    <ExternalLinkIcon />
+                    Reopen sign-in
+                  </Button>
+                ) : null}
+                {connection.canDisconnect ? (
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    disabled={busy}
+                    onClick={() => disconnectConnection(connection)}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
+            ) : connection.canDisconnect ? (
+              <Button
+                size="sm"
+                variant="ghost-muted"
+                disabled={busy}
+                onClick={() => disconnectConnection(connection)}
+              >
+                {busy ? "Disconnecting…" : "Disconnect"}
+              </Button>
+            ) : null;
+          return (
+            <SettingsRow
+              key={key}
+              className="rounded-none"
+              title={
+                <span className="flex items-center gap-2">
+                  <HarnessIcon harness={connection.harness} className="size-4 shrink-0" />
+                  <span>{connection.serverName}</span>
+                  <McpAuthStatusBadge connection={connection} />
+                </span>
+              }
+              description={connection.endpoint ?? connection.detail ?? "Remote MCP server"}
+              status={connection.endpoint && connection.detail ? connection.detail : undefined}
+              control={control}
+            >
+              {showCallback ? (
+                <div className="mt-3 flex flex-col gap-2 border-t border-foreground/8 pt-3 sm:ml-6 sm:flex-row">
+                  <Input
+                    nativeInput
+                    value={callbackUrls[key] ?? ""}
+                    placeholder="Paste the full callback URL"
+                    aria-label={`OAuth callback URL for ${connection.serverName}`}
+                    onChange={(event) =>
+                      setCallbackUrls((current) => ({
+                        ...current,
+                        [key]: event.currentTarget.value,
+                      }))
+                    }
+                  />
+                  <Button
+                    size="sm"
+                    disabled={busy || (callbackUrls[key]?.trim().length ?? 0) === 0}
+                    onClick={() => completeConnection(connection)}
+                  >
+                    {busy ? "Submitting…" : "Complete sign-in"}
+                  </Button>
+                </div>
+              ) : null}
+            </SettingsRow>
+          );
+        })}
+        {!authState ? (
+          <SettingsRow
+            className="rounded-none"
+            title="Checking MCP connections"
+            description="Reading authentication status from the installed harnesses."
+          />
+        ) : null}
+      </div>
+      {loadError ? <p className="px-4 text-destructive text-xs">{loadError}</p> : null}
+      <p className="px-3 text-pretty text-base/7 text-muted-foreground sm:px-4 sm:text-sm/5">
+        Credentials stay in each harness&apos;s native OAuth store and are available to new chats.
+        Local standard-input MCP servers do not use this OAuth flow.
       </p>
     </SettingsSection>
   );
@@ -561,8 +834,18 @@ function packageDescription(plugin: PluginMarketplaceDetail): string {
 }
 
 function PluginContents({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
+  const [expanded, setExpanded] = useState(false);
   const count =
     plugin.mcpServers.length + plugin.skills.length + plugin.apps.length + plugin.extensions.length;
+  const rows = [
+    ...plugin.mcpServers.map((server) => <McpServerRow key={`mcp:${server.id}`} server={server} />),
+    ...plugin.skills.map((skill) => <SkillRow key={`skill:${skill.id}`} skill={skill} />),
+    ...plugin.apps.map((app) => <AppRow key={`app:${app.id}`} app={app} />),
+    ...plugin.extensions.map((extension) => (
+      <ExtensionRow key={`extension:${extension.kind}:${extension.id}`} extension={extension} />
+    )),
+  ];
+  const visibleRows = expanded ? rows : rows.slice(0, 5);
   return (
     <SettingsSection
       title={`${MARKETPLACE_HARNESS_LABELS[plugin.sourceHarness]} package`}
@@ -577,18 +860,18 @@ function PluginContents({ plugin }: { readonly plugin: PluginMarketplaceDetail }
       </p>
       {count > 0 ? (
         <div className="divide-y divide-foreground/8 rounded-xl border border-foreground/8 bg-card/24 px-1 dark:bg-card/40">
-          {plugin.mcpServers.map((server) => (
-            <McpServerRow key={`mcp:${server.id}`} server={server} />
-          ))}
-          {plugin.skills.map((skill) => (
-            <SkillRow key={`skill:${skill.id}`} skill={skill} />
-          ))}
-          {plugin.apps.map((app) => (
-            <AppRow key={`app:${app.id}`} app={app} />
-          ))}
-          {plugin.extensions.map((extension) => (
-            <ExtensionRow key={extension.id} extension={extension} />
-          ))}
+          {visibleRows}
+          {rows.length > 5 ? (
+            <div className="flex justify-center px-3 py-2">
+              <Button
+                size="sm"
+                variant="ghost-muted"
+                onClick={() => setExpanded((value) => !value)}
+              >
+                {expanded ? "Show less" : `Show ${rows.length - 5} more`}
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <SettingsRow
@@ -760,6 +1043,7 @@ export function PluginDetail({ pluginId }: { readonly pluginId: string }) {
       </header>
 
       <InstallationSettings plugin={plugin} />
+      <McpAuthentication plugin={plugin} />
       {hasInstalledCodexComputerUse ? <ComputerUsePermissions plugin={plugin} /> : null}
       <PluginContents plugin={plugin} />
       <PluginInformation plugin={plugin} />

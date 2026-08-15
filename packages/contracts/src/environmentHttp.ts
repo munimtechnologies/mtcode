@@ -653,7 +653,7 @@ export class EnvironmentPluginMarketplaceHttpApi extends HttpApiGroup.make("plug
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.delete("remove", "/api/plugins/:pluginId", {
+    HttpApiEndpoint.post("remove", "/api/plugins/:pluginId/remove", {
       headers: OptionalBearerHeaders,
       params: PluginMarketplacePluginParams,
       success: PluginMarketplaceMutationResult,

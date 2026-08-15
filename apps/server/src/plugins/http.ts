@@ -41,6 +41,51 @@ export const pluginMarketplaceHttpApiLayer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        "mcpAuth",
+        Effect.fn("environment.plugins.mcpAuth")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          return yield* marketplace.mcpAuth(args.params.pluginId);
+        }),
+      )
+      .handle(
+        "startMcpAuth",
+        Effect.fn("environment.plugins.startMcpAuth")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          return yield* marketplace.startMcpAuth(
+            args.params.pluginId,
+            args.payload.harness,
+            args.payload.serverId,
+          );
+        }),
+      )
+      .handle(
+        "completeMcpAuth",
+        Effect.fn("environment.plugins.completeMcpAuth")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          return yield* marketplace.completeMcpAuth(
+            args.params.pluginId,
+            args.payload.harness,
+            args.payload.serverId,
+            args.payload.callbackUrl,
+          );
+        }),
+      )
+      .handle(
+        "disconnectMcpAuth",
+        Effect.fn("environment.plugins.disconnectMcpAuth")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          return yield* marketplace.disconnectMcpAuth(
+            args.params.pluginId,
+            args.payload.harness,
+            args.payload.serverId,
+          );
+        }),
+      )
+      .handle(
         "install",
         Effect.fn("environment.plugins.install")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);

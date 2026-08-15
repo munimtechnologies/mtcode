@@ -46,6 +46,7 @@ import {
   makeMcpOAuthRuntime,
   type McpOAuthHarness,
   type McpOAuthRuntime,
+  type McpOAuthRuntimeError,
   type McpOAuthServerStatus,
 } from "./McpOAuthRuntime.ts";
 
@@ -1940,6 +1941,315 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       } satisfies PluginMarketplaceLogo;
     });
 
+    const loadMcpAuthCandidates = Effect.fn("CodexPluginMarketplace.loadMcpAuthCandidates")(
+      function* (pluginId: string) {
+        const plugin = yield* findPlugin(pluginId);
+        const snapshot = yield* getSnapshot();
+        const candidates = yield* Effect.forEach(
+          plugin.detail.installTargets.filter(
+            (target) => target.installed && target.contents.mcpServerCount > 0,
+          ),
+          (target) =>
+            Effect.gen(function* () {
+              const targetPlugin = snapshot.plugins.get(target.pluginId);
+              if (!targetPlugin) return [];
+              const detail = yield* loadRemotePreview(targetPlugin).pipe(
+                Effect.orElseSucceed(() => targetPlugin.detail),
+              );
+              return detail.mcpServers
+                .filter((server) =>
+                  target.harness === "cursor"
+                    ? true
+                    : server.transport === "http" && server.url !== null,
+                )
+                .map(
+                  (server): McpAuthCandidate => ({
+                    target,
+                    packageName: detail.packageName,
+                    server,
+                  }),
+                );
+            }),
+          { concurrency: 3 },
+        );
+        return candidates.flat();
+      },
+    );
+
+    const runtimeStatuses = Effect.fn("CodexPluginMarketplace.runtimeStatuses")(function* (
+      candidates: ReadonlyArray<McpAuthCandidate>,
+    ) {
+      const harnesses = [
+        ...new Set(
+          candidates
+            .map((candidate) => candidate.target.harness)
+            .filter(
+              (harness): harness is McpOAuthHarness =>
+                harness === "codex" || harness === "claude" || harness === "cursor",
+            ),
+        ),
+      ];
+      const results = yield* Effect.forEach(
+        harnesses,
+        (
+          harness,
+        ): Effect.Effect<
+          readonly [
+            McpOAuthHarness,
+            Result.Result<ReadonlyArray<McpOAuthServerStatus>, McpOAuthRuntimeError> | null,
+          ]
+        > => {
+          if (!options.mcpOAuthRuntime) return Effect.succeed([harness, null] as const);
+          return options.mcpOAuthRuntime.status(harness).pipe(
+            Effect.result,
+            Effect.map((result) => [harness, result] as const),
+          );
+        },
+        { concurrency: 3 },
+      );
+      return new Map(results);
+    });
+
+    const mcpAuth = Effect.fn("CodexPluginMarketplace.mcpAuth")(function* (pluginId: string) {
+      const candidates = yield* loadMcpAuthCandidates(pluginId);
+      const statusesByHarness = yield* runtimeStatuses(candidates);
+      const connections = candidates.map((candidate): PluginMarketplaceMcpAuthConnection => {
+        const harness = candidate.target.harness;
+        if (harness === "cursor") {
+          const result = statusesByHarness.get("cursor");
+          const statuses = result && Result.isSuccess(result) ? result.success : [];
+          const native = resolveNativeMcpStatus(
+            "cursor",
+            candidate.packageName,
+            candidate.server,
+            statuses,
+          );
+          return {
+            harness,
+            serverId: candidate.server.id,
+            serverName: candidate.server.name,
+            endpoint: candidate.server.url,
+            status: "external",
+            detail: native?.detail ?? "Authentication is managed by Cursor.",
+            authorizationUrl: null,
+            callbackRequired: false,
+            canConnect: false,
+            canDisconnect: false,
+            marketplaceUrl: candidate.target.marketplaceUrl,
+          };
+        }
+        if (harness !== "codex" && harness !== "claude") {
+          return {
+            harness,
+            serverId: candidate.server.id,
+            serverName: candidate.server.name,
+            endpoint: candidate.server.url,
+            status: "unsupported",
+            detail: `${harness} does not expose MCP OAuth management yet.`,
+            authorizationUrl: null,
+            callbackRequired: false,
+            canConnect: false,
+            canDisconnect: false,
+            marketplaceUrl: candidate.target.marketplaceUrl,
+          };
+        }
+        const result = statusesByHarness.get(harness);
+        if (!result || result === null || Result.isFailure(result)) {
+          return {
+            harness,
+            serverId: candidate.server.id,
+            serverName: candidate.server.name,
+            endpoint: candidate.server.url,
+            status: "unavailable",
+            detail:
+              result && Result.isFailure(result)
+                ? result.failure.detail
+                : `${harness} MCP status is unavailable on this environment.`,
+            authorizationUrl: null,
+            callbackRequired: false,
+            canConnect: false,
+            canDisconnect: false,
+            marketplaceUrl: candidate.target.marketplaceUrl,
+          };
+        }
+        const native = resolveNativeMcpStatus(
+          harness,
+          candidate.packageName,
+          candidate.server,
+          result.success,
+        );
+        if (!native) {
+          return {
+            harness,
+            serverId: candidate.server.id,
+            serverName: candidate.server.name,
+            endpoint: candidate.server.url,
+            status: "unavailable",
+            detail: `This MCP server has not appeared in ${harness} yet. Reload the provider after installation.`,
+            authorizationUrl: null,
+            callbackRequired: false,
+            canConnect: false,
+            canDisconnect: false,
+            marketplaceUrl: candidate.target.marketplaceUrl,
+          };
+        }
+        return {
+          harness,
+          serverId: candidate.server.id,
+          serverName: candidate.server.name,
+          endpoint: candidate.server.url,
+          status: native.status,
+          detail: native.detail,
+          authorizationUrl: null,
+          callbackRequired: harness === "claude" && native.status === "connecting",
+          canConnect: native.canConnect,
+          canDisconnect: native.canDisconnect,
+          marketplaceUrl: candidate.target.marketplaceUrl,
+        };
+      });
+      return { pluginId, connections } satisfies PluginMarketplaceMcpAuthState;
+    });
+
+    const resolveMcpAuthTarget = Effect.fn("CodexPluginMarketplace.resolveMcpAuthTarget")(
+      function* (pluginId: string, harness: PluginMarketplaceHarnessId, serverId: string) {
+        if (harness !== "codex" && harness !== "claude" && harness !== "cursor") {
+          return yield* new PluginMarketplaceOperationError({
+            operation: "authenticate",
+            pluginId,
+            detail: `${harness} does not support managed MCP authentication.`,
+          });
+        }
+        const candidates = yield* loadMcpAuthCandidates(pluginId);
+        const candidate = candidates.find(
+          (item) => item.target.harness === harness && item.server.id === serverId,
+        );
+        if (!candidate) {
+          return yield* new PluginMarketplaceOperationError({
+            operation: "authenticate",
+            pluginId,
+            detail: "This installed package does not expose that remote MCP server.",
+          });
+        }
+        if (harness === "cursor") {
+          return yield* new PluginMarketplaceOperationError({
+            operation: "authenticate",
+            pluginId,
+            detail: "Cursor manages MCP authentication in its own Marketplace UI.",
+          });
+        }
+        if (!options.mcpOAuthRuntime) {
+          return yield* new PluginMarketplaceOperationError({
+            operation: "authenticate",
+            pluginId,
+            detail: "MCP authentication is unavailable on this environment.",
+          });
+        }
+        const statuses = yield* options.mcpOAuthRuntime.status(harness).pipe(
+          Effect.mapError(
+            (error) =>
+              new PluginMarketplaceOperationError({
+                operation: "authenticate",
+                pluginId,
+                detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+              }),
+          ),
+        );
+        const native = resolveNativeMcpStatus(
+          harness,
+          candidate.packageName,
+          candidate.server,
+          statuses,
+        );
+        if (!native) {
+          return yield* new PluginMarketplaceOperationError({
+            operation: "authenticate",
+            pluginId,
+            detail: `This MCP server is not registered in ${harness} yet. Reload the provider after installation.`,
+          });
+        }
+        return { candidate, native, harness } as const;
+      },
+    );
+
+    const startMcpAuth = Effect.fn("CodexPluginMarketplace.startMcpAuth")(function* (
+      pluginId: string,
+      harness: PluginMarketplaceHarnessId,
+      serverId: string,
+    ) {
+      const resolved = yield* resolveMcpAuthTarget(pluginId, harness, serverId);
+      const started = yield* options
+        .mcpOAuthRuntime!.start(resolved.harness, resolved.native.name)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new PluginMarketplaceOperationError({
+                operation: "authenticate",
+                pluginId,
+                detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+              }),
+          ),
+        );
+      return {
+        pluginId,
+        harness: resolved.harness,
+        serverId,
+        status: "connecting",
+        authorizationUrl: started.authorizationUrl,
+        callbackRequired: started.callbackRequired,
+      } satisfies PluginMarketplaceMcpAuthStartResult;
+    });
+
+    const completeMcpAuth = Effect.fn("CodexPluginMarketplace.completeMcpAuth")(function* (
+      pluginId: string,
+      harness: PluginMarketplaceHarnessId,
+      serverId: string,
+      callbackUrl: string,
+    ) {
+      const resolved = yield* resolveMcpAuthTarget(pluginId, harness, serverId);
+      yield* options
+        .mcpOAuthRuntime!.complete(resolved.harness, resolved.native.name, callbackUrl)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new PluginMarketplaceOperationError({
+                operation: "authenticate",
+                pluginId,
+                detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+              }),
+          ),
+        );
+      return {
+        pluginId,
+        harness: resolved.harness,
+        serverId,
+        status: "connecting",
+      } satisfies PluginMarketplaceMcpAuthMutationResult;
+    });
+
+    const disconnectMcpAuth = Effect.fn("CodexPluginMarketplace.disconnectMcpAuth")(function* (
+      pluginId: string,
+      harness: PluginMarketplaceHarnessId,
+      serverId: string,
+    ) {
+      const resolved = yield* resolveMcpAuthTarget(pluginId, harness, serverId);
+      yield* options.mcpOAuthRuntime!.disconnect(resolved.harness, resolved.native.name).pipe(
+        Effect.mapError(
+          (error) =>
+            new PluginMarketplaceOperationError({
+              operation: "authenticate",
+              pluginId,
+              detail: error.detail.slice(0, MAX_OPERATION_ERROR_LENGTH),
+            }),
+        ),
+      );
+      return {
+        pluginId,
+        harness: resolved.harness,
+        serverId,
+        status: "not_connected",
+      } satisfies PluginMarketplaceMcpAuthMutationResult;
+    });
+
     const setup = Effect.fn("CodexPluginMarketplace.setup")(function* (
       pluginId: string,
       action: PluginMarketplaceSetupAction,
@@ -2085,7 +2395,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         }
 
         if (plugin.record.codexLegacyInstalled) {
-          yield* processRunner
+          const legacyRemoval = yield* processRunner
             .run({
               command: "codex",
               args: ["plugin", "remove", plugin.record.sourcePluginId, "--json"],
@@ -2093,19 +2403,22 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               maxOutputBytes: 1024 * 1024,
             })
             .pipe(
-              Effect.tap((result) =>
-                result.code === 0
-                  ? Effect.void
-                  : Effect.logWarning("Failed to remove a stale local Codex plugin shadow.", {
-                      pluginId: plugin.record.sourcePluginId,
-                    }),
-              ),
-              Effect.catch(() =>
-                Effect.logWarning("Failed to remove a stale local Codex plugin shadow.", {
-                  pluginId: plugin.record.sourcePluginId,
-                }),
+              Effect.mapError(
+                () =>
+                  new PluginMarketplaceOperationError({
+                    operation,
+                    pluginId,
+                    detail: `Codex could not remove the local ${plugin.detail.name} package.`,
+                  }),
               ),
             );
+          if (legacyRemoval.code !== 0) {
+            return yield* new PluginMarketplaceOperationError({
+              operation,
+              pluginId,
+              detail: publicOperationDetail(legacyRemoval.stderr, legacyRemoval.code),
+            });
+          }
         }
 
         yield* Ref.set(cachedSnapshot, null);
@@ -2170,6 +2483,10 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       catalog,
       detail,
       logo,
+      mcpAuth,
+      startMcpAuth,
+      completeMcpAuth,
+      disconnectMcpAuth,
       setup,
       install: (pluginId) => mutate("install", pluginId),
       remove: (pluginId) => mutate("remove", pluginId),
@@ -2279,7 +2596,19 @@ export const makeCodexPluginRuntime = Effect.gen(function* () {
       ),
     remove: (pluginId) =>
       withClient((client) =>
-        client.request("plugin/uninstall", { pluginId }).pipe(Effect.asVoid),
+        Effect.gen(function* () {
+          yield* client.request("plugin/uninstall", { pluginId });
+          const installed = yield* client.request("plugin/installed", { cwds: [process.cwd()] });
+          const remaining = normalize(installed.marketplaces).find(
+            (plugin) => plugin.id === pluginId && plugin.installed,
+          );
+          if (remaining) {
+            return yield* new CodexPluginRuntimeError({
+              operation: "remove",
+              detail: `Codex still reports '${pluginId}' as installed after removal.`,
+            });
+          }
+        }),
       ).pipe(
         Effect.mapError(
           () =>
@@ -2294,9 +2623,11 @@ export const makeCodexPluginRuntime = Effect.gen(function* () {
 
 export const make = Effect.gen(function* () {
   const codexPluginRuntime = yield* makeCodexPluginRuntime;
+  const mcpOAuthRuntime = yield* makeMcpOAuthRuntime;
 
   return yield* makeWithOptions({
     codexPluginRuntime,
+    mcpOAuthRuntime,
   });
 });
 

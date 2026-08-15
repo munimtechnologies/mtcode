@@ -1,8 +1,10 @@
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
@@ -42,6 +44,7 @@ export class McpOAuthRuntimeError extends Schema.TaggedErrorClass<McpOAuthRuntim
     detail: Schema.String,
   },
 ) {}
+const isMcpOAuthRuntimeError = Schema.is(McpOAuthRuntimeError);
 
 export interface McpOAuthRuntime {
   readonly status: (
@@ -243,7 +246,7 @@ export const makeMcpOAuthRuntime = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const activeSessions = yield* Ref.make(new Map<string, ActiveSession>());
   const failures = yield* Ref.make(new Map<string, string>());
-  const sessionLock = yield* Effect.makeSemaphore(1);
+  const sessionLock = yield* Semaphore.make(1);
 
   const clearFailure = (key: string) =>
     Ref.update(failures, (current) => {
@@ -330,6 +333,9 @@ export const makeMcpOAuthRuntime = Effect.gen(function* () {
         }
       }),
     ).pipe(
+      Effect.mapError(() =>
+        commandError("start", "codex", "Codex could not start MCP authentication."),
+      ),
       Effect.tap(() => clearFailure(key)),
       Effect.tapError((error) =>
         Effect.all([
@@ -377,7 +383,7 @@ export const makeMcpOAuthRuntime = Effect.gen(function* () {
           }),
         );
 
-        const scanOutput = (stream: Stream.Stream<Uint8Array, unknown>) => {
+        const scanOutput = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) => {
           const decoder = new TextDecoder();
           let buffered = "";
           return Stream.runForEach(stream, (chunk) =>
@@ -413,6 +419,11 @@ export const makeMcpOAuthRuntime = Effect.gen(function* () {
         yield* clearFailure(key);
       }),
     ).pipe(
+      Effect.mapError((error) =>
+        isMcpOAuthRuntimeError(error)
+          ? error
+          : commandError("start", "claude", "Claude Code could not start MCP authentication."),
+      ),
       Effect.tapError((error) =>
         Effect.all([
           Deferred.fail(session.started, error).pipe(Effect.ignore),
@@ -507,14 +518,18 @@ export const makeMcpOAuthRuntime = Effect.gen(function* () {
           name,
           started: yield* Deferred.make<McpOAuthStart, McpOAuthRuntimeError>(),
           cancelled: yield* Deferred.make<void>(),
-          submitCallback: yield* Ref.make(null),
+          submitCallback: yield* Ref.make<
+            ((callbackUrl: string) => Effect.Effect<void, McpOAuthRuntimeError>) | null
+          >(null),
         };
         yield* Ref.update(activeSessions, (current) => new Map(current).set(key, session));
         yield* clearFailure(key);
         yield* (
           harness === "codex" ? runCodexSession(key, session) : runClaudeSession(key, session)
         ).pipe(Effect.forkIn(runtimeScope));
-        const started = yield* Deferred.await(session.started).pipe(Effect.timeout("20 seconds"));
+        const started = yield* Deferred.await(session.started).pipe(
+          Effect.timeoutOption("20 seconds"),
+        );
         if (Option.isNone(started)) {
           yield* Deferred.succeed(session.cancelled, undefined);
           return yield* commandError(

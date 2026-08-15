@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 
-import type { PluginMarketplaceSetupAction } from "@t3tools/contracts";
+import type { PluginMarketplaceHarnessId, PluginMarketplaceSetupAction } from "@t3tools/contracts";
 import { PrimaryEnvironmentHttpClient } from "~/environments/primary/httpClient";
 import { runPrimaryHttp } from "~/lib/runtime";
 
@@ -24,6 +24,69 @@ export function fetchPluginMarketplaceLogo(pluginId: string) {
   return runPrimaryHttp(
     PrimaryEnvironmentHttpClient.pipe(
       Effect.flatMap((client) => client.plugins.logo({ headers: {}, params: { pluginId } })),
+    ),
+  );
+}
+
+export function fetchPluginMcpAuth(pluginId: string) {
+  return runPrimaryHttp(
+    PrimaryEnvironmentHttpClient.pipe(
+      Effect.flatMap((client) => client.plugins.mcpAuth({ headers: {}, params: { pluginId } })),
+    ),
+  );
+}
+
+export function startPluginMcpAuth(
+  pluginId: string,
+  harness: PluginMarketplaceHarnessId,
+  serverId: string,
+) {
+  return runPrimaryHttp(
+    PrimaryEnvironmentHttpClient.pipe(
+      Effect.flatMap((client) =>
+        client.plugins.startMcpAuth({
+          headers: {},
+          params: { pluginId },
+          payload: { harness, serverId },
+        }),
+      ),
+    ),
+  );
+}
+
+export function completePluginMcpAuth(
+  pluginId: string,
+  harness: PluginMarketplaceHarnessId,
+  serverId: string,
+  callbackUrl: string,
+) {
+  return runPrimaryHttp(
+    PrimaryEnvironmentHttpClient.pipe(
+      Effect.flatMap((client) =>
+        client.plugins.completeMcpAuth({
+          headers: {},
+          params: { pluginId },
+          payload: { harness, serverId, callbackUrl },
+        }),
+      ),
+    ),
+  );
+}
+
+export function disconnectPluginMcpAuth(
+  pluginId: string,
+  harness: PluginMarketplaceHarnessId,
+  serverId: string,
+) {
+  return runPrimaryHttp(
+    PrimaryEnvironmentHttpClient.pipe(
+      Effect.flatMap((client) =>
+        client.plugins.disconnectMcpAuth({
+          headers: {},
+          params: { pluginId },
+          payload: { harness, serverId },
+        }),
+      ),
     ),
   );
 }

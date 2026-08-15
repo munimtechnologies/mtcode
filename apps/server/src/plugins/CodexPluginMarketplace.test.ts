@@ -12,6 +12,7 @@ import {
   parseCursorMarketplaceHtml,
   type CodexPluginRuntime,
 } from "./CodexPluginMarketplace.ts";
+import type { McpOAuthRuntime } from "./McpOAuthRuntime.ts";
 import { PluginMarketplaceUnavailableError } from "@t3tools/contracts";
 
 const processOutput = (stdout: string) => ({
@@ -173,6 +174,88 @@ testLayer("CodexPluginMarketplace", (it) => {
       ]);
       assert.deepStrictEqual(detail.defaultPrompts, ["Play a playlist to help me focus"]);
       expect(detail.mcpServers[0]?.environmentVariables).not.toContain("never-return-this-value");
+    }),
+  );
+
+  it.effect("maps remote MCP OAuth through the installed harness", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-oauth-" });
+      yield* fs.makeDirectory(path.join(root, ".codex-plugin"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, ".codex-plugin", "plugin.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ name: "figma", mcpServers: "./.mcp.json" }),
+      );
+      yield* fs.writeFileString(
+        path.join(root, ".mcp.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          mcpServers: {
+            figma: { type: "http", url: "https://mcp.figma.com/mcp" },
+          },
+        }),
+      );
+      const record = {
+        pluginId: "figma@openai-curated",
+        name: "figma",
+        marketplaceName: "openai-curated",
+        version: "2.0.17",
+        installed: true,
+        enabled: true,
+        source: { source: "local", path: root },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      const starts: Array<string> = [];
+      const oauthRuntime = {
+        status: () =>
+          Effect.succeed([
+            {
+              name: "figma",
+              url: "https://mcp.figma.com/mcp",
+              status: "not_connected",
+              detail: "Sign in with Codex to use this MCP server",
+              canConnect: true,
+              canDisconnect: false,
+            },
+          ]),
+        start: (_harness, name) =>
+          Effect.sync(() => {
+            starts.push(name);
+            return {
+              authorizationUrl: "https://accounts.figma.com/oauth",
+              callbackRequired: false,
+            };
+          }),
+        complete: () => Effect.void,
+        disconnect: () => Effect.void,
+      } satisfies McpOAuthRuntime;
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.succeed(
+            input.command === "codex"
+              ? processOutput(JSON.stringify({ installed: [record], available: [] }))
+              : unavailableProcessOutput,
+          ),
+      });
+      const marketplace = yield* makeWithOptions({
+        mcpOAuthRuntime: oauthRuntime,
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+      const pluginId = `codex:${record.pluginId}`;
+
+      const state = yield* marketplace.mcpAuth(pluginId);
+      assert.strictEqual(state.connections[0]?.status, "not_connected");
+      assert.strictEqual(state.connections[0]?.canConnect, true);
+      const started = yield* marketplace.startMcpAuth(pluginId, "codex", "figma");
+      assert.strictEqual(started.authorizationUrl, "https://accounts.figma.com/oauth");
+      assert.deepStrictEqual(starts, ["figma"]);
     }),
   );
 
