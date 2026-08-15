@@ -6,11 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import {
-  AntigravitySettings,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { AntigravitySettings, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 
 import { makeAntigravityAdapter } from "./AntigravityAdapter.ts";
 
@@ -56,10 +52,9 @@ it.layer(NodeServices.layer)("makeAntigravityAdapter", (it) => {
   it.effect("binds custom instanceId to session", () =>
     Effect.gen(function* () {
       const customInstanceId = ProviderInstanceId.make("antigravity-secondary");
-      const adapter = yield* makeAntigravityAdapter(
-        decodeAntigravitySettings({ enabled: true }),
-        { instanceId: customInstanceId },
-      );
+      const adapter = yield* makeAntigravityAdapter(decodeAntigravitySettings({ enabled: true }), {
+        instanceId: customInstanceId,
+      });
       const threadId = ThreadId.make("thread-2");
 
       const session = yield* adapter.startSession({

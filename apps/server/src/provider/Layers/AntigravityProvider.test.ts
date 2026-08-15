@@ -81,7 +81,9 @@ it.layer(NodeServices.layer)("checkAntigravityProviderStatus", (it) => {
       expect(snapshot.enabled).toBe(true);
       expect(snapshot.installed).toBe(true);
       expect(snapshot.status).toBe("error");
-      expect(snapshot.message).toBe("Antigravity CLI is installed but exited with non-zero status.");
+      expect(snapshot.message).toBe(
+        "Antigravity CLI is installed but exited with non-zero status.",
+      );
       expect(snapshot.message).not.toContain(secretStderr);
     }),
   );

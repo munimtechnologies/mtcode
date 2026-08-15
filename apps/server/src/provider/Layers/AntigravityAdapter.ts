@@ -542,42 +542,17 @@ export function makeAntigravityAdapter(
             );
 
             const exitCode = yield* processHandle.exitCode;
-            const wasInterrupted = ctx.activeTurnId !== turnId;
-            if (wasInterrupted) return;
-
-            const completedStamp = yield* makeEventStamp();
             const isSuccess = exitCode === 0;
 
-            ctx.activeProcess = undefined;
-            ctx.activeTurnId = undefined;
-
-            yield* publishEvent({
-              ...completedStamp,
-              provider: PROVIDER,
+            yield* withThreadLock(
               threadId,
-              turnId,
-              type: "turn.completed",
-              payload: {
-                state: isSuccess ? "completed" : "failed",
-                ...(!isSuccess
-                  ? { errorMessage: `Antigravity CLI process exited with code ${exitCode}` }
-                  : {}),
-              },
-            });
-          }).pipe(
-            Effect.catchCause((cause) =>
               Effect.gen(function* () {
-                if (Cause.hasInterruptsOnly(cause)) {
-                  return yield* Effect.failCause(cause);
-                }
-                if (ctx.activeProcess) {
-                  yield* ctx.activeProcess.kill();
+                if (ctx.activeTurnId !== turnId) return;
+                if (ctx.activeProcess === processHandle) {
                   ctx.activeProcess = undefined;
                 }
-                const wasInterrupted = ctx.activeTurnId !== turnId;
-                if (wasInterrupted) return;
-
                 ctx.activeTurnId = undefined;
+
                 const completedStamp = yield* makeEventStamp();
                 yield* publishEvent({
                   ...completedStamp,
@@ -586,14 +561,46 @@ export function makeAntigravityAdapter(
                   turnId,
                   type: "turn.completed",
                   payload: {
-                    state: "failed",
-                    errorMessage: "Antigravity CLI process monitor failed.",
+                    state: isSuccess ? "completed" : "failed",
+                    ...(!isSuccess
+                      ? { errorMessage: `Antigravity CLI process exited with code ${exitCode}` }
+                      : {}),
                   },
                 });
-                yield* Effect.logWarning("Antigravity process monitor failed", {
-                  cause,
-                });
               }),
+            );
+          }).pipe(
+            Effect.catchCause((cause) =>
+              withThreadLock(
+                threadId,
+                Effect.gen(function* () {
+                  if (Cause.hasInterruptsOnly(cause)) {
+                    return yield* Effect.failCause(cause);
+                  }
+                  if (ctx.activeTurnId !== turnId) return;
+                  if (ctx.activeProcess === processHandle) {
+                    yield* processHandle.kill();
+                    ctx.activeProcess = undefined;
+                  }
+                  ctx.activeTurnId = undefined;
+
+                  const completedStamp = yield* makeEventStamp();
+                  yield* publishEvent({
+                    ...completedStamp,
+                    provider: PROVIDER,
+                    threadId,
+                    turnId,
+                    type: "turn.completed",
+                    payload: {
+                      state: "failed",
+                      errorMessage: "Antigravity CLI process monitor failed.",
+                    },
+                  });
+                  yield* Effect.logWarning("Antigravity process monitor failed", {
+                    cause,
+                  });
+                }),
+              ),
             ),
           );
 
@@ -617,12 +624,12 @@ export function makeAntigravityAdapter(
             return;
           }
 
+          const effectiveTurnId = turnId ?? ctx.activeTurnId;
           if (ctx.activeProcess) {
             yield* ctx.activeProcess.kill();
             ctx.activeProcess = undefined;
           }
 
-          const effectiveTurnId = turnId ?? ctx.activeTurnId;
           if (effectiveTurnId) {
             ctx.activeTurnId = undefined;
             const stamp = yield* makeEventStamp();
@@ -635,6 +642,17 @@ export function makeAntigravityAdapter(
               type: "turn.aborted",
               payload: {
                 reason: "Turn interrupted by user",
+              },
+            });
+
+            yield* publishEvent({
+              ...stamp,
+              provider: PROVIDER,
+              threadId,
+              turnId: effectiveTurnId,
+              type: "turn.completed",
+              payload: {
+                state: "aborted",
               },
             });
           }
