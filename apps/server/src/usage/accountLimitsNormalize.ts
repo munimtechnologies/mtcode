@@ -120,6 +120,19 @@ function claudeWindowFromEntry(meta: ClaudeWindowMeta, entry: unknown): AccountL
   };
 }
 
+/**
+ * A window the provider has never metered says nothing: untouched windows
+ * report 0% used with no reset clock (the reset only exists once there is
+ * traffic). Dropping them here - the one place windows are assembled -
+ * keeps every client rendering the array as-is while sparing all of them a
+ * row like a bare provider-side slug at a permanent 0%. A window appears
+ * the moment it first carries usage, which is also when its reset clock
+ * starts meaning something.
+ */
+export function windowHasTraffic(window: AccountLimitsWindow): boolean {
+  return window.usedPercent > 0 || window.resetsAt !== null;
+}
+
 export interface ClaudeUsageSnapshot {
   readonly plan: string | null;
   readonly windows: AccountLimitsWindow[];
@@ -155,7 +168,10 @@ export function claudeUsageSnapshotFromUnknown(value: unknown): ClaudeUsageSnaps
     }
   }
 
-  return { plan: readString(value.subscription_type), windows: sortWindows([...windows.values()]) };
+  return {
+    plan: readString(value.subscription_type),
+    windows: sortWindows([...windows.values()].filter(windowHasTraffic)),
+  };
 }
 
 /** One entry of the newer `rate_limits.limits` array. */
@@ -263,7 +279,7 @@ export function codexSnapshotFromUnknown(value: unknown): CodexRateLimitsSnapsho
   }
   if (windows.length === 0 && limitId === null && plan === null) return null;
 
-  return { limitId, plan, windows: sortWindows(windows) };
+  return { limitId, plan, windows: sortWindows(windows.filter(windowHasTraffic)) };
 }
 
 /**
