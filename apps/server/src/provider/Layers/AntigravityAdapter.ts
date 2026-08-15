@@ -652,7 +652,7 @@ export function makeAntigravityAdapter(
               turnId: effectiveTurnId,
               type: "turn.completed",
               payload: {
-                state: "aborted",
+                state: "interrupted",
               },
             });
           }
