@@ -242,6 +242,13 @@ export const ChatHeader = memo(function ChatHeader({
           activeProjectCwd={activeProjectCwd}
           activeProjectFaviconPath={activeProjectFaviconPath}
           onNewTab={onNewThreadInProject}
+          renamingTitle={renamingTitle}
+          onCommitRename={commitRename}
+          onCancelRename={() => {
+            renameCommittedRef.current = true;
+            setRenaming(null);
+          }}
+          onRenameKeyDown={handleRenameKeyDown}
         />
       ) : (
         <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">

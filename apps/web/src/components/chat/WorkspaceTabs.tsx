@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Pin, Plus, X } from "lucide-react";
 import {
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type WheelEvent as ReactWheelEvent,
   useCallback,
@@ -15,6 +16,7 @@ import {
 import type { DraftId } from "~/composerDraftStore";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
+import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -31,6 +33,10 @@ interface WorkspaceTabsProps {
   readonly activeProjectFaviconPath?: string | null | undefined;
   readonly isWorking?: boolean | undefined;
   readonly onNewTab: () => void;
+  readonly renamingTitle?: string | null | undefined;
+  readonly onCommitRename?: ((title: string) => void) | undefined;
+  readonly onCancelRename?: (() => void) | undefined;
+  readonly onRenameKeyDown?: ((event: ReactKeyboardEvent<HTMLInputElement>) => void) | undefined;
 }
 
 function ServerThreadTabItem({
@@ -38,6 +44,9 @@ function ServerThreadTabItem({
   isActive,
   isDragged,
   isDragOver,
+  renamingTitle,
+  onCommitRename,
+  onRenameKeyDown,
   onActivate,
   onClose,
   onAuxClick,
@@ -52,6 +61,9 @@ function ServerThreadTabItem({
   readonly isActive: boolean;
   readonly isDragged: boolean;
   readonly isDragOver: boolean;
+  readonly renamingTitle?: string | null | undefined;
+  readonly onCommitRename?: ((title: string) => void) | undefined;
+  readonly onRenameKeyDown?: ((event: ReactKeyboardEvent<HTMLInputElement>) => void) | undefined;
   readonly onActivate: () => void;
   readonly onClose: (e: ReactMouseEvent) => void;
   readonly onAuxClick: (e: ReactMouseEvent) => void;
@@ -77,10 +89,12 @@ function ServerThreadTabItem({
     }
   }, [isActive]);
 
+  const isRenaming = isActive && renamingTitle !== null && renamingTitle !== undefined;
+
   return (
     <div
       ref={itemRef}
-      draggable
+      draggable={!isRenaming}
       data-active-tab={isActive ? "true" : "false"}
       data-tab-key={tab.key}
       onDragStart={onDragStart}
@@ -91,7 +105,7 @@ function ServerThreadTabItem({
       onAuxClick={onAuxClick}
       onContextMenu={onContextMenu}
       className={cn(
-        "group/tab relative flex h-7 max-w-48 min-w-24 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2 text-xs transition-all duration-150",
+        "group/tab relative flex h-7 max-w-48 min-w-24 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2 text-xs transition-all duration-150 [-webkit-app-region:no-drag]",
         isActive
           ? "border border-border/80 bg-accent text-foreground shadow-2xs font-medium"
           : "border border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -99,33 +113,53 @@ function ServerThreadTabItem({
         isDragOver && !isDragged && "ring-2 ring-primary/80 bg-accent/90",
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-1.5" onClick={onActivate}>
-        <ProjectFavicon
-          environmentId={tab.environmentId}
-          cwd={tab.projectCwd ?? ""}
-          faviconPath={tab.faviconPath}
-          className="size-3.5 shrink-0"
+      {isRenaming ? (
+        <input
+          autoFocus
+          aria-label="Thread title"
+          className="min-w-0 flex-1 rounded-sm bg-transparent text-xs font-medium text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring"
+          defaultValue={renamingTitle}
+          onBlur={(event) => {
+            onCommitRename?.(event.currentTarget.value);
+          }}
+          onFocus={(event) => event.currentTarget.select()}
+          onKeyDown={onRenameKeyDown}
         />
-        <Tooltip>
-          <TooltipTrigger render={<span className="truncate">{title}</span>} />
-          <TooltipPopup side="bottom">{fullLabel}</TooltipPopup>
-        </Tooltip>
-        {tab.pinned ? <Pin className="size-2.5 shrink-0 rotate-45 opacity-60" /> : null}
-      </div>
+      ) : (
+        <button
+          type="button"
+          aria-label={fullLabel}
+          onClick={onActivate}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ProjectFavicon
+            environmentId={tab.environmentId}
+            cwd={tab.projectCwd ?? ""}
+            faviconPath={tab.faviconPath}
+            className="size-3.5 shrink-0"
+          />
+          <Tooltip>
+            <TooltipTrigger render={<span className="truncate">{title}</span>} />
+            <TooltipPopup side="bottom">{fullLabel}</TooltipPopup>
+          </Tooltip>
+          {tab.pinned ? <Pin className="size-2.5 shrink-0 rotate-45 opacity-60" /> : null}
+        </button>
+      )}
 
-      <button
-        type="button"
+      <Button
+        size="icon-micro"
+        variant="ghost-muted"
         aria-label={`Close ${title}`}
         onClick={onClose}
         className={cn(
-          "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+          "shrink-0",
           isActive
             ? "opacity-60 hover:opacity-100"
             : "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
         )}
       >
         <X className="size-3" />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -139,6 +173,9 @@ export function WorkspaceTabs({
   activeProjectCwd,
   activeProjectFaviconPath,
   onNewTab,
+  renamingTitle,
+  onCommitRename,
+  onRenameKeyDown,
 }: WorkspaceTabsProps) {
   const navigate = useNavigate();
   const tabs = useWorkspaceTabsStore((state) => state.tabs);
@@ -288,18 +325,24 @@ export function WorkspaceTabs({
         case "close":
           handleCloseTab(tab);
           break;
-        case "close-others":
+        case "close-others": {
           closeOtherTabs(tab.key);
-          if (currentTabKey !== tab.key) {
+          const remainingTabs = useWorkspaceTabsStore.getState().tabs;
+          const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
+          if (!isCurrentStillOpen) {
             handleNavigateToTab(tab);
           }
           break;
-        case "close-to-right":
+        }
+        case "close-to-right": {
           closeTabsToRight(tab.key);
-          if (effectiveTabs.findIndex((t) => t.key === currentTabKey) > tabIndex) {
+          const remainingTabs = useWorkspaceTabsStore.getState().tabs;
+          const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
+          if (!isCurrentStillOpen) {
             handleNavigateToTab(tab);
           }
           break;
+        }
         case "close-all":
           closeAllTabs();
           onNewTab();
@@ -344,16 +387,12 @@ export function WorkspaceTabs({
     (e: ReactDragEvent, targetKey: string) => {
       e.preventDefault();
       if (draggedKey && draggedKey !== targetKey) {
-        const sourceIndex = effectiveTabs.findIndex((t) => t.key === draggedKey);
-        const targetIndex = effectiveTabs.findIndex((t) => t.key === targetKey);
-        if (sourceIndex >= 0 && targetIndex >= 0) {
-          reorderTabs(sourceIndex, targetIndex);
-        }
+        reorderTabs(draggedKey, targetKey);
       }
       setDraggedKey(null);
       setDragOverKey(null);
     },
-    [draggedKey, effectiveTabs, reorderTabs],
+    [draggedKey, reorderTabs],
   );
 
   const handleDragEnd = useCallback(() => {
@@ -362,9 +401,10 @@ export function WorkspaceTabs({
   }, []);
 
   const handleWheel = useCallback((e: ReactWheelEvent<HTMLDivElement>) => {
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-      e.currentTarget.scrollLeft += e.deltaY;
-    }
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    const viewport = e.currentTarget.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) return;
+    viewport.scrollLeft += e.deltaY;
   }, []);
 
   return (
@@ -382,12 +422,14 @@ export function WorkspaceTabs({
           <Tooltip>
             <TooltipTrigger
               render={
-                <div
+                <button
+                  type="button"
+                  aria-label="New thread"
                   data-active-tab={isDraftActive ? "true" : "false"}
                   data-tab-key="new-thread"
                   onClick={onNewTab}
                   className={cn(
-                    "group/tab relative flex h-7 max-w-40 min-w-24 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors duration-150",
+                    "group/tab relative flex h-7 max-w-40 min-w-24 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors duration-150 [-webkit-app-region:no-drag] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
                     isDraftActive
                       ? "border border-border/80 bg-accent text-foreground shadow-2xs font-medium"
                       : "border border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -395,7 +437,7 @@ export function WorkspaceTabs({
                 >
                   <Plus className="size-3.5 shrink-0 text-muted-foreground group-hover/tab:text-foreground" />
                   <span className="truncate">New thread</span>
-                </div>
+                </button>
               }
             />
             <TooltipPopup side="bottom">New thread</TooltipPopup>
@@ -413,6 +455,9 @@ export function WorkspaceTabs({
                 isActive={isActive}
                 isDragged={isDragged}
                 isDragOver={isDragOver}
+                renamingTitle={renamingTitle}
+                onCommitRename={onCommitRename}
+                onRenameKeyDown={onRenameKeyDown}
                 onActivate={() => handleNavigateToTab(tab)}
                 onClose={(e) => handleCloseTab(tab, e)}
                 onAuxClick={(e) => handleTabAuxClick(e, tab)}

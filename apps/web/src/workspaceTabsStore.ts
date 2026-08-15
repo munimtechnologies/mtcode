@@ -26,7 +26,7 @@ export interface WorkspaceTabsState {
   readonly closeOtherTabs: (keepTabKey: string) => void;
   readonly closeTabsToRight: (fromTabKey: string) => void;
   readonly closeAllTabs: () => void;
-  readonly reorderTabs: (sourceIndex: number, targetIndex: number) => void;
+  readonly reorderTabs: (sourceKey: string, targetKey: string) => void;
   readonly togglePinTab: (tabKey: string) => void;
 }
 
@@ -150,6 +150,8 @@ export const useWorkspaceTabsStore = create<WorkspaceTabsState>((set, get) => ({
 
   closeOtherTabs: (keepTabKey: string) => {
     set((state) => {
+      const exists = state.tabs.some((t) => t.key === keepTabKey);
+      if (!exists) return state;
       const nextTabs = state.tabs.filter((t) => t.key === keepTabKey || t.pinned);
       const nextActiveKey = nextTabs.some((t) => t.key === state.activeTabKey)
         ? state.activeTabKey
@@ -181,15 +183,11 @@ export const useWorkspaceTabsStore = create<WorkspaceTabsState>((set, get) => ({
     });
   },
 
-  reorderTabs: (sourceIndex: number, targetIndex: number) => {
+  reorderTabs: (sourceKey: string, targetKey: string) => {
     set((state) => {
-      if (
-        sourceIndex < 0 ||
-        sourceIndex >= state.tabs.length ||
-        targetIndex < 0 ||
-        targetIndex >= state.tabs.length ||
-        sourceIndex === targetIndex
-      ) {
+      const sourceIndex = state.tabs.findIndex((t) => t.key === sourceKey);
+      const targetIndex = state.tabs.findIndex((t) => t.key === targetKey);
+      if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) {
         return state;
       }
       const tab = state.tabs[sourceIndex];

@@ -150,7 +150,7 @@ describe("workspaceTabsStore", () => {
     useWorkspaceTabsStore.getState().openTab(tab2);
     useWorkspaceTabsStore.getState().openTab(tab3);
 
-    useWorkspaceTabsStore.getState().reorderTabs(0, 2);
+    useWorkspaceTabsStore.getState().reorderTabs(tab3.key, tab1.key);
 
     const state = useWorkspaceTabsStore.getState();
     expect(state.tabs.map((t) => t.key)).toEqual([tab2.key, tab1.key, tab3.key]);
