@@ -60,7 +60,7 @@ export interface ProviderRegistryShape {
 
   readonly listWorkspaceCapabilities: (input: {
     readonly instanceId: ProviderInstanceId;
-    readonly cwd: string;
+    readonly cwd: string | null;
   }) => Effect.Effect<ServerProviderWorkspaceCapabilities>;
 
   /**

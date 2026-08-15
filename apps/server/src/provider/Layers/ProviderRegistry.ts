@@ -510,12 +510,12 @@ export const ProviderRegistryLive = Layer.effect(
 
     const listWorkspaceCapabilities = Effect.fn("listWorkspaceCapabilities")(function* (input: {
       readonly instanceId: ProviderInstanceId;
-      readonly cwd: string;
+      readonly cwd: string | null;
     }) {
       const instance = Array.from((yield* Ref.get(liveSubsRef)).values()).find(
         (candidate) => candidate.instanceId === input.instanceId,
       );
-      if (instance?.listWorkspaceCapabilities) {
+      if (input.cwd !== null && instance?.listWorkspaceCapabilities) {
         return yield* instance.listWorkspaceCapabilities(input.cwd);
       }
       const snapshot = (yield* Ref.get(providersRef)).find(

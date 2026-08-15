@@ -1020,6 +1020,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               fallback.slashCommands.map((command) => command.name),
               ["codex-command"],
             );
+
+            const withoutWorkspace = yield* registry.listWorkspaceCapabilities({
+              instanceId: claudeInstanceId,
+              cwd: null,
+            });
+            assert.deepStrictEqual(
+              withoutWorkspace.slashCommands.map((command) => command.name),
+              ["server-cwd-command"],
+            );
+            assert.strictEqual(yield* Ref.get(probedCwd), "/workspaces/my-project");
           }).pipe(Effect.provide(runtimeServices));
         }),
       );

@@ -1460,20 +1460,34 @@ const makeWsRpcLayer = (
             Effect.gen(function* () {
               const project = yield* projectionSnapshotQuery
                 .getProjectShellById(input.projectId)
-                .pipe(Effect.orElseSucceed(() => Option.none()));
-              if (Option.isNone(project)) {
-                return { slashCommands: [], skills: [] };
-              }
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to read the project for provider workspace capabilities",
+                        cause,
+                      }),
+                  ),
+                );
+              const projectRoot = Option.isSome(project) ? project.value.workspaceRoot : null;
 
-              let cwd = project.value.workspaceRoot;
+              let cwd = projectRoot;
               if (input.threadId !== undefined) {
                 const thread = yield* projectionSnapshotQuery
                   .getThreadShellById(input.threadId)
-                  .pipe(Effect.orElseSucceed(() => Option.none()));
-                if (Option.isNone(thread) || thread.value.projectId !== input.projectId) {
-                  return { slashCommands: [], skills: [] };
-                }
-                cwd = thread.value.worktreePath ?? cwd;
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: "Failed to read the thread for provider workspace capabilities",
+                          cause,
+                        }),
+                    ),
+                  );
+                cwd =
+                  Option.isSome(thread) && thread.value.projectId === input.projectId
+                    ? (thread.value.worktreePath ?? projectRoot)
+                    : null;
               }
 
               return yield* providerRegistry.listWorkspaceCapabilities({

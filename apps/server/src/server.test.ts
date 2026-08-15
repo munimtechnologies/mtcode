@@ -3410,7 +3410,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("resolves provider workspace capabilities from the thread worktree", () =>
     Effect.gen(function* () {
-      const requestedCwds = yield* Ref.make<ReadonlyArray<string>>([]);
+      const requestedCwds = yield* Ref.make<ReadonlyArray<string | null>>([]);
       const projectShell = {
         id: defaultProjectId,
         title: "Default Project",
@@ -3439,7 +3439,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           providerRegistry: {
             listWorkspaceCapabilities: ({ cwd }) =>
               Ref.update(requestedCwds, (cwds) => [...cwds, cwd]).pipe(
-                Effect.as({ slashCommands: [{ name: "deploy" }], skills: [] }),
+                Effect.as({
+                  slashCommands: [{ name: cwd === null ? "from-snapshot" : "deploy" }],
+                  skills: [],
+                }),
               ),
           },
         },
@@ -3470,12 +3473,54 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepStrictEqual(yield* Ref.get(requestedCwds), [
         "/tmp/worktrees/default-thread",
         "/tmp/default-project",
+        null,
       ]);
       assert.deepStrictEqual(
         responses.withThread.slashCommands.map((command) => command.name),
         ["deploy"],
       );
-      assert.deepStrictEqual(responses.unknownThread.slashCommands, []);
+      assert.deepStrictEqual(
+        responses.unknownThread.slashCommands.map((command) => command.name),
+        ["from-snapshot"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("fails provider workspace capabilities when the projection read fails", () =>
+    Effect.gen(function* () {
+      const projectionError = new PersistenceSqlError({
+        operation: "ProjectionSnapshotQuery.getProjectShellById:test",
+        detail: "failed to read the project shell",
+      });
+      const registryCalls = yield* Ref.make(0);
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: () => Effect.fail(projectionError),
+          },
+          providerRegistry: {
+            listWorkspaceCapabilities: () =>
+              Ref.update(registryCalls, (count) => count + 1).pipe(
+                Effect.as({ slashCommands: [], skills: [] }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.serverListProviderWorkspaceCapabilities]({
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            projectId: defaultProjectId,
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "OrchestrationGetSnapshotError");
+      assert.strictEqual(yield* Ref.get(registryCalls), 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

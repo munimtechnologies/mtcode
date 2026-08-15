@@ -358,7 +358,7 @@ export const WsServerListProviderWorkspaceCapabilitiesRpc = Rpc.make(
   {
     payload: ServerProviderWorkspaceCapabilitiesInput,
     success: ServerProviderWorkspaceCapabilities,
-    error: EnvironmentAuthorizationError,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
   },
 );
 
