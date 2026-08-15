@@ -6749,7 +6749,6 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenChange={setIsHandoffDialogOpen}
                 sourceThread={activeServerThread}
                 targetModelSelection={handoffTargetModelSelection}
-                providerInstanceEntries={providerInstanceEntries}
                 onConfirmHandoff={handleConfirmHandoff}
               />
             ) : null}

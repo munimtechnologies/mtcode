@@ -44,7 +44,7 @@ function createMockThread(
 describe("detectNewTurnCompletions", () => {
   it("does not trigger chime on initial snapshot or environment hydration of settled threads", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:02:00.000Z" },
+      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:02:00.000Z" } as any,
       latestTurn: {
         turnId: TurnId.make("turn-1"),
         state: "completed",
@@ -63,7 +63,11 @@ describe("detectNewTurnCompletions", () => {
 
   it("does not trigger chime during mid-turn checkpoints while state or session is running", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "running", activeTurnId: "turn-1", updatedAt: "2026-08-15T07:01:30.000Z" },
+      session: {
+        status: "running",
+        activeTurnId: TurnId.make("turn-1"),
+        updatedAt: "2026-08-15T07:01:30.000Z",
+      } as any,
       latestTurn: {
         turnId: TurnId.make("turn-1"),
         state: "running",
@@ -82,7 +86,7 @@ describe("detectNewTurnCompletions", () => {
 
   it("triggers chime when a running thread settles and completes", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:02:00.000Z" },
+      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:02:00.000Z" } as any,
       latestTurn: {
         turnId: TurnId.make("turn-1"),
         state: "completed",
@@ -102,7 +106,7 @@ describe("detectNewTurnCompletions", () => {
 
   it("triggers chime when a previously completed thread completes a new turn", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" },
+      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" } as any,
       latestTurn: {
         turnId: TurnId.make("turn-2"),
         state: "completed",
@@ -122,7 +126,7 @@ describe("detectNewTurnCompletions", () => {
 
   it("ignores unchanged completed threads on subsequent renders", () => {
     const thread = createMockThread("thread-1", {
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" },
+      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" } as any,
       latestTurn: {
         turnId: TurnId.make("turn-2"),
         state: "completed",
@@ -142,7 +146,7 @@ describe("detectNewTurnCompletions", () => {
   it("clears tracked state when thread is archived and does not chime on unarchiving an already-settled thread", () => {
     const archivedThread = createMockThread("thread-1", {
       archivedAt: "2026-08-15T07:04:00.000Z",
-      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" },
+      session: { status: "idle", activeTurnId: null, updatedAt: "2026-08-15T07:06:00.000Z" } as any,
       latestTurn: {
         turnId: TurnId.make("turn-2"),
         state: "completed",

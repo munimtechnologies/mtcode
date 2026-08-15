@@ -4,35 +4,48 @@ export interface ThreadHandoffInput {
     readonly title: string;
     readonly branch?: string | null;
     readonly worktreePath?: string | null;
-    readonly modelSelection?: {
-      readonly instanceId: string;
-      readonly model: string;
-    } | null;
-    readonly messages?: ReadonlyArray<{
-      readonly role: "user" | "assistant" | "system";
-      readonly text: string;
-      readonly attachments?: ReadonlyArray<{
-        readonly name?: string;
-        readonly path?: string;
-      }>;
-    }>;
-    readonly activities?: ReadonlyArray<{
-      readonly tone: string;
-      readonly kind: string;
-      readonly summary: string;
-      readonly payload?: unknown;
-    }>;
-    readonly proposedPlans?: ReadonlyArray<{
-      readonly planMarkdown: string;
-    }>;
-    readonly checkpoints?: ReadonlyArray<{
-      readonly files: ReadonlyArray<{
-        readonly path: string;
-        readonly kind?: string;
-        readonly additions?: number;
-        readonly deletions?: number;
-      }>;
-    }>;
+    readonly modelSelection?:
+      | {
+          readonly instanceId: string;
+          readonly model: string;
+        }
+      | null
+      | undefined;
+    readonly messages?:
+      | ReadonlyArray<{
+          readonly role: "user" | "assistant" | "system";
+          readonly text: string;
+          readonly attachments?:
+            | ReadonlyArray<{
+                readonly name?: string | undefined;
+                readonly path?: string | undefined;
+              }>
+            | undefined;
+        }>
+      | undefined;
+    readonly activities?:
+      | ReadonlyArray<{
+          readonly tone: string;
+          readonly kind: string;
+          readonly summary: string;
+          readonly payload?: unknown | undefined;
+        }>
+      | undefined;
+    readonly proposedPlans?:
+      | ReadonlyArray<{
+          readonly planMarkdown: string;
+        }>
+      | undefined;
+    readonly checkpoints?:
+      | ReadonlyArray<{
+          readonly files: ReadonlyArray<{
+            readonly path: string;
+            readonly kind?: string | undefined;
+            readonly additions?: number | undefined;
+            readonly deletions?: number | undefined;
+          }>;
+        }>
+      | undefined;
   };
   readonly targetModelSelection?: {
     readonly instanceId: string;

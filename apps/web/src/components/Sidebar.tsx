@@ -51,6 +51,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  LoaderCircleIcon,
   MessageSquareIcon,
   PinIcon,
   PlusIcon,
@@ -117,6 +118,7 @@ import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../s
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
+import { useThreadSearch } from "../state/queries";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   buildThreadRouteParams,
@@ -126,6 +128,7 @@ import {
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
+import { HighlightedSearchText } from "./CommandPaletteResults";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   buildBulkTitleRegenerationContextMenuItem,
@@ -134,6 +137,7 @@ import {
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
+  mergeSidebarThreadSearchResults,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   planPinnedReorder,
@@ -143,6 +147,7 @@ import {
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
+  type SidebarThreadContentMatch,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
   sortSettledThreadsForSidebar,
@@ -1619,6 +1624,7 @@ function latestTurnDiff(
 
 const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   thread: SidebarThreadSummary;
+  contentMatch?: SidebarThreadContentMatch | undefined;
   projectCwd: string | null;
   projectFaviconPath: string | null;
   projectTitle: string | null;
@@ -1630,9 +1636,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   onHighlight: () => void;
   onSelect: () => void;
 }) {
-  const { thread } = props;
-  // Same details tooltip as the regular rows: a search hit is still a thread,
-  // and the hover card is how you disambiguate identically-titled results.
+  const { thread, contentMatch } = props;
   const gitCwd = thread.worktreePath ?? props.projectCwd;
   const gitStatus = useEnvironmentQuery(
     (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
@@ -1671,8 +1675,6 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               id={props.resultId}
               type="button"
               role="option"
-              // aria-activedescendant options: focus stays on the search input,
-              // which owns all keyboard interaction for the listbox.
               tabIndex={-1}
               aria-selected={props.isHighlighted}
               aria-current={props.isRouteActive ? "page" : undefined}
@@ -1682,7 +1684,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
               className={cn(
-                "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
+                "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
+                contentMatch ? "min-h-9 py-1.5" : "h-9",
                 props.isHighlighted || props.isRouteActive
                   ? "bg-sidebar-row-active text-sidebar-foreground"
                   : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
@@ -1697,10 +1700,24 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             className="size-4 shrink-0"
             fallbackIcon={MessageSquareIcon}
           />
-          <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
-            {threadTimeLabel(thread)}
-          </span>
+          <div className="flex min-w-0 flex-1 flex-col justify-center">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
+                {threadTimeLabel(thread)}
+              </span>
+            </div>
+            {contentMatch ? (
+              <span className="truncate text-xs text-muted-foreground/85">
+                <span
+                  className={contentMatch.source === "user" ? "text-blue-400" : "text-emerald-400"}
+                >
+                  {contentMatch.source === "user" ? "You:" : "Agent:"}
+                </span>{" "}
+                <HighlightedSearchText text={contentMatch.snippet} query={contentMatch.query} />
+              </span>
+            ) : null}
+          </div>
         </TooltipTrigger>
         <SidebarThreadTooltip
           thread={thread}
@@ -2140,20 +2157,30 @@ export default function Sidebar() {
     threads,
   ]);
 
+  const environmentIds = useMemo(
+    () =>
+      environments
+        .filter((environment) => environment.connection.phase === "connected")
+        .map((environment) => environment.environmentId),
+    [environments],
+  );
+
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
+  const threadSearch = useThreadSearch(environmentIds, threadSearchQuery);
   const searchableThreads = useMemo(
     () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
     [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
   const threadSearchResults = useMemo(
-    () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
-    [searchableThreads, threadSearchQuery],
+    () =>
+      mergeSidebarThreadSearchResults(searchableThreads, threadSearchQuery, threadSearch.matches),
+    [searchableThreads, threadSearchQuery, threadSearch.matches],
   );
   const threadSearchResultOrderKey = threadSearchResults
-    .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+    .map((result) => scopedThreadKey(scopeThreadRef(result.thread.environmentId, result.thread.id)))
     .join("\0");
 
   useEffect(() => {
@@ -2440,7 +2467,7 @@ export default function Sidebar() {
       if (event.key === "Enter") {
         event.preventDefault();
         const result = threadSearchResults[activeSearchResultIndex];
-        if (result) selectThreadSearchResult(result);
+        if (result) selectThreadSearchResult(result.thread);
       }
     },
     [
@@ -3856,19 +3883,24 @@ export default function Sidebar() {
                   className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
                 />
                 {isSearchingThreads ? (
-                  <Button
-                    type="button"
-                    size="icon-micro"
-                    variant="ghost"
-                    className="shrink-0 text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
-                    aria-label="Clear thread search"
-                    onClick={() => {
-                      clearThreadSearch();
-                      threadSearchInputRef.current?.focus();
-                    }}
-                  >
-                    <XIcon className="size-3" />
-                  </Button>
+                  <>
+                    {threadSearch.isPending ? (
+                      <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-sidebar-muted-foreground/80" />
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="icon-micro"
+                      variant="ghost"
+                      className="shrink-0 text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
+                      aria-label="Clear thread search"
+                      onClick={() => {
+                        clearThreadSearch();
+                        threadSearchInputRef.current?.focus();
+                      }}
+                    >
+                      <XIcon className="size-3" />
+                    </Button>
+                  </>
                 ) : null}
               </div>
               <div className="shrink-0">
@@ -4031,7 +4063,8 @@ export default function Sidebar() {
                   aria-label="Thread search results"
                   className="flex flex-col gap-px"
                 >
-                  {threadSearchResults.map((thread, index) => {
+                  {threadSearchResults.map((result, index) => {
+                    const { thread, contentMatch } = result;
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
@@ -4039,6 +4072,7 @@ export default function Sidebar() {
                       <SidebarSearchResultRow
                         key={threadKey}
                         thread={thread}
+                        contentMatch={contentMatch}
                         projectCwd={
                           projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
                         }

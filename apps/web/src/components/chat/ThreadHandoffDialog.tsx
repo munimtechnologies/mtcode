@@ -20,9 +20,9 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 export interface ThreadHandoffContentProps {
   readonly sourceThread: OrchestrationThread;
   readonly targetModelSelection: ModelSelection;
-  readonly providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry>;
-  readonly isSubmitting?: boolean;
-  readonly onCancel?: () => void;
+  readonly providerInstanceEntries?: ReadonlyArray<ProviderInstanceEntry> | undefined;
+  readonly isSubmitting?: boolean | undefined;
+  readonly onCancel?: (() => void) | undefined;
   readonly onConfirmHandoff: (
     handoffMarkdown: string,
     targetModelSelection: ModelSelection,
@@ -49,12 +49,12 @@ export function ThreadHandoffContent({
 
   const sourceEntry = useMemo(() => {
     const instanceId = sourceThread.modelSelection?.instanceId;
-    return providerInstanceEntries.find((entry) => entry.instanceId === instanceId) ?? null;
+    return providerInstanceEntries?.find((entry) => entry.instanceId === instanceId) ?? null;
   }, [providerInstanceEntries, sourceThread.modelSelection?.instanceId]);
 
   const targetEntry = useMemo(() => {
     return (
-      providerInstanceEntries.find(
+      providerInstanceEntries?.find(
         (entry) => entry.instanceId === targetModelSelection.instanceId,
       ) ?? null
     );
@@ -171,7 +171,7 @@ export interface ThreadHandoffDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   readonly sourceThread: OrchestrationThread;
   readonly targetModelSelection: ModelSelection | null;
-  readonly providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  readonly providerInstanceEntries?: ReadonlyArray<ProviderInstanceEntry> | undefined;
   readonly onConfirmHandoff: (
     handoffMarkdown: string,
     targetModelSelection: ModelSelection,

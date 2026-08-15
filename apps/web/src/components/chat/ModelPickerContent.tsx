@@ -73,25 +73,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * between the default Codex and a custom Codex Personal).
    */
   lockedProvider: ProviderDriverKind | null;
-  lockedContinuationGroupKey?: string | null;
-  /**
-   * All configured provider instances in display order. Used to render
-   * the sidebar (one button per instance) and to resolve display names
-   * for the locked-mode header.
-   */
+  lockedContinuationGroupKey?: string | null | undefined;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
-  keybindings?: ResolvedKeybindingsConfig;
-  /**
-   * Model options per instance. Keyed by `ProviderInstanceId` so the
-   * default Codex instance and any custom Codex instances each have their
-   * own list (custom instances typically start with the same built-in
-   * model set but are free to diverge via customModels).
-   */
+  keybindings?: ResolvedKeybindingsConfig | undefined;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
-  onRequestClose?: () => void;
-  allowHandoff?: boolean;
-  getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
+  onRequestClose?: (() => void) | undefined;
+  allowHandoff?: boolean | undefined;
+  getModelDisabledReason?:
+    | ((instanceId: ProviderInstanceId, model: string) => string | null)
+    | undefined;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const {
