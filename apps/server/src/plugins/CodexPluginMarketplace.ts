@@ -51,16 +51,10 @@ import { ServerConfig } from "../config.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
-import {
-  makeMcpOAuthRuntime,
-  McpOAuthRuntime,
-  type McpOAuthHarness,
-  type McpOAuthRuntimeError,
-  type McpOAuthRuntimeOptions,
-  type McpOAuthServerStatus,
-} from "./McpOAuthRuntime.ts";
+import * as McpOAuthRuntime from "./McpOAuthRuntime.ts";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 const MAX_LOGO_BYTES = 1024 * 1024;
@@ -347,7 +341,7 @@ class PluginProviderCommands extends Context.Service<
   PluginProviderCommands,
   {
     readonly resolve: (
-      harness: McpOAuthHarness,
+      harness: McpOAuthRuntime.McpOAuthHarness,
     ) => Effect.Effect<PluginProviderCommand | undefined>;
   }
 >()("t3/plugins/CodexPluginMarketplace/PluginProviderCommands") {}
@@ -510,11 +504,11 @@ function normalizedMcpEndpoint(value: string | null): string | null {
 }
 
 function resolveNativeMcpStatus(
-  harness: McpOAuthHarness,
+  harness: McpOAuthRuntime.McpOAuthHarness,
   packageName: string,
   server: PluginMarketplaceMcpServer,
-  statuses: ReadonlyArray<McpOAuthServerStatus>,
-): McpOAuthServerStatus | null {
+  statuses: ReadonlyArray<McpOAuthRuntime.McpOAuthServerStatus>,
+): McpOAuthRuntime.McpOAuthServerStatus | null {
   const serverId = server.id.toLocaleLowerCase();
   const names = new Set([
     serverId,
@@ -744,9 +738,9 @@ interface PluginMarketplaceOptions {
   readonly readRemoteText?: (url: string) => Effect.Effect<string | null>;
   readonly platform?: NodeJS.Platform;
   readonly codexPluginRuntime?: CodexPluginRuntime["Service"];
-  readonly mcpOAuthRuntime?: McpOAuthRuntime["Service"];
-  readonly commands?: McpOAuthRuntimeOptions["commands"];
-  readonly resolveCommand?: McpOAuthRuntimeOptions["resolveCommand"];
+  readonly mcpOAuthRuntime?: McpOAuthRuntime.McpOAuthRuntime["Service"];
+  readonly commands?: McpOAuthRuntime.McpOAuthRuntimeOptions["commands"];
+  readonly resolveCommand?: McpOAuthRuntime.McpOAuthRuntimeOptions["resolveCommand"];
   readonly cwd?: string;
   readonly onHarnessChanged?: (
     harness: Extract<PluginMarketplaceHarnessId, "codex" | "claude">,
@@ -764,7 +758,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     const platform = options.platform ?? (yield* HostProcessPlatform);
     const marketplaceCwd = options.cwd ?? process.cwd();
     const commandFor = Effect.fn("CodexPluginMarketplace.commandFor")(function* (
-      harness: McpOAuthHarness,
+      harness: McpOAuthRuntime.McpOAuthHarness,
       fallback: string,
     ) {
       if (options.resolveCommand) return yield* options.resolveCommand(harness);
@@ -1929,6 +1923,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 ? "image/svg+xml"
                 : null;
       if (!mimeType) return null;
+      const info = yield* fileSystem.stat(logoPath).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "File" || info.value.size > maxBytes)
+        return null;
       const bytes = yield* fileSystem.readFile(logoPath).pipe(Effect.option);
       if (Option.isNone(bytes) || bytes.value.byteLength > maxBytes) return null;
       return `data:${mimeType};base64,${Buffer.from(bytes.value).toString("base64")}`;
@@ -2006,7 +2003,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           candidates
             .map((candidate) => candidate.target.harness)
             .filter(
-              (harness): harness is McpOAuthHarness =>
+              (harness): harness is McpOAuthRuntime.McpOAuthHarness =>
                 harness === "codex" || harness === "claude" || harness === "cursor",
             ),
         ),
@@ -2017,8 +2014,11 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           harness,
         ): Effect.Effect<
           readonly [
-            McpOAuthHarness,
-            Result.Result<ReadonlyArray<McpOAuthServerStatus>, McpOAuthRuntimeError> | null,
+            McpOAuthRuntime.McpOAuthHarness,
+            Result.Result<
+              ReadonlyArray<McpOAuthRuntime.McpOAuthServerStatus>,
+              McpOAuthRuntime.McpOAuthRuntimeError
+            > | null,
           ]
         > => {
           if (!options.mcpOAuthRuntime) return Effect.succeed([harness, null] as const);
@@ -2173,6 +2173,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 operation: "authenticate",
                 pluginId,
                 detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                cause: error,
               }),
           ),
         );
@@ -2208,6 +2209,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 operation: "authenticate",
                 pluginId,
                 detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                cause: error,
               }),
           ),
         );
@@ -2237,6 +2239,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 operation: "authenticate",
                 pluginId,
                 detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                cause: error,
               }),
           ),
         );
@@ -2261,6 +2264,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               operation: "authenticate",
               pluginId,
               detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+              cause: error,
             }),
         ),
       );
@@ -2336,11 +2340,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         })
         .pipe(
           Effect.mapError(
-            () =>
+            (cause) =>
               new PluginMarketplaceOperationError({
                 operation: "setup",
                 pluginId,
                 detail: "macOS could not open the Computer Use permission setup.",
+                cause,
               }),
           ),
         );
@@ -2349,6 +2354,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           operation: "setup",
           pluginId,
           detail: publicOperationDetail(result.code),
+          cause: new Error(`macOS open exited with status ${result.code}.`),
         });
       }
       return { pluginId, action, opened: true } satisfies PluginMarketplaceSetupResult;
@@ -2400,22 +2406,24 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         if (operation === "install") {
           yield* runtime.install(plugin.record.name).pipe(
             Effect.mapError(
-              () =>
+              (cause) =>
                 new PluginMarketplaceOperationError({
                   operation,
                   pluginId,
                   detail: `Codex could not install ${plugin.detail.name} from its runtime catalog.`,
+                  cause,
                 }),
             ),
           );
         } else if (plugin.record.codexRuntimeInstalledId) {
           yield* runtime.remove(plugin.record.codexRuntimeInstalledId).pipe(
             Effect.mapError(
-              () =>
+              (cause) =>
                 new PluginMarketplaceOperationError({
                   operation,
                   pluginId,
                   detail: `Codex could not uninstall ${plugin.detail.name} from its runtime catalog.`,
+                  cause,
                 }),
             ),
           );
@@ -2429,6 +2437,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               operation,
               pluginId,
               detail: "The configured Codex provider is unavailable.",
+              cause: new Error("No configured Codex provider is available."),
             });
           }
           const legacyRemoval = yield* processRunner
@@ -2442,11 +2451,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             })
             .pipe(
               Effect.mapError(
-                () =>
+                (cause) =>
                   new PluginMarketplaceOperationError({
                     operation,
                     pluginId,
                     detail: `Codex could not remove the local ${plugin.detail.name} package.`,
+                    cause,
                   }),
               ),
               Effect.tapError(() => invalidateCodex),
@@ -2457,6 +2467,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               operation,
               pluginId,
               detail: publicOperationDetail(legacyRemoval.code),
+              cause: new Error(`Codex exited with status ${legacyRemoval.code}.`),
             });
           }
         }
@@ -2474,6 +2485,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           operation,
           pluginId,
           detail: `The configured ${plugin.record.harness === "codex" ? "Codex" : "Claude Code"} provider is unavailable.`,
+          cause: new Error(`No configured ${plugin.record.harness} provider is available.`),
         });
       }
       const invocation =
@@ -2504,11 +2516,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         })
         .pipe(
           Effect.mapError(
-            () =>
+            (cause) =>
               new PluginMarketplaceOperationError({
                 operation,
                 pluginId,
                 detail: `${plugin.record.harness === "codex" ? "Codex" : "Claude Code"} could not start the plugin operation.`,
+                cause,
               }),
           ),
         );
@@ -2517,6 +2530,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           operation,
           pluginId,
           detail: publicOperationDetail(result.code),
+          cause: new Error(`${plugin.record.harness} exited with status ${result.code}.`),
         });
       }
       yield* invalidateSnapshot;
@@ -2702,11 +2716,11 @@ const makePluginProviderCommands = Effect.gen(function* () {
   const path = yield* Path.Path;
 
   const resolve = Effect.fn("PluginProviderCommands.resolve")(function* (
-    harness: McpOAuthHarness,
+    harness: McpOAuthRuntime.McpOAuthHarness,
   ): Effect.fn.Return<PluginProviderCommand | undefined> {
     const settings = yield* settingsService.getSettings.pipe(Effect.orDie);
     const driver = harness === "claude" ? "claudeAgent" : harness;
-    const matches = Object.values(settings.providerInstances).filter(
+    const matches = Object.values(deriveProviderInstanceConfigMap(settings)).filter(
       (instance) => instance.enabled !== false && instance.driver === driver,
     );
     if (matches.length !== 1) return undefined;
@@ -2750,7 +2764,7 @@ export const make = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const providerCommands = yield* PluginProviderCommands;
   const codexPluginRuntime = yield* CodexPluginRuntime;
-  const mcpOAuthRuntime = yield* McpOAuthRuntime;
+  const mcpOAuthRuntime = yield* McpOAuthRuntime.McpOAuthRuntime;
 
   return yield* makeWithOptions({
     codexPluginRuntime,
@@ -2774,15 +2788,14 @@ const runtimeLayer = Layer.merge(
       });
     }),
   ),
-  Layer.effect(
-    McpOAuthRuntime,
+  McpOAuthRuntime.layer(
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig;
       const providerCommands = yield* PluginProviderCommands;
-      return yield* makeMcpOAuthRuntime({
+      return {
         cwd: serverConfig.cwd,
         resolveCommand: providerCommands.resolve,
-      });
+      } satisfies McpOAuthRuntime.McpOAuthRuntimeOptions;
     }),
   ),
 ).pipe(Layer.provide(providerCommandsLayer));

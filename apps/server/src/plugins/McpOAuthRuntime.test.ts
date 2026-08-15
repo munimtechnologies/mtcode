@@ -1,11 +1,24 @@
 import { assert, it } from "@effect/vitest";
 
 import {
+  findClaudeMcpAuthorizationUrl,
   parseClaudeMcpStatusOutput,
   parseCodexMcpStatusOutput,
   parseCursorMcpStatusOutput,
   validateMcpOAuthCallback,
 } from "./McpOAuthRuntime.ts";
+
+it("selects Claude OAuth URLs instead of unrelated output links", () => {
+  const authorizationUrl =
+    "https://accounts.example.com/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A43123%2Fcallback";
+  assert.strictEqual(
+    findClaudeMcpAuthorizationUrl(
+      `Documentation: https://docs.example.com/mcp\nOpen this URL to authenticate:\n${authorizationUrl}`,
+    ),
+    authorizationUrl,
+  );
+  assert.strictEqual(findClaudeMcpAuthorizationUrl("See https://docs.example.com/mcp"), null);
+});
 
 it("parses Codex OAuth and bearer-token MCP states", () => {
   const statuses = parseCodexMcpStatusOutput(

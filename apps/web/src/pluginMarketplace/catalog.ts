@@ -1,4 +1,5 @@
 import type {
+  PluginMarketplaceDetail,
   PluginMarketplaceHarnessId,
   PluginMarketplaceHarnessSupport,
   PluginMarketplacePlugin,
@@ -25,4 +26,28 @@ export function marketplacePluginKinds(
     plugin.contents.skillCount > 0 ? "skill" : null,
     plugin.contents.appCount > 0 ? "app" : null,
   ].filter((kind): kind is MarketplacePluginKind => kind !== null);
+}
+
+const EXTENSION_INCLUDE_LABELS: Readonly<
+  Record<PluginMarketplaceDetail["extensions"][number]["kind"], string>
+> = {
+  command: "Commands",
+  agent: "Subagents",
+  rule: "Rules",
+  hook: "Hooks",
+  lsp: "Language servers",
+  monitor: "Monitors",
+};
+
+export function marketplacePluginIncludeLabels(
+  plugin: Pick<PluginMarketplaceDetail, "contents" | "extensions">,
+): ReadonlyArray<string> {
+  const extensionKinds = [...new Set(plugin.extensions.map((extension) => extension.kind))];
+  return [
+    ...marketplacePluginKinds(plugin).map((kind) =>
+      kind === "mcp" ? "MCP" : kind === "skill" ? "Skills" : "Apps",
+    ),
+    ...extensionKinds.map((kind) => EXTENSION_INCLUDE_LABELS[kind]),
+    ...(plugin.contents.hasHooks && !extensionKinds.includes("hook") ? ["Hooks"] : []),
+  ];
 }

@@ -40,51 +40,110 @@ interface McpOAuthStart {
   readonly callbackRequired: boolean;
 }
 
-export class McpOAuthRuntimeError extends Schema.TaggedErrorClass<McpOAuthRuntimeError>()(
-  "McpOAuthRuntimeError",
-  {
-    operation: Schema.Literals(["status", "start", "complete", "disconnect"]),
-    harness: Schema.Literals(["codex", "claude", "cursor"]),
-    serverName: Schema.optional(Schema.String),
-    reason: Schema.Literals([
-      "provider_unavailable",
-      "callback_mismatch",
-      "callback_rejected",
-      "authentication_cancelled",
-      "authentication_failed",
-      "unsupported",
-      "no_pending_session",
-      "authorization_timeout",
-      "command_failed",
-    ]),
-    cause: Schema.Defect(),
-  },
+const McpOAuthRuntimeErrorFields = {
+  operation: Schema.Literals(["status", "start", "complete", "disconnect"]),
+  harness: Schema.Literals(["codex", "claude", "cursor"]),
+  serverName: Schema.optional(Schema.String),
+  cause: Schema.Defect(),
+};
+
+function providerLabel(harness: McpOAuthHarness): string {
+  return harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : "Cursor";
+}
+
+export class McpOAuthProviderUnavailableError extends Schema.TaggedErrorClass<McpOAuthProviderUnavailableError>()(
+  "McpOAuthProviderUnavailableError",
+  McpOAuthRuntimeErrorFields,
 ) {
   override get message(): string {
-    const provider =
-      this.harness === "codex" ? "Codex" : this.harness === "claude" ? "Claude Code" : "Cursor";
-    switch (this.reason) {
-      case "callback_mismatch":
-        return "The callback URL does not match this authentication request.";
-      case "callback_rejected":
-        return `${provider} could not accept the authentication callback.`;
-      case "authentication_cancelled":
-        return "Authentication was cancelled.";
-      case "authentication_failed":
-        return `${provider} did not complete MCP authentication.`;
-      case "unsupported":
-        return `${provider} manages MCP authentication in its own settings.`;
-      case "no_pending_session":
-        return "There is no pending authentication request.";
-      case "authorization_timeout":
-        return `${provider} did not produce an authorization URL.`;
-      case "provider_unavailable":
-        return `${provider} is unavailable for MCP ${this.operation}.`;
-      case "command_failed":
-        return `${provider} could not complete the requested MCP operation.`;
-    }
+    return `${providerLabel(this.harness)} is unavailable for MCP ${this.operation}.`;
   }
 }
+
+export class McpOAuthCallbackMismatchError extends Schema.TaggedErrorClass<McpOAuthCallbackMismatchError>()(
+  "McpOAuthCallbackMismatchError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return "The callback URL does not match this authentication request.";
+  }
+}
+
+export class McpOAuthCallbackRejectedError extends Schema.TaggedErrorClass<McpOAuthCallbackRejectedError>()(
+  "McpOAuthCallbackRejectedError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return `${providerLabel(this.harness)} could not accept the authentication callback.`;
+  }
+}
+
+export class McpOAuthAuthenticationCancelledError extends Schema.TaggedErrorClass<McpOAuthAuthenticationCancelledError>()(
+  "McpOAuthAuthenticationCancelledError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return "Authentication was cancelled.";
+  }
+}
+
+export class McpOAuthAuthenticationFailedError extends Schema.TaggedErrorClass<McpOAuthAuthenticationFailedError>()(
+  "McpOAuthAuthenticationFailedError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return `${providerLabel(this.harness)} did not complete MCP authentication.`;
+  }
+}
+
+export class McpOAuthUnsupportedHarnessError extends Schema.TaggedErrorClass<McpOAuthUnsupportedHarnessError>()(
+  "McpOAuthUnsupportedHarnessError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return `${providerLabel(this.harness)} manages MCP authentication in its own settings.`;
+  }
+}
+
+export class McpOAuthNoPendingSessionError extends Schema.TaggedErrorClass<McpOAuthNoPendingSessionError>()(
+  "McpOAuthNoPendingSessionError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return "There is no pending authentication request.";
+  }
+}
+
+export class McpOAuthAuthorizationTimeoutError extends Schema.TaggedErrorClass<McpOAuthAuthorizationTimeoutError>()(
+  "McpOAuthAuthorizationTimeoutError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return `${providerLabel(this.harness)} did not produce an authorization URL.`;
+  }
+}
+
+export class McpOAuthCommandFailedError extends Schema.TaggedErrorClass<McpOAuthCommandFailedError>()(
+  "McpOAuthCommandFailedError",
+  McpOAuthRuntimeErrorFields,
+) {
+  override get message(): string {
+    return `${providerLabel(this.harness)} could not complete the requested MCP operation.`;
+  }
+}
+
+export const McpOAuthRuntimeError = Schema.Union([
+  McpOAuthProviderUnavailableError,
+  McpOAuthCallbackMismatchError,
+  McpOAuthCallbackRejectedError,
+  McpOAuthAuthenticationCancelledError,
+  McpOAuthAuthenticationFailedError,
+  McpOAuthUnsupportedHarnessError,
+  McpOAuthNoPendingSessionError,
+  McpOAuthAuthorizationTimeoutError,
+  McpOAuthCommandFailedError,
+]);
+export type McpOAuthRuntimeError = typeof McpOAuthRuntimeError.Type;
 const isMcpOAuthRuntimeError = Schema.is(McpOAuthRuntimeError);
 
 export class McpOAuthRuntime extends Context.Service<
@@ -148,6 +207,23 @@ function findHttpUrl(value: string): string | null {
   // eslint-disable-next-line no-control-regex -- URLs end before terminal control sequences.
   const match = value.match(/https?:\/\/[^\s\u0007\u001B]+/u)?.[0];
   return match?.replace(/[),.;]+$/u, "") ?? null;
+}
+
+export function findClaudeMcpAuthorizationUrl(value: string): string | null {
+  // eslint-disable-next-line no-control-regex -- URLs end before terminal control sequences.
+  for (const match of value.matchAll(/https?:\/\/[^\s\u0007\u001B]+/gu)) {
+    const candidate = match[0].replace(/[),.;]+$/u, "");
+    try {
+      const url = new URL(candidate);
+      const redirectValue = url.searchParams.get("redirect_uri");
+      if (!redirectValue) continue;
+      const redirect = new URL(redirectValue);
+      if (redirect.protocol === "http:" || redirect.protocol === "https:") return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 export function parseCodexMcpStatusOutput(output: string): ReadonlyArray<McpOAuthServerStatus> {
@@ -319,7 +395,7 @@ function sessionKey(harness: McpOAuthHarness, name: string): string {
   return `${harness}:${name.toLocaleLowerCase()}`;
 }
 
-export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
+export const make = (options: McpOAuthRuntimeOptions = {}) =>
   Effect.gen(function* () {
     const runtimeScope = yield* Scope.Scope;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -364,11 +440,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
         Effect.gen(function* () {
           const configured = yield* commandFor("codex", "codex");
           if (!configured) {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthProviderUnavailableError({
               operation: "start",
               harness: "codex",
               serverName: session.name,
-              reason: "provider_unavailable",
               cause: new Error("No configured Codex provider is available."),
             });
           }
@@ -417,11 +492,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
               !isLoopbackHttpUrl(callbackUrl) ||
               !validateMcpOAuthCallback(response.authorizationUrl, callbackUrl)
             ) {
-              return new McpOAuthRuntimeError({
+              return new McpOAuthCallbackMismatchError({
                 operation: "complete",
                 harness: "codex",
                 serverName: session.name,
-                reason: "callback_mismatch",
                 cause: new Error("Callback URL validation failed."),
               });
             }
@@ -429,11 +503,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
               Effect.flatMap(HttpClientResponse.filterStatusOk),
               Effect.mapError(
                 (cause) =>
-                  new McpOAuthRuntimeError({
+                  new McpOAuthCallbackRejectedError({
                     operation: "complete",
                     harness: "codex",
                     serverName: session.name,
-                    reason: "callback_rejected",
                     cause,
                   }),
               ),
@@ -449,11 +522,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
             Deferred.await(session.cancelled).pipe(
               Effect.flatMap(() =>
                 Effect.fail(
-                  new McpOAuthRuntimeError({
+                  new McpOAuthAuthenticationCancelledError({
                     operation: "start",
                     harness: "codex",
                     serverName: session.name,
-                    reason: "authentication_cancelled",
                     cause: new Error("Authentication was cancelled."),
                   }),
                 ),
@@ -461,11 +533,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
             ),
           );
           if (!result.success) {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthAuthenticationFailedError({
               operation: "start",
               harness: "codex",
               serverName: session.name,
-              reason: "authentication_failed",
               cause: new Error(
                 result.error?.trim() || "Codex did not complete MCP authentication.",
               ),
@@ -476,11 +547,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
         Effect.mapError((cause) =>
           isMcpOAuthRuntimeError(cause)
             ? cause
-            : new McpOAuthRuntimeError({
+            : new McpOAuthProviderUnavailableError({
                 operation: "start",
                 harness: "codex",
                 serverName: session.name,
-                reason: "provider_unavailable",
                 cause,
               }),
         ),
@@ -502,11 +572,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
           const args = ["mcp", "login", "--no-browser", session.name];
           const configured = yield* commandFor("claude", "claude");
           if (!configured) {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthProviderUnavailableError({
               operation: "start",
               harness: "claude",
               serverName: session.name,
-              reason: "provider_unavailable",
               cause: new Error("No configured Claude Code provider is available."),
             });
           }
@@ -529,11 +598,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
             Effect.gen(function* () {
               const expected = yield* Ref.get(authorizationUrl);
               if (!expected || !validateMcpOAuthCallback(expected, callbackUrl)) {
-                return yield* new McpOAuthRuntimeError({
+                return yield* new McpOAuthCallbackMismatchError({
                   operation: "complete",
                   harness: "claude",
                   serverName: session.name,
-                  reason: "callback_mismatch",
                   cause: new Error("Callback URL validation failed."),
                 });
               }
@@ -543,11 +611,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
               ).pipe(
                 Effect.mapError(
                   (cause) =>
-                    new McpOAuthRuntimeError({
+                    new McpOAuthCallbackRejectedError({
                       operation: "complete",
                       harness: "claude",
                       serverName: session.name,
-                      reason: "callback_rejected",
                       cause,
                     }),
                 ),
@@ -563,7 +630,7 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
                 buffered = `${buffered}${decoder.decode(chunk, { stream: true })}`.slice(
                   -64 * 1024,
                 );
-                const url = findHttpUrl(buffered);
+                const url = findClaudeMcpAuthorizationUrl(buffered);
                 if (!url || (yield* Ref.get(authorizationUrl)) !== null) return;
                 yield* Ref.set(authorizationUrl, url);
                 yield* Deferred.succeed(session.started, {
@@ -580,11 +647,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
             Deferred.await(session.cancelled).pipe(
               Effect.flatMap(() =>
                 Effect.fail(
-                  new McpOAuthRuntimeError({
+                  new McpOAuthAuthenticationCancelledError({
                     operation: "start",
                     harness: "claude",
                     serverName: session.name,
-                    reason: "authentication_cancelled",
                     cause: new Error("Authentication was cancelled."),
                   }),
                 ),
@@ -592,11 +658,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
             ),
           );
           if (exitCode !== 0) {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthAuthenticationFailedError({
               operation: "start",
               harness: "claude",
               serverName: session.name,
-              reason: "authentication_failed",
               cause: new Error(`Claude Code exited with status ${exitCode}.`),
             });
           }
@@ -606,11 +671,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
         Effect.mapError((error) =>
           isMcpOAuthRuntimeError(error)
             ? error
-            : new McpOAuthRuntimeError({
+            : new McpOAuthProviderUnavailableError({
                 operation: "start",
                 harness: "claude",
                 serverName: session.name,
-                reason: "provider_unavailable",
                 cause: error,
               }),
         ),
@@ -632,10 +696,9 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
           harness === "cursor" ? "cursor-agent" : harness,
         );
         if (!configured) {
-          return yield* new McpOAuthRuntimeError({
+          return yield* new McpOAuthProviderUnavailableError({
             operation: "status",
             harness,
-            reason: "provider_unavailable",
             cause: new Error(`No configured ${harness} provider is available.`),
           });
         }
@@ -664,19 +727,17 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
           .pipe(
             Effect.mapError(
               (cause) =>
-                new McpOAuthRuntimeError({
+                new McpOAuthCommandFailedError({
                   operation: "status",
                   harness,
-                  reason: "command_failed",
                   cause,
                 }),
             ),
           );
         if (result.code !== 0) {
-          return yield* new McpOAuthRuntimeError({
+          return yield* new McpOAuthCommandFailedError({
             operation: "status",
             harness,
-            reason: "command_failed",
             cause: new Error(`${harness} exited with status ${result.code}.`),
           });
         }
@@ -731,11 +792,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
     const start: McpOAuthRuntime["Service"]["start"] = (harness, name) =>
       Effect.gen(function* () {
         if (harness === "cursor") {
-          return yield* new McpOAuthRuntimeError({
+          return yield* new McpOAuthUnsupportedHarnessError({
             operation: "start",
             harness,
             serverName: name,
-            reason: "unsupported",
             cause: new Error("Cursor MCP OAuth is not supported."),
           });
         }
@@ -763,14 +823,14 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
         );
         const started = yield* Deferred.await(session.started).pipe(
           Effect.timeoutOption("20 seconds"),
+          Effect.onInterrupt(() => Deferred.succeed(session.cancelled, undefined)),
         );
         if (Option.isNone(started)) {
           yield* Deferred.succeed(session.cancelled, undefined);
-          return yield* new McpOAuthRuntimeError({
+          return yield* new McpOAuthAuthorizationTimeoutError({
             operation: "start",
             harness,
             serverName: name,
-            reason: "authorization_timeout",
             cause: new Error("Authorization URL timed out."),
           });
         }
@@ -780,22 +840,20 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
     const complete: McpOAuthRuntime["Service"]["complete"] = (harness, name, callbackUrl) =>
       Effect.gen(function* () {
         if (harness === "cursor") {
-          return yield* new McpOAuthRuntimeError({
+          return yield* new McpOAuthUnsupportedHarnessError({
             operation: "complete",
             harness,
             serverName: name,
-            reason: "unsupported",
             cause: new Error("Cursor MCP OAuth is not supported."),
           });
         }
         const session = (yield* Ref.get(activeSessions)).get(sessionKey(harness, name));
         const submit = session ? yield* Ref.get(session.submitCallback) : null;
         if (!submit) {
-          return yield* new McpOAuthRuntimeError({
+          return yield* new McpOAuthNoPendingSessionError({
             operation: "complete",
             harness,
             serverName: name,
-            reason: "no_pending_session",
             cause: new Error("No pending MCP OAuth session exists."),
           });
         }
@@ -806,11 +864,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
       sessionLock.withPermits(1)(
         Effect.gen(function* () {
           if (harness === "cursor") {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthUnsupportedHarnessError({
               operation: "disconnect",
               harness,
               serverName: name,
-              reason: "unsupported",
               cause: new Error("Cursor MCP OAuth is not supported."),
             });
           }
@@ -822,11 +879,10 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
           }
           const configured = yield* commandFor(harness, harness);
           if (!configured) {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthProviderUnavailableError({
               operation: "disconnect",
               harness,
               serverName: name,
-              reason: "provider_unavailable",
               cause: new Error(`No configured ${harness} provider is available.`),
             });
           }
@@ -843,21 +899,19 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
             .pipe(
               Effect.mapError(
                 (cause) =>
-                  new McpOAuthRuntimeError({
+                  new McpOAuthCommandFailedError({
                     operation: "disconnect",
                     harness,
                     serverName: name,
-                    reason: "command_failed",
                     cause,
                   }),
               ),
             );
           if (result.code !== 0) {
-            return yield* new McpOAuthRuntimeError({
+            return yield* new McpOAuthCommandFailedError({
               operation: "disconnect",
               harness,
               serverName: name,
-              reason: "command_failed",
               cause: new Error(`${harness} exited with status ${result.code}.`),
             });
           }
@@ -867,3 +921,6 @@ export const makeMcpOAuthRuntime = (options: McpOAuthRuntimeOptions = {}) =>
 
     return McpOAuthRuntime.of({ status, start, complete, disconnect });
   });
+
+export const layer = <E, R>(options: Effect.Effect<McpOAuthRuntimeOptions, E, R>) =>
+  Layer.effect(McpOAuthRuntime, Effect.flatMap(options, make));

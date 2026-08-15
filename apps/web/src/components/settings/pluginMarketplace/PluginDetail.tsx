@@ -52,7 +52,10 @@ import {
   openPluginSetup,
   startPluginMcpAuth,
 } from "~/pluginMarketplace/api";
-import { MARKETPLACE_HARNESS_LABELS, marketplacePluginKinds } from "~/pluginMarketplace/catalog";
+import {
+  MARKETPLACE_HARNESS_LABELS,
+  marketplacePluginIncludeLabels,
+} from "~/pluginMarketplace/catalog";
 import {
   pluginMarketplaceErrorMessage,
   usePluginMarketplaceStore,
@@ -489,7 +492,14 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
                     size="sm"
                     variant="outline"
                     disabled={busy}
-                    onClick={() => void openAuthorizationUrl(authorizationUrl)}
+                    onClick={() =>
+                      void openAuthorizationUrl(authorizationUrl).catch((error: unknown) =>
+                        toastManager.add({
+                          type: "error",
+                          title: pluginMarketplaceErrorMessage(error),
+                        }),
+                      )
+                    }
                   >
                     <ExternalLinkIcon />
                     Reopen sign-in
@@ -801,7 +811,6 @@ const EXTENSION_LABELS: Readonly<Record<PluginMarketplaceExtension["kind"], stri
   lsp: "Language server",
   monitor: "Monitor",
 };
-
 function ExtensionIcon({ kind }: { readonly kind: PluginMarketplaceExtension["kind"] }) {
   const Icon =
     kind === "command"
@@ -919,7 +928,7 @@ function PluginContents({ plugin }: { readonly plugin: PluginMarketplaceDetail }
 }
 
 function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
-  const kinds = marketplacePluginKinds(plugin);
+  const includes = marketplacePluginIncludeLabels(plugin);
   return (
     <SettingsSection title="Details">
       <Collapsible className="rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
@@ -956,12 +965,11 @@ function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetai
             </dd>
             <dt className="font-medium text-base text-foreground sm:text-sm">Includes</dt>
             <dd className="flex min-w-0 flex-wrap gap-1">
-              {kinds.map((kind) => (
-                <Badge key={kind} variant="secondary">
-                  {kind === "mcp" ? "MCP" : kind === "skill" ? "Skills" : "Apps"}
+              {includes.map((label) => (
+                <Badge key={label} variant="secondary">
+                  {label}
                 </Badge>
               ))}
-              {plugin.contents.hasHooks ? <Badge variant="secondary">Hooks</Badge> : null}
             </dd>
             <dt className="font-medium text-base text-foreground sm:text-sm">Marketplace</dt>
             <dd className="min-w-0 text-base text-muted-foreground sm:text-sm">

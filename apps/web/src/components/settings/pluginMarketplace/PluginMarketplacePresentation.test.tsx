@@ -2,6 +2,8 @@ import type { PluginMarketplacePlugin } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
+import { marketplacePluginIncludeLabels } from "~/pluginMarketplace/catalog";
+
 import { HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
 
 const plugin: PluginMarketplacePlugin = {
@@ -59,5 +61,29 @@ describe("plugin marketplace presentation", () => {
 
     expect(markup).toContain('aria-label="Codex: MCP + skills + apps"');
     expect(markup).not.toContain('aria-label="Cursor:');
+  });
+
+  it("includes every extension kind without duplicating hooks", () => {
+    expect(
+      marketplacePluginIncludeLabels({
+        contents: { ...plugin.contents, hasHooks: true },
+        extensions: [
+          { id: "run", name: "Run", kind: "command", description: "", sourceUrl: null },
+          { id: "review", name: "Review", kind: "agent", description: "", sourceUrl: null },
+          { id: "start", name: "Start", kind: "hook", description: "", sourceUrl: null },
+          { id: "typescript", name: "TypeScript", kind: "lsp", description: "", sourceUrl: null },
+          { id: "health", name: "Health", kind: "monitor", description: "", sourceUrl: null },
+        ],
+      }),
+    ).toEqual([
+      "MCP",
+      "Skills",
+      "Apps",
+      "Commands",
+      "Subagents",
+      "Hooks",
+      "Language servers",
+      "Monitors",
+    ]);
   });
 });

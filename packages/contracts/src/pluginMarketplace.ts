@@ -274,6 +274,7 @@ export class PluginMarketplaceOperationError extends Schema.TaggedErrorClass<Plu
     operation: Schema.Literals(["install", "remove", "setup", "authenticate"]),
     pluginId: TrimmedNonEmptyString,
     detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
   },
   { httpApiStatus: 502 },
 ) {
