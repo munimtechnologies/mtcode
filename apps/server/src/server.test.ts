@@ -3466,12 +3466,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               projectId: defaultProjectId,
               threadId: ThreadId.make("thread-from-another-project"),
             }),
+            unknownProject: client[WS_METHODS.serverListProviderWorkspaceCapabilities]({
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              projectId: ProjectId.make("project-that-is-gone"),
+            }),
           }),
         ),
       );
 
       assert.deepStrictEqual(yield* Ref.get(requestedCwds), [
         "/tmp/worktrees/default-thread",
+        "/tmp/default-project",
         "/tmp/default-project",
         null,
       ]);
@@ -3481,6 +3486,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.deepStrictEqual(
         responses.unknownThread.slashCommands.map((command) => command.name),
+        ["deploy"],
+      );
+      assert.deepStrictEqual(
+        responses.unknownProject.slashCommands.map((command) => command.name),
         ["from-snapshot"],
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),

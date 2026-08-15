@@ -1487,7 +1487,7 @@ const makeWsRpcLayer = (
                 cwd =
                   Option.isSome(thread) && thread.value.projectId === input.projectId
                     ? (thread.value.worktreePath ?? projectRoot)
-                    : null;
+                    : projectRoot;
               }
 
               return yield* providerRegistry.listWorkspaceCapabilities({
