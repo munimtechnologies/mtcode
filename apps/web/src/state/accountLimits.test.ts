@@ -34,6 +34,7 @@ const status = (
 ): EnvironmentLimitsStatus => ({
   environmentId: environmentId as EnvironmentId,
   environmentLabel: environmentId,
+  environmentIsPrimary: false,
   isPending: false,
   snapshots: [],
   providers: null,

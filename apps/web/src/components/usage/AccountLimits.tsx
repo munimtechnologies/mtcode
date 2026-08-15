@@ -20,6 +20,7 @@
 import type { AccountLimitsSnapshot, AccountLimitsWindow } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
+import { resolveEnvironmentOptionLabel } from "../BranchToolbar.logic";
 import { cn } from "../../lib/utils";
 import {
   type AccountLimitsRow,
@@ -101,7 +102,16 @@ function RowCaption({
     <div className={cn("flex items-baseline gap-1.5", className)}>
       <span className="truncate">
         {row.instanceLabel}
-        {nameEnvironment ? ` · ${row.environmentLabel ?? row.environmentId}` : ""}
+        {/* The shared option-label contract: blank labels normalize, and
+            the primary environment reads "This device" here exactly as it
+            does in the pickers. */}
+        {nameEnvironment
+          ? ` · ${resolveEnvironmentOptionLabel({
+              isPrimary: row.environmentIsPrimary,
+              environmentId: row.environmentId,
+              runtimeLabel: row.environmentLabel,
+            })}`
+          : ""}
       </span>
       <span className="ml-auto shrink-0">
         <SnapshotAge snapshot={row.snapshot} nowMs={nowMs} />

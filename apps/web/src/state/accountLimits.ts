@@ -38,6 +38,10 @@ export interface EnvironmentLimitsStatus {
   readonly environmentId: EnvironmentId;
   /** The environment's display label, for when several report. */
   readonly environmentLabel: string | null;
+  /** Whether this is the primary (local) environment - captions resolve
+   * environment names through the shared option-label contract, which
+   * needs it. */
+  readonly environmentIsPrimary: boolean;
   readonly isPending: boolean;
   readonly snapshots: readonly AccountLimitsSnapshot[] | null;
   /** Streamed provider config; the source of instance display names. */
@@ -53,6 +57,7 @@ const accountLimitsAtom = Atom.make((get): readonly EnvironmentLimitsStatus[] =>
     statuses.push({
       environmentId,
       environmentLabel: presentation.entry.target.label ?? null,
+      environmentIsPrimary: presentation.entry.target._tag === "PrimaryConnectionTarget",
       providers: presentation.serverConfig?.providers ?? null,
       isPending: result.waiting,
       snapshots:
@@ -68,6 +73,7 @@ const accountLimitsAtom = Atom.make((get): readonly EnvironmentLimitsStatus[] =>
 export interface AccountLimitsRow {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string | null;
+  readonly environmentIsPrimary: boolean;
   /**
    * Instance display name off the provider config already streaming to the
    * client, else the raw instance id. Never the account email: the provider
@@ -137,6 +143,7 @@ export function mergeEnvironmentLimits(
       rows.push({
         environmentId: status.environmentId,
         environmentLabel: status.environmentLabel,
+        environmentIsPrimary: status.environmentIsPrimary,
         instanceLabel: entry?.displayName ?? instanceId,
         snapshot,
       });
