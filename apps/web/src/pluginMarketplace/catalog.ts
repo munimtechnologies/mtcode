@@ -1,24 +1,20 @@
 import type {
-  PluginMarketplaceDetail,
   PluginMarketplaceHarnessId,
   PluginMarketplaceHarnessSupport,
   PluginMarketplacePlugin,
 } from "@t3tools/contracts";
 
-export const MARKETPLACE_HARNESSES = ["codex", "claude", "cursor", "grok", "opencode"] as const;
+export const MARKETPLACE_HARNESSES = ["codex", "claude", "cursor"] as const;
 
 export type MarketplaceHarnessId = PluginMarketplaceHarnessId;
 export type MarketplaceHarnessSupport = PluginMarketplaceHarnessSupport;
 export type MarketplacePlugin = PluginMarketplacePlugin;
-export type MarketplacePluginDetail = PluginMarketplaceDetail;
 export type MarketplacePluginKind = "mcp" | "skill" | "app";
 
 export const MARKETPLACE_HARNESS_LABELS: Readonly<Record<MarketplaceHarnessId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
-  grok: "Grok",
-  opencode: "OpenCode",
 };
 
 export function marketplacePluginKinds(

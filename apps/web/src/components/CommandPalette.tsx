@@ -1573,7 +1573,7 @@ function OpenCommandPaletteDialog(props: {
     value: "action:plugins",
     searchTerms: ["plugins", "marketplace", "mcp", "skills", "harnesses"],
     title: "Browse plugins",
-    description: "MCP servers and skills for every harness",
+    description: "MCP servers and skills across supported harnesses",
     icon: <BlocksIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/plugins" });

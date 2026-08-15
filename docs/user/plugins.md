@@ -1,21 +1,23 @@
 # Plugins
 
-Open **Settings → Plugins** to browse Codex, Claude Code, and Cursor plugins from the current
-environment. You can also use the Plugins button at the bottom of the sidebar or open the command
-palette and choose **Browse plugins**.
+In the web and desktop clients, open **Settings → Plugins** to browse Codex, Claude Code, and Cursor
+plugins from the current environment. You can also use the Plugins button at the bottom of the
+sidebar or open the command palette and choose **Browse plugins**.
 
 The marketplace reads installed and available packages from configured Codex and Claude Code
 marketplaces. It also reads Cursor's public marketplace and local Cursor plugin cache. Search by
 name, filter by MCP server, skill, app, harness, or category, and select a plugin to inspect its
 contents. Plugin artwork and metadata come from the package or its published marketplace listing.
-Use the **Installed** view to see every active package without repeating those packages throughout
+Use the **Installed** view to see every installed package without repeating those packages throughout
 the browse categories. Equivalent category names from different marketplaces are combined into one
 category.
 
-When the same package is published for more than one harness, T3 Code groups those listings into one
-marketplace entry. The detail page has a separate installation switch for each supported harness,
-so you can install the plugin on one harness, several harnesses, or every directly manageable
-harness. Select **View package contents** on a harness row to inspect that harness's published MCP
+Marketplace changes use the configured binary, home directory, and environment of that harness's
+provider instance. If more than one enabled instance of the same harness is configured, manage its
+plugins with the provider directly until per-instance marketplace selection is available.
+
+Listings stay scoped to their source harness and marketplace so similarly named packages cannot be
+mistaken for one another. Each detail page manages that specific package and shows its published MCP
 servers and components.
 
 Package contents are shown in the terms used by each harness. Codex bundles skills, MCP connections,
@@ -25,9 +27,9 @@ hooks, skills, and MCP servers. T3 Code reads Cursor's published inventory direc
 source of remote Claude packages when you open their details.
 
 Installation switches update the real Codex or Claude Code configuration on that environment.
-When a Codex message names an installed plugin, T3 Code forwards that plugin's enabled skills with
-the turn, including in an existing thread. Start a new chat after changing MCP servers or apps so
-the harness can refresh those longer-lived connections.
+When a Codex message explicitly mentions an installed plugin with `$plugin-name`, T3 Code forwards
+that plugin's enabled skills with the turn, including in an existing thread. Start a new chat after
+changing MCP servers or apps so the harness can refresh those longer-lived connections.
 
 Remote HTTP MCP servers that require OAuth have an **MCP authentication** section after
 installation. Select **Connect** to open the provider's authorization page. Codex completes the

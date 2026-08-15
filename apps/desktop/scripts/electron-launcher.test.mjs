@@ -1,7 +1,6 @@
 import { assert, describe, it } from "vite-plus/test";
 
 import {
-  makeMacDevelopmentOpenCommand,
   makeDevelopmentLauncherSource,
   resolveElectronBinaryPath,
   resolveMacLauncherIconPaths,
@@ -26,10 +25,9 @@ describe("electron development launcher", () => {
     assert.include(source, 'const char *electronPath = "/repo/node_modules/electron/Electron";');
     assert.include(source, 'childArgs[1] = "--t3code-dev-root=/repo/apps/desktop";');
     assert.include(source, 'childArgs[2] = "/repo/apps/desktop/dist-electron/main.cjs";');
-    assert.include(source, "childPid = fork();");
-    assert.include(source, "waitpid(childPid, &status, 0)");
-    assert.include(source, "kill(childPid, signalNumber);");
-    assert.notInclude(source, "\n  execv(electronPath, childArgs);");
+    assert.include(source, "\n  execv(electronPath, childArgs);");
+    assert.notInclude(source, "fork()");
+    assert.notInclude(source, "waitpid(");
   });
 
   it("repairs Electron before loading the package entrypoint", () => {
@@ -81,22 +79,16 @@ describe("electron development launcher", () => {
     assert.notInclude(source, "node_modules/electron");
   });
 
-  it("launches the development bundle through LaunchServices", () => {
-    assert.deepEqual(
-      makeMacDevelopmentOpenCommand("/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app", [
-        "--remote-debugging-port=9222",
-      ]),
-      {
-        electronPath: "/usr/bin/open",
-        args: [
-          "-W",
-          "-n",
-          "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
-          "--args",
-          "--remote-debugging-port=9222",
-        ],
-      },
-    );
+  it("encodes non-printable environment bytes as fixed-width C escapes", () => {
+    const source = makeDevelopmentLauncherSource({
+      electronBinaryPath: "/repo/Electron",
+      mainEntryPath: "/repo/main.cjs",
+      desktopRoot: "/repo",
+      environment: { T3CODE_HOME: "/tmp/with\u001bescape" },
+    });
+
+    assert.include(source, 'setFallback("T3CODE_HOME", "/tmp/with\\033escape");');
+    assert.notInclude(source, "\\u001b");
   });
 
   it("derives launcher icons from canonical development and production assets", () => {

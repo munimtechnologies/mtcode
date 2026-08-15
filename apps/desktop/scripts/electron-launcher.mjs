@@ -20,7 +20,7 @@ export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 18;
+const LAUNCHER_VERSION = 19;
 const APPLE_EVENTS_USAGE_DESCRIPTION =
   "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.";
 const DEVELOPMENT_MAC_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -128,27 +128,26 @@ export function makeDevelopmentLauncherSource({
     ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],
     ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
-  const cString = (value) => JSON.stringify(value);
+  const cString = (value) => {
+    const encoded = [...Buffer.from(value, "utf8")]
+      .map((byte) => {
+        if (byte === 0x22) return '\\"';
+        if (byte === 0x5c) return "\\\\";
+        if (byte >= 0x20 && byte <= 0x7e) return String.fromCharCode(byte);
+        return `\\${byte.toString(8).padStart(3, "0")}`;
+      })
+      .join("");
+    return `"${encoded}"`;
+  };
   const fallbackStatements = envEntries
     .map(([name, value]) => `  setFallback(${cString(name)}, ${cString(value)});`)
     .join("\n");
 
   return `#include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
-
-static pid_t childPid = -1;
-
-static void forwardSignal(int signalNumber) {
-  if (childPid > 0) {
-    kill(childPid, signalNumber);
-  }
-}
 
 static void setFallback(const char *name, const char *value) {
   const char *current = getenv(name);
@@ -170,44 +169,8 @@ ${fallbackStatements}
   }
   childArgs[argc + 2] = NULL;
 
-  struct sigaction action;
-  memset(&action, 0, sizeof(action));
-  action.sa_handler = forwardSignal;
-  sigemptyset(&action.sa_mask);
-  sigaction(SIGINT, &action, NULL);
-  sigaction(SIGTERM, &action, NULL);
-
-  childPid = fork();
-  if (childPid == -1) {
-    fprintf(stderr, "Failed to fork Electron: %s\\n", strerror(errno));
-    return 1;
-  }
-
-  if (childPid == 0) {
-    execv(electronPath, childArgs);
-    fprintf(stderr, "Failed to launch Electron: %s\\n", strerror(errno));
-    _exit(1);
-  }
-
-  int status = 0;
-  while (waitpid(childPid, &status, 0) == -1) {
-    if (errno == EINTR) {
-      continue;
-    }
-    fprintf(stderr, "Failed while waiting for Electron: %s\\n", strerror(errno));
-    return 1;
-  }
-  childPid = -1;
-
-  if (WIFEXITED(status)) {
-    return WEXITSTATUS(status);
-  }
-  if (WIFSIGNALED(status)) {
-    const int signalNumber = WTERMSIG(status);
-    signal(signalNumber, SIG_DFL);
-    raise(signalNumber);
-    return 128 + signalNumber;
-  }
+  execv(electronPath, childArgs);
+  fprintf(stderr, "Failed to launch Electron: %s\\n", strerror(errno));
   return 1;
 }
 `;
@@ -501,21 +464,9 @@ export function resolveElectronPath() {
 
 export function resolveElectronLaunchCommand(args = []) {
   const electronPath = resolveElectronPath();
-  if (hostPlatform === "darwin" && isDevelopment) {
-    const appBundlePath = NodePath.resolve(electronPath, "..", "..", "..");
-    return makeMacDevelopmentOpenCommand(appBundlePath, args);
-  }
-
   return {
     electronPath,
     args: [...resolveLinuxSandboxArgs(electronPath), ...args],
-  };
-}
-
-export function makeMacDevelopmentOpenCommand(appBundlePath, args = []) {
-  return {
-    electronPath: "/usr/bin/open",
-    args: ["-W", "-n", appBundlePath, "--args", ...args],
   };
 }
 

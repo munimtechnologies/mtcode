@@ -4,13 +4,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
-export const PluginMarketplaceHarnessId = Schema.Literals([
-  "codex",
-  "claude",
-  "cursor",
-  "grok",
-  "opencode",
-]);
+export const PluginMarketplaceHarnessId = Schema.Literals(["codex", "claude", "cursor"]);
 export type PluginMarketplaceHarnessId = typeof PluginMarketplaceHarnessId.Type;
 
 export const PluginMarketplaceHarnessSupport = Schema.Struct({
@@ -75,9 +69,6 @@ export const PluginMarketplaceMcpServer = Schema.Struct({
   name: TrimmedNonEmptyString,
   transport: Schema.Literals(["http", "stdio", "unknown"]),
   url: Schema.NullOr(Schema.String),
-  command: Schema.NullOr(Schema.String),
-  arguments: Schema.Array(Schema.String),
-  workingDirectory: Schema.NullOr(Schema.String),
   oauthResource: Schema.NullOr(Schema.String),
   note: Schema.NullOr(Schema.String),
   toolTimeoutSeconds: Schema.NullOr(Schema.Number),

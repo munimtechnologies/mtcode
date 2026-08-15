@@ -72,9 +72,6 @@ const detail: PluginMarketplaceDetail = {
       name: "Computer Use",
       transport: "stdio",
       url: null,
-      command: "computer-use",
-      arguments: [],
-      workingDirectory: null,
       oauthResource: null,
       note: null,
       toolTimeoutSeconds: null,
@@ -127,7 +124,7 @@ describe("plugin marketplace store", () => {
     });
     vi.mocked(fetchPluginMarketplaceDetail).mockResolvedValue(detail);
 
-    await usePluginMarketplaceStore.getState().install(summary.id);
+    await usePluginMarketplaceStore.getState().setInstalled(summary.id, true);
 
     expect(installPlugin).toHaveBeenCalledWith(summary.id);
     expect(usePluginMarketplaceStore.getState().plugins[0]?.installed).toBe(true);
@@ -144,66 +141,9 @@ describe("plugin marketplace store", () => {
       enabled: false,
     });
 
-    await usePluginMarketplaceStore.getState().remove(summary.id);
+    await usePluginMarketplaceStore.getState().setInstalled(summary.id, false);
 
     expect(removePlugin).toHaveBeenCalledWith(summary.id);
     expect(usePluginMarketplaceStore.getState().details[summary.id]?.plugin?.installed).toBe(false);
-  });
-
-  it("installs one package on multiple harnesses and refreshes their shared detail", async () => {
-    const claudeId = "claude:computer-use@claude-plugins-official";
-    const sharedDetail = {
-      ...detail,
-      installed: false,
-      enabled: false,
-      installTargets: [
-        { ...detail.installTargets[0]!, installed: false, enabled: false },
-        {
-          ...detail.installTargets[0]!,
-          pluginId: claudeId,
-          harness: "claude" as const,
-          marketplaceName: "claude-plugins-official",
-          installed: false,
-          enabled: false,
-        },
-      ],
-    };
-    usePluginMarketplaceStore.setState({
-      catalogStatus: "ready",
-      plugins: [summary],
-      details: {
-        [summary.id]: { status: "ready", plugin: sharedDetail, error: null },
-      },
-    });
-    vi.mocked(installPlugin).mockImplementation(async (pluginId) => ({
-      pluginId,
-      installed: true,
-    }));
-    vi.mocked(fetchPluginMarketplaceCatalog).mockResolvedValue({
-      plugins: [{ ...summary, installed: true, enabled: true }],
-    });
-    vi.mocked(fetchPluginMarketplaceDetail).mockImplementation(async (pluginId) => ({
-      ...sharedDetail,
-      id: pluginId,
-      installed: true,
-      enabled: true,
-      installTargets: sharedDetail.installTargets.map((target) => ({
-        ...target,
-        installed: true,
-        enabled: true,
-      })),
-    }));
-
-    await usePluginMarketplaceStore.getState().setInstalled([summary.id, claudeId], true);
-
-    expect(installPlugin).toHaveBeenCalledTimes(2);
-    expect(installPlugin).toHaveBeenCalledWith(summary.id);
-    expect(installPlugin).toHaveBeenCalledWith(claudeId);
-    expect(fetchPluginMarketplaceCatalog).toHaveBeenCalledOnce();
-    expect(
-      usePluginMarketplaceStore.getState().details[summary.id]?.plugin?.installTargets,
-    ).toEqual(
-      expect.arrayContaining([expect.objectContaining({ harness: "claude", installed: true })]),
-    );
   });
 });

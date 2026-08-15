@@ -401,12 +401,16 @@ export function selectMentionedCodexPlugins<T extends CodexPluginMentionCandidat
   prompt: string,
   plugins: ReadonlyArray<T>,
 ): ReadonlyArray<T> {
-  const normalizedPrompt = ` ${normalizePluginMention(prompt)} `;
+  const mentions = new Set(
+    [...prompt.matchAll(/(?:^|\s)\$([\w:-]+)/gu)].map((match) =>
+      normalizePluginMention(match[1] ?? ""),
+    ),
+  );
   return plugins.filter(
     (plugin) =>
       plugin.installed &&
       plugin.enabled &&
-      pluginMentionAliases(plugin).some((alias) => normalizedPrompt.includes(` ${alias} `)),
+      pluginMentionAliases(plugin).some((alias) => mentions.has(alias)),
   );
 }
 
@@ -1927,7 +1931,7 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
-          const pluginSkills = input.input
+          const pluginSkills = input.input?.includes("$")
             ? yield* resolvePluginSkillsForPrompt(input.input).pipe(
                 Effect.catch((cause) =>
                   Effect.logWarning("Failed to discover installed Codex plugins for this turn.", {

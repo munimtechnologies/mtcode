@@ -302,24 +302,22 @@ describe("selectMentionedCodexPlugins", () => {
     },
   ];
 
-  it("matches installed enabled plugins by package or display name", () => {
+  it("matches installed enabled plugins only through explicit mentions", () => {
     NodeAssert.deepStrictEqual(
-      selectMentionedCodexPlugins("Do I have the HyperFrames plugin installed?", plugins).map(
+      selectMentionedCodexPlugins("Use $hyperframes to render this video", plugins).map(
         (plugin) => plugin.id,
       ),
       ["hyperframes@openai-curated"],
     );
     NodeAssert.deepStrictEqual(
-      selectMentionedCodexPlugins("Use HyperFrames by HeyGen for this video", plugins).map(
-        (plugin) => plugin.id,
-      ),
-      ["hyperframes@openai-curated"],
+      selectMentionedCodexPlugins("Do I have the HyperFrames plugin installed?", plugins),
+      [],
     );
   });
 
   it("does not forward disabled, uninstalled, or unrelated plugins", () => {
-    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Use Computer Use", plugins), []);
-    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Open Apollo.io", plugins), []);
+    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Use $computer-use", plugins), []);
+    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Open $apollo", plugins), []);
     NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Explain this repository", plugins), []);
   });
 });

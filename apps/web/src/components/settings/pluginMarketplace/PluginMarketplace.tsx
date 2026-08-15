@@ -228,7 +228,7 @@ export function PluginMarketplace() {
   const loadCatalog = usePluginMarketplaceStore((state) => state.loadCatalog);
 
   useEffect(() => {
-    void loadCatalog().catch(() => undefined);
+    void loadCatalog(true).catch(() => undefined);
   }, [loadCatalog]);
 
   const categories = useMemo(
@@ -394,11 +394,21 @@ export function PluginMarketplace() {
         </Empty>
       ) : null}
       {status === "ready" ? (
-        <MarketplaceResults
-          plugins={filteredPlugins}
-          filtered={isFiltered}
-          onSelectCategory={setCategory}
-        />
+        <>
+          {error ? (
+            <p
+              className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-warning text-sm"
+              role="alert"
+            >
+              Showing cached plugin data because the latest refresh failed: {error}
+            </p>
+          ) : null}
+          <MarketplaceResults
+            plugins={filteredPlugins}
+            filtered={isFiltered}
+            onSelectCategory={setCategory}
+          />
+        </>
       ) : null}
     </SettingsPageContainer>
   );

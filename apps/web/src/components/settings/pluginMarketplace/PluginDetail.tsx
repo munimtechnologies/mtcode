@@ -16,7 +16,7 @@ import {
   SparklesIcon,
   WebhookIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   PluginMarketplaceApp,
@@ -44,6 +44,7 @@ import { Input } from "~/components/ui/input";
 import { Switch } from "~/components/ui/switch";
 import { toastManager } from "~/components/ui/toast";
 import { readLocalApi } from "~/localApi";
+import { usePrimaryEnvironment } from "~/state/environments";
 import {
   completePluginMcpAuth,
   disconnectPluginMcpAuth,
@@ -155,7 +156,7 @@ function InstallTargetRow({
   const setInstalled = usePluginMarketplaceStore((state) => state.setInstalled);
   const harnessName = MARKETPLACE_HARNESS_LABELS[target.harness];
   const changeInstallation = (installed: boolean) => {
-    void setInstalled([target.pluginId], installed)
+    void setInstalled(target.pluginId, installed)
       .then(() =>
         toastManager.add({
           type: "success",
@@ -237,68 +238,15 @@ function InstallTargetRow({
 }
 
 function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
-  const pending = usePluginMarketplaceStore((state) => state.pending);
-  const setInstalled = usePluginMarketplaceStore((state) => state.setInstalled);
   const manageable = plugin.installTargets.filter((target) => target.installPolicy === "AVAILABLE");
-  const installable = manageable.filter((target) => !target.installed);
-  const removable = manageable.filter((target) => target.installed);
-  const busy = manageable.some((target) => pending[target.pluginId] === true);
   const hasCursorTarget = plugin.installTargets.some((target) => target.harness === "cursor");
   const managementDescription =
-    manageable.length > 1
-      ? "Each supported harness can be managed separately or together."
-      : manageable.length === 1
-        ? `${MARKETPLACE_HARNESS_LABELS[manageable[0]!.harness]} is managed here.`
-        : "This package is managed by its provider.";
-  const changeMany = (
-    targets: ReadonlyArray<PluginMarketplaceInstallTarget>,
-    installed: boolean,
-  ) => {
-    void setInstalled(
-      targets.map((target) => target.pluginId),
-      installed,
-    )
-      .then(() =>
-        toastManager.add({
-          type: "success",
-          title: installed
-            ? `${plugin.name} installed on ${targets.length} harnesses`
-            : `${plugin.name} removed from ${targets.length} harnesses`,
-          description: "Start new chats in those harnesses to load the updated plugin set.",
-        }),
-      )
-      .catch((error: unknown) =>
-        toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
-      );
-  };
-  const headerAction =
-    manageable.length > 1 ? (
-      <div className="flex items-center gap-2">
-        {removable.length > 1 ? (
-          <Button
-            size="sm"
-            variant="destructive-outline"
-            disabled={busy}
-            onClick={() => changeMany(removable, false)}
-          >
-            Remove from all
-          </Button>
-        ) : null}
-        {installable.length > 0 ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => changeMany(installable, true)}
-          >
-            {removable.length > 0 ? "Install available" : "Install on available"}
-          </Button>
-        ) : null}
-      </div>
-    ) : null;
+    manageable.length === 1
+      ? `${MARKETPLACE_HARNESS_LABELS[manageable[0]!.harness]} is managed here.`
+      : "This package is managed by its provider.";
 
   return (
-    <SettingsSection title="Installations" headerAction={headerAction}>
+    <SettingsSection title="Installation">
       <div className="divide-y divide-foreground/8 overflow-hidden rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
         {plugin.installTargets.map((target) => (
           <InstallTargetRow key={target.pluginId} plugin={plugin} target={target} />
@@ -343,7 +291,7 @@ function McpAuthStatusBadge({
                 ? (["No OAuth required", "secondary"] as const)
                 : (["Unavailable", "secondary"] as const);
   return (
-    <Badge size="sm" variant={variant}>
+    <Badge size="sm" variant={variant} role="status" aria-live="polite">
       {label}
     </Badge>
   );
@@ -355,30 +303,60 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [authorizationUrls, setAuthorizationUrls] = useState<Readonly<Record<string, string>>>({});
   const [callbackUrls, setCallbackUrls] = useState<Readonly<Record<string, string>>>({});
-  const hasInstalledMcp = plugin.installTargets.some(
-    (target) => target.installed && target.contents.mcpServerCount > 0,
-  );
+  const requestGeneration = useRef(0);
+  const installedMcpTargetKey = plugin.installTargets
+    .filter((target) => target.installed && target.contents.mcpServerCount > 0)
+    .map((target) => target.pluginId)
+    .toSorted()
+    .join("\u0000");
+  const hasInstalledMcp = installedMcpTargetKey.length > 0;
   const loadAuth = useCallback(async () => {
-    if (!hasInstalledMcp) return;
+    const generation = ++requestGeneration.current;
+    if (!hasInstalledMcp) {
+      setAuthState(null);
+      setLoadError(null);
+      return;
+    }
     try {
-      setAuthState(await fetchPluginMcpAuth(plugin.id));
+      const state = await fetchPluginMcpAuth(plugin.id);
+      if (requestGeneration.current !== generation) return;
+      setAuthState(state);
       setLoadError(null);
     } catch (error) {
+      if (requestGeneration.current !== generation) return;
       setLoadError(pluginMarketplaceErrorMessage(error));
     }
   }, [hasInstalledMcp, plugin.id]);
 
   useEffect(() => {
+    requestGeneration.current += 1;
+    setAuthState(null);
+    setLoadError(null);
+    setPendingKey(null);
+    setAuthorizationUrls({});
+    setCallbackUrls({});
     void loadAuth();
-  }, [loadAuth]);
+    return () => {
+      requestGeneration.current += 1;
+    };
+  }, [installedMcpTargetKey, loadAuth, plugin.id]);
 
   const hasPendingConnection = authState?.connections.some(
     (connection) => connection.status === "connecting",
   );
   useEffect(() => {
     if (!hasPendingConnection) return;
-    const timer = window.setInterval(() => void loadAuth(), 2_000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      await loadAuth();
+      if (!cancelled) timer = window.setTimeout(() => void poll(), 2_000);
+    };
+    timer = window.setTimeout(() => void poll(), 2_000);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [hasPendingConnection, loadAuth]);
 
   if (!hasInstalledMcp) return null;
@@ -390,25 +368,35 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
   };
   const startConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
     const key = mcpAuthConnectionKey(connection);
+    const reservedWindow = window.desktopBridge ? null : window.open("about:blank", "_blank");
+    if (reservedWindow) reservedWindow.opener = null;
     setPendingKey(key);
     void startPluginMcpAuth(plugin.id, connection.harness, connection.serverId)
       .then(async (result) => {
         if (result.authorizationUrl) {
           setAuthorizationUrls((current) => ({ ...current, [key]: result.authorizationUrl! }));
-          await openAuthorizationUrl(result.authorizationUrl);
+          if (reservedWindow) {
+            reservedWindow.location.href = result.authorizationUrl;
+          } else if (window.desktopBridge) {
+            await openAuthorizationUrl(result.authorizationUrl);
+          }
         }
         toastManager.add({
           type: "success",
-          title: result.callbackRequired ? "Continue in your browser" : "Sign-in opened",
+          title:
+            reservedWindow || window.desktopBridge ? "Continue in your browser" : "Sign-in ready",
           description: result.callbackRequired
-            ? "After approval, paste the full callback URL below."
-            : "Return here after the provider finishes authentication.",
+            ? "If the callback cannot reach this environment, paste its full URL below."
+            : reservedWindow || window.desktopBridge
+              ? "Return here after the provider finishes authentication."
+              : "Select Open sign-in to continue.",
         });
         await loadAuth();
       })
-      .catch((error: unknown) =>
-        toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) }),
-      )
+      .catch((error: unknown) => {
+        reservedWindow?.close();
+        toastManager.add({ type: "error", title: pluginMarketplaceErrorMessage(error) });
+      })
       .finally(() => setPendingKey(null));
   };
   const completeConnection = (connection: PluginMarketplaceMcpAuthConnection) => {
@@ -419,7 +407,7 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
     void completePluginMcpAuth(plugin.id, connection.harness, connection.serverId, callbackUrl)
       .then(async () => {
         setCallbackUrls((current) => ({ ...current, [key]: "" }));
-        toastManager.add({ type: "success", title: "Callback sent to Claude Code" });
+        toastManager.add({ type: "success", title: "Callback sent to the provider" });
         await loadAuth();
       })
       .catch((error: unknown) =>
@@ -455,9 +443,9 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
         {authState?.connections.map((connection) => {
           const key = mcpAuthConnectionKey(connection);
           const busy = pendingKey === key;
-          const authorizationUrl = authorizationUrls[key];
-          const showCallback =
-            connection.harness === "claude" && connection.status === "connecting";
+          const authorizationUrl =
+            authorizationUrls[key] ?? connection.authorizationUrl ?? undefined;
+          const showCallback = connection.callbackRequired && connection.status === "connecting";
           const control =
             connection.status === "external" ? (
               connection.marketplaceUrl ? (
@@ -563,7 +551,11 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
           />
         ) : null}
       </div>
-      {loadError ? <p className="px-4 text-destructive text-xs">{loadError}</p> : null}
+      {loadError ? (
+        <p className="px-4 text-destructive text-xs" role="alert">
+          {loadError}
+        </p>
+      ) : null}
       <p className="px-3 text-pretty text-base/7 text-muted-foreground sm:px-4 sm:text-sm/5">
         Credentials stay in each harness&apos;s native OAuth store and are available to new chats.
         Local standard-input MCP servers do not use this OAuth flow.
@@ -675,7 +667,7 @@ function McpServerRow({ server }: { readonly server: PluginMarketplaceMcpServer 
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-sm text-foreground">{server.name}</span>
           <span className="block truncate text-muted-foreground text-xs">
-            {server.url ?? server.command ?? "Configuration supplied by the plugin"}
+            {server.url ?? "Configuration supplied by the plugin"}
           </span>
         </span>
         <Badge size="sm" variant="outline">
@@ -691,13 +683,6 @@ function McpServerRow({ server }: { readonly server: PluginMarketplaceMcpServer 
         <dl className="space-y-2 border-t border-foreground/8 px-4 py-3 text-xs">
           <DetailLine label="ID">{server.id}</DetailLine>
           {server.url ? <DetailLine label="Endpoint">{server.url}</DetailLine> : null}
-          {server.command ? <DetailLine label="Command">{server.command}</DetailLine> : null}
-          {server.arguments.length > 0 ? (
-            <DetailLine label="Arguments">{server.arguments.join(" ")}</DetailLine>
-          ) : null}
-          {server.workingDirectory ? (
-            <DetailLine label="Working directory">{server.workingDirectory}</DetailLine>
-          ) : null}
           {server.oauthResource ? (
             <DetailLine label="OAuth resource">{server.oauthResource}</DetailLine>
           ) : null}
@@ -977,6 +962,7 @@ function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetai
 export function PluginDetail({ pluginId }: { readonly pluginId: string }) {
   const canGoBack = useCanGoBack();
   const navigate = useNavigate();
+  const primaryEnvironment = usePrimaryEnvironment();
   const state = usePluginMarketplaceStore((store) => store.details[pluginId]);
   const loadDetail = usePluginMarketplaceStore((store) => store.loadDetail);
   const handleBackToPlugins = useCallback(() => {
@@ -1006,6 +992,7 @@ export function PluginDetail({ pluginId }: { readonly pluginId: string }) {
     (target) => target.installPolicy !== "EXTERNAL" && target.installed,
   ).length;
   const hasInstalledCodexComputerUse =
+    primaryEnvironment?.serverConfig?.environment.platform.os === "darwin" &&
     plugin.packageName === "computer-use" &&
     plugin.installTargets.some((target) => target.harness === "codex" && target.installed);
   return (

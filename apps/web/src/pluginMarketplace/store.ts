@@ -24,9 +24,7 @@ interface PluginMarketplaceStoreState {
   readonly pending: Readonly<Record<string, boolean | undefined>>;
   loadCatalog: (force?: boolean) => Promise<void>;
   loadDetail: (pluginId: string, force?: boolean) => Promise<void>;
-  setInstalled: (pluginIds: ReadonlyArray<string>, installed: boolean) => Promise<void>;
-  install: (pluginId: string) => Promise<void>;
-  remove: (pluginId: string) => Promise<void>;
+  setInstalled: (pluginId: string, installed: boolean) => Promise<void>;
 }
 
 export function pluginMarketplaceErrorMessage(error: unknown): string {
@@ -53,12 +51,18 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
     if (catalogRequest) return catalogRequest;
 
     const request = (async () => {
-      set({ catalogStatus: "loading", catalogError: null });
+      set((state) => ({
+        catalogStatus: state.plugins.length > 0 ? "ready" : "loading",
+        catalogError: null,
+      }));
       try {
         const catalog = await fetchPluginMarketplaceCatalog();
         set({ catalogStatus: "ready", plugins: catalog.plugins, catalogError: null });
       } catch (error) {
-        set({ catalogStatus: "error", catalogError: pluginMarketplaceErrorMessage(error) });
+        set((state) => ({
+          catalogStatus: state.plugins.length > 0 ? "ready" : "error",
+          catalogError: pluginMarketplaceErrorMessage(error),
+        }));
         throw error;
       }
     })();
@@ -96,8 +100,8 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
           details: {
             ...state.details,
             [pluginId]: {
-              status: "error",
-              plugin: null,
+              status: current?.plugin ? "ready" : "error",
+              plugin: current?.plugin ?? null,
               error: pluginMarketplaceErrorMessage(error),
             },
           },
@@ -113,55 +117,28 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
     }
   },
 
-  setInstalled: async (pluginIds, installed) => {
-    const uniquePluginIds = [...new Set(pluginIds)];
-    if (uniquePluginIds.length === 0) return;
-    const affectedPackages = new Set<string>();
-    const currentState = get();
-    for (const pluginId of uniquePluginIds) {
-      const catalogPlugin = currentState.plugins.find((plugin) => plugin.id === pluginId);
-      if (catalogPlugin) affectedPackages.add(catalogPlugin.packageName);
-      for (const detail of Object.values(currentState.details)) {
-        if (detail?.plugin?.installTargets.some((target) => target.pluginId === pluginId)) {
-          affectedPackages.add(detail.plugin.packageName);
-        }
-      }
-    }
+  setInstalled: async (pluginId, installed) => {
     set((state) => ({
       pending: {
         ...state.pending,
-        ...Object.fromEntries(uniquePluginIds.map((pluginId) => [pluginId, true])),
+        [pluginId]: true,
       },
     }));
     try {
-      const results = await Promise.allSettled(
-        uniquePluginIds.map((pluginId) =>
-          installed ? installPlugin(pluginId) : removePlugin(pluginId),
-        ),
-      );
-      await get().loadCatalog(true);
-      const detailIds = new Set(uniquePluginIds);
-      for (const [pluginId, detail] of Object.entries(get().details)) {
-        if (detail?.plugin && affectedPackages.has(detail.plugin.packageName)) {
-          detailIds.add(pluginId);
-        }
-      }
-      await Promise.all([...detailIds].map((pluginId) => get().loadDetail(pluginId, true)));
-      const failure = results.find(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      if (failure) throw failure.reason;
+      await (installed ? installPlugin(pluginId) : removePlugin(pluginId));
+      await get()
+        .loadCatalog(true)
+        .catch(() => undefined);
+      await get()
+        .loadDetail(pluginId, true)
+        .catch(() => undefined);
     } finally {
       set((state) => ({
         pending: {
           ...state.pending,
-          ...Object.fromEntries(uniquePluginIds.map((pluginId) => [pluginId, false])),
+          [pluginId]: false,
         },
       }));
     }
   },
-
-  install: async (pluginId) => get().setInstalled([pluginId], true),
-
-  remove: async (pluginId) => get().setInstalled([pluginId], false),
 }));

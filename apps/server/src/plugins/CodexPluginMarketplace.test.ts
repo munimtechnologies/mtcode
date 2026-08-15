@@ -127,14 +127,28 @@ testLayer("CodexPluginMarketplace", (it) => {
       };
       // @effect-diagnostics-next-line preferSchemaOverJson:off
       const catalogJson = JSON.stringify({ installed: [record], available: [] });
+      let codexEnvironment: NodeJS.ProcessEnv | undefined;
       const runner = ProcessRunner.ProcessRunner.of({
-        run: (input) =>
-          Effect.succeed(
-            input.command === "codex" ? processOutput(catalogJson) : unavailableProcessOutput,
-          ),
+        run: (input) => {
+          if (input.command !== "/tools/custom-codex") {
+            return Effect.succeed(unavailableProcessOutput);
+          }
+          codexEnvironment = input.env;
+          return Effect.succeed(processOutput(catalogJson));
+        },
       });
-      const marketplace = yield* makeTestMarketplace.pipe(
+      const marketplace = yield* makeWithOptions({
+        commands: {
+          codex: {
+            command: "/tools/custom-codex",
+            env: { ...process.env, CODEX_HOME: "/custom/codex-home" },
+          },
+        },
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+      }).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
       );
 
       const catalog = yield* marketplace.catalog();
@@ -146,6 +160,7 @@ testLayer("CodexPluginMarketplace", (it) => {
       assert.strictEqual(catalog.plugins[0]?.logoDataUrl, null);
       expect(logo.dataUrl).toMatch(/^data:image\/png;base64,/u);
       expect(detail.logoDataUrl).toBe(logo.dataUrl);
+      assert.strictEqual(codexEnvironment?.CODEX_HOME, "/custom/codex-home");
       assert.deepStrictEqual(detail.skills, [
         {
           id: "computer-use",
@@ -160,9 +175,6 @@ testLayer("CodexPluginMarketplace", (it) => {
           name: "Computer Use",
           transport: "stdio",
           url: null,
-          command: "computer-use",
-          arguments: ["serve"],
-          workingDirectory: null,
           oauthResource: null,
           note: null,
           toolTimeoutSeconds: null,
@@ -217,6 +229,7 @@ testLayer("CodexPluginMarketplace", (it) => {
               url: "https://mcp.figma.com/mcp",
               status: "not_connected",
               detail: "Sign in with Codex to use this MCP server",
+              authorizationUrl: null,
               canConnect: true,
               canDisconnect: false,
             },
@@ -259,7 +272,7 @@ testLayer("CodexPluginMarketplace", (it) => {
     }),
   );
 
-  it.effect("groups matching marketplace packages into one multi-harness plugin", () =>
+  it.effect("keeps same-name packages from different marketplaces separate", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-shared-" });
@@ -302,27 +315,31 @@ testLayer("CodexPluginMarketplace", (it) => {
       );
 
       const catalog = yield* marketplace.catalog();
-      const detail = yield* marketplace.detail("codex:figma@openai-curated");
+      const codexDetail = yield* marketplace.detail("codex:figma@openai-curated");
+      const claudeDetail = yield* marketplace.detail("claude:figma@claude-plugins-official");
 
-      assert.strictEqual(catalog.plugins.length, 1);
+      assert.strictEqual(catalog.plugins.length, 2);
       assert.deepStrictEqual(
-        detail.installTargets.map((target) => ({
+        codexDetail.installTargets.map((target) => ({
+          pluginId: target.pluginId,
+          harness: target.harness,
+          installed: target.installed,
+        })),
+        [{ pluginId: "codex:figma@openai-curated", harness: "codex", installed: false }],
+      );
+      assert.deepStrictEqual(
+        claudeDetail.installTargets.map((target) => ({
           pluginId: target.pluginId,
           harness: target.harness,
           installed: target.installed,
         })),
         [
-          { pluginId: "codex:figma@openai-curated", harness: "codex", installed: false },
           {
             pluginId: "claude:figma@claude-plugins-official",
             harness: "claude",
             installed: false,
           },
         ],
-      );
-      assert.deepStrictEqual(
-        detail.support.map((support) => support.harness),
-        ["codex", "claude"],
       );
     }),
   );

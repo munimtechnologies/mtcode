@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 
-import {
-  ClaudeAI,
-  CursorIcon,
-  GrokIcon,
-  OpenAI,
-  OpenCodeIcon,
-  type Icon,
-} from "~/components/Icons";
+import { ClaudeAI, CursorIcon, OpenAI, type Icon } from "~/components/Icons";
 import { Badge } from "~/components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -23,8 +16,6 @@ const HARNESS_ICONS: Readonly<Record<MarketplaceHarnessId, Icon>> = {
   codex: OpenAI,
   claude: ClaudeAI,
   cursor: CursorIcon,
-  grok: GrokIcon,
-  opencode: OpenCodeIcon,
 };
 
 const FALLBACK_LOGO_STYLES = [
@@ -42,8 +33,14 @@ function loadLocalPluginLogo(pluginId: string): Promise<string | null> {
   const existing = localLogoRequests.get(pluginId);
   if (existing) return existing;
   const request = fetchPluginMarketplaceLogo(pluginId)
-    .then((result) => result.dataUrl)
-    .catch(() => null);
+    .then((result) => {
+      if (result.dataUrl === null) localLogoRequests.delete(pluginId);
+      return result.dataUrl;
+    })
+    .catch(() => {
+      localLogoRequests.delete(pluginId);
+      return null;
+    });
   localLogoRequests.set(pluginId, request);
   return request;
 }
@@ -91,22 +88,30 @@ export function PluginLogo({
   readonly size?: "small" | "default" | "large";
   readonly className?: string;
 }) {
-  const [localLogoDataUrl, setLocalLogoDataUrl] = useState<string | null>(null);
-  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const [localLogo, setLocalLogo] = useState<{
+    readonly pluginId: string;
+    readonly dataUrl: string | null;
+  } | null>(null);
+  const [failedImage, setFailedImage] = useState<{
+    readonly pluginId: string;
+    readonly source: string;
+  } | null>(null);
   useEffect(() => {
     if (!plugin.hasLocalLogo || plugin.logoDataUrl) return;
     let active = true;
     void loadLocalPluginLogo(plugin.id).then((dataUrl) => {
-      if (active) setLocalLogoDataUrl(dataUrl);
+      if (active) setLocalLogo({ pluginId: plugin.id, dataUrl });
     });
     return () => {
       active = false;
     };
   }, [plugin.hasLocalLogo, plugin.id, plugin.logoDataUrl]);
 
+  const localLogoDataUrl = localLogo?.pluginId === plugin.id ? localLogo.dataUrl : null;
   const source =
     plugin.logoDataUrl ?? localLogoDataUrl ?? (plugin.hasLocalLogo ? null : plugin.logoUrl);
-  const showImage = source !== null && source !== failedSource;
+  const showImage =
+    source !== null && (failedImage?.pluginId !== plugin.id || failedImage.source !== source);
   return (
     <div
       aria-label={`${plugin.name} logo`}
@@ -126,7 +131,7 @@ export function PluginLogo({
           className="size-full object-cover"
           referrerPolicy="no-referrer"
           src={source ?? undefined}
-          onError={() => setFailedSource(source)}
+          onError={() => setFailedImage({ pluginId: plugin.id, source })}
         />
       ) : (
         <PluginFallbackIcon name={plugin.name} packageName={plugin.packageName} />
