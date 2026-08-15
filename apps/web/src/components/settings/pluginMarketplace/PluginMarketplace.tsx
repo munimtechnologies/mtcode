@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "~/components/ui/button";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -376,12 +377,14 @@ export function PluginMarketplace() {
       {status === "idle" || status === "loading" ? <LoadingMarketplace /> : null}
       {status === "error" ? (
         <Empty className="min-h-64 border border-dashed border-foreground/10">
+          <EmptyMedia variant="icon">
+            <PackageOpenIcon />
+          </EmptyMedia>
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <PackageOpenIcon />
-            </EmptyMedia>
             <EmptyTitle>Plugin marketplaces are unavailable</EmptyTitle>
             <EmptyDescription>{error}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
             <Button
               size="sm"
               variant="outline"
@@ -390,7 +393,7 @@ export function PluginMarketplace() {
               <RefreshCwIcon />
               Try again
             </Button>
-          </EmptyHeader>
+          </EmptyContent>
         </Empty>
       ) : null}
       {status === "ready" ? (

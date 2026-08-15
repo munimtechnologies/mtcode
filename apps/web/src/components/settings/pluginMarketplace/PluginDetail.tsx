@@ -34,6 +34,7 @@ import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -89,23 +90,23 @@ function MissingPlugin({
   return (
     <SettingsPageContainer>
       <Empty className="min-h-80 border border-dashed border-foreground/10">
+        <EmptyMedia variant="icon">
+          <PackageOpenIcon />
+        </EmptyMedia>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <PackageOpenIcon />
-          </EmptyMedia>
           <EmptyTitle>Plugin unavailable</EmptyTitle>
           <EmptyDescription>{error ?? "This Codex plugin could not be loaded."}</EmptyDescription>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" render={<Link to="/settings/plugins" replace />}>
-              <ArrowLeftIcon />
-              Back to plugins
-            </Button>
-            <Button size="sm" variant="outline" onClick={onRetry}>
-              <RefreshCwIcon />
-              Try again
-            </Button>
-          </div>
         </EmptyHeader>
+        <EmptyContent className="flex-row flex-wrap justify-center gap-2">
+          <Button size="sm" variant="outline" render={<Link to="/settings/plugins" replace />}>
+            <ArrowLeftIcon />
+            Back to plugins
+          </Button>
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCwIcon />
+            Try again
+          </Button>
+        </EmptyContent>
       </Empty>
     </SettingsPageContainer>
   );

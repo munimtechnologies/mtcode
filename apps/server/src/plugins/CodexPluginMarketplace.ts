@@ -59,7 +59,6 @@ import * as McpOAuthRuntime from "./McpOAuthRuntime.ts";
 const CATALOG_CACHE_TTL_MS = 30_000;
 const MAX_LOGO_BYTES = 1024 * 1024;
 const MAX_CATALOG_LOGO_BYTES = 48 * 1024;
-const MAX_OPERATION_ERROR_LENGTH = 500;
 const MAX_REMOTE_DESCRIPTION_FILES = 32;
 const MAX_REMOTE_TREE_ENTRIES = 20_000;
 const decodeCodexSettingsOption = Schema.decodeUnknownOption(CodexSettings);
@@ -610,6 +609,10 @@ function normalizeCategory(value: string | undefined): string {
 
 function publicPluginId(harness: PluginSourceRecord["harness"], pluginId: string): string {
   return `${harness}:${pluginId}`;
+}
+
+function mcpHarnessLabel(harness: McpOAuthRuntime.McpOAuthHarness): string {
+  return harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : "Cursor";
 }
 
 function publicFaviconUrl(value: string | null | undefined): string | null {
@@ -2178,7 +2181,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               new PluginMarketplaceOperationError({
                 operation: "authenticate",
                 pluginId,
-                detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                detail: `${mcpHarnessLabel(harness)} could not report MCP authentication status for '${serverId}'.`,
                 cause: error,
               }),
           ),
@@ -2214,7 +2217,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               new PluginMarketplaceOperationError({
                 operation: "authenticate",
                 pluginId,
-                detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                detail: `${mcpHarnessLabel(resolved.harness)} could not start MCP authentication for '${serverId}'.`,
                 cause: error,
               }),
           ),
@@ -2244,7 +2247,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               new PluginMarketplaceOperationError({
                 operation: "authenticate",
                 pluginId,
-                detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+                detail: `${mcpHarnessLabel(resolved.harness)} could not complete MCP authentication for '${serverId}'.`,
                 cause: error,
               }),
           ),
@@ -2269,7 +2272,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             new PluginMarketplaceOperationError({
               operation: "authenticate",
               pluginId,
-              detail: error.message.slice(0, MAX_OPERATION_ERROR_LENGTH),
+              detail: `${mcpHarnessLabel(resolved.harness)} could not disconnect MCP authentication for '${serverId}'.`,
               cause: error,
             }),
         ),
