@@ -1,0 +1,697 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import { ChildProcessSpawner } from "effect/unstable/process";
+
+import * as ProcessRunner from "../processRunner.ts";
+import {
+  makeWithOptions,
+  parseCursorMarketplaceHtml,
+  type CodexPluginRuntime,
+} from "./CodexPluginMarketplace.ts";
+import { PluginMarketplaceUnavailableError } from "@t3tools/contracts";
+
+const processOutput = (stdout: string) => ({
+  stdout,
+  stderr: "",
+  code: ChildProcessSpawner.ExitCode(0),
+  timedOut: false,
+  stdoutTruncated: false,
+  stderrTruncated: false,
+  stdoutInvalidUtf8: false,
+  stderrInvalidUtf8: false,
+});
+
+const unavailableProcessOutput = {
+  ...processOutput(""),
+  code: ChildProcessSpawner.ExitCode(1),
+};
+
+function cursorMarketplaceHtml(plugins: ReadonlyArray<unknown>): string {
+  const escaped = JSON.stringify(JSON.stringify(plugins)).slice(1, -1);
+  return `x:\\"initialPlugins\\":${escaped},\\"initialTemplates\\":[]`;
+}
+
+const unusedHttpClient = HttpClient.make(() =>
+  Effect.die("Cursor HTTP should not run in plugin marketplace tests."),
+);
+
+const makeTestMarketplace = makeWithOptions({
+  readCursorMarketplaceHtml: () =>
+    new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+}).pipe(Effect.provideService(HttpClient.HttpClient, unusedHttpClient));
+
+const testLayer = it.layer(NodeServices.layer);
+
+testLayer("CodexPluginMarketplace", (it) => {
+  it("extracts the published Cursor plugin payload", () => {
+    const html = String.raw`<script>self.__next_f.push([1,"x:{\"initialPlugins\":[{\"id\":\"730\",\"name\":\"posthog\"}],\"initialTemplates\":[]}"])</script>`;
+
+    assert.deepStrictEqual(parseCursorMarketplaceHtml(html), [{ id: "730", name: "posthog" }]);
+  });
+
+  it.effect("loads real manifest, skill, MCP, app, and artwork metadata", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-marketplace-" });
+      yield* fs.makeDirectory(path.join(root, ".codex-plugin"), { recursive: true });
+      yield* fs.makeDirectory(path.join(root, "skills", "computer-use"), { recursive: true });
+      yield* fs.makeDirectory(path.join(root, "assets"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, ".codex-plugin", "plugin.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          name: "computer-use",
+          version: "1.0.1000633",
+          description: "Control local apps.",
+          skills: "./skills",
+          mcpServers: "./.mcp.json",
+          apps: "./.app.json",
+          interface: {
+            displayName: "Computer Use",
+            shortDescription: "Control Mac apps from Codex",
+            longDescription: "Use Codex to operate approved Mac applications.",
+            developerName: "OpenAI",
+            category: "Productivity",
+            logo: "./assets/app-icon.png",
+            defaultPrompt: "Play a playlist to help me focus",
+          },
+        }),
+      );
+      yield* fs.writeFileString(
+        path.join(root, "skills", "computer-use", "SKILL.md"),
+        [
+          "---",
+          "name: computer-use",
+          "description: Operate local Mac application UI.",
+          "---",
+          "Use the bundled MCP server.",
+        ].join("\n"),
+      );
+      yield* fs.writeFileString(
+        path.join(root, ".mcp.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          mcpServers: {
+            "computer-use": {
+              command: "computer-use",
+              args: ["serve"],
+              env: { COMPUTER_USE_TOKEN: "never-return-this-value" },
+            },
+          },
+        }),
+      );
+      yield* fs.writeFileString(
+        path.join(root, ".app.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ apps: { "computer-use": { id: "computer-use-connector" } } }),
+      );
+      yield* fs.writeFile(path.join(root, "assets", "app-icon.png"), new Uint8Array(60 * 1024));
+
+      const record = {
+        pluginId: "computer-use@openai-bundled",
+        name: "computer-use",
+        marketplaceName: "openai-bundled",
+        version: "1.0.1000633",
+        installed: true,
+        enabled: true,
+        source: { source: "git", path: root },
+        marketplaceSource: { sourceType: "git", source: "openai/plugins" },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const catalogJson = JSON.stringify({ installed: [record], available: [] });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.succeed(
+            input.command === "codex" ? processOutput(catalogJson) : unavailableProcessOutput,
+          ),
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      const detail = yield* marketplace.detail(`codex:${record.pluginId}`);
+      const logo = yield* marketplace.logo(`codex:${record.pluginId}`);
+
+      assert.strictEqual(catalog.plugins[0]?.name, "Computer Use");
+      assert.strictEqual(catalog.plugins[0]?.hasLocalLogo, true);
+      assert.strictEqual(catalog.plugins[0]?.logoDataUrl, null);
+      expect(logo.dataUrl).toMatch(/^data:image\/png;base64,/u);
+      expect(detail.logoDataUrl).toBe(logo.dataUrl);
+      assert.deepStrictEqual(detail.skills, [
+        {
+          id: "computer-use",
+          name: "computer-use",
+          description: "Operate local Mac application UI.",
+          invocation: "$computer-use:computer-use",
+        },
+      ]);
+      assert.deepStrictEqual(detail.mcpServers, [
+        {
+          id: "computer-use",
+          name: "Computer Use",
+          transport: "stdio",
+          url: null,
+          command: "computer-use",
+          arguments: ["serve"],
+          workingDirectory: null,
+          oauthResource: null,
+          note: null,
+          toolTimeoutSeconds: null,
+          environmentVariables: ["COMPUTER_USE_TOKEN"],
+        },
+      ]);
+      assert.deepStrictEqual(detail.apps, [
+        { id: "computer-use", name: "Computer Use", connectorId: "computer-use-connector" },
+      ]);
+      assert.deepStrictEqual(detail.defaultPrompts, ["Play a playlist to help me focus"]);
+      expect(detail.mcpServers[0]?.environmentVariables).not.toContain("never-return-this-value");
+    }),
+  );
+
+  it.effect("groups matching marketplace packages into one multi-harness plugin", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-shared-" });
+      const codexRecord = {
+        pluginId: "figma@openai-curated",
+        name: "figma",
+        marketplaceName: "openai-curated",
+        version: "2.0.0",
+        installed: false,
+        enabled: false,
+        source: { source: "git", path: root },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const codexCatalog = JSON.stringify({ installed: [], available: [codexRecord] });
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const claudeCatalog = JSON.stringify({
+        installed: [],
+        available: [
+          {
+            pluginId: "figma@claude-plugins-official",
+            name: "figma",
+            description: "Figma design tools",
+            marketplaceName: "claude-plugins-official",
+            source: { source: "git", url: "https://example.com/figma.git" },
+          },
+        ],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) => {
+          if (input.command === "codex") return Effect.succeed(processOutput(codexCatalog));
+          if (input.args[1] === "list") return Effect.succeed(processOutput(claudeCatalog));
+          if (input.args[1] === "marketplace") return Effect.succeed(processOutput("[]"));
+          return Effect.succeed(unavailableProcessOutput);
+        },
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      const detail = yield* marketplace.detail("codex:figma@openai-curated");
+
+      assert.strictEqual(catalog.plugins.length, 1);
+      assert.deepStrictEqual(
+        detail.installTargets.map((target) => ({
+          pluginId: target.pluginId,
+          harness: target.harness,
+          installed: target.installed,
+        })),
+        [
+          { pluginId: "codex:figma@openai-curated", harness: "codex", installed: false },
+          {
+            pluginId: "claude:figma@claude-plugins-official",
+            harness: "claude",
+            installed: false,
+          },
+        ],
+      );
+      assert.deepStrictEqual(
+        detail.support.map((support) => support.harness),
+        ["codex", "claude"],
+      );
+    }),
+  );
+
+  it.effect("previews remote Claude package skills, MCP servers, hooks, and artwork", () =>
+    Effect.gen(function* () {
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const claudeCatalog = JSON.stringify({
+        installed: [],
+        available: [
+          {
+            pluginId: "figma@claude-plugins-official",
+            name: "figma",
+            description: "Figma design tools",
+            marketplaceName: "claude-plugins-official",
+            source: {
+              source: "url",
+              url: "https://github.com/figma/mcp-server-guide.git",
+              sha: "abc123",
+            },
+          },
+        ],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) => {
+          if (input.command === "codex") return Effect.succeed(unavailableProcessOutput);
+          if (input.args[1] === "list") return Effect.succeed(processOutput(claudeCatalog));
+          if (input.args[1] === "marketplace") return Effect.succeed(processOutput("[]"));
+          return Effect.succeed(unavailableProcessOutput);
+        },
+      });
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const tree = JSON.stringify({
+        truncated: false,
+        tree: [
+          { type: "blob", path: ".claude-plugin/plugin.json" },
+          { type: "blob", path: ".mcp.json" },
+          { type: "blob", path: "Figma Icon.svg" },
+          { type: "blob", path: "hooks/hooks.json" },
+          { type: "blob", path: "skills/design-to-code/SKILL.md" },
+        ],
+      });
+      const marketplace = yield* makeWithOptions({
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+        readRemoteText: (url) =>
+          Effect.succeed(
+            url.includes("/git/trees/")
+              ? tree
+              : url.endsWith("/.claude-plugin/plugin.json")
+                ? JSON.stringify({
+                    name: "figma",
+                    version: "2.2.95",
+                    description: "Figma plugin for design workflows",
+                    author: { name: "Figma" },
+                  })
+                : url.endsWith("/skills/design-to-code/SKILL.md")
+                  ? [
+                      "---",
+                      "name: design-to-code",
+                      "description: Turn Figma designs into implementation-ready code.",
+                      "---",
+                    ].join("\n")
+                  : url.endsWith("/.mcp.json")
+                    ? JSON.stringify({
+                        mcpServers: { figma: { type: "http", url: "https://mcp.figma.com/mcp" } },
+                      })
+                    : null,
+          ),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const detail = yield* marketplace.detail("claude:figma@claude-plugins-official");
+
+      assert.strictEqual(detail.version, "2.2.95");
+      assert.strictEqual(detail.skills[0]?.id, "design-to-code");
+      assert.strictEqual(detail.mcpServers[0]?.url, "https://mcp.figma.com/mcp");
+      assert.strictEqual(detail.extensions[0]?.kind, "hook");
+      assert.strictEqual(detail.contents.hookCount, 1);
+      expect(detail.logoUrl).toMatch(/Figma%20Icon\.svg$/u);
+    }),
+  );
+
+  it.effect("uses Cursor publisher artwork and exposes editor-specific components", () =>
+    Effect.gen(function* () {
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: () => Effect.succeed(unavailableProcessOutput),
+      });
+      const html = cursorMarketplaceHtml([
+        {
+          id: "730",
+          name: "posthog",
+          displayName: "PostHog",
+          description: "Product analytics for Cursor",
+          repositoryUrl: "https://github.com/PostHog/posthog",
+          publisher: {
+            name: "posthog",
+            displayName: "PostHog",
+            logoUrl: "https://cdn.example.com/posthog.png",
+          },
+          marketplace: { name: "cursor-public", displayName: "Cursor Marketplace" },
+          curatedCategoryKeys: ["data-analytics"],
+          skills: [{ name: "analytics", description: "Analyze product usage" }],
+          commands: [{ name: "query", description: "Run a product query" }],
+          rules: [{ name: "tracking", description: "Apply tracking conventions" }],
+          subagents: [{ name: "analyst", description: "Analyze product data" }],
+          hooks: [{ name: "sessionstart", description: "Load project context" }],
+        },
+      ]);
+      const marketplace = yield* makeWithOptions({
+        readCursorMarketplaceHtml: () => Effect.succeed(html),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      const detail = yield* marketplace.detail("cursor:730");
+
+      assert.strictEqual(catalog.plugins[0]?.logoUrl, "https://cdn.example.com/posthog.png");
+      assert.strictEqual(catalog.plugins[0]?.category, "Data & Analytics");
+      assert.deepStrictEqual(
+        detail.extensions.map((extension) => extension.kind),
+        ["agent", "command", "hook", "rule"],
+      );
+      assert.strictEqual(detail.contents.commandCount, 1);
+      assert.strictEqual(detail.contents.agentCount, 1);
+      assert.strictEqual(detail.contents.ruleCount, 1);
+      assert.strictEqual(detail.contents.hookCount, 1);
+    }),
+  );
+
+  it.effect("installs only the catalog-resolved package through Codex", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-install-" });
+      const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+        [];
+      const record = {
+        pluginId: "computer-use@openai-bundled",
+        name: "computer-use",
+        marketplaceName: "openai-bundled",
+        version: "1.0.1000633",
+        installed: false,
+        enabled: false,
+        source: { source: "git", path: root },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const catalogJson = JSON.stringify({ installed: [], available: [record] });
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const installJson = JSON.stringify({ pluginId: record.pluginId, installed: true });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push({ command: input.command, args: input.args });
+            if (input.command !== "codex") return unavailableProcessOutput;
+            return processOutput(input.args[1] === "list" ? catalogJson : installJson);
+          }),
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const publicId = `codex:${record.pluginId}`;
+      const result = yield* marketplace.install(publicId);
+
+      assert.deepStrictEqual(result, { pluginId: publicId, installed: true });
+      expect(commands).toContainEqual({
+        command: "codex",
+        args: ["plugin", "list", "--available", "--json"],
+      });
+      expect(commands).toContainEqual({
+        command: "codex",
+        args: ["plugin", "add", record.pluginId, "--json"],
+      });
+    }),
+  );
+
+  it.effect("removes only the catalog-resolved package through Codex", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-remove-" });
+      const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+        [];
+      const record = {
+        pluginId: "apollo@openai-curated",
+        name: "apollo",
+        marketplaceName: "openai-curated",
+        version: "1.0.0",
+        installed: true,
+        enabled: true,
+        source: { source: "git", path: root },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const catalogJson = JSON.stringify({ installed: [record], available: [] });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push({ command: input.command, args: input.args });
+            if (input.command !== "codex") return unavailableProcessOutput;
+            return processOutput(input.args[1] === "list" ? catalogJson : "");
+          }),
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const publicId = `codex:${record.pluginId}`;
+      const result = yield* marketplace.remove(publicId);
+
+      assert.deepStrictEqual(result, { pluginId: publicId, installed: false });
+      expect(commands).toContainEqual({
+        command: "codex",
+        args: ["plugin", "remove", record.pluginId, "--json"],
+      });
+    }),
+  );
+
+  it.effect("uses Codex runtime state and backend ids for official plugins", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-runtime-" });
+      const runtimeInstalls: Array<string> = [];
+      const runtimeRemovals: Array<string> = [];
+      const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+        [];
+      const record = {
+        pluginId: "hyperframes@openai-curated",
+        name: "hyperframes",
+        marketplaceName: "openai-curated",
+        version: "0.1.2",
+        installed: true,
+        enabled: true,
+        source: { source: "local", path: root },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const catalogJson = JSON.stringify({ installed: [record], available: [] });
+      let runtimeInstalled = false;
+      const runtime = {
+        installed: () =>
+          Effect.succeed(
+            runtimeInstalled
+              ? [
+                  {
+                    id: "hyperframes@openai-curated-remote",
+                    name: "hyperframes",
+                    marketplaceName: "openai-curated-remote",
+                    remotePluginId: "Plugin_hyperframes",
+                    installed: true,
+                    enabled: true,
+                  },
+                ]
+              : [],
+          ),
+        install: (pluginName) =>
+          Effect.sync(() => {
+            runtimeInstalls.push(pluginName);
+            runtimeInstalled = true;
+          }),
+        remove: (pluginId) =>
+          Effect.sync(() => {
+            runtimeRemovals.push(pluginId);
+            runtimeInstalled = false;
+          }),
+      } satisfies CodexPluginRuntime;
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push({ command: input.command, args: input.args });
+            if (input.command === "codex" && input.args[1] === "list") {
+              return processOutput(catalogJson);
+            }
+            return processOutput("");
+          }),
+      });
+      const makeMarketplace = () =>
+        makeWithOptions({
+          codexPluginRuntime: runtime,
+          readCursorMarketplaceHtml: () =>
+            new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+        }).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, runner),
+          Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+        );
+
+      const marketplace = yield* makeMarketplace();
+      const publicId = `codex:${record.pluginId}`;
+      assert.strictEqual((yield* marketplace.detail(publicId)).installed, false);
+      assert.deepStrictEqual(yield* marketplace.install(publicId), {
+        pluginId: publicId,
+        installed: true,
+      });
+      assert.deepStrictEqual(runtimeInstalls, ["hyperframes"]);
+      expect(commands).not.toContainEqual({
+        command: "codex",
+        args: ["plugin", "add", record.pluginId, "--json"],
+      });
+      expect(commands).toContainEqual({
+        command: "codex",
+        args: ["plugin", "remove", record.pluginId, "--json"],
+      });
+
+      const installedMarketplace = yield* makeMarketplace();
+      assert.strictEqual((yield* installedMarketplace.detail(publicId)).installed, true);
+      assert.deepStrictEqual(yield* installedMarketplace.remove(publicId), {
+        pluginId: publicId,
+        installed: false,
+      });
+      assert.deepStrictEqual(runtimeRemovals, ["hyperframes@openai-curated-remote"]);
+    }),
+  );
+
+  it.effect("installs Claude marketplace packages through the Claude Code CLI", () =>
+    Effect.gen(function* () {
+      const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+        [];
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const claudeCatalog = JSON.stringify({
+        installed: [],
+        available: [
+          {
+            pluginId: "agent-sdk-dev@claude-plugins-official",
+            name: "agent-sdk-dev",
+            description: "Claude Agent SDK development tools",
+            marketplaceName: "claude-plugins-official",
+            source: { source: "git-subdir", url: "https://example.com/plugins.git" },
+          },
+        ],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push({ command: input.command, args: input.args });
+            if (input.command === "codex") return unavailableProcessOutput;
+            if (input.args[1] === "list") return processOutput(claudeCatalog);
+            if (input.args[1] === "marketplace") return processOutput("[]");
+            return processOutput("");
+          }),
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+      const publicId = "claude:agent-sdk-dev@claude-plugins-official";
+
+      const result = yield* marketplace.install(publicId);
+
+      assert.deepStrictEqual(result, { pluginId: publicId, installed: true });
+      expect(commands).toContainEqual({
+        command: "claude",
+        args: [
+          "plugin",
+          "install",
+          "agent-sdk-dev@claude-plugins-official",
+          "--scope",
+          "user",
+          "--yes",
+        ],
+      });
+    }),
+  );
+
+  it.effect("opens the signed Computer Use app and macOS permission settings", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const codexHome = yield* fs.makeTempDirectoryScoped({ prefix: "t3-computer-use-home-" });
+      const pluginRoot = path.join(
+        codexHome,
+        ".tmp",
+        "bundled-marketplaces",
+        "openai-bundled",
+        "plugins",
+        "computer-use",
+      );
+      const appPath = path.join(codexHome, "computer-use", "Codex Computer Use.app");
+      yield* fs.makeDirectory(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+      yield* fs.makeDirectory(appPath, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          name: "computer-use",
+          version: "1.0.1000633",
+          description: "Control local Mac apps.",
+          interface: { displayName: "Computer Use", category: "Productivity" },
+        }),
+      );
+
+      const record = {
+        pluginId: "computer-use@openai-bundled",
+        name: "computer-use",
+        marketplaceName: "openai-bundled",
+        version: "1.0.1000633",
+        installed: true,
+        enabled: true,
+        source: { source: "git", path: pluginRoot },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const codexCatalog = JSON.stringify({ installed: [record], available: [] });
+      const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+        [];
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push({ command: input.command, args: input.args });
+            return processOutput(input.command === "codex" ? codexCatalog : "[]");
+          }),
+      });
+      const marketplace = yield* makeWithOptions({
+        platform: "darwin",
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({ reason: "marketplaces_unavailable" }),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const pluginId = "codex:computer-use@openai-bundled";
+      const detail = yield* marketplace.detail(pluginId);
+      assert.deepStrictEqual(
+        detail.installTargets.map((target) => target.harness),
+        ["codex"],
+      );
+      assert.deepStrictEqual(
+        detail.support.map((support) => support.harness),
+        ["codex"],
+      );
+      assert.deepStrictEqual(yield* marketplace.setup(pluginId, "permissions"), {
+        pluginId,
+        action: "permissions",
+        opened: true,
+      });
+      assert.deepStrictEqual(yield* marketplace.setup(pluginId, "automation"), {
+        pluginId,
+        action: "automation",
+        opened: true,
+      });
+      expect(commands).toContainEqual({ command: "/usr/bin/open", args: [appPath] });
+      expect(commands).toContainEqual({
+        command: "/usr/bin/open",
+        args: ["x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"],
+      });
+    }),
+  );
+});

@@ -34,6 +34,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  BlocksIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -1564,6 +1565,18 @@ function OpenCommandPaletteDialog(props: {
         themeHalves,
         initialAppearance: resolvedTheme,
       });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:plugins",
+    searchTerms: ["plugins", "marketplace", "mcp", "skills", "harnesses"],
+    title: "Browse plugins",
+    description: "MCP servers and skills for every harness",
+    icon: <BlocksIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/plugins" });
     },
   });
 

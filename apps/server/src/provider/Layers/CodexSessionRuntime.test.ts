@@ -21,6 +21,7 @@ import {
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
+  selectMentionedCodexPlugins,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -181,6 +182,34 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it.effect("forwards selected plugin skills alongside the user's prompt", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Use HyperFrames to render a video",
+        skills: [
+          {
+            name: "hyperframes:hyperframes",
+            path: "/plugins/hyperframes/skills/hyperframes/SKILL.md",
+          },
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(params.input, [
+        {
+          type: "text",
+          text: "$hyperframes:hyperframes Use HyperFrames to render a video",
+        },
+        {
+          type: "skill",
+          name: "hyperframes:hyperframes",
+          path: "/plugins/hyperframes/skills/hyperframes/SKILL.md",
+        },
+      ]);
+    }),
+  );
+
   it("reports the same fallback model and effort in settings and instructions", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -245,6 +274,53 @@ describe("buildTurnStartParams", () => {
         },
       ],
     });
+  });
+});
+
+describe("selectMentionedCodexPlugins", () => {
+  const plugins = [
+    {
+      id: "hyperframes@openai-curated",
+      name: "hyperframes",
+      displayName: "HyperFrames by HeyGen",
+      installed: true,
+      enabled: true,
+    },
+    {
+      id: "computer-use@openai-bundled",
+      name: "computer-use",
+      displayName: "Computer Use",
+      installed: true,
+      enabled: false,
+    },
+    {
+      id: "apollo@openai-curated",
+      name: "apollo",
+      displayName: "Apollo.io",
+      installed: false,
+      enabled: true,
+    },
+  ];
+
+  it("matches installed enabled plugins by package or display name", () => {
+    NodeAssert.deepStrictEqual(
+      selectMentionedCodexPlugins("Do I have the HyperFrames plugin installed?", plugins).map(
+        (plugin) => plugin.id,
+      ),
+      ["hyperframes@openai-curated"],
+    );
+    NodeAssert.deepStrictEqual(
+      selectMentionedCodexPlugins("Use HyperFrames by HeyGen for this video", plugins).map(
+        (plugin) => plugin.id,
+      ),
+      ["hyperframes@openai-curated"],
+    );
+  });
+
+  it("does not forward disabled, uninstalled, or unrelated plugins", () => {
+    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Use Computer Use", plugins), []);
+    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Open Apollo.io", plugins), []);
+    NodeAssert.deepStrictEqual(selectMentionedCodexPlugins("Explain this repository", plugins), []);
   });
 });
 

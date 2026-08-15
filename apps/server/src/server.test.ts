@@ -1353,6 +1353,7 @@ const assertBrowserApiCorsPreflightHeaders = (
 ) => {
   assertBrowserApiCorsResponseHeaders(headers, options);
   assert.deepEqual(splitHeaderTokens(headers["access-control-allow-methods"] ?? null), [
+    "DELETE",
     "GET",
     "OPTIONS",
     "POST",
@@ -3479,6 +3480,30 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("allows credentialed plugin removal preflights from the desktop renderer", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL(crossOriginClientOrigin) },
+      });
+
+      const pluginUrl = yield* getHttpServerUrl("/api/plugins/codex%3Aexample%40marketplace");
+      const response = yield* fetchEffect(pluginUrl, {
+        method: "OPTIONS",
+        headers: {
+          origin: "t3code-dev://app",
+          "access-control-request-method": "DELETE",
+          "access-control-request-headers": "content-type",
+        },
+      });
+
+      assert.equal(response.status, 204);
+      assertBrowserApiCorsPreflightHeaders(response.headers, {
+        origin: "t3code-dev://app",
+        credentials: true,
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("allows credentialed cloud link proof preflights from the configured dev UI", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({
@@ -4284,6 +4309,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 204);
       assert.equal(response.headers["access-control-allow-origin"], "*");
       assert.deepEqual(splitHeaderTokens(response.headers["access-control-allow-methods"]), [
+        "DELETE",
         "GET",
         "OPTIONS",
         "POST",

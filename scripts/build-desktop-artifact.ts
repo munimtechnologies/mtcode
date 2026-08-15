@@ -1051,6 +1051,8 @@ ${associatedDomains}
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
   </dict>
 </plist>
 `;
@@ -2069,6 +2071,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      extendInfo: {
+        NSAppleEventsUsageDescription:
+          "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",
+      },
       protocols: [
         {
           name: "T3 Code",

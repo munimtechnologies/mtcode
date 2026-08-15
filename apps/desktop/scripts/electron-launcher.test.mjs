@@ -1,7 +1,8 @@
 import { assert, describe, it } from "vite-plus/test";
 
 import {
-  makeDevelopmentLauncherScript,
+  makeMacDevelopmentOpenCommand,
+  makeDevelopmentLauncherSource,
   resolveElectronBinaryPath,
   resolveMacLauncherIconPaths,
   resolveMacLauncherPaths,
@@ -9,7 +10,7 @@ import {
 
 describe("electron development launcher", () => {
   it("uses captured values only as fallbacks for a live runner environment", () => {
-    const script = makeDevelopmentLauncherScript({
+    const source = makeDevelopmentLauncherSource({
       electronBinaryPath: "/repo/node_modules/electron/Electron",
       mainEntryPath: "/repo/apps/desktop/dist-electron/main.cjs",
       desktopRoot: "/repo/apps/desktop",
@@ -20,15 +21,15 @@ describe("electron development launcher", () => {
       },
     });
 
-    assert.include(
-      script,
-      "if [ -z \"${VITE_DEV_SERVER_URL:-}\" ]; then export VITE_DEV_SERVER_URL='http://127.0.0.1:8526'; fi",
-    );
-    assert.notInclude(script, "\nexport VITE_DEV_SERVER_URL=");
-    assert.include(
-      script,
-      "exec '/repo/node_modules/electron/Electron' --t3code-dev-root='/repo/apps/desktop' '/repo/apps/desktop/dist-electron/main.cjs' \"$@\"",
-    );
+    assert.include(source, 'setFallback("VITE_DEV_SERVER_URL", "http://127.0.0.1:8526");');
+    assert.notInclude(source, 'setenv("VITE_DEV_SERVER_URL"');
+    assert.include(source, 'const char *electronPath = "/repo/node_modules/electron/Electron";');
+    assert.include(source, 'childArgs[1] = "--t3code-dev-root=/repo/apps/desktop";');
+    assert.include(source, 'childArgs[2] = "/repo/apps/desktop/dist-electron/main.cjs";');
+    assert.include(source, "childPid = fork();");
+    assert.include(source, "waitpid(childPid, &status, 0)");
+    assert.include(source, "kill(childPid, signalNumber);");
+    assert.notInclude(source, "\n  execv(electronPath, childArgs);");
   });
 
   it("repairs Electron before loading the package entrypoint", () => {
@@ -67,17 +68,35 @@ describe("electron development launcher", () => {
       "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron",
     );
 
-    const script = makeDevelopmentLauncherScript({
+    const source = makeDevelopmentLauncherSource({
       electronBinaryPath: paths.runtimeElectronBinaryPath,
       mainEntryPath: "/repo/apps/desktop/dist-electron/main.cjs",
       desktopRoot: "/repo/apps/desktop",
       environment: {},
     });
     assert.include(
-      script,
-      "exec '/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron'",
+      source,
+      'const char *electronPath = "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron";',
     );
-    assert.notInclude(script, "node_modules/electron");
+    assert.notInclude(source, "node_modules/electron");
+  });
+
+  it("launches the development bundle through LaunchServices", () => {
+    assert.deepEqual(
+      makeMacDevelopmentOpenCommand("/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app", [
+        "--remote-debugging-port=9222",
+      ]),
+      {
+        electronPath: "/usr/bin/open",
+        args: [
+          "-W",
+          "-n",
+          "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
+          "--args",
+          "--remote-debugging-port=9222",
+        ],
+      },
+    );
   });
 
   it("derives launcher icons from canonical development and production assets", () => {
