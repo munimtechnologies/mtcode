@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
+import { Dialog } from "../ui/dialog";
 import { ThreadHandoffContent } from "./ThreadHandoffDialog";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
@@ -42,55 +43,58 @@ describe("ThreadHandoffContent", () => {
 
   it("renders handoff content with source and target model indicators and markdown preview", () => {
     const markup = renderToStaticMarkup(
-      <ThreadHandoffContent
-        sourceThread={{
-          id: ThreadId.make("thread-1"),
-          projectId: ProjectId.make("project-1"),
-          title: "Optimize database queries",
-          modelSelection: {
-            instanceId: ProviderInstanceId.make("claudeAgent"),
-            model: "claude-3-7-sonnet",
-          },
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: "feat/optimize-db",
-          worktreePath: null,
-          latestTurn: null,
-          createdAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
-          updatedAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
-          archivedAt: null,
-          settledOverride: null,
-          settledAt: null,
-          deletedAt: null,
-          messages: [
-            {
-              id: "msg-1" as any,
-              role: "user",
-              text: "Add index to user_id column",
-              turnId: null,
-              streaming: false,
-              createdAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
-              updatedAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
+      <Dialog open>
+        <ThreadHandoffContent
+          sourceThread={{
+            id: ThreadId.make("thread-1"),
+            projectId: ProjectId.make("project-1"),
+            title: "Optimize database queries",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-3-7-sonnet",
             },
-          ],
-          proposedPlans: [],
-          activities: [],
-          checkpoints: [],
-          session: null,
-        }}
-        targetModelSelection={{
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.3-codex",
-        }}
-        providerInstanceEntries={dummyInstanceEntries}
-        onConfirmHandoff={() => {}}
-      />,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: "feat/optimize-db",
+            worktreePath: null,
+            latestTurn: null,
+            createdAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
+            updatedAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            deletedAt: null,
+            messages: [
+              {
+                id: "msg-1" as any,
+                role: "user",
+                text: "Add index to user_id column",
+                turnId: null,
+                streaming: false,
+                createdAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
+                updatedAt: IsoDateTime.make("2026-08-15T10:00:00.000Z"),
+              },
+            ],
+            proposedPlans: [],
+            activities: [],
+            checkpoints: [],
+            session: null,
+          }}
+          targetModelSelection={{
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.3-codex",
+          }}
+          providerInstanceEntries={dummyInstanceEntries}
+          onConfirmHandoff={() => {}}
+        />
+      </Dialog>,
     );
 
     expect(markup).toContain("Continue in new thread");
     expect(markup).toContain("claude-3-7-sonnet");
     expect(markup).toContain("gpt-5.3-codex");
     expect(markup).toContain("Handoff context (editable)");
+    expect(markup).toContain("handoff-context-textarea");
     expect(markup).toContain("Continue with gpt-5.3-codex");
     expect(markup).toContain("Add index to user_id column");
   });

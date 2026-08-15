@@ -1,9 +1,17 @@
 import { type ModelSelection, type OrchestrationThread } from "@t3tools/contracts";
 import { buildThreadHandoffMarkdown } from "@t3tools/client-runtime/handoff";
 import { ArrowRightIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button";
-import { Dialog, DialogFooter, DialogPanel, DialogPopup } from "../ui/dialog";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { Textarea } from "../ui/textarea";
 import { Spinner } from "../ui/spinner";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -36,6 +44,9 @@ export function ThreadHandoffContent({
     }),
   );
 
+  const isUserDirtyRef = useRef(false);
+  const targetKeyRef = useRef(`${targetModelSelection.instanceId}:${targetModelSelection.model}`);
+
   const sourceEntry = useMemo(() => {
     const instanceId = sourceThread.modelSelection?.instanceId;
     return providerInstanceEntries.find((entry) => entry.instanceId === instanceId) ?? null;
@@ -50,11 +61,15 @@ export function ThreadHandoffContent({
   }, [providerInstanceEntries, targetModelSelection]);
 
   useEffect(() => {
-    const generated = buildThreadHandoffMarkdown({
-      thread: sourceThread,
-      targetModelSelection,
-    });
-    setHandoffText(generated);
+    const currentTargetKey = `${targetModelSelection.instanceId}:${targetModelSelection.model}`;
+    if (targetKeyRef.current !== currentTargetKey || !isUserDirtyRef.current) {
+      targetKeyRef.current = currentTargetKey;
+      const generated = buildThreadHandoffMarkdown({
+        thread: sourceThread,
+        targetModelSelection,
+      });
+      setHandoffText(generated);
+    }
   }, [sourceThread, targetModelSelection]);
 
   const handleConfirm = useCallback(() => {
@@ -66,17 +81,15 @@ export function ThreadHandoffContent({
 
   return (
     <>
-      <div className="flex flex-col space-y-1.5 p-6 pb-0">
-        <h2 className="text-lg font-semibold leading-none tracking-tight">
-          Continue in new thread
-        </h2>
-        <p className="text-sm text-muted-foreground">
+      <DialogHeader>
+        <DialogTitle>Continue in new thread</DialogTitle>
+        <DialogDescription>
           Switch to a different model with a structured handoff of your current progress. The
           original thread remains untouched.
-        </p>
-      </div>
+        </DialogDescription>
+      </DialogHeader>
 
-      <DialogPanel className="space-y-4 px-6 py-4">
+      <DialogPanel className="space-y-4">
         <div className="flex items-center justify-between rounded-lg border bg-muted/40 p-3">
           <div className="flex items-center gap-2.5">
             {sourceEntry && (
@@ -110,25 +123,32 @@ export function ThreadHandoffContent({
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">
+          <label
+            htmlFor="handoff-context-textarea"
+            className="text-xs font-medium text-muted-foreground"
+          >
             Handoff context (editable)
           </label>
           <Textarea
+            id="handoff-context-textarea"
             value={handoffText}
-            onChange={(e) => setHandoffText(e.target.value)}
+            onChange={(e) => {
+              isUserDirtyRef.current = true;
+              setHandoffText(e.target.value);
+            }}
             rows={12}
-            className="font-mono text-xs leading-relaxed resize-y"
+            className="font-mono text-xs leading-relaxed"
             placeholder="Structured context to be sent to the new model..."
           />
         </div>
       </DialogPanel>
 
-      <DialogFooter className="px-6 pb-6">
+      <DialogFooter>
         <Button variant="outline" disabled={isSubmitting} onClick={onCancel}>
           Cancel
         </Button>
         <Button
-          variant="primary"
+          variant="default"
           disabled={isSubmitting || handoffText.trim().length === 0}
           onClick={handleConfirm}
         >
@@ -170,6 +190,7 @@ export function ThreadHandoffDialog({
 
   const handleConfirm = useCallback(
     async (handoffMarkdown: string, selection: ModelSelection) => {
+      if (isSubmitting) return;
       setIsSubmitting(true);
       try {
         await onConfirmHandoff(handoffMarkdown, selection);
@@ -178,7 +199,15 @@ export function ThreadHandoffDialog({
         setIsSubmitting(false);
       }
     },
-    [onConfirmHandoff, onOpenChange],
+    [isSubmitting, onConfirmHandoff, onOpenChange],
+  );
+
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (isSubmitting) return;
+      onOpenChange(nextOpen);
+    },
+    [isSubmitting, onOpenChange],
   );
 
   if (!targetModelSelection) {
@@ -186,14 +215,14 @@ export function ThreadHandoffDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="max-w-2xl p-0">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogPopup className="max-w-2xl" showCloseButton={!isSubmitting}>
         <ThreadHandoffContent
           sourceThread={sourceThread}
           targetModelSelection={targetModelSelection}
           providerInstanceEntries={providerInstanceEntries}
           isSubmitting={isSubmitting}
-          onCancel={() => onOpenChange(false)}
+          onCancel={() => handleOpenChange(false)}
           onConfirmHandoff={handleConfirm}
         />
       </DialogPopup>

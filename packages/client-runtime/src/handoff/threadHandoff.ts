@@ -11,6 +11,10 @@ export interface ThreadHandoffInput {
     readonly messages?: ReadonlyArray<{
       readonly role: "user" | "assistant" | "system";
       readonly text: string;
+      readonly attachments?: ReadonlyArray<{
+        readonly name?: string;
+        readonly path?: string;
+      }>;
     }>;
     readonly activities?: ReadonlyArray<{
       readonly tone: string;
@@ -53,14 +57,26 @@ export function buildThreadHandoffMarkdown(input: ThreadHandoffInput): string {
       `> Source thread: "${thread.title}" (ID: \`${thread.id}\`)`,
   );
 
-  const messages = (thread.messages ?? []).filter((m) => m.text.trim().length > 0);
+  const messages = (thread.messages ?? []).filter(
+    (m) => m.text.trim().length > 0 || (m.attachments && m.attachments.length > 0),
+  );
   const userMessages = messages.filter((m) => m.role === "user");
   const assistantMessages = messages.filter((m) => m.role === "assistant");
 
   if (userMessages.length > 0) {
-    const originalGoal = userMessages[0]?.text.trim();
-    if (originalGoal) {
-      sections.push(`## 🎯 Original Goal & Instructions\n${originalGoal}`);
+    const firstMsg = userMessages[0];
+    const originalGoal = firstMsg?.text.trim();
+    const attachmentNames = (firstMsg?.attachments ?? [])
+      .map((a) => a.name || a.path)
+      .filter((n): n is string => Boolean(n));
+
+    let goalContent = originalGoal || "";
+    if (attachmentNames.length > 0) {
+      goalContent += `\n\nAttachments: ${attachmentNames.map((n) => `\`${n}\``).join(", ")}`;
+    }
+
+    if (goalContent.trim().length > 0) {
+      sections.push(`## 🎯 Original Goal & Instructions\n${goalContent.trim()}`);
     }
   }
 
@@ -151,12 +167,10 @@ export function buildThreadHandoffMarkdown(input: ThreadHandoffInput): string {
   }
 
   if (userMessages.length > 0) {
-    const latestUserMsg = userMessages[userMessages.length - 1]?.text.trim();
-    if (
-      latestUserMsg &&
-      (userMessages.length > 1 || !sections.some((s) => s.includes(latestUserMsg)))
-    ) {
-      sections.push(`## ⏭️ Latest Request / Next Immediate Step\n${latestUserMsg}`);
+    const latestUserMsg = userMessages[userMessages.length - 1];
+    const latestText = latestUserMsg?.text.trim();
+    if (latestText && (userMessages.length > 1 || !sections.some((s) => s.includes(latestText)))) {
+      sections.push(`## ⏭️ Latest Request / Next Immediate Step\n${latestText}`);
     }
   }
 
