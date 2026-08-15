@@ -149,7 +149,7 @@ function ServerThreadTabItem({
           aria-label={fullLabel}
           aria-haspopup={isActive ? "menu" : undefined}
           onClick={handleActivationClick}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+          className="group/tab-trigger flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ProjectFavicon
             environmentId={tab.environmentId}
@@ -164,7 +164,7 @@ function ServerThreadTabItem({
           {isActive ? (
             <ChevronDown
               aria-hidden
-              className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/tab:opacity-100 group-focus-visible/tab:opacity-100"
+              className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/tab:opacity-100 group-focus-visible/tab-trigger:opacity-100"
             />
           ) : null}
           {tab.pinned ? <Pin className="size-2.5 shrink-0 rotate-45 opacity-60" /> : null}
@@ -369,10 +369,17 @@ export function WorkspaceTabs({
           }
           break;
         }
-        case "close-all":
+        case "close-all": {
           closeAllTabs();
-          onNewTab();
+          const { tabs: remainingTabs, activeTabKey } = useWorkspaceTabsStore.getState();
+          const nextActiveTab = remainingTabs.find((t) => t.key === activeTabKey);
+          if (nextActiveTab) {
+            handleNavigateToTab(nextActiveTab);
+          } else {
+            onNewTab();
+          }
           break;
+        }
         case "toggle-pin":
           togglePinTab(tab.key);
           break;
