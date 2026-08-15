@@ -372,11 +372,14 @@ export function WorkspaceTabs({
         case "close-all": {
           closeAllTabs();
           const { tabs: remainingTabs, activeTabKey } = useWorkspaceTabsStore.getState();
-          const nextActiveTab = remainingTabs.find((t) => t.key === activeTabKey);
-          if (nextActiveTab) {
-            handleNavigateToTab(nextActiveTab);
-          } else {
-            onNewTab();
+          const isCurrentStillOpen = remainingTabs.some((t) => t.key === currentTabKey);
+          if (!isCurrentStillOpen) {
+            const nextActiveTab = remainingTabs.find((t) => t.key === activeTabKey);
+            if (nextActiveTab) {
+              handleNavigateToTab(nextActiveTab);
+            } else {
+              onNewTab();
+            }
           }
           break;
         }
