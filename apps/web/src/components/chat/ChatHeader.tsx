@@ -249,6 +249,13 @@ export const ChatHeader = memo(function ChatHeader({
             setRenaming(null);
           }}
           onRenameKeyDown={handleRenameKeyDown}
+          onOpenThreadMenu={(rect) => {
+            if (rect) {
+              openMenu({ x: rect.left, y: rect.bottom + 4 });
+            } else {
+              openMenuFromTitle();
+            }
+          }}
         />
       ) : (
         <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">

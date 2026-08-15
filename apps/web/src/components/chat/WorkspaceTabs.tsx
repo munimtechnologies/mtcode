@@ -1,7 +1,7 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
-import { Pin, Plus, X } from "lucide-react";
+import { ChevronDown, Pin, Plus, X } from "lucide-react";
 import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -37,6 +37,7 @@ interface WorkspaceTabsProps {
   readonly onCommitRename?: ((title: string) => void) | undefined;
   readonly onCancelRename?: (() => void) | undefined;
   readonly onRenameKeyDown?: ((event: ReactKeyboardEvent<HTMLInputElement>) => void) | undefined;
+  readonly onOpenThreadMenu?: ((targetRect?: DOMRect) => void) | undefined;
 }
 
 function ServerThreadTabItem({
@@ -47,6 +48,7 @@ function ServerThreadTabItem({
   renamingTitle,
   onCommitRename,
   onRenameKeyDown,
+  onOpenThreadMenu,
   onActivate,
   onClose,
   onAuxClick,
@@ -64,6 +66,7 @@ function ServerThreadTabItem({
   readonly renamingTitle?: string | null | undefined;
   readonly onCommitRename?: ((title: string) => void) | undefined;
   readonly onRenameKeyDown?: ((event: ReactKeyboardEvent<HTMLInputElement>) => void) | undefined;
+  readonly onOpenThreadMenu?: ((targetRect?: DOMRect) => void) | undefined;
   readonly onActivate: () => void;
   readonly onClose: (e: ReactMouseEvent) => void;
   readonly onAuxClick: (e: ReactMouseEvent) => void;
@@ -75,6 +78,7 @@ function ServerThreadTabItem({
   readonly onDragEnd: () => void;
 }) {
   const itemRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const threadRef = useMemo(
     () => scopeThreadRef(tab.environmentId, tab.threadId),
     [tab.environmentId, tab.threadId],
@@ -91,12 +95,25 @@ function ServerThreadTabItem({
 
   const isRenaming = isActive && renamingTitle !== null && renamingTitle !== undefined;
 
+  const handleActivationClick = useCallback(() => {
+    if (isActive) {
+      if (triggerRef.current && onOpenThreadMenu) {
+        onOpenThreadMenu(triggerRef.current.getBoundingClientRect());
+      }
+    } else {
+      onActivate();
+    }
+  }, [isActive, onActivate, onOpenThreadMenu]);
+
   return (
     <div
       ref={itemRef}
       draggable={!isRenaming}
       data-active-tab={isActive ? "true" : "false"}
       data-tab-key={tab.key}
+      onMouseDown={(event) => {
+        if (event.button === 1) event.preventDefault();
+      }}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -127,9 +144,11 @@ function ServerThreadTabItem({
         />
       ) : (
         <button
+          ref={triggerRef}
           type="button"
           aria-label={fullLabel}
-          onClick={onActivate}
+          aria-haspopup={isActive ? "menu" : undefined}
+          onClick={handleActivationClick}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ProjectFavicon
@@ -142,6 +161,12 @@ function ServerThreadTabItem({
             <TooltipTrigger render={<span className="truncate">{title}</span>} />
             <TooltipPopup side="bottom">{fullLabel}</TooltipPopup>
           </Tooltip>
+          {isActive ? (
+            <ChevronDown
+              aria-hidden
+              className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/tab:opacity-100 group-focus-visible/tab:opacity-100"
+            />
+          ) : null}
           {tab.pinned ? <Pin className="size-2.5 shrink-0 rotate-45 opacity-60" /> : null}
         </button>
       )}
@@ -176,6 +201,7 @@ export function WorkspaceTabs({
   renamingTitle,
   onCommitRename,
   onRenameKeyDown,
+  onOpenThreadMenu,
 }: WorkspaceTabsProps) {
   const navigate = useNavigate();
   const tabs = useWorkspaceTabsStore((state) => state.tabs);
@@ -288,11 +314,11 @@ export function WorkspaceTabs({
 
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, tab: WorkspaceTab) => {
-      event.preventDefault();
-      event.stopPropagation();
-
       const api = readLocalApi();
       if (!api) return;
+
+      event.preventDefault();
+      event.stopPropagation();
 
       const tabIndex = effectiveTabs.findIndex((t) => t.key === tab.key);
       if (tabIndex < 0) return;
@@ -458,6 +484,11 @@ export function WorkspaceTabs({
                 renamingTitle={renamingTitle}
                 onCommitRename={onCommitRename}
                 onRenameKeyDown={onRenameKeyDown}
+                onOpenThreadMenu={(rect) => {
+                  if (rect && onOpenThreadMenu) {
+                    onOpenThreadMenu(rect);
+                  }
+                }}
                 onActivate={() => handleNavigateToTab(tab)}
                 onClose={(e) => handleCloseTab(tab, e)}
                 onAuxClick={(e) => handleTabAuxClick(e, tab)}
