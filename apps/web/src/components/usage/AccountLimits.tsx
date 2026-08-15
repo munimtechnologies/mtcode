@@ -21,7 +21,11 @@ import type { AccountLimitsSnapshot, AccountLimitsWindow } from "@t3tools/contra
 import { useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
-import { type AccountLimitsRow, useAccountLimits } from "../../state/accountLimits";
+import {
+  type AccountLimitsRow,
+  legacyInstanceIdFor,
+  useAccountLimits,
+} from "../../state/accountLimits";
 import { formatAgo, formatResetAt } from "../../usage/limitsFormat";
 import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
 
@@ -72,11 +76,9 @@ function SnapshotAge({ snapshot, nowMs }: { snapshot: AccountLimitsSnapshot; now
 
 /** Stable key for one (environment, instance) row group. */
 function rowKey(row: AccountLimitsRow): string {
-  // The merge folds unkeyed snapshots onto the driver's default instance id,
-  // so the key must use the same spelling or an instance literally named
-  // "default" could collide with a legacy row.
-  const instanceId =
-    row.snapshot.instanceId ?? (row.snapshot.provider === "claude" ? "claudeAgent" : "codex");
+  // The merge folds unkeyed snapshots onto the driver's default instance
+  // id, so the key must share the merge's own mapping.
+  const instanceId = row.snapshot.instanceId ?? legacyInstanceIdFor(row.snapshot.provider);
   return `${row.environmentId}:${instanceId}`;
 }
 
@@ -99,7 +101,7 @@ function RowCaption({
     <div className={cn("flex items-baseline gap-1.5", className)}>
       <span className="truncate">
         {row.instanceLabel}
-        {nameEnvironment && row.environmentLabel !== null ? ` · ${row.environmentLabel}` : ""}
+        {nameEnvironment ? ` · ${row.environmentLabel ?? row.environmentId}` : ""}
       </span>
       <span className="ml-auto shrink-0">
         <SnapshotAge snapshot={row.snapshot} nowMs={nowMs} />
@@ -194,14 +196,18 @@ export function AccountLimitsHoverCard() {
                     nowMs={nowMs}
                     className="text-[10px] text-muted-foreground"
                   />
-                  {row.snapshot.windows.map((window) => (
-                    <HoverWindowRow
-                      key={window.id}
-                      window={window}
-                      color={PROVIDER_COLOR[provider]}
-                      nowMs={nowMs}
-                    />
-                  ))}
+                  {row.snapshot.windows.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">No limit data yet</p>
+                  ) : (
+                    row.snapshot.windows.map((window) => (
+                      <HoverWindowRow
+                        key={window.id}
+                        window={window}
+                        color={PROVIDER_COLOR[provider]}
+                        nowMs={nowMs}
+                      />
+                    ))
+                  )}
                 </div>
               ))
             )}
@@ -299,14 +305,18 @@ export function AccountLimitsSection() {
                       nowMs={nowMs}
                       className="text-xs text-muted-foreground"
                     />
-                    {row.snapshot.windows.map((window) => (
-                      <SectionWindowRow
-                        key={window.id}
-                        window={window}
-                        color={PROVIDER_COLOR[provider]}
-                        nowMs={nowMs}
-                      />
-                    ))}
+                    {row.snapshot.windows.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No limit data yet</p>
+                    ) : (
+                      row.snapshot.windows.map((window) => (
+                        <SectionWindowRow
+                          key={window.id}
+                          window={window}
+                          color={PROVIDER_COLOR[provider]}
+                          nowMs={nowMs}
+                        />
+                      ))
+                    )}
                   </div>
                 ))
               )}

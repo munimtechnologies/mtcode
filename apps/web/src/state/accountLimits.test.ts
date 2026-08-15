@@ -21,7 +21,12 @@ const snapshot = (
 });
 
 const provider = (instanceId: string, overrides: Record<string, unknown> = {}) =>
-  ({ instanceId, auth: { status: "unknown" }, ...overrides }) as unknown as ServerProvider;
+  ({
+    instanceId,
+    driver: "codex",
+    auth: { status: "unknown" },
+    ...overrides,
+  }) as unknown as ServerProvider;
 
 const status = (
   environmentId: string,
@@ -57,6 +62,19 @@ describe("mergeEnvironmentLimits", () => {
     ]);
   });
 
+  it("unnamed instances caption with the app-wide humanized names", () => {
+    const merged = mergeEnvironmentLimits([
+      status("laptop", {
+        snapshots: [
+          snapshot("codex", { instanceId: "codex_a" as never }),
+          snapshot("codex", { instanceId: "codex_b" as never }),
+        ],
+        providers: [provider("codex_a"), provider("codex_b")] as never,
+      }),
+    ]);
+    expect(merged.get("codex")?.map((row) => row.instanceLabel)).toEqual(["Codex A", "Codex B"]);
+  });
+
   it("a display name shared by two different instances falls back to instance ids", () => {
     const merged = mergeEnvironmentLimits([
       status("laptop", {
@@ -65,8 +83,8 @@ describe("mergeEnvironmentLimits", () => {
           snapshot("codex", { instanceId: "codex_b" as never }),
         ],
         providers: [
-          provider("codex_a", { displayName: "Codex" }),
-          provider("codex_b", { displayName: "Codex" }),
+          provider("codex_a", { displayName: "Work" }),
+          provider("codex_b", { displayName: "Work" }),
         ] as never,
       }),
     ]);
@@ -148,11 +166,12 @@ describe("mergeEnvironmentLimits", () => {
     const merged = mergeEnvironmentLimits([
       status("laptop", {
         providers: [
-          provider("claude_main", { displayName: "Claude Main" }),
+          provider("claude_main", { driver: "claudeAgent", displayName: "Claude Main" }),
           // An authenticated email is deliberately NOT a label source: the
           // provider UI blurs emails until clicked, and a caption must not
           // leak what that redaction protects.
           provider("claude_partner", {
+            driver: "claudeAgent",
             auth: { status: "authenticated", email: "partner@example.com" },
           }),
         ],
@@ -165,7 +184,10 @@ describe("mergeEnvironmentLimits", () => {
     ]);
     expect(merged.get("claude")?.map((row) => row.instanceLabel)).toEqual([
       "Claude Main",
-      "claude_partner",
+      // Unnamed but configured: the app-wide resolver humanizes the id -
+      // and the authenticated email above is still not a label source.
+      "Claude Partner",
+      // Not in the provider config at all: nothing to resolve, raw id.
       "claude_unknown",
     ]);
   });

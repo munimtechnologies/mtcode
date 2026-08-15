@@ -374,8 +374,10 @@ export const make = Effect.gen(function* () {
       const envOverride = entry.environment
         ?.find((variable) => variable.name === "CODEX_HOME")
         ?.value.trim();
+      // A shadow overlay pins the layout: spawn overrides CODEX_HOME with
+      // the overlay path, so an instance env value never reaches the CLI.
       const envHome =
-        codexSettings.homePath.trim() === ""
+        codexSettings.homePath.trim() === "" && codexSettings.shadowHomePath.trim() === ""
           ? envOverride || hostEnvironment["CODEX_HOME"]?.trim() || ""
           : "";
       if (envHome !== "") {

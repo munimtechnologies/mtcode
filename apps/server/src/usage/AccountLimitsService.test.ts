@@ -13,12 +13,7 @@ import * as Path from "effect/Path";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
-import {
-  AccountLimitsService,
-  type CodexSeedTarget,
-  layer as accountLimitsLayer,
-  planCodexTranscriptSeeds,
-} from "./AccountLimitsService.ts";
+import * as AccountLimitsServiceModule from "./AccountLimitsService.ts";
 
 const asInstanceId = (value: string): ProviderInstanceId => ProviderInstanceId.make(value);
 const asDriver = (value: string): ProviderDriverKind => ProviderDriverKind.make(value);
@@ -78,7 +73,7 @@ const instanceRoster = (): Partial<ServerSettings> => ({
 });
 
 const makeLayer = (overrides: Partial<ServerSettings> = instanceRoster()) =>
-  accountLimitsLayer.pipe(
+  AccountLimitsServiceModule.layer.pipe(
     Layer.provideMerge(ServerSettingsModule.layerTest(overrides)),
     Layer.provideMerge(
       Layer.fresh(
@@ -90,7 +85,7 @@ const makeLayer = (overrides: Partial<ServerSettings> = instanceRoster()) =>
   );
 
 const makeLayerAt = (baseDir: string, overrides: Partial<ServerSettings> = instanceRoster()) =>
-  accountLimitsLayer.pipe(
+  AccountLimitsServiceModule.layer.pipe(
     Layer.provideMerge(ServerSettingsModule.layerTest(overrides)),
     Layer.provideMerge(Layer.fresh(ServerConfig.layerTest(process.cwd(), baseDir))),
   );
@@ -98,7 +93,7 @@ const makeLayerAt = (baseDir: string, overrides: Partial<ServerSettings> = insta
 it.layer(NodeServices.layer)("account limits service", (it) => {
   it.effect("keeps one snapshot per instance - accounts no longer overwrite each other", () =>
     Effect.gen(function* () {
-      const service = yield* AccountLimitsService;
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
       yield* service.ingest({
         provider: "codex",
         payload: codexPayload(10),
@@ -128,7 +123,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
 
   it.effect("still guards ordering within one instance", () =>
     Effect.gen(function* () {
-      const service = yield* AccountLimitsService;
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
       yield* service.ingest({
         provider: "codex",
         payload: codexPayload(20),
@@ -148,7 +143,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
 
   it.effect("events without an instance id flow to the driver's default instance", () =>
     Effect.gen(function* () {
-      const service = yield* AccountLimitsService;
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
       yield* service.ingest({
         provider: "codex",
         payload: codexPayload(33),
@@ -161,7 +156,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
 
   it.effect("claude window events patch their own instance's window set only", () =>
     Effect.gen(function* () {
-      const service = yield* AccountLimitsService;
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
       yield* service.ingest({
         provider: "claudeAgent",
         payload: claudeUsagePayload(24, 18),
@@ -219,7 +214,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
           }
         ]`,
       );
-      const service = yield* AccountLimitsService;
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
       const summary = yield* service.readSummary();
       expect(summary.snapshots.map((snapshot) => [snapshot.instanceId, snapshot.plan])).toEqual([
         ["claudeAgent", "max"],
@@ -245,7 +240,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
         prefix: "t3code-account-limits-reload-",
       });
       yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         yield* service.ingest({
           provider: "codex",
           payload: codexPayload(10),
@@ -261,7 +256,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
       }).pipe(Effect.provide(makeLayerAt(baseDir)));
       // A fresh service over the same state dir - the restart.
       const summary = yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         return yield* service.readSummary();
       }).pipe(Effect.provide(makeLayerAt(baseDir)));
       expect(summary.snapshots.map((snapshot) => snapshot.instanceId)).toEqual([
@@ -273,7 +268,7 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
 
   it.effect("rows for deleted instances are evicted; disabled instances are hidden", () =>
     Effect.gen(function* () {
-      const service = yield* AccountLimitsService;
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
       // codex_gone is not in settings at all; codex_b is disabled for this
       // test's roster below.
       yield* service.ingest({
@@ -335,7 +330,7 @@ it("transcript seeding attributes a sole-owner dir and skips shared or disabled 
     }
     try {
       const summary = yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         return yield* service.readSummary();
       }).pipe(
         Effect.provide(
@@ -426,7 +421,7 @@ it("an unconfirmed migrated row keeps its v1 shape across restarts - the ghost e
       // First run: an UNRELATED codex ingest persists the cache. The migrated
       // claude row must be written back in its v1 shape, still unconfirmed.
       yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         yield* service.readSummary();
         yield* service.ingest({
           provider: asDriver("codex"),
@@ -449,7 +444,7 @@ it("an unconfirmed migrated row keeps its v1 shape across restarts - the ghost e
       // Second run - a restart. Live claude data on ANOTHER instance must
       // still evict the migrated default row instead of leaving a ghost.
       const summary = yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         yield* service.ingest({
           provider: asDriver("claudeAgent"),
           payload: claudeUsagePayload(31, 9),
@@ -501,7 +496,7 @@ it("evicts a row whose instance now runs a different driver", () =>
     );
     try {
       const summary = yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         return yield* service.readSummary();
       }).pipe(
         Effect.provide(
@@ -538,7 +533,7 @@ it("seeds a codex instance homed by its environment's CODEX_HOME", () =>
     );
     try {
       const summary = yield* Effect.gen(function* () {
-        const service = yield* AccountLimitsService;
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
         return yield* service.readSummary();
       }).pipe(
         Effect.provide(
@@ -568,24 +563,86 @@ it("seeds a codex instance homed by its environment's CODEX_HOME", () =>
     }
   }).pipe(Effect.provide(NodeServices.layer), Effect.runPromise));
 
+it("a shadow-overlay instance seeds from its layout, not its CODEX_HOME env", () =>
+  Effect.gen(function* () {
+    const line = (percent: number) =>
+      `${JSON.stringify({
+        timestamp: "2026-08-15T10:00:00.000Z",
+        payload: { rate_limits: codexPayload(percent) },
+      })}\n`;
+    const plainEnvHome = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-seed-plainenv-"));
+    NodeFS.mkdirSync(NodePath.join(plainEnvHome, "sessions"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(plainEnvHome, "sessions", "rollout-1.jsonl"), line(78));
+    const shadowEnvHome = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-seed-shadowenv-"));
+    NodeFS.mkdirSync(NodePath.join(shadowEnvHome, "sessions"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(shadowEnvHome, "sessions", "rollout-1.jsonl"), line(77));
+    try {
+      const summary = yield* Effect.gen(function* () {
+        const service = yield* AccountLimitsServiceModule.AccountLimitsService;
+        return yield* service.readSummary();
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            providerInstances: {
+              [asInstanceId("codex")]: {
+                driver: asDriver("codex"),
+                config: { homePath: "/nonexistent/t3-test-codex-default" },
+              },
+              // No shadow: the env home is where the CLI writes - seeded.
+              [asInstanceId("codex_plain")]: {
+                driver: asDriver("codex"),
+                environment: [{ name: "CODEX_HOME", value: plainEnvHome, sensitive: false }],
+              },
+              // Shadow overlay: spawn pins CODEX_HOME to the overlay, so the
+              // instance env value never reaches the CLI - the seed must not
+              // read it either. (Its layout home may hold this machine's
+              // real transcripts; the assertions below stay independent of
+              // whatever that dir contains.)
+              [asInstanceId("codex_shadow")]: {
+                driver: asDriver("codex"),
+                config: { shadowHomePath: "/nonexistent/t3-test-codex-shadow" },
+                environment: [{ name: "CODEX_HOME", value: shadowEnvHome, sensitive: false }],
+              },
+            },
+          }),
+        ),
+      );
+      const plainRow = summary.snapshots.find((snapshot) => snapshot.instanceId === "codex_plain");
+      expect(plainRow?.windows[0]?.usedPercent).toBe(78);
+      // The trap percentage must appear on no row at all.
+      expect(
+        summary.snapshots.filter((snapshot) => snapshot.windows[0]?.usedPercent === 77),
+      ).toEqual([]);
+    } finally {
+      NodeFS.rmSync(plainEnvHome, { recursive: true, force: true });
+      NodeFS.rmSync(shadowEnvHome, { recursive: true, force: true });
+    }
+  }).pipe(Effect.provide(NodeServices.layer), Effect.runPromise));
+
 describe("planCodexTranscriptSeeds", () => {
-  const target = (instanceId: string, sessionsDir: string, enabled = true): CodexSeedTarget => ({
+  const target = (
+    instanceId: string,
+    sessionsDir: string,
+    enabled = true,
+  ): AccountLimitsServiceModule.CodexSeedTarget => ({
     instanceId: asInstanceId(instanceId),
     sessionsDir,
     enabled,
   });
 
   it("keeps sole-owner sessions dirs and attributes them to their instance", () => {
-    expect(planCodexTranscriptSeeds([target("codex", "/home/user/.codex/sessions")])).toEqual([
-      target("codex", "/home/user/.codex/sessions"),
-    ]);
+    expect(
+      AccountLimitsServiceModule.planCodexTranscriptSeeds([
+        target("codex", "/home/user/.codex/sessions"),
+      ]),
+    ).toEqual([target("codex", "/home/user/.codex/sessions")]);
   });
 
   it("skips a dir that several instances write - no honest attribution exists", () => {
     // The reported setup: three instances share one homePath (shadow homes
     // symlink sessions/ back to it) - seeding any of them invents data.
     expect(
-      planCodexTranscriptSeeds([
+      AccountLimitsServiceModule.planCodexTranscriptSeeds([
         target("codex_a", "/home/user/.codex/sessions"),
         target("codex_b", "/home/user/.codex/sessions"),
         target("codex_c", "/home/user/.codex/sessions"),
@@ -595,7 +652,7 @@ describe("planCodexTranscriptSeeds", () => {
 
   it("counts disabled instances as owners - their transcripts share the dir", () => {
     expect(
-      planCodexTranscriptSeeds([
+      AccountLimitsServiceModule.planCodexTranscriptSeeds([
         target("codex_a", "/home/user/.codex/sessions"),
         target("codex_off", "/home/user/.codex/sessions", false),
       ]),
@@ -604,7 +661,7 @@ describe("planCodexTranscriptSeeds", () => {
 
   it("plans independent dirs independently", () => {
     expect(
-      planCodexTranscriptSeeds([
+      AccountLimitsServiceModule.planCodexTranscriptSeeds([
         target("codex_a", "/home/user/.codex/sessions"),
         target("codex_b", "/home/user/.codex/sessions"),
         target("codex_work", "/home/user/.codex-work/sessions"),

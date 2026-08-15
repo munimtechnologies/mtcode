@@ -5,7 +5,11 @@
  * the client keeps ONE ROW PER (environment, provider, instance) and never
  * merges across environments: `asOf` comes from each environment's local
  * clock, and clock skew must not let one machine's reading replace another
- * machine's correct one. Within a single environment, a server predating
+ * machine's correct one. The one exception: byte-identical rows for the
+ * SAME instance id collapse, because identical content under one id is the
+ * same underlying reading seen twice (worktree servers sharing a home, two
+ * machines seeded from the same transcripts) and carries no extra
+ * information. Within a single environment, a server predating
  * instance attribution answers with unkeyed snapshots - those fold onto the
  * driver's default instance, freshest wins, which is exactly what that data
  * meant when it was written.
@@ -15,6 +19,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   ACCOUNT_LIMITS_ACCEPTED_VERSIONS,
+  ProviderInstanceId,
   type AccountLimitsSnapshot,
   type EnvironmentId,
   type ServerProvider,
@@ -24,6 +29,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo } from "react";
 
+import { getProviderInstanceEntry } from "../providerInstances";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
@@ -74,7 +80,7 @@ export interface AccountLimitsRow {
 }
 
 /** What an unkeyed (pre-instance-attribution) snapshot always meant. */
-const legacyInstanceIdFor = (provider: UsageProviderKind): string =>
+export const legacyInstanceIdFor = (provider: UsageProviderKind): string =>
   provider === "claude" ? "claudeAgent" : "codex";
 
 /**
@@ -119,12 +125,19 @@ export function mergeEnvironmentLimits(
       ]);
       if (seen.has(duplicateKey)) continue;
       seen.add(duplicateKey);
-      const provider = status.providers?.find((candidate) => candidate.instanceId === instanceId);
+      // Resolve the caption through the app-wide instance display-name
+      // contract (explicit name wins, non-default ids humanize, defaults
+      // keep the brand label), so Limits names accounts the same way the
+      // picker and provider settings do.
+      const entry = getProviderInstanceEntry(
+        status.providers ?? [],
+        ProviderInstanceId.make(instanceId),
+      );
       const rows = byProvider.get(snapshot.provider) ?? [];
       rows.push({
         environmentId: status.environmentId,
         environmentLabel: status.environmentLabel,
-        instanceLabel: provider?.displayName ?? instanceId,
+        instanceLabel: entry?.displayName ?? instanceId,
         snapshot,
       });
       byProvider.set(snapshot.provider, rows);
