@@ -161,6 +161,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     desktopOnly: true,
   },
   {
+    id: "sound-notifications",
+    title: "Turn completion chime",
+    to: "/settings/general",
+  },
+  {
     id: "text-generation-model",
     title: "Text generation model",
     to: "/settings/general",

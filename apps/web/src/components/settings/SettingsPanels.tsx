@@ -530,6 +530,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit
         ? ["Quit confirmation"]
         : []),
+      ...(settings.soundNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled
+        ? ["Turn completion chime"]
+        : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
     ],
     [
@@ -538,6 +541,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmQuit,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.soundNotificationsEnabled,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
@@ -652,6 +656,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
+      soundNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
@@ -2287,6 +2292,33 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+
+        <SettingsRow
+          {...searchableSetting("sound-notifications")}
+          description="Play a subtle sound when an agent completes a turn."
+          resetAction={
+            settings.soundNotificationsEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled ? (
+              <SettingResetButton
+                label="turn completion chime"
+                onClick={() =>
+                  updateSettings({
+                    soundNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.soundNotificationsEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ soundNotificationsEnabled: Boolean(checked) })
+              }
+              aria-label="Play sound when agent completes a turn"
+            />
+          }
+        />
 
         <SettingsRow
           {...searchableSetting("text-generation-model")}
