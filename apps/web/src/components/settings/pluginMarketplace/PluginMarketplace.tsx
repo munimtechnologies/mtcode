@@ -79,7 +79,7 @@ function MarketplacePluginCard({
               {plugin.name}
             </h3>
             {plugin.installed ? (
-              <span className="flex shrink-0 items-center gap-1 text-success text-xs">
+              <span className="flex shrink-0 items-center gap-1 text-success-foreground text-xs">
                 <CheckIcon className="size-3.5" />
                 Installed
               </span>
@@ -397,7 +397,7 @@ export function PluginMarketplace() {
         <>
           {error ? (
             <p
-              className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-warning text-sm"
+              className="rounded-lg border border-warning/32 bg-warning-surface px-3 py-2 text-warning-foreground text-sm"
               role="alert"
             >
               Showing cached plugin data because the latest refresh failed: {error}

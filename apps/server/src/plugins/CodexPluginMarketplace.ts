@@ -310,11 +310,19 @@ class CodexPluginRuntimeError extends Schema.TaggedErrorClass<CodexPluginRuntime
   {
     operation: Schema.Literals(["installed", "install", "remove"]),
     pluginRef: Schema.optional(Schema.String),
-    cause: Schema.Defect(),
+    outcome: Schema.optional(
+      Schema.Literals(["provider_unavailable", "not_found", "still_installed"]),
+    ),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     const target = this.pluginRef === undefined ? "" : ` for '${this.pluginRef}'`;
+    if (this.outcome === "provider_unavailable")
+      return "The configured Codex provider is unavailable.";
+    if (this.outcome === "not_found") return `Codex could not find the plugin${target}.`;
+    if (this.outcome === "still_installed")
+      return `Codex still reports the plugin${target} as installed.`;
     return `Codex plugin runtime operation '${this.operation}' failed${target}.`;
   }
 }
@@ -1450,7 +1458,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         if (!command) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "codex_unavailable",
-            cause: new Error("No configured Codex provider is available."),
           });
         }
         const [result, runtimeResult] = yield* Effect.all(
@@ -1477,7 +1484,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         if (result.code !== 0 || result.stdoutInvalidUtf8 || result.stdoutTruncated) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "codex_unavailable",
-            cause: new Error(`Codex catalog command exited with status ${result.code}.`),
+            ...(result.code === null ? {} : { exitCode: result.code }),
           });
         }
         const decoded = yield* decodeCodexPluginListJson(result.stdout).pipe(
@@ -1546,7 +1553,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         if (!command) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "marketplaces_unavailable",
-            cause: new Error("No configured Claude Code provider is available."),
           });
         }
         const [pluginsResult, marketplacesResult] = yield* Effect.all(
@@ -1577,7 +1583,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         ) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "marketplaces_unavailable",
-            cause: new Error(`Claude plugin command exited with status ${pluginsResult.code}.`),
+            ...(pluginsResult.code === null ? {} : { exitCode: pluginsResult.code }),
           });
         }
         const pluginList = yield* decodeClaudePluginListJson(pluginsResult.stdout).pipe(
@@ -1686,7 +1692,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               if (!httpClient) {
                 return yield* new PluginMarketplaceUnavailableError({
                   reason: "marketplaces_unavailable",
-                  cause: new Error("HTTP client is unavailable."),
                 });
               }
               const response = yield* httpClient.get("https://cursor.com/marketplace").pipe(
@@ -1711,7 +1716,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               if (body.length > 8 * 1024 * 1024) {
                 return yield* new PluginMarketplaceUnavailableError({
                   reason: "catalog_invalid",
-                  cause: new Error("Cursor marketplace response exceeded the size limit."),
                 });
               }
               return body;
@@ -1849,7 +1853,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
         );
         return yield* new PluginMarketplaceUnavailableError({
           reason: "marketplaces_unavailable",
-          cause: causes.length === 1 ? causes[0] : new AggregateError(causes),
+          ...(causes.length === 0
+            ? {}
+            : { cause: causes.length === 1 ? causes[0] : new AggregateError(causes) }),
         });
       }
       const sourcePlugins = yield* Effect.forEach(sourceRecords, loadPlugin, { concurrency: 16 });
@@ -2354,7 +2360,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           operation: "setup",
           pluginId,
           detail: publicOperationDetail(result.code),
-          cause: new Error(`macOS open exited with status ${result.code}.`),
+          ...(result.code === null ? {} : { exitCode: result.code }),
         });
       }
       return { pluginId, action, opened: true } satisfies PluginMarketplaceSetupResult;
@@ -2437,7 +2443,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               operation,
               pluginId,
               detail: "The configured Codex provider is unavailable.",
-              cause: new Error("No configured Codex provider is available."),
             });
           }
           const legacyRemoval = yield* processRunner
@@ -2467,7 +2472,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               operation,
               pluginId,
               detail: publicOperationDetail(legacyRemoval.code),
-              cause: new Error(`Codex exited with status ${legacyRemoval.code}.`),
+              ...(legacyRemoval.code === null ? {} : { exitCode: legacyRemoval.code }),
             });
           }
         }
@@ -2485,7 +2490,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           operation,
           pluginId,
           detail: `The configured ${plugin.record.harness === "codex" ? "Codex" : "Claude Code"} provider is unavailable.`,
-          cause: new Error(`No configured ${plugin.record.harness} provider is available.`),
         });
       }
       const invocation =
@@ -2530,7 +2534,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           operation,
           pluginId,
           detail: publicOperationDetail(result.code),
-          cause: new Error(`${plugin.record.harness} exited with status ${result.code}.`),
+          ...(result.code === null ? {} : { exitCode: result.code }),
         });
       }
       yield* invalidateSnapshot;
@@ -2583,7 +2587,7 @@ const makeCodexPluginRuntime = (
             return yield* new CodexPluginRuntimeError({
               operation,
               ...(pluginRef === undefined ? {} : { pluginRef }),
-              cause: new Error("Codex provider is unavailable."),
+              outcome: "provider_unavailable",
             });
           }
           const spawnCommand = yield* resolveSpawnCommand(command.command, ["app-server"], {
@@ -2666,7 +2670,7 @@ const makeCodexPluginRuntime = (
               return yield* new CodexPluginRuntimeError({
                 operation: "install",
                 pluginRef: pluginName,
-                cause: new Error("Plugin was not found in the Codex runtime catalog."),
+                outcome: "not_found",
               });
             }
             yield* client.request("plugin/install", {
@@ -2697,7 +2701,7 @@ const makeCodexPluginRuntime = (
               return yield* new CodexPluginRuntimeError({
                 operation: "remove",
                 pluginRef: pluginId,
-                cause: new Error("Plugin remains installed after removal."),
+                outcome: "still_installed",
               });
             }
           }),

@@ -18,6 +18,11 @@ it("selects Claude OAuth URLs instead of unrelated output links", () => {
     authorizationUrl,
   );
   assert.strictEqual(findClaudeMcpAuthorizationUrl("See https://docs.example.com/mcp"), null);
+  const authorizationUrlEndingInPunctuation = `${authorizationUrl}&nonce=valid)`;
+  assert.strictEqual(
+    findClaudeMcpAuthorizationUrl(authorizationUrlEndingInPunctuation),
+    authorizationUrlEndingInPunctuation,
+  );
 });
 
 it("parses Codex OAuth and bearer-token MCP states", () => {

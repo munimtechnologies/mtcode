@@ -221,7 +221,8 @@ testLayer("CodexPluginMarketplace", (it) => {
       }
       assert.strictEqual(error.detail, "The provider exited with status 1.");
       expect(error.detail).not.toContain("never-return-this-token");
-      expect(error.cause).toBeInstanceOf(Error);
+      assert.strictEqual(error.cause, undefined);
+      assert.strictEqual(error.exitCode, 1);
     }),
   );
 

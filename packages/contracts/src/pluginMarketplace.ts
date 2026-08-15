@@ -240,7 +240,11 @@ export type PluginMarketplaceUnavailableReason = typeof PluginMarketplaceUnavail
 
 export class PluginMarketplaceUnavailableError extends Schema.TaggedErrorClass<PluginMarketplaceUnavailableError>()(
   "PluginMarketplaceUnavailableError",
-  { reason: PluginMarketplaceUnavailableReason, cause: Schema.Defect() },
+  {
+    reason: PluginMarketplaceUnavailableReason,
+    cause: Schema.optional(Schema.Defect()),
+    exitCode: Schema.optional(Schema.Number),
+  },
   { httpApiStatus: 503 },
 ) {
   [HttpServerRespondable.symbol]() {
@@ -275,6 +279,7 @@ export class PluginMarketplaceOperationError extends Schema.TaggedErrorClass<Plu
     pluginId: TrimmedNonEmptyString,
     detail: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
+    exitCode: Schema.optional(Schema.Number),
   },
   { httpApiStatus: 502 },
 ) {

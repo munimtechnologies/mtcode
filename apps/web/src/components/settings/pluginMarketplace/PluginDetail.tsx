@@ -186,7 +186,7 @@ function InstallTargetRow({
       description={`${packageFormat(target)} · ${target.marketplaceName} · ${target.version}`}
       status={
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className={target.installed ? "text-success" : undefined}>
+          <span className={target.installed ? "text-success-foreground" : undefined}>
             {target.installPolicy === "EXTERNAL"
               ? `Managed in ${harnessName}`
               : pending
