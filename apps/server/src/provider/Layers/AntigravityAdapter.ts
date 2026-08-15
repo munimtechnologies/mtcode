@@ -156,14 +156,6 @@ export function makeAntigravityAdapter(
     const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
       Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
 
-    const removeThreadSemaphore = (threadId: string) =>
-      SynchronizedRef.update(threadLocksRef, (current) => {
-        if (!current.has(threadId)) return current;
-        const next = new Map(current);
-        next.delete(threadId);
-        return next;
-      });
-
     const publishEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
 
@@ -265,11 +257,32 @@ export function makeAntigravityAdapter(
             ctx.activeProcess = undefined;
           }
 
+          if (ctx.activeTurnId) {
+            const abortedStamp = yield* makeEventStamp();
+            yield* publishEvent({
+              ...abortedStamp,
+              provider: PROVIDER,
+              threadId,
+              turnId: ctx.activeTurnId,
+              type: "turn.aborted",
+              payload: {
+                reason: "Superseded by new turn",
+              },
+            });
+            ctx.activeTurnId = undefined;
+          }
+
           const turnId = yield* nextTurnId;
 
           ctx.activeTurnId = turnId;
           const turnStartedAt = yield* nowIso;
           const turnStartEventId = yield* nextEventId;
+
+          const turnRecord = {
+            id: turnId,
+            items: [{ prompt: input.input ?? "" }],
+          };
+          ctx.turns.push(turnRecord);
 
           yield* publishEvent({
             eventId: turnStartEventId,
@@ -422,6 +435,7 @@ export function makeAntigravityAdapter(
                     data.step_update !== null
                   ) {
                     const step = data.step_update as Record<string, unknown>;
+                    turnRecord.items.push(step);
 
                     if (step.step_type === "agent_response") {
                       if (typeof step.text_delta === "string") {
@@ -518,6 +532,7 @@ export function makeAntigravityAdapter(
                     data.result !== null
                   ) {
                     const resultObj = data.result as Record<string, unknown>;
+                    turnRecord.items.push(resultObj);
                     if (typeof resultObj.conversation_id === "string") {
                       ctx.antigravityConversationId = resultObj.conversation_id;
                     }
@@ -527,6 +542,9 @@ export function makeAntigravityAdapter(
             );
 
             const exitCode = yield* processHandle.exitCode;
+            const wasInterrupted = ctx.activeTurnId !== turnId;
+            if (wasInterrupted) return;
+
             const completedStamp = yield* makeEventStamp();
             const isSuccess = exitCode === 0;
 
@@ -556,6 +574,9 @@ export function makeAntigravityAdapter(
                   yield* ctx.activeProcess.kill();
                   ctx.activeProcess = undefined;
                 }
+                const wasInterrupted = ctx.activeTurnId !== turnId;
+                if (wasInterrupted) return;
+
                 ctx.activeTurnId = undefined;
                 const completedStamp = yield* makeEventStamp();
                 yield* publishEvent({
@@ -591,6 +612,10 @@ export function makeAntigravityAdapter(
         Effect.gen(function* () {
           const ctx = sessions.get(threadId);
           if (!ctx) return;
+
+          if (turnId !== undefined && ctx.activeTurnId !== turnId) {
+            return;
+          }
 
           if (ctx.activeProcess) {
             yield* ctx.activeProcess.kill();
@@ -632,7 +657,6 @@ export function makeAntigravityAdapter(
 
         yield* Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore);
         sessions.delete(ctx.threadId);
-        yield* removeThreadSemaphore(ctx.threadId);
 
         const stamp = yield* makeEventStamp();
         yield* publishEvent({
