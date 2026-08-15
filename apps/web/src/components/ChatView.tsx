@@ -251,6 +251,7 @@ import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
+import { ThreadHandoffDialog } from "./chat/ThreadHandoffDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
@@ -276,7 +277,10 @@ import {
   shouldShowThreadErrorBanner,
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
-import { resolveThreadPr } from "./ThreadStatusIndicators";
+import {
+  resolveDisplayedThreadPr,
+  threadChangeRequestSnapshotsAtom,
+} from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
@@ -318,6 +322,7 @@ import {
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
   startNewThreadForProject,
+  threadHasStarted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
@@ -1379,6 +1384,9 @@ function ChatViewContent(props: ChatViewProps) {
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
+  const [isHandoffDialogOpen, setIsHandoffDialogOpen] = useState(false);
+  const [handoffTargetModelSelection, setHandoffTargetModelSelection] =
+    useState<ModelSelection | null>(null);
   const [terminalUiLaunchContext, setTerminalUiLaunchContext] =
     useState<TerminalLaunchContext | null>(null);
   const [attachmentPreviewHandoffByMessageId, setAttachmentPreviewHandoffByMessageId] = useState<
@@ -1596,6 +1604,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThreadEnvironmentId, activeThreadId],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null;
     readonly messageId: MessageId | null;
@@ -4124,9 +4133,11 @@ function ChatViewContent(props: ChatViewProps) {
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
   const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays);
   const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge);
-  const activeThreadPr = resolveThreadPr({
+  const activeThreadPr = resolveDisplayedThreadPr({
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
+    snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
+    retainTerminalOnBranchMismatch: activeThread?.worktreePath === null,
   });
   // The right panel offers the thread's own change request, so it can only offer it once the
   // branch has one; until then the picker says so rather than opening an empty panel.
@@ -4208,6 +4219,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadShell,
     autoSettleAfterDays,
     autoSettleOnMerge,
+    changeRequestSnapshotByKey,
     nowMinute,
     supportsSettlement,
   ]);
@@ -4732,6 +4744,13 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "rightPanel.toggleMaximized") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleRightPanelMaximized();
+        return;
+      }
+
       if (command === "terminal.split") {
         event.preventDefault();
         event.stopPropagation();
@@ -4827,6 +4846,7 @@ function ChatViewContent(props: ChatViewProps) {
     keybindings,
     onToggleDiff,
     toggleRightPanel,
+    toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
   ]);
@@ -4994,6 +5014,16 @@ function ChatViewContent(props: ChatViewProps) {
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
+      const outgoingFollowUpText = formatOutgoingPrompt({
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        models: ctxSelectedProviderModels,
+        effort: ctxSelectedPromptEffort,
+        text: followUp.text.trim(),
+      });
+      if (composerRef.current?.validateProviderInput(outgoingFollowUpText) === false) {
+        return;
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -5063,6 +5093,34 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
+    const composerImagesSnapshot = [...composerImages];
+    const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
+    const composerElementContextsSnapshot = [...composerElementContexts];
+    const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
+    const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
+    const messageTextWithContexts = appendElementContextsToPrompt(
+      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+      composerElementContextsSnapshot,
+    );
+    const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
+      (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
+      messageTextWithContexts,
+    );
+    const messageTextForSend = appendReviewCommentsToPrompt(
+      messageTextWithPreviewAnnotations,
+      composerReviewCommentsSnapshot,
+    );
+    const outgoingMessageText = formatOutgoingPrompt({
+      provider: ctxSelectedProvider,
+      model: ctxSelectedModel,
+      models: ctxSelectedProviderModels,
+      effort: ctxSelectedPromptEffort,
+      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+    });
+    if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
+      return;
+    }
+
     sendInFlightRef.current = true;
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
@@ -5081,32 +5139,8 @@ function ChatViewContent(props: ChatViewProps) {
     }
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
 
-    const composerImagesSnapshot = [...composerImages];
-    const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
-    const composerElementContextsSnapshot = [...composerElementContexts];
-    const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
-    const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
-    const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
-      composerElementContextsSnapshot,
-    );
-    const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
-      (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
-      messageTextWithContexts,
-    );
-    const messageTextForSend = appendReviewCommentsToPrompt(
-      messageTextWithPreviewAnnotations,
-      composerReviewCommentsSnapshot,
-    );
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
-    const outgoingMessageText = formatOutgoingPrompt({
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-      models: ctxSelectedProviderModels,
-      effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
-    });
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
@@ -5723,6 +5757,9 @@ function ChatViewContent(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: implementationPrompt,
     });
+    if (composerRef.current?.validateProviderInput(outgoingImplementationPrompt) === false) {
+      return;
+    }
     const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
     const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection;
 
@@ -5843,9 +5880,139 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
+  const handleConfirmHandoff = useCallback(
+    async (handoffMarkdown: string, targetModelSelection: ModelSelection) => {
+      if (!activeProject || !activeThread) return;
+      const nextThreadId = newThreadId();
+      const nextThreadTitle = `${activeThread.title} (Handoff)`;
+      const createdAt = new Date().toISOString();
+
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: false });
+      const finish = () => {
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+      };
+
+      const createResult = await createThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          projectId: activeProject.id,
+          title: nextThreadTitle,
+          modelSelection: targetModelSelection,
+          runtimeMode,
+          interactionMode: "default",
+          branch: activeThreadBranch,
+          worktreePath: activeThread.worktreePath,
+          createdAt,
+        },
+      });
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult._tag === "Failure" ? createResult : null;
+
+      if (failure === null) {
+        const startResult = await startThreadTurn({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: handoffMarkdown,
+              attachments: [],
+            },
+            modelSelection: targetModelSelection,
+            titleSeed: nextThreadTitle,
+            runtimeMode,
+            interactionMode: "default",
+            createdAt,
+          },
+        });
+        failure = startResult._tag === "Failure" ? startResult : null;
+      }
+
+      if (failure === null) {
+        const startedResult = await settlePromise(() =>
+          waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId)),
+        );
+        failure = startedResult._tag === "Failure" ? startedResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: {
+              environmentId: activeThread.environmentId,
+              threadId: nextThreadId,
+            },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null) {
+        const cleanupResult = await deleteThread({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+          },
+        });
+        if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+          console.warn(
+            "Failed to clean up handoff thread after start failure.",
+            squashAtomCommandFailure(cleanupResult),
+          );
+        }
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not start handoff thread",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : typeof error === "string"
+                    ? error
+                    : "Failed to continue conversation in new thread.",
+            }),
+          );
+        }
+        finish();
+        return;
+      }
+
+      finish();
+      toastManager.add({
+        type: "success",
+        title: "Thread started with handoff",
+        description: `Continuing conversation with ${targetModelSelection.model}`,
+      });
+    },
+    [
+      activeProject,
+      activeThread,
+      activeThreadBranch,
+      beginLocalDispatch,
+      createThread,
+      deleteThread,
+      environmentId,
+      navigate,
+      resetLocalDispatch,
+      runtimeMode,
+      startThreadTurn,
+      waitForStartedServerThread,
+    ],
+  );
+
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
+        return null;
+      }
+      if (isServerThread && activeServerThread && threadHasStarted(activeServerThread)) {
         return null;
       }
       const reason = getStartedThreadModelChangeBlockReason({
@@ -5857,38 +6024,14 @@ function ChatViewContent(props: ChatViewProps) {
       });
       return reason ? `${reason.description} Start a new thread to use this model.` : null;
     },
-    [activeThread, providerStatuses],
+    [activeServerThread, activeThread, isServerThread, providerStatuses],
   );
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
-      // Look up the configured instance so model normalization and custom
-      // model lookup stay scoped to that exact instance. Unknown instance ids
-      // are rejected by returning early; the server remains authoritative too.
       const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
       const resolvedDriverKind = entry?.driver ?? null;
-      if (
-        lockedProvider !== null &&
-        resolvedDriverKind !== null &&
-        resolvedDriverKind !== lockedProvider
-      ) {
-        scheduleComposerFocus();
-        return;
-      }
-      if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
-        const currentEntry = providerStatuses.find(
-          (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
-        );
-        if (
-          currentEntry?.continuation?.groupKey &&
-          entry?.continuation?.groupKey &&
-          currentEntry.continuation.groupKey !== entry.continuation.groupKey
-        ) {
-          scheduleComposerFocus();
-          return;
-        }
-      }
       const resolvedModel = resolveAppModelSelectionForInstance(
         instanceId,
         settings,
@@ -5903,6 +6046,28 @@ function ChatViewContent(props: ChatViewProps) {
         instanceId,
         model: resolvedModel,
       };
+
+      const isCrossProvider =
+        isServerThread &&
+        activeServerThread !== null &&
+        threadHasStarted(activeServerThread) &&
+        ((lockedProvider !== null &&
+          resolvedDriverKind !== null &&
+          resolvedDriverKind !== lockedProvider) ||
+          (lockedProvider !== null &&
+            activeServerThread.session?.providerInstanceId &&
+            (() => {
+              const currentEntry = providerStatuses.find(
+                (snapshot) =>
+                  snapshot.instanceId === activeServerThread.session?.providerInstanceId,
+              );
+              return Boolean(
+                currentEntry?.continuation?.groupKey &&
+                entry?.continuation?.groupKey &&
+                currentEntry.continuation.groupKey !== entry.continuation.groupKey,
+              );
+            })()));
+
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.session !== null,
@@ -5910,6 +6075,19 @@ function ChatViewContent(props: ChatViewProps) {
         currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
         nextModelSelection,
       });
+
+      if (
+        isCrossProvider ||
+        (modelChangeBlockReason &&
+          isServerThread &&
+          activeServerThread !== null &&
+          threadHasStarted(activeServerThread))
+      ) {
+        setHandoffTargetModelSelection(nextModelSelection);
+        setIsHandoffDialogOpen(true);
+        return;
+      }
+
       if (modelChangeBlockReason) {
         toastManager.add({
           type: "warning",
@@ -5927,12 +6105,14 @@ function ChatViewContent(props: ChatViewProps) {
       scheduleComposerFocus();
     },
     [
+      activeServerThread,
       activeThread,
+      isServerThread,
       lockedProvider,
+      providerStatuses,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
-      providerStatuses,
       settings,
     ],
   );
@@ -6560,6 +6740,17 @@ function ChatViewContent(props: ChatViewProps) {
                   }
                 }}
                 onPrepared={handlePreparedPullRequestThread}
+              />
+            ) : null}
+
+            {activeServerThread && handoffTargetModelSelection ? (
+              <ThreadHandoffDialog
+                open={isHandoffDialogOpen}
+                onOpenChange={setIsHandoffDialogOpen}
+                sourceThread={activeServerThread}
+                targetModelSelection={handoffTargetModelSelection}
+                providerInstanceEntries={providerInstanceEntries}
+                onConfirmHandoff={handleConfirmHandoff}
               />
             ) : null}
           </div>
