@@ -108,7 +108,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
         ),
       );
 
-    const [stdout, stderr, exitCode] = yield* Effect.all(
+    const [stdout, _stderr, exitCode] = yield* Effect.all(
       [
         readStreamAsString(operation, processHandle.stdout),
         readStreamAsString(operation, processHandle.stderr),

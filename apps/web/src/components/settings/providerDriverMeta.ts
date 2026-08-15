@@ -12,7 +12,6 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
-  Gemini,
   GrokIcon,
   type Icon,
   OpenAI,

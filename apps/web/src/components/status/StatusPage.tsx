@@ -4,11 +4,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  ServerProvider,
-  ServerProviderClaudeRateLimitWindow,
-  ServerProviderCodexRateLimitWindow,
-} from "@t3tools/contracts";
+import type { ServerProvider } from "@t3tools/contracts";
 import { ExternalLinkIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 

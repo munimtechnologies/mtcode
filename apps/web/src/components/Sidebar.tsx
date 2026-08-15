@@ -6,7 +6,6 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  closestCenter,
   pointerWithin,
   rectIntersection,
   useDroppable,
@@ -25,7 +24,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { snapCenterToCursor } from "@dnd-kit/modifiers";
 import {
-  canSettle,
   canSnooze,
   changeRequestAutoSettles,
   effectiveSettled,
