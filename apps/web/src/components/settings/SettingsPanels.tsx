@@ -578,13 +578,24 @@ export function useSettingsRestore(onRestored?: () => void) {
     );
     if (!confirmed) return;
 
+    // Only touch the theme keys that are actually dirty, so a theme-storage
+    // failure cannot block restoring unrelated settings. Preferences are
+    // re-read after the confirmation dialog: they may have changed (another
+    // tab, an OS flip) while it was open, and rollback must restore the live
+    // values rather than the ones captured at render time.
     let previousTheme = theme;
     try {
       previousTheme = readThemePreference();
-    } catch {}
+    } catch {
+      // Storage is unreadable; the render-time value is the best rollback.
+    }
+    // The mix may have changed while the confirmation dialog was open; both
+    // the dirty check and the rollback must see the live value.
     const liveHalves = readThemeHalves();
     const needsThemeReset = previousTheme !== "system";
     const needsMixReset = liveHalves !== null;
+    // Same for the appearance mode: trusting the render-time value would skip
+    // the reset and report success while a non-system mode stayed in storage.
     const needsFollowSystemReset = readAppearanceModePreference(previousTheme) !== "system";
     const notifyThemeRestoreFailure = () => {
       toastManager.add(
@@ -595,6 +606,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         }),
       );
     };
+    // Rollback restores the base preference first (which clears any mix) and
+    // then re-applies the captured mix on top, so no failure path can leave
+    // the pair of keys half-restored.
     const previousHalves = liveHalves;
     const rollbackThemeState = () => {
       if (needsThemeReset) setTheme(previousTheme);
