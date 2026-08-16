@@ -5,6 +5,7 @@ import {
   resolveAvailableNewThreadProjectRef,
   resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
+  resolveWorkspaceOptionsAfterEnvironmentRetarget,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
@@ -160,5 +161,47 @@ describe("chatThreadActions", () => {
         isEnvironmentReachable: () => false,
       }),
     ).toEqual(requested);
+  });
+
+  it("keeps explicit workspace options when the draft stays on the requested environment", () => {
+    expect(
+      resolveWorkspaceOptionsAfterEnvironmentRetarget({
+        requestedEnvironmentId: ENVIRONMENT_ID,
+        targetEnvironmentId: ENVIRONMENT_ID,
+        options: {
+          branch: "feat/checkout",
+          worktreePath: "/dead/machine/worktree",
+          envMode: "worktree",
+          startFromOrigin: false,
+        },
+      }),
+    ).toEqual({
+      branch: "feat/checkout",
+      worktreePath: "/dead/machine/worktree",
+      envMode: "worktree",
+      startFromOrigin: false,
+    });
+  });
+
+  it("clears machine-specific workspace options when retargeting to another environment", () => {
+    const targetEnvironmentId = EnvironmentId.make("environment-2");
+
+    expect(
+      resolveWorkspaceOptionsAfterEnvironmentRetarget({
+        requestedEnvironmentId: ENVIRONMENT_ID,
+        targetEnvironmentId,
+        options: {
+          branch: "feat/checkout",
+          worktreePath: "/dead/machine/worktree",
+          envMode: "worktree",
+          startFromOrigin: false,
+        },
+      }),
+    ).toEqual({
+      branch: null,
+      worktreePath: null,
+      envMode: "worktree",
+      startFromOrigin: false,
+    });
   });
 });

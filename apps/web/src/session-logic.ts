@@ -347,7 +347,7 @@ export function shouldEscapeUnsettledThreadOnOfflineEnvironment(
   connectionPhase: EnvironmentConnectionPhase | null | undefined,
 ): boolean {
   if (canCreateProjectInEnvironment(connectionPhase)) return false;
-  return !isLatestTurnSettled(latestTurn, session);
+  return latestTurn !== null && !isLatestTurnSettled(latestTurn, session);
 }
 
 export function shouldOpenLatestThreadForProject(

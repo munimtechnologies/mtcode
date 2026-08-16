@@ -68,6 +68,25 @@ export function resolveAvailableNewThreadProjectRef(input: {
   return next ? scopeProjectRef(next.environmentId, next.projectId) : input.requested;
 }
 
+export function resolveWorkspaceOptionsAfterEnvironmentRetarget<
+  TOptions extends {
+    branch?: string | null;
+    worktreePath?: string | null;
+  },
+>(input: {
+  requestedEnvironmentId: EnvironmentId;
+  targetEnvironmentId: EnvironmentId;
+  options: TOptions | undefined;
+}): TOptions | undefined {
+  if (input.options === undefined) return undefined;
+  if (input.requestedEnvironmentId === input.targetEnvironmentId) return input.options;
+  return {
+    ...input.options,
+    ...(input.options.branch !== undefined ? { branch: null } : {}),
+    ...(input.options.worktreePath !== undefined ? { worktreePath: null } : {}),
+  };
+}
+
 // New threads inherit only the *project* from the current context. Branch,
 // worktree, and env mode always come from the user's configured defaults —
 // carrying them over from the viewed thread meant "new thread" silently

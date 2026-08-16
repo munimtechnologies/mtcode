@@ -1708,6 +1708,11 @@ describe("offline environment escape for unsettled latest turns", () => {
     ).toBe(false);
   });
 
+  it("does not treat a never-started thread as an unsettled trap when the environment is offline", () => {
+    expect(shouldEscapeUnsettledThreadOnOfflineEnvironment(null, null, "offline")).toBe(false);
+    expect(shouldOpenLatestThreadForProject(null, null, "offline")).toBe(true);
+  });
+
   it("does not consult t3.json for new-thread defaults unless the environment is connected", () => {
     expect(shouldReadProjectFileForNewThreadDefaults(null, "connected")).toBe(true);
     expect(shouldReadProjectFileForNewThreadDefaults(null, "offline")).toBe(false);
