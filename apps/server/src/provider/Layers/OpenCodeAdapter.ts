@@ -640,34 +640,6 @@ export function makeOpenCodeAdapter(
         })),
       );
 
-    // Layer-level finalizer: when the adapter layer shuts down, stop every
-    // session. Each session's `Scope.close` tears down its spawned OpenCode
-    // server (via the `ChildProcessSpawner` finalizer installed in
-    // `startOpenCodeServerProcess`) and interrupts the forked event/exit
-    // fibers. Consumers that can't reason about Effect scopes therefore
-    // cannot leak OpenCode child processes by forgetting to call `stopAll`.
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        const contexts = [...sessions.values()];
-        sessions.clear();
-        // `ignoreCause` swallows both typed failures (none here) and defects
-        // from throwing scope finalizers so a sibling's death can't interrupt
-        // the remaining cleanups.
-        yield* Effect.forEach(
-          contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
-          { concurrency: "unbounded", discard: true },
-        );
-        // Close the logger AFTER session teardown so any final lifecycle
-        // events emitted during shutdown still get written. `close` flushes
-        // the `Logger.batched` window and closes each per-thread
-        // `RotatingFileSink` handle owned by the logger's internal scope.
-        if (managedNativeEventLogger !== undefined) {
-          yield* managedNativeEventLogger.close();
-        }
-      }).pipe(Effect.ensuring(Queue.shutdown(runtimeEvents))),
-    );
-
     const emit = (event: ProviderRuntimeEvent) =>
       Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
 
@@ -712,6 +684,39 @@ export function makeOpenCodeAdapter(
           { discard: true },
         );
       });
+
+    // Layer-level finalizer: when the adapter layer shuts down, settle every
+    // pending request then stop the session. Each session's `Scope.close`
+    // tears down its spawned OpenCode server (via the `ChildProcessSpawner`
+    // finalizer installed in `startOpenCodeServerProcess`) and interrupts
+    // the forked event/exit fibers. Provider instance remove/replace closes
+    // this scope without calling `stopAll`, so settlement has to live here.
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        const contexts = [...sessions.values()];
+        sessions.clear();
+        // `ignoreCause` swallows both typed failures (none here) and defects
+        // from throwing scope finalizers so a sibling's death can't interrupt
+        // the remaining cleanups.
+        yield* Effect.forEach(
+          contexts,
+          (context) =>
+            Effect.ignoreCause(
+              settleOpenCodePendingAsCancelled(context).pipe(
+                Effect.andThen(stopOpenCodeContext(context)),
+              ),
+            ),
+          { concurrency: "unbounded", discard: true },
+        );
+        // Close the logger AFTER session teardown so any final lifecycle
+        // events emitted during shutdown still get written. `close` flushes
+        // the `Logger.batched` window and closes each per-thread
+        // `RotatingFileSink` handle owned by the logger's internal scope.
+        if (managedNativeEventLogger !== undefined) {
+          yield* managedNativeEventLogger.close();
+        }
+      }).pipe(Effect.ensuring(Queue.shutdown(runtimeEvents))),
+    );
     const writeNativeEvent = (
       threadId: ThreadId,
       event: {
