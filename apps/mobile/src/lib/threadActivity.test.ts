@@ -274,6 +274,70 @@ describe("buildThreadFeed", () => {
     );
   });
 
+  it("merges a late tool result into the completed work-log row", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-late-tool"),
+      projectId: ProjectId.make("project-1"),
+      title: "Late tool result",
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "completed",
+        requestedAt: "2026-04-01T00:00:00.000Z",
+        startedAt: "2026-04-01T00:00:01.000Z",
+        completedAt: "2026-04-01T00:00:03.000Z",
+        assistantMessageId: null,
+      },
+      activities: [
+        makeActivity({
+          id: EventId.make("tool-force-complete"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Grep",
+          createdAt: "2026-04-01T00:00:01.000Z",
+          turnId: TurnId.make("turn-1"),
+          payload: {
+            title: "Grep",
+            itemType: "dynamic_tool_call",
+            data: {
+              toolCallId: "tool-late-1",
+              toolName: "Grep",
+              input: { pattern: "foo" },
+            },
+          },
+        }),
+        makeActivity({
+          id: EventId.make("tool-late-updated"),
+          kind: "tool.updated",
+          tone: "tool",
+          summary: "Grep",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          turnId: TurnId.make("turn-1"),
+          payload: {
+            title: "Grep",
+            itemType: "dynamic_tool_call",
+            status: "completed",
+            data: {
+              toolCallId: "tool-late-1",
+              toolName: "Grep",
+              input: { pattern: "foo" },
+              result: { content: "src/example.ts:1:foo" },
+            },
+          },
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+    const group = feed[0];
+    expect(group).toMatchObject({ type: "activity-group" });
+    if (!group || group.type !== "activity-group") {
+      return;
+    }
+
+    expect(group.activities).toHaveLength(1);
+    expect(group.activities[0]?.id).toBe("tool-late-updated");
+  });
+
   it("keeps MCP inputs available to expanded mobile work rows", () => {
     const turnId = TurnId.make("turn-mcp");
     const thread = makeThread({

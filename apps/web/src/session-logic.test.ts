@@ -1479,6 +1479,47 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-1-complete", "tool-2-complete"]);
   });
 
+  it("merges a late result into the completed row when toolCallId matches", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-force-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Grep",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Grep",
+          data: {
+            toolCallId: "tool-late-1",
+            toolName: "Grep",
+            input: { pattern: "foo" },
+          },
+        },
+      }),
+      makeActivity({
+        id: "tool-late-updated",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.updated",
+        summary: "Grep",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Grep",
+          status: "completed",
+          data: {
+            toolCallId: "tool-late-1",
+            toolName: "Grep",
+            input: { pattern: "foo" },
+            result: { content: "src/example.ts:1:foo" },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.id).toBe("tool-late-updated");
+  });
+
   it("collapses same-timestamp lifecycle rows even when completed sorts before updated by id", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

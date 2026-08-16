@@ -1467,6 +1467,18 @@ function toolResultStreamKind(itemType: CanonicalItemType): ClaudeToolResultStre
   }
 }
 
+function claudeToolEventData(
+  tool: Pick<ToolInFlight, "itemId" | "toolName" | "input">,
+  extra?: { readonly result?: Record<string, unknown> },
+): Record<string, unknown> {
+  return {
+    toolName: tool.toolName,
+    input: tool.input,
+    toolCallId: tool.itemId,
+    ...(extra?.result !== undefined ? { result: extra.result } : {}),
+  };
+}
+
 function rememberFinalizedToolAwaitingResult(
   tools: Map<string, FinalizedToolAwaitingResult>,
   entry: FinalizedToolAwaitingResult,
@@ -2345,10 +2357,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: status === "completed" ? "completed" : "failed",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
-          data: {
-            toolName: tool.toolName,
-            input: tool.input,
-          },
+          data: claudeToolEventData(tool),
         },
         providerRefs: nativeProviderRefs(context, {
           providerItemId: tool.itemId,
@@ -2583,10 +2592,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(nextTool.detail ? { detail: nextTool.detail } : {}),
             ...(nextTool.agentId ? { agentId: nextTool.agentId } : {}),
             ...(nextTool.parentToolUseId ? { parentToolUseId: nextTool.parentToolUseId } : {}),
-            data: {
-              toolName: nextTool.toolName,
-              input: nextTool.input,
-            },
+            data: claudeToolEventData(nextTool),
           },
           providerRefs: nativeProviderRefs(context, {
             providerItemId: nextTool.itemId,
@@ -2690,10 +2696,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(tool.detail ? { detail: tool.detail } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
           ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
-          data: {
-            toolName: tool.toolName,
-            input: toolInput,
-          },
+          data: claudeToolEventData(tool),
         },
         providerRefs: nativeProviderRefs(context, {
           providerItemId: tool.itemId,
@@ -2762,11 +2765,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         : finalized?.turnId;
       const itemStatus = toolResult.isError ? "failed" : "completed";
       const toolUseResult = readClaudeToolUseResult(message);
-      const toolData = {
-        toolName: tool.toolName,
-        input: tool.input,
-        result: toolResult.block,
-      };
+      const toolData = claudeToolEventData(tool, { result: toolResult.block });
 
       const updatedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({

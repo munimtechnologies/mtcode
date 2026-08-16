@@ -1014,7 +1014,8 @@ function shouldCollapseToolLifecycleEntries(
     return false;
   }
   if (previous.activityKind === "tool.completed") {
-    return false;
+    // Same toolCallId after complete is a late result amendment, not a new call.
+    return previous.toolCallId !== undefined && previous.toolCallId === next.toolCallId;
   }
   if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
     return true;
