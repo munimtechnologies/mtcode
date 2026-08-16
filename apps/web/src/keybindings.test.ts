@@ -25,7 +25,6 @@ import {
   shouldShowThreadJumpHints,
   shortcutLabelForCommand,
   terminalDeleteShortcutData,
-  terminalEmacsShortcutData,
   terminalNavigationShortcutData,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
@@ -880,25 +879,6 @@ describe("terminalNavigationShortcutData", () => {
         "MacIntel",
       ),
     );
-  });
-});
-
-describe("terminalEmacsShortcutData", () => {
-  it("maps Ctrl+A and Ctrl+E to line movement on all platforms", () => {
-    assert.strictEqual(terminalEmacsShortcutData(event({ key: "a", ctrlKey: true })), "\u0001");
-    assert.strictEqual(terminalEmacsShortcutData(event({ key: "e", ctrlKey: true })), "\u0005");
-  });
-
-  it("rejects modified variants and other keys", () => {
-    assert.isNull(terminalEmacsShortcutData(event({ key: "a", ctrlKey: true, shiftKey: true })));
-    assert.isNull(terminalEmacsShortcutData(event({ key: "a", ctrlKey: true, metaKey: true })));
-    assert.isNull(terminalEmacsShortcutData(event({ key: "a", ctrlKey: true, altKey: true })));
-    assert.isNull(terminalEmacsShortcutData(event({ key: "a" })));
-    assert.isNull(terminalEmacsShortcutData(event({ key: "l", ctrlKey: true })));
-  });
-
-  it("ignores non-keydown events", () => {
-    assert.isNull(terminalEmacsShortcutData(event({ type: "keyup", key: "a", ctrlKey: true })));
   });
 });
 

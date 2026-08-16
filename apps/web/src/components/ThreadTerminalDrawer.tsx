@@ -51,7 +51,6 @@ import {
   isTerminalSplitVerticalShortcut,
   isTerminalToggleShortcut,
   terminalDeleteShortcutData,
-  terminalEmacsShortcutData,
   terminalNavigationShortcutData,
 } from "../keybindings";
 import {
@@ -727,14 +726,6 @@ export function TerminalViewport({
           event.preventDefault();
           event.stopPropagation();
           void sendTerminalInput(navigationData, "Failed to move cursor");
-          return false;
-        }
-
-        const emacsData = terminalEmacsShortcutData(event);
-        if (emacsData !== null) {
-          event.preventDefault();
-          event.stopPropagation();
-          void sendTerminalInput(emacsData, "Failed to move cursor");
           return false;
         }
 
