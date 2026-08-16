@@ -147,6 +147,13 @@ function lastRetainedAssistantUuid(
   return undefined;
 }
 
+function isStaleRollbackQuery(context: {
+  readonly needsPinnedQueryRestart: boolean;
+  readonly replacingQuery: boolean;
+}): boolean {
+  return context.needsPinnedQueryRestart || context.replacingQuery;
+}
+
 interface ClaudeTurnState {
   readonly turnId: TurnId;
   readonly startedAt: string;
@@ -2896,6 +2903,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (message.type !== "assistant") {
       return;
     }
+    if (isStaleRollbackQuery(context)) {
+      return;
+    }
 
     // Subagent-owned assistant snapshots (parent_tool_use_id set) are the
     // subagent's own conversation, not the parent's. Emitting them created
@@ -3555,6 +3565,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: SDKMessage,
   ) {
     yield* logNativeSdkMessage(context, message);
+    // Rollback leaves the old SDK stream running until sendTurn replaces it.
+    // Late assistant/result frames from that stream must not move the cursor
+    // back onto discarded transcript.
+    if (isStaleRollbackQuery(context)) {
+      return;
+    }
     yield* ensureThreadId(context, message);
 
     // Wire-only command bookkeeping has no user-facing T3 lifecycle.
@@ -3635,7 +3651,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
     exit: Exit.Exit<void, ProviderAdapterProcessError>,
   ) {
-    if (context.stopped || context.replacingQuery) {
+    if (context.stopped || isStaleRollbackQuery(context)) {
       return;
     }
 
@@ -3798,7 +3814,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     streamFiber = runFork(
       Effect.exit(runSdkStream(context)).pipe(
         Effect.flatMap((exit) => {
-          if (context.stopped || context.replacingQuery) {
+          if (context.stopped || isStaleRollbackQuery(context)) {
             return Effect.void;
           }
           if (context.streamFiber === streamFiber) {
@@ -3824,6 +3840,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
   ) {
     const threadId = context.session.threadId;
+    const pinnedResumeSessionId = context.resumeSessionId;
+    const pinnedLastAssistantUuid = context.lastAssistantUuid;
     context.replacingQuery = true;
     const streamFiber = context.streamFiber;
     context.streamFiber = undefined;
@@ -3850,11 +3868,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...baseQueryOptions
     } = context.queryOptions;
     const nextOptions: ClaudeQueryOptions =
-      context.lastAssistantUuid && context.resumeSessionId
+      pinnedLastAssistantUuid && pinnedResumeSessionId
         ? {
             ...baseQueryOptions,
-            resume: context.resumeSessionId,
-            resumeSessionAt: context.lastAssistantUuid,
+            resume: pinnedResumeSessionId,
+            resumeSessionAt: pinnedLastAssistantUuid,
           }
         : {
             ...baseQueryOptions,
@@ -3882,6 +3900,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context.promptQueue = promptQueue;
     context.query = queryRuntime;
     context.queryOptions = nextOptions;
+    context.lastAssistantUuid = pinnedLastAssistantUuid;
+    context.pinResumeSessionAt = pinnedLastAssistantUuid !== undefined;
     yield* updateResumeCursor(context);
 
     const runtimeContext = yield* Effect.context<never>();
@@ -4669,16 +4689,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const nextLength = Math.max(0, context.turns.length - numTurns);
       context.turns.splice(nextLength);
       context.lastAssistantUuid = lastRetainedAssistantUuid(context.turns);
+      context.needsPinnedQueryRestart = true;
       if (context.lastAssistantUuid) {
         context.pinResumeSessionAt = true;
-        context.needsPinnedQueryRestart = true;
-      } else if (context.turns.length === 0) {
+      } else {
+        // No retained assistant checkpoint: a resume would replay discarded
+        // turns, so the replacement query must start a fresh session.
         context.resumeSessionId = undefined;
         context.pinResumeSessionAt = false;
-        context.needsPinnedQueryRestart = true;
-      } else {
-        context.pinResumeSessionAt = false;
-        context.needsPinnedQueryRestart = false;
       }
       yield* updateResumeCursor(context);
       return yield* snapshotThread(context);
