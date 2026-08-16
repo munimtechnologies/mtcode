@@ -570,7 +570,55 @@ const projectRenameCommand = Command.make("rename", {
   ),
 );
 
+const projectRelinkCommand = Command.make("relink", {
+  ...projectLocationFlags,
+  project: Argument.string("project").pipe(
+    Argument.withDescription("Project id or workspace root to relink."),
+  ),
+  workspaceRoot: Argument.string("path").pipe(
+    Argument.withDescription("New workspace root for the project."),
+  ),
+}).pipe(
+  Command.withDescription("Relink a project to a new workspace root."),
+  Command.withHandler((flags) =>
+    runProjectMutation(
+      flags,
+      Effect.fn("projectRelinkMutation")(function* ({
+        snapshot,
+        dispatch,
+      }: {
+        readonly snapshot: OrchestrationReadModel;
+        readonly dispatch: (
+          command: ProjectCliDispatchCommand,
+        ) => Effect.Effect<void, Error, FileSystem.FileSystem | HttpClient.HttpClient | Path.Path>;
+      }) {
+        const project = yield* findActiveProjectTarget({
+          snapshot,
+          identifier: flags.project,
+        });
+        const workspaceRoot = yield* normalizeWorkspaceRootForProjectCommand(flags.workspaceRoot);
+        if (workspaceRoot === project.workspaceRoot) {
+          return `Project ${project.id} is already linked to ${workspaceRoot}.`;
+        }
+
+        yield* dispatch({
+          type: "project.meta.update",
+          commandId: CommandId.make(yield* projectCommandUuid),
+          projectId: project.id,
+          workspaceRoot,
+        });
+        return `Relinked project ${project.id} to ${workspaceRoot}.`;
+      }),
+    ),
+  ),
+);
+
 export const projectCommand = Command.make("project").pipe(
   Command.withDescription("Manage projects."),
-  Command.withSubcommands([projectAddCommand, projectRemoveCommand, projectRenameCommand]),
+  Command.withSubcommands([
+    projectAddCommand,
+    projectRemoveCommand,
+    projectRenameCommand,
+    projectRelinkCommand,
+  ]),
 );
