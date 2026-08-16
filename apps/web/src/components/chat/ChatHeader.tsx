@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   type EditorId,
+  type OrchestrationThreadGoal,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
@@ -22,6 +23,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import GitActionsControl from "../GitActionsControl";
+import { GoalChip } from "./GoalChip";
 import { type DraftId } from "~/composerDraftStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -64,6 +66,7 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
+  goal?: OrchestrationThreadGoal | null | undefined;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -125,6 +128,7 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   onOpenPullRequest,
+  goal,
   onNewThreadInProject,
   onRunProjectScript,
   onAddProjectScript,
@@ -309,6 +313,7 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          <GoalChip goal={goal} />
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       <div

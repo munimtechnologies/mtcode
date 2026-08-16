@@ -44,6 +44,7 @@ import {
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
+import { formatGoalStatusMessage, parseGoalComposerCommand } from "@t3tools/shared/composerTrigger";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
@@ -1230,6 +1231,10 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const setGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+  const pauseGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
+  const resumeGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
+  const clearGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -4144,6 +4149,7 @@ function ChatViewContent(props: ChatViewProps) {
     supportsPullRequests && activeThreadPr !== null && threadRepository !== null;
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true;
+  const supportsGoal = serverConfig?.environment.capabilities.threadGoal === true;
   const nowMinute = useNowMinute();
   const snoozeNow = new Date().toISOString();
   const activeThreadSnoozed =
@@ -5004,6 +5010,106 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
+    const goalCommand = parseGoalComposerCommand(trimmed);
+    let pendingGoalObjective: string | null = null;
+    if (goalCommand !== null && !directAnnotation) {
+      const clearGoalComposer = () => {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      };
+      const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>) => {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            activeThread.id,
+            error instanceof Error ? error.message : "Failed to update the Objective.",
+          );
+        }
+      };
+      if (goalCommand.action === "status") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "info",
+            title: "Objective",
+            description: formatGoalStatusMessage(activeThread.goal ?? null),
+          }),
+        );
+        clearGoalComposer();
+        return;
+      }
+      if (goalCommand.action === "refuse") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "That command was not sent",
+            description: "Type /goal followed by the outcome to set an Objective.",
+          }),
+        );
+        clearGoalComposer();
+        return;
+      }
+      if (isServerThread && !supportsGoal) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "This environment cannot set an Objective",
+            description: "Update the server to use /goal.",
+          }),
+        );
+        clearGoalComposer();
+        return;
+      }
+      if (
+        goalCommand.action === "clear" ||
+        goalCommand.action === "pause" ||
+        goalCommand.action === "resume"
+      ) {
+        if (!isServerThread) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: "Objective",
+              description: "Set an Objective with /goal before pausing, resuming, or clearing.",
+            }),
+          );
+          clearGoalComposer();
+          return;
+        }
+        const result =
+          goalCommand.action === "clear"
+            ? await clearGoal({
+                environmentId,
+                input: { threadId: activeThread.id },
+              })
+            : goalCommand.action === "pause"
+              ? await pauseGoal({
+                  environmentId,
+                  input: { threadId: activeThread.id },
+                })
+              : await resumeGoal({
+                  environmentId,
+                  input: { threadId: activeThread.id },
+                });
+        reportGoalCommandFailure(result);
+        clearGoalComposer();
+        return;
+      }
+      if (isServerThread) {
+        const result = await setGoal({
+          environmentId,
+          input: {
+            threadId: activeThread.id,
+            objective: goalCommand.objective,
+            messageId: newMessageId(),
+          },
+        });
+        reportGoalCommandFailure(result);
+        clearGoalComposer();
+        return;
+      }
+      pendingGoalObjective = goalCommand.objective;
+    }
     if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -5094,7 +5200,10 @@ function ChatViewContent(props: ChatViewProps) {
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
     const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+      appendTerminalContextsToPrompt(
+        pendingGoalObjective ?? promptForSend,
+        composerTerminalContextsSnapshot,
+      ),
       composerElementContextsSnapshot,
     );
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
@@ -5206,7 +5315,7 @@ function ChatViewContent(props: ChatViewProps) {
         firstComposerImageName = firstComposerImage.name;
       }
     }
-    let titleSeed = trimmed;
+    let titleSeed = pendingGoalObjective ?? trimmed;
     if (!titleSeed) {
       if (firstComposerImageName) {
         titleSeed = `Image: ${firstComposerImageName}`;
@@ -5317,6 +5426,23 @@ function ChatViewContent(props: ChatViewProps) {
       } else {
         turnStartSucceeded = true;
         acknowledgeActiveThreadWoke();
+        if (pendingGoalObjective !== null) {
+          const goalResult = await setGoal({
+            environmentId,
+            input: {
+              threadId: threadIdForSend,
+              objective: pendingGoalObjective,
+              messageId: messageIdForSend,
+            },
+          });
+          if (goalResult._tag === "Failure" && !isAtomCommandInterrupted(goalResult)) {
+            const error = squashAtomCommandFailure(goalResult);
+            setThreadError(
+              threadIdForSend,
+              error instanceof Error ? error.message : "Failed to update the Objective.",
+            );
+          }
+        }
       }
     }
 
@@ -6236,6 +6362,7 @@ function ChatViewContent(props: ChatViewProps) {
             {...(routeKind === "draft" && draftId ? { draftId } : {})}
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
+            goal={activeThread.goal ?? null}
             changeRequestState={activeThreadPr?.state ?? null}
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}

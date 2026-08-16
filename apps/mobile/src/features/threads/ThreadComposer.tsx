@@ -393,6 +393,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           description: "Switch model",
         },
         {
+          id: "cmd:goal",
+          type: "slash-command" as const,
+          command: "goal",
+          label: "/goal",
+          description: "Set an Objective this Thread keeps working toward",
+        },
+        {
           id: "cmd:plan",
           type: "slash-command" as const,
           command: "plan",
@@ -411,6 +418,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
       const providerCommands: ComposerCommandItem[] = [];
       for (const cmd of selectedProviderStatus?.slashCommands ?? []) {
+        if (cmd.name.toLowerCase() === "goal") continue;
         if (!cmd.name.toLowerCase().includes(q)) continue;
         providerCommands.push({
           id: `pcmd:${cmd.name}`,

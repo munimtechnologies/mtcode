@@ -1,6 +1,78 @@
 export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
 
+export const GOAL_OBJECTIVE_PREVIEW_MAX_CHARS = 80;
+
+const GOAL_COMMAND_TOKEN = /^\/goal(?:\/\S*)?$/i;
+const SLASH_GOAL_PHRASE = /^slash\s+goal\b/i;
+const GOAL_SLASH_LINE = /^\/goal(?:\s+([\s\S]*))?$/i;
+
+export type ParsedGoalComposerCommand =
+  | { readonly action: "status" }
+  | { readonly action: "pause" }
+  | { readonly action: "resume" }
+  | { readonly action: "clear" }
+  | { readonly action: "set"; readonly objective: string }
+  | { readonly action: "refuse" };
+
+export function isGoalCommandForm(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  if (SLASH_GOAL_PHRASE.test(trimmed)) {
+    return true;
+  }
+  const firstToken = trimmed.split(/\s+/u, 1)[0] ?? "";
+  return GOAL_COMMAND_TOKEN.test(firstToken);
+}
+
+export function parseGoalComposerCommand(text: string): ParsedGoalComposerCommand | null {
+  const trimmed = text.trim();
+  if (!isGoalCommandForm(trimmed)) {
+    return null;
+  }
+  const slashMatch = GOAL_SLASH_LINE.exec(trimmed);
+  if (slashMatch === null) {
+    return { action: "refuse" };
+  }
+  const rest = (slashMatch[1] ?? "").trim();
+  if (rest.length === 0) {
+    return { action: "status" };
+  }
+  const restLower = rest.toLowerCase();
+  if (restLower === "pause") {
+    return { action: "pause" };
+  }
+  if (restLower === "resume") {
+    return { action: "resume" };
+  }
+  if (restLower === "clear") {
+    return { action: "clear" };
+  }
+  return { action: "set", objective: rest };
+}
+
+export function formatGoalStatusMessage(
+  goal: { readonly status: string; readonly objective: string } | null | undefined,
+): string {
+  if (goal == null) {
+    return "No Objective on this Thread. Type /goal followed by the outcome to set one.";
+  }
+  const statusLabel =
+    goal.status === "usageLimited"
+      ? "Usage-limited"
+      : `${goal.status.slice(0, 1).toUpperCase()}${goal.status.slice(1)}`;
+  return `${statusLabel}: ${goal.objective}`;
+}
+
+export function truncateGoalObjectivePreview(objective: string): string {
+  if (objective.length <= GOAL_OBJECTIVE_PREVIEW_MAX_CHARS) {
+    return objective;
+  }
+  return `${objective.slice(0, GOAL_OBJECTIVE_PREVIEW_MAX_CHARS - 1)}…`;
+}
+
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
   query: string;
