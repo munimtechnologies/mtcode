@@ -3,6 +3,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   FilterIcon,
+  LayersIcon,
   PackageOpenIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -43,7 +44,7 @@ import {
 import { usePluginMarketplaceStore } from "~/pluginMarketplace/store";
 import { searchableSetting } from "../settingsSearch";
 import { SettingsPageContainer, SettingsSection } from "../settingsLayout";
-import { HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
+import { HarnessIcon, HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
 
 const KIND_FILTERS: ReadonlyArray<{
   readonly label: string;
@@ -55,6 +56,21 @@ const KIND_FILTERS: ReadonlyArray<{
   { label: "Skills", value: "skill" },
   { label: "Apps", value: "app" },
 ];
+
+function HarnessFilterOption({ harness }: { readonly harness: MarketplaceHarnessFilter }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      {harness === "all" ? (
+        <LayersIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <HarnessIcon harness={harness} className="size-3.5" />
+      )}
+      <span className="truncate">
+        {harness === "all" ? "All harnesses" : MARKETPLACE_HARNESS_LABELS[harness]}
+      </span>
+    </span>
+  );
+}
 
 function MarketplacePluginCard({
   plugin,
@@ -143,8 +159,8 @@ function MarketplaceResults({
 
   if (filtered) {
     return (
-      <section className="space-y-3" aria-labelledby="marketplace-results-title">
-        <div className="flex items-baseline justify-between gap-3 border-b border-foreground/8 pb-3">
+      <section className="space-y-2" aria-labelledby="marketplace-results-title">
+        <div className="flex items-baseline justify-between gap-3">
           <h2 id="marketplace-results-title" className="font-semibold text-lg text-foreground">
             Results
           </h2>
@@ -176,12 +192,10 @@ function MarketplaceResults({
   return (
     <div className="flex flex-col gap-10">
       {discover.length > 0 ? (
-        <section className="space-y-3" aria-labelledby="discover-plugins-title">
-          <div className="border-b border-foreground/8 pb-3">
-            <h2 id="discover-plugins-title" className="font-semibold text-lg text-foreground">
-              Discover
-            </h2>
-          </div>
+        <section className="space-y-2" aria-labelledby="discover-plugins-title">
+          <h2 id="discover-plugins-title" className="font-semibold text-lg text-foreground">
+            Discover
+          </h2>
           <div className="grid gap-3 lg:grid-cols-2">
             {discover.map((plugin) => (
               <MarketplacePluginCard key={plugin.id} plugin={plugin} featured />
@@ -192,12 +206,10 @@ function MarketplaceResults({
       {sections.map((section) => {
         const headingId = `marketplace-category-${section.category.replaceAll(" ", "-")}`;
         return (
-          <section key={section.category} className="space-y-3" aria-labelledby={headingId}>
-            <div className="border-b border-foreground/8 pb-3">
-              <h2 id={headingId} className="font-semibold text-lg text-foreground">
-                {section.category}
-              </h2>
-            </div>
+          <section key={section.category} className="space-y-2" aria-labelledby={headingId}>
+            <h2 id={headingId} className="font-semibold text-lg text-foreground">
+              {section.category}
+            </h2>
             <div className="grid gap-3 lg:grid-cols-2">
               {section.plugins.slice(0, 6).map((plugin) => (
                 <MarketplacePluginCard key={plugin.id} plugin={plugin} />
@@ -340,14 +352,16 @@ export function PluginMarketplace() {
                   >
                     <SelectTrigger size="sm" aria-label="Filter by harness">
                       <SelectValue>
-                        {harness === "all" ? "All harnesses" : MARKETPLACE_HARNESS_LABELS[harness]}
+                        <HarnessFilterOption harness={harness} />
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All harnesses</SelectItem>
+                      <SelectItem value="all">
+                        <HarnessFilterOption harness="all" />
+                      </SelectItem>
                       {MARKETPLACE_HARNESSES.map((harnessId) => (
                         <SelectItem key={harnessId} value={harnessId}>
-                          {MARKETPLACE_HARNESS_LABELS[harnessId]}
+                          <HarnessFilterOption harness={harnessId} />
                         </SelectItem>
                       ))}
                     </SelectContent>

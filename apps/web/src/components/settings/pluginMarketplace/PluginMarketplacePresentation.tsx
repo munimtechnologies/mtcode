@@ -148,7 +148,7 @@ export function HarnessIcon({
   readonly className?: string;
 }) {
   const Icon = HARNESS_ICONS[harness];
-  return <Icon aria-hidden="true" className={cn("size-3.5 shrink-0", className)} />;
+  return <Icon aria-hidden="true" className={cn("aspect-square size-3.5 shrink-0", className)} />;
 }
 
 function supportLabel(support: MarketplaceHarnessSupport): string {
@@ -187,13 +187,15 @@ export function HarnessSupportBadges({
                   role="img"
                   aria-label={label}
                   className={cn(
-                    "bg-background/68 text-muted-foreground",
-                    compact ? "px-1" : "py-1 pr-2 pl-1",
+                    "overflow-visible bg-background/68 text-muted-foreground",
+                    compact
+                      ? "size-5 min-w-5 px-0 sm:size-5 sm:h-5 sm:min-w-5"
+                      : "h-auto min-h-5 py-1 pr-2 pl-1 sm:h-auto",
                   )}
                 />
               }
             >
-              <HarnessIcon harness={entry.harness} />
+              <HarnessIcon harness={entry.harness} className={compact ? "size-3" : "size-3.5"} />
               {compact ? null : <span>{MARKETPLACE_HARNESS_LABELS[entry.harness]}</span>}
             </TooltipTrigger>
             <TooltipPopup side="top">{label}</TooltipPopup>

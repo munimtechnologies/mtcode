@@ -20,24 +20,7 @@ export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 20;
-const APPLE_EVENTS_USAGE_DESCRIPTION =
-  "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.";
-const DEVELOPMENT_MAC_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>com.apple.security.cs.allow-jit</key>
-    <true/>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
-    <key>com.apple.security.automation.apple-events</key>
-    <true/>
-  </dict>
-</plist>
-`;
+const LAUNCHER_VERSION = 15;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
   "assets",
@@ -113,7 +96,11 @@ function runChecked(command, args) {
   throw new Error(`Failed to run ${command} ${args.join(" ")}: ${details}`.trim());
 }
 
-export function makeDevelopmentLauncherSource({
+function shellSingleQuote(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function makeDevelopmentLauncherScript({
   electronBinaryPath,
   mainEntryPath,
   desktopRoot,
@@ -128,66 +115,28 @@ export function makeDevelopmentLauncherSource({
     ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],
     ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
-  const cString = (value) => {
-    const encoded = [...Buffer.from(value, "utf8")]
-      .map((byte) => {
-        if (byte === 0x22) return '\\"';
-        if (byte === 0x5c) return "\\\\";
-        if (byte >= 0x20 && byte <= 0x7e) return String.fromCharCode(byte);
-        return `\\${byte.toString(8).padStart(3, "0")}`;
-      })
-      .join("");
-    return `"${encoded}"`;
-  };
-  const fallbackStatements = envEntries
-    .map(([name, value]) => `  setFallback(${cString(name)}, ${cString(value)});`)
-    .join("\n");
-
-  return `#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-
-static void setFallback(const char *name, const char *value) {
-  const char *current = getenv(name);
-  if ((current == NULL || current[0] == '\\0') && value[0] != '\\0') {
-    setenv(name, value, 1);
-  }
+  return [
+    "#!/bin/sh",
+    ...envEntries.map(
+      ([name, value]) =>
+        `if [ -z "\${${name}:-}" ]; then export ${name}=${shellSingleQuote(value)}; fi`,
+    ),
+    `exec ${shellSingleQuote(electronBinaryPath)} --t3code-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
+    "",
+  ].join("\n");
 }
 
-int main(int argc, char **argv) {
-${fallbackStatements}
-
-  const char *electronPath = ${cString(electronBinaryPath)};
-  char *childArgs[argc + 3];
-  childArgs[0] = (char *)electronPath;
-  childArgs[1] = ${cString(`--t3code-dev-root=${desktopRoot}`)};
-  childArgs[2] = ${cString(mainEntryPath)};
-  for (int index = 1; index < argc; index += 1) {
-    childArgs[index + 2] = argv[index];
-  }
-  childArgs[argc + 2] = NULL;
-
-  execv(electronPath, childArgs);
-  fprintf(stderr, "Failed to launch Electron: %s\\n", strerror(errno));
-  return 1;
-}
-`;
-}
-
-function writeDevelopmentLauncherBinary(targetBinaryPath, electronBinaryPath, runtimeDir) {
-  const sourcePath = NodePath.join(runtimeDir, "dev-launcher.c");
+function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
   NodeFS.writeFileSync(
-    sourcePath,
-    makeDevelopmentLauncherSource({
+    targetBinaryPath,
+    makeDevelopmentLauncherScript({
       electronBinaryPath,
       mainEntryPath: NodePath.join(desktopDir, "dist-electron", "main.cjs"),
       desktopRoot: desktopDir,
       environment: process.env,
     }),
   );
-  runChecked("xcrun", ["clang", "-Os", "-Wall", "-Wextra", "-o", targetBinaryPath, sourcePath]);
+  NodeFS.chmodSync(targetBinaryPath, 0o755);
 }
 
 function registerMacLauncherBundle(appBundlePath) {
@@ -279,7 +228,6 @@ function patchMainBundleInfoPlist(appBundlePath, iconPath, executableName) {
   setPlistString(infoPlistPath, "CFBundleIdentifier", APP_BUNDLE_ID);
   setPlistString(infoPlistPath, "CFBundleExecutable", executableName);
   setPlistString(infoPlistPath, "CFBundleIconFile", "icon.icns");
-  setPlistString(infoPlistPath, "NSAppleEventsUsageDescription", APPLE_EVENTS_USAGE_DESCRIPTION);
   setPlistJson(infoPlistPath, "CFBundleURLTypes", [
     {
       CFBundleURLName: APP_BUNDLE_ID,
@@ -320,91 +268,6 @@ function patchHelperBundleInfoPlists(appBundlePath) {
       "CFBundleIdentifier",
       `${APP_BUNDLE_ID}.${bundleIdentifierSuffix}`,
     );
-  }
-}
-
-function findNestedMacBundlePaths(appBundlePath) {
-  const nestedBundlePaths = [];
-  const directories = [NodePath.join(appBundlePath, "Contents", "Frameworks")];
-
-  while (directories.length > 0) {
-    const directory = directories.pop();
-    if (!directory || !NodeFS.existsSync(directory)) {
-      continue;
-    }
-
-    for (const entry of NodeFS.readdirSync(directory, { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      const entryPath = NodePath.join(directory, entry.name);
-      directories.push(entryPath);
-      if (entry.name.endsWith(".app") || entry.name.endsWith(".framework")) {
-        nestedBundlePaths.push(entryPath);
-      }
-    }
-  }
-
-  return nestedBundlePaths;
-}
-
-export function makeDevelopmentMacSigningSteps({
-  appBundlePath,
-  entitlementsPath,
-  nestedBundlePaths,
-}) {
-  const depth = (path) => NodePath.relative(appBundlePath, path).split(NodePath.sep).length;
-  const nestedSigningSteps = [...new Set(nestedBundlePaths)]
-    .sort((left, right) => depth(right) - depth(left) || left.localeCompare(right))
-    .map((targetPath) => ({
-      targetPath,
-      args: [
-        "--force",
-        "--sign",
-        "-",
-        "--options",
-        "runtime",
-        "--preserve-metadata=entitlements",
-        targetPath,
-      ],
-    }));
-  const entitledSigningStep = (targetPath) => ({
-    targetPath,
-    args: [
-      "--force",
-      "--sign",
-      "-",
-      "--options",
-      "runtime",
-      "--entitlements",
-      entitlementsPath,
-      targetPath,
-    ],
-  });
-  const { runtimeElectronBinaryPath } = resolveMacLauncherPaths(appBundlePath);
-
-  return [
-    ...nestedSigningSteps,
-    entitledSigningStep(runtimeElectronBinaryPath),
-    entitledSigningStep(appBundlePath),
-  ];
-}
-
-function signDevelopmentMacBundle(appBundlePath, runtimeDir, includeNestedCode) {
-  const entitlementsPath = NodePath.join(runtimeDir, "entitlements.dev.plist");
-  NodeFS.writeFileSync(entitlementsPath, DEVELOPMENT_MAC_ENTITLEMENTS);
-  const signingSteps = makeDevelopmentMacSigningSteps({
-    appBundlePath,
-    entitlementsPath,
-    nestedBundlePaths: includeNestedCode ? findNestedMacBundlePaths(appBundlePath) : [],
-  });
-
-  for (const { targetPath, args } of signingSteps) {
-    if (!includeNestedCode && targetPath !== appBundlePath) {
-      continue;
-    }
-    runChecked("codesign", args);
   }
 }
 
@@ -460,8 +323,7 @@ function buildMacLauncher(electronBinaryPath) {
       // The launcher also handles protocol activations outside the dev runner,
       // so refresh its fallback environment on every launch. Never let a value
       // captured by an older parent app override the live dev-runner environment.
-      writeDevelopmentLauncherBinary(launcherBinaryPath, runtimeElectronBinaryPath, runtimeDir);
-      signDevelopmentMacBundle(targetAppBundlePath, runtimeDir, false);
+      writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath);
     }
     registerMacLauncherBundle(targetAppBundlePath);
     return launcherBinaryPath;
@@ -488,8 +350,7 @@ function buildMacLauncher(electronBinaryPath) {
     // Electron.app even though this bundle's Info.plist has the T3 Code name.
     // Its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
-    writeDevelopmentLauncherBinary(launcherBinaryPath, runtimeElectronBinaryPath, runtimeDir);
-    signDevelopmentMacBundle(targetAppBundlePath, runtimeDir, true);
+    writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath);
   }
   NodeFS.writeFileSync(metadataPath, `${JSON.stringify(expectedMetadata, null, 2)}\n`);
   registerMacLauncherBundle(targetAppBundlePath);
