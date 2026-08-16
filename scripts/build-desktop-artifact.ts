@@ -2256,18 +2256,42 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
 // ELECTRON_RUN_AS_NODE runtime; enabling WSL extracts it to a real directory.
 // Shipping one packed archive instead of thousands of loose files is what
 // makes the NSIS install/update fast.
+function packedAsarPayloadBytes(directory: DirectoryRecord): number {
+  let bytes = 0;
+  for (const entry of Object.values(directory.files)) {
+    if ("files" in entry) {
+      bytes = Math.max(bytes, packedAsarPayloadBytes(entry));
+    } else if (!entry.unpacked) {
+      bytes = Math.max(bytes, Number(entry.offset) + entry.size);
+    }
+  }
+  return bytes;
+}
+
+async function waitForAsarWriteCompletion(asarPath: string): Promise<void> {
+  const { header, headerSize } = getRawHeader(asarPath);
+  const expectedBytes = 8 + headerSize + packedAsarPayloadBytes(header);
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    if ((await NodeFSP.stat(asarPath)).size >= expectedBytes) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`ASAR writer did not flush ${expectedBytes} bytes to ${asarPath}.`);
+}
+
 export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function* (input: {
   readonly sourceDir: string;
   readonly asarPath: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   yield* Effect.tryPromise({
-    try: () =>
-      createPackageWithOptions(input.sourceDir, input.asarPath, {
+    try: async () => {
+      await createPackageWithOptions(input.sourceDir, input.asarPath, {
         dot: true,
         unpack: WINDOWS_SERVER_ASAR_UNPACK_GLOB,
         globOptions: { ignore: [...WINDOWS_SERVER_ASAR_IGNORE_GLOBS] },
-      }),
+      });
+      await waitForAsarWriteCompletion(input.asarPath);
+    },
     catch: (cause) => new WindowsServerSidecarPackError({ asarPath: input.asarPath, cause }),
   });
   const unpackedDirPath = `${input.asarPath}.unpacked`;
