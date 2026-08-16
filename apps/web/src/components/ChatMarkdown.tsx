@@ -75,7 +75,12 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
-import { normalizeLatexMathDelimiters, remarkPromoteBracketDisplayMath } from "../markdown-math";
+import {
+  MARKDOWN_MATH_CODE_CLASS_NAMES,
+  normalizeLatexMathDelimiters,
+  rehypeStripKatexErrorTitle,
+  remarkPromoteBracketDisplayMath,
+} from "../markdown-math";
 import {
   normalizeMarkdownLinkDestination,
   resolveInlineCodeFileLinkMeta,
@@ -183,7 +188,14 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   attributes: {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
-    code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta", "dataInlineCode"],
+    code: [
+      ...(defaultSchema.attributes?.code ?? []).filter(
+        (attribute) => !Array.isArray(attribute) || attribute[0] !== "className",
+      ),
+      ["className", /^language-./, ...MARKDOWN_MATH_CODE_CLASS_NAMES],
+      "dataCodeMeta",
+      "dataInlineCode",
+    ],
     blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
   },
   protocols: {
@@ -192,14 +204,21 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
+const CHAT_MARKDOWN_KATEX_OPTIONS = {
+  output: "htmlAndMathml",
+  errorColor: "var(--destructive)",
+} as const;
+
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
-  [rehypeKatex, { output: "htmlAndMathml" }],
+  [rehypeKatex, CHAT_MARKDOWN_KATEX_OPTIONS],
+  rehypeStripKatexErrorTitle,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS_WITHOUT_RAW_HTML = [
-  [rehypeKatex, { output: "htmlAndMathml" }],
+  [rehypeKatex, CHAT_MARKDOWN_KATEX_OPTIONS],
+  rehypeStripKatexErrorTitle,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
