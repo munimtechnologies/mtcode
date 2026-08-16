@@ -7,6 +7,7 @@ import {
   ProjectId,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
+import * as NodeOS from "node:os";
 import * as Console from "effect/Console";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -235,6 +236,16 @@ const normalizeWorkspaceRootForProjectCommand = Effect.fn(
   return yield* workspacePaths.normalizeWorkspaceRoot(workspaceRoot);
 });
 
+function resolveWorkspaceRootIdentifier(identifier: string, path: Path.Path): string {
+  const expandedIdentifier =
+    identifier === "~"
+      ? NodeOS.homedir()
+      : identifier.startsWith("~/") || identifier.startsWith("~\\")
+        ? path.join(NodeOS.homedir(), identifier.slice(2))
+        : identifier;
+  return path.resolve(expandedIdentifier);
+}
+
 const resolveProjectTitle = Effect.fn("resolveProjectTitle")(function* (
   workspaceRoot: string,
   explicitTitle?: string,
@@ -279,8 +290,10 @@ const findActiveProjectTarget = Effect.fn("findActiveProjectTarget")(function* (
 
   // A relink may be the first command run after the workspace moved, so the
   // stored root can be valid project identity even though it no longer exists.
+  const path = yield* Path.Path;
+  const resolvedWorkspaceRootIdentifier = resolveWorkspaceRootIdentifier(trimmedIdentifier, path);
   const staleWorkspaceRootMatch = activeProjects.find(
-    (project) => project.workspaceRoot === trimmedIdentifier,
+    (project) => project.workspaceRoot === resolvedWorkspaceRootIdentifier,
   );
   if (staleWorkspaceRootMatch) {
     return {

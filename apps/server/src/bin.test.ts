@@ -498,10 +498,11 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         assert.equal(renamedProject?.deletedAt, null);
 
         NodeFS.renameSync(workspaceRoot, relinkedWorkspaceRoot);
+        const staleWorkspaceRoot = NodePath.relative(process.cwd(), workspaceRoot);
         yield* runCliWithRuntime([
           "project",
           "relink",
-          workspaceRoot,
+          staleWorkspaceRoot,
           relinkedWorkspaceRoot,
           "--base-dir",
           baseDir,
