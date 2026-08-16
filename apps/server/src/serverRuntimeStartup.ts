@@ -21,8 +21,10 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
+import { runEnvironmentLabelRelaySync } from "./cloud/EnvironmentLabelRelaySync.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
@@ -355,6 +357,18 @@ export const make = (options?: StartupOptions) =>
       );
 
       const welcomeBase = yield* resolveWelcomeBase;
+      yield* serverEnvironment.setEnvironmentLabel(
+        (yield* serverSettings.getSettings).environmentLabel,
+      );
+      yield* serverSettings.streamChanges.pipe(
+        Stream.runForEach((settings) =>
+          serverEnvironment.setEnvironmentLabel(settings.environmentLabel),
+        ),
+        Scope.provide(reactorScope),
+        Effect.forkScoped,
+      );
+      yield* runEnvironmentLabelRelaySync().pipe(Scope.provide(reactorScope), Effect.forkScoped);
+
       const environment = yield* serverEnvironment.getDescriptor;
       yield* Effect.logDebug("startup phase: preparing welcome payload");
 
