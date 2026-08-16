@@ -11,9 +11,15 @@ import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/rela
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import { extractDesktopProtocolUrl, isDesktopProtocolUrl } from "./desktopProtocolUrl.ts";
+import {
+  extractDesktopProtocolUrl,
+  isDesktopProtocolUrl,
+  loadDesktopProtocolUrl,
+  queuePendingDesktopProtocolUrl,
+} from "./desktopProtocolUrl.ts";
 
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -49,7 +55,10 @@ export class DesktopClerk extends Context.Service<
     readonly configure: Effect.Effect<
       void,
       never,
-      ElectronApp.ElectronApp | ElectronWindow.ElectronWindow | Scope.Scope
+      | ElectronApp.ElectronApp
+      | ElectronWindow.ElectronWindow
+      | DesktopWindow.DesktopWindow
+      | Scope.Scope
     >;
   }
 >()("@t3tools/desktop/app/DesktopClerk") {}
@@ -125,8 +134,6 @@ export const make = Effect.gen(function* () {
     configure: Effect.gen(function* () {
       const electronApp = yield* ElectronApp.ElectronApp;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
-      const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
-      const runPromise = Effect.runPromiseWith(context);
 
       // The SDK bridge holds Electron's single-instance lock (acquired at
       // bridge creation) so OAuth deep-link callbacks on Windows/Linux are
@@ -138,23 +145,40 @@ export const make = Effect.gen(function* () {
         return yield* Effect.interrupt;
       }
 
+      const desktopWindow = yield* DesktopWindow.DesktopWindow;
+      const context = yield* Effect.context<
+        ElectronWindow.ElectronWindow | DesktopWindow.DesktopWindow
+      >();
+      const runPromise = Effect.runPromiseWith(context);
+
       const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
       const revealAndDispatch = Effect.fn("desktop.clerk.revealAndDispatchProtocolUrl")(function* (
         url: string | null,
       ) {
-        const mainWindow = yield* electronWindow.currentMainOrFirst;
-        if (Option.isNone(mainWindow)) {
+        // Registered main only. currentMainOrFirst can be the WSL splash.
+        const mainWindow = yield* electronWindow.main;
+        if (Option.isSome(mainWindow)) {
+          yield* electronWindow.reveal(mainWindow.value);
+          if (url !== null) {
+            yield* Effect.sync(() => {
+              loadDesktopProtocolUrl(mainWindow.value, url);
+            });
+          }
           return;
         }
-        yield* electronWindow.reveal(mainWindow.value);
-        if (url === null) {
+
+        if (url !== null) {
+          queuePendingDesktopProtocolUrl(url);
+          // Opens the real main when the backend is already ready (macOS with
+          // no windows). Otherwise createMain applies the queued URL later.
+          yield* desktopWindow.createMainIfBackendReady.pipe(Effect.ignore);
           return;
         }
-        // Same path as first-launch renderer loads: the custom protocol serves
-        // t3code:// (and t3code-dev://) on the existing window.
-        yield* Effect.sync(() => {
-          void Promise.resolve(mainWindow.value.loadURL(url)).catch(() => undefined);
-        });
+
+        const fallbackWindow = yield* electronWindow.currentMainOrFirst;
+        if (Option.isSome(fallbackWindow)) {
+          yield* electronWindow.reveal(fallbackWindow.value);
+        }
       });
 
       yield* electronApp.on("second-instance", (_event, argv) => {

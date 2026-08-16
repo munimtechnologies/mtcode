@@ -1,6 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
+import { beforeEach } from "vite-plus/test";
 
-import { extractDesktopProtocolUrl } from "./desktopProtocolUrl.ts";
+import {
+  applyPendingDesktopProtocolUrl,
+  extractDesktopProtocolUrl,
+  queuePendingDesktopProtocolUrl,
+  takePendingDesktopProtocolUrl,
+} from "./desktopProtocolUrl.ts";
 
 describe("extractDesktopProtocolUrl", () => {
   it.each([
@@ -50,5 +56,28 @@ describe("extractDesktopProtocolUrl", () => {
     },
   ])("$name", ({ argv, scheme, expected }) => {
     assert.equal(extractDesktopProtocolUrl(argv, scheme), expected);
+  });
+});
+
+describe("pending desktop protocol URL", () => {
+  beforeEach(() => {
+    takePendingDesktopProtocolUrl();
+  });
+
+  it("keeps the latest queued URL until it is applied", () => {
+    const loaded: string[] = [];
+    const loadURL = (url: string) => {
+      loaded.push(url);
+    };
+
+    assert.equal(takePendingDesktopProtocolUrl(), null);
+    assert.equal(applyPendingDesktopProtocolUrl({ loadURL }), false);
+
+    queuePendingDesktopProtocolUrl("t3code://app/first");
+    queuePendingDesktopProtocolUrl("t3code://app/second");
+    assert.equal(applyPendingDesktopProtocolUrl({ loadURL }), true);
+    assert.deepEqual(loaded, ["t3code://app/second"]);
+    assert.equal(takePendingDesktopProtocolUrl(), null);
+    assert.equal(applyPendingDesktopProtocolUrl({ loadURL }), false);
   });
 });

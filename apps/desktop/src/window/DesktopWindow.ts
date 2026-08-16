@@ -13,6 +13,7 @@ import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import { applyPendingDesktopProtocolUrl } from "../app/desktopProtocolUrl.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
@@ -752,6 +753,9 @@ export const make = Effect.gen(function* () {
     const window = yield* createWindow();
     yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
+    yield* Effect.sync(() => {
+      applyPendingDesktopProtocolUrl(window);
+    });
     return window;
   }).pipe(Effect.withSpan("desktop.window.createMain"));
 
