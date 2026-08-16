@@ -15,6 +15,7 @@ import {
   type PermissionUpdate,
   resolveSettings as resolveClaudeSdkSettings,
   type SDKMessage,
+  type SDKRateLimitInfo,
   type SDKControlGetContextUsageResponse,
   type SDKControlGetUsageResponse,
   type SDKResultMessage,
@@ -341,6 +342,8 @@ interface ClaudeSessionContext {
   needsPinnedQueryRestart: boolean;
   replacingQuery: boolean;
   lastThreadStartedId: string | undefined;
+  /** Last surfaced limit line; sibling fields drift and re-fire the event with the same text. */
+  lastUsageLimitNotice: string | undefined;
   stopped: boolean;
   /**
    * Set only from sendTurn's interactionMode plan/default branches.
@@ -529,6 +532,35 @@ function isInterruptedResult(result: SDKResultMessage): boolean {
       errors.includes("interrupted by user") ||
       errors.includes("aborted"))
   );
+}
+
+const CLAUDE_USAGE_LIMIT_WINDOWS = {
+  five_hour: "5-hour",
+  seven_day: "7-day",
+  seven_day_opus: "7-day Opus",
+  seven_day_sonnet: "7-day Sonnet",
+  overage: "overage",
+} satisfies Record<NonNullable<SDKRateLimitInfo["rateLimitType"]>, string>;
+
+/** `resetsAt` is epoch seconds: the CLI itself renders it as `new Date(resetsAt * 1000)`. */
+function describeClaudeUsageLimit(info: SDKRateLimitInfo): string {
+  const label = info.rateLimitType ? CLAUDE_USAGE_LIMIT_WINDOWS[info.rateLimitType] : undefined;
+  const resetsAtMs = info.resetsAt === undefined ? undefined : info.resetsAt * 1000;
+  // `Intl` throws RangeError outside the ±8.64e15 Date range, and a throw here
+  // would surface as a defect that kills the session. Drop the time instead.
+  const resetAt =
+    resetsAtMs !== undefined && resetsAtMs > 0 && resetsAtMs <= 8.64e15
+      ? new Intl.DateTimeFormat(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZoneName: "short",
+        }).format(resetsAtMs)
+      : undefined;
+  return `Claude usage limit reached. This turn is paused until the ${
+    label ? `${label} ` : ""
+  }limit resets${resetAt ? ` at ${resetAt}` : ""}.`;
 }
 
 function asRuntimeItemId(value: string): RuntimeItemId {
@@ -3899,6 +3931,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           rateLimits: message,
         },
       });
+      // A rejected window parks the turn inside the SDK: no further messages
+      // arrive and no result lands, so without a row the thread just spins.
+      // Warnings (allowed_warning) still have headroom and stay quiet.
+      if (message.rate_limit_info?.status === "rejected") {
+        const notice = describeClaudeUsageLimit(message.rate_limit_info);
+        if (notice !== context.lastUsageLimitNotice) {
+          context.lastUsageLimitNotice = notice;
+          yield* emitRuntimeWarning(context, notice);
+        }
+      } else {
+        context.lastUsageLimitNotice = undefined;
+      }
       return;
     }
   });
@@ -4886,6 +4930,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         needsPinnedQueryRestart: false,
         replacingQuery: false,
         lastThreadStartedId: undefined,
+        lastUsageLimitNotice: undefined,
         stopped: false,
         inPlanMode: false,
       };
@@ -5071,6 +5116,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const updatedAt = yield* nowIso;
       context.turnState = turnState;
+      // A retry inside the same window renders the identical line: every new
+      // turn gets to announce the pause again.
+      context.lastUsageLimitNotice = undefined;
       context.session = {
         ...context.session,
         status: "running",
