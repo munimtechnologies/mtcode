@@ -16,9 +16,9 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import {
+  applyPendingDesktopProtocolUrl,
   extractDesktopProtocolUrl,
   isDesktopProtocolUrl,
-  loadDesktopProtocolUrl,
   queuePendingDesktopProtocolUrl,
 } from "./desktopProtocolUrl.ts";
 
@@ -163,7 +163,11 @@ export const make = Effect.gen(function* () {
           yield* electronWindow.reveal(mainWindow.value);
           if (url !== null) {
             yield* Effect.sync(() => {
-              loadDesktopProtocolUrl(mainWindow.value, url);
+              // Queue then apply so a later waiter cannot load a stale
+              // fiber-local URL over a newer deep link, and createMain cannot
+              // replay the older pending slot.
+              queuePendingDesktopProtocolUrl(url);
+              applyPendingDesktopProtocolUrl(mainWindow.value);
             });
           }
           return;
@@ -179,7 +183,7 @@ export const make = Effect.gen(function* () {
               if (Option.isSome(existing)) {
                 yield* electronWindow.reveal(existing.value);
                 yield* Effect.sync(() => {
-                  loadDesktopProtocolUrl(existing.value, url);
+                  applyPendingDesktopProtocolUrl(existing.value);
                 });
                 return;
               }

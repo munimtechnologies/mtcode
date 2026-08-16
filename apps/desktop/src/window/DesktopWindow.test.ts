@@ -43,6 +43,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { queuePendingDesktopProtocolUrl } from "../app/desktopProtocolUrl.ts";
 import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
@@ -1032,6 +1033,36 @@ describe("DesktopWindow", () => {
         yield* TestClock.adjust(250);
         assert.equal(fakeWindow.loadURL.mock.calls.length, 2);
         assert.equal(fakeWindow.reload.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("retries a queued deep link instead of the home URL", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+      const deepLink = "t3code-dev://app/sso-callback";
+
+      yield* Effect.gen(function* () {
+        queuePendingDesktopProtocolUrl(deepLink);
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const didFailLoad = fakeWindow.webContentsListeners.get("did-fail-load");
+        if (!didFailLoad) {
+          return yield* Effect.die("renderer load listeners were not registered");
+        }
+
+        assert.deepEqual(fakeWindow.loadURL.mock.calls, [[deepLink]]);
+        didFailLoad({}, -9, "ERR_UNEXPECTED", deepLink, true);
+        yield* TestClock.adjust(100);
+        assert.deepEqual(fakeWindow.loadURL.mock.calls, [[deepLink], [deepLink]]);
       }).pipe(Effect.provide(layer));
     }),
   );

@@ -13,7 +13,11 @@ import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
-import { applyPendingDesktopProtocolUrl } from "../app/desktopProtocolUrl.ts";
+import {
+  applyPendingDesktopProtocolUrl,
+  registerDesktopProtocolWindowLoader,
+  takePendingDesktopProtocolUrl,
+} from "../app/desktopProtocolUrl.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
@@ -612,12 +616,18 @@ export const make = Effect.gen(function* () {
       developmentLoadRetryFiber = undefined;
       runFork(Fiber.interrupt(retryFiber));
     };
+    let currentLoadUrl = applicationUrl;
     const loadApplication = () => {
       if (window.isDestroyed()) {
         return;
       }
-      void window.loadURL(applicationUrl).catch(() => undefined);
+      void window.loadURL(currentLoadUrl).catch(() => undefined);
     };
+    registerDesktopProtocolWindowLoader(window, (url) => {
+      currentLoadUrl = url;
+      clearDevelopmentLoadRetry();
+      loadApplication();
+    });
     const scheduleDevelopmentLoadRetry = () => {
       if (developmentLoadRetryFiber !== undefined || window.isDestroyed()) {
         return undefined;
@@ -735,6 +745,10 @@ export const make = Effect.gen(function* () {
       void runPromise(Effect.andThen(electronWindow.reveal(window), dismissConnectingSplash));
     });
 
+    const pendingUrl = takePendingDesktopProtocolUrl();
+    if (pendingUrl !== null) {
+      currentLoadUrl = pendingUrl;
+    }
     loadApplication();
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });

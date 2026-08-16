@@ -4,7 +4,9 @@ import { beforeEach } from "vite-plus/test";
 import {
   applyPendingDesktopProtocolUrl,
   extractDesktopProtocolUrl,
+  loadDesktopProtocolUrl,
   queuePendingDesktopProtocolUrl,
+  registerDesktopProtocolWindowLoader,
   takePendingDesktopProtocolUrl,
 } from "./desktopProtocolUrl.ts";
 
@@ -79,5 +81,16 @@ describe("pending desktop protocol URL", () => {
     assert.deepEqual(loaded, ["t3code://app/second"]);
     assert.equal(takePendingDesktopProtocolUrl(), null);
     assert.equal(applyPendingDesktopProtocolUrl({ loadURL }), false);
+  });
+
+  it("loads through a registered window loader so retries can track the URL", () => {
+    const loaded: string[] = [];
+    const window = { loadURL: (url: string) => loaded.push(`direct:${url}`) };
+    registerDesktopProtocolWindowLoader(window, (url) => {
+      loaded.push(`loader:${url}`);
+    });
+
+    loadDesktopProtocolUrl(window, "t3code://app/sso-callback");
+    assert.deepEqual(loaded, ["loader:t3code://app/sso-callback"]);
   });
 });

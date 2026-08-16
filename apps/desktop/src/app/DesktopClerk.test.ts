@@ -22,6 +22,7 @@ vi.mock("@clerk/electron/storage", () => ({
   storage: storageMock,
 }));
 
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -386,6 +387,64 @@ describe("DesktopClerk", () => {
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
       Effect.provideService(DesktopWindow.DesktopWindow, desktopWindow),
+    );
+  });
+
+  it.effect("does not apply a stale deep link after a newer one is queued", () => {
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+    const listeners = new Map<string, (...args: readonly unknown[]) => void>();
+    const loadURL = vi.fn(() => Promise.resolve());
+    const mainWindow = { loadURL };
+    let currentMain = Option.none<typeof mainWindow>();
+    const electronApp = {
+      quit: Effect.void,
+      on: (eventName: string, listener: (...args: readonly unknown[]) => void) =>
+        Effect.sync(() => {
+          listeners.set(eventName, listener);
+        }),
+    } as unknown as ElectronApp.ElectronApp["Service"];
+    const electronWindow = {
+      main: Effect.sync(() => currentMain),
+      currentMainOrFirst: Effect.sync(() => currentMain),
+      reveal: () => Effect.void,
+    } as unknown as ElectronWindow.ElectronWindow["Service"];
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const enteredCreate = yield* Deferred.make<void>();
+        const releaseCreate = yield* Deferred.make<void>();
+        const desktopWindow = {
+          createMainIfBackendReady: Effect.gen(function* () {
+            yield* Deferred.succeed(enteredCreate, undefined);
+            yield* Deferred.await(releaseCreate);
+            applyPendingDesktopProtocolUrl(mainWindow);
+            currentMain = Option.some(mainWindow);
+          }),
+        } as unknown as DesktopWindow.DesktopWindow["Service"];
+
+        const clerk = yield* DesktopClerk.DesktopClerk;
+        yield* clerk.configure.pipe(
+          Effect.provideService(DesktopWindow.DesktopWindow, desktopWindow),
+        );
+
+        const older = "t3code-dev://app/sso-callback?state=old";
+        const newer = "t3code-dev://app/sso-callback?state=new";
+        listeners.get("open-url")?.({ preventDefault: vi.fn() }, older);
+        yield* Deferred.await(enteredCreate);
+        listeners.get("open-url")?.({ preventDefault: vi.fn() }, newer);
+        yield* Deferred.succeed(releaseCreate, undefined);
+        yield* Effect.promise(() =>
+          vi.waitFor(() => {
+            assert.deepEqual(loadURL.mock.calls, [[newer]]);
+          }),
+        );
+        assert.equal(takePendingDesktopProtocolUrl(), null);
+      }),
+    ).pipe(
+      Effect.provide(makeDesktopClerkLayer(true, [], "darwin")),
+      Effect.provideService(ElectronApp.ElectronApp, electronApp),
+      Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );
   });
 

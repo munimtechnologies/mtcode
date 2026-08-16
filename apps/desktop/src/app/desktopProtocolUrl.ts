@@ -15,10 +15,29 @@ export function extractDesktopProtocolUrl(argv: readonly string[], scheme: strin
   return found;
 }
 
+type DesktopProtocolWindowLoader = (url: string) => void;
+
+// DesktopWindow registers the loader that also updates the window's intended
+// URL, so development did-fail-load retries cannot replace a deep link with
+// the default home URL.
+const desktopProtocolWindowLoaders = new WeakMap<object, DesktopProtocolWindowLoader>();
+
+export function registerDesktopProtocolWindowLoader(
+  window: object,
+  load: DesktopProtocolWindowLoader,
+): void {
+  desktopProtocolWindowLoaders.set(window, load);
+}
+
 export function loadDesktopProtocolUrl(
   window: { readonly loadURL: (url: string) => unknown },
   url: string,
 ): void {
+  const load = desktopProtocolWindowLoaders.get(window);
+  if (load !== undefined) {
+    load(url);
+    return;
+  }
   void Promise.resolve(window.loadURL(url)).catch(() => undefined);
 }
 
