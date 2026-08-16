@@ -47,9 +47,9 @@ const openProjectViaDesktopOrLiveServer = Effect.fn("openProjectViaDesktopOrLive
     }
 
     yield* Console.error(
-      "Launched T3 Code desktop, but it did not become ready in time. Open the app and retry.",
+      "Launched T3 Code desktop, but it did not become ready in time. Falling back to the CLI server.",
     );
-    return true;
+    return false;
   },
 );
 

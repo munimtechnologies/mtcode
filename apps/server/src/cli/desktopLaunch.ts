@@ -38,6 +38,35 @@ const spawnOk = (command: string, args: ReadonlyArray<string>): boolean => {
   }
 };
 
+/** True only after the child has actually spawned; false on async launch errors. */
+const spawnDetachedOk = (command: string, args: ReadonlyArray<string> = []): Promise<boolean> =>
+  new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    let child: NodeChildProcess.ChildProcess;
+    try {
+      child = NodeChildProcess.spawn(command, [...args], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      finish(false);
+      return;
+    }
+
+    child.once("error", () => finish(false));
+    child.once("spawn", () => {
+      child.unref();
+      finish(true);
+    });
+  });
+
 /** Activate a running desktop app, or launch it if installed. */
 export const tryLaunchDesktopApp = Effect.fn("tryLaunchDesktopApp")(function* () {
   const platform = yield* HostProcessPlatform;
@@ -54,16 +83,8 @@ export const tryLaunchDesktopApp = Effect.fn("tryLaunchDesktopApp")(function* ()
   if (platform === "win32") {
     for (const exe of windowsDesktopExecutableCandidates()) {
       if (!NodeFS.existsSync(exe)) continue;
-      try {
-        const child = NodeChildProcess.spawn(exe, [], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        child.unref();
+      if (yield* Effect.promise(() => spawnDetachedOk(exe))) {
         return true;
-      } catch {
-        // try next candidate
       }
     }
     return false;
