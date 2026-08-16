@@ -252,9 +252,13 @@ interface ClaudeSessionContext {
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
-  currentPermissionMode: PermissionMode;
+  currentPermissionMode: PermissionMode | undefined;
+  targetPermissionMode: PermissionMode | undefined;
+  permissionControlGeneration: number;
   readonly queryReady: Deferred.Deferred<void>;
   currentApiModelId: string | undefined;
+  targetApiModelId: string | undefined;
+  modelControlGeneration: number;
   /** Effective effort for the session's turns; subagents without an explicit
    * effort override inherit this. */
   currentEffort: string | undefined;
@@ -291,8 +295,8 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly interrupt: () => Promise<void>;
   /** SDK Query.stopTask — present on real queries; optional for test doubles. */
   readonly stopTask?: (taskId: string) => Promise<void>;
-  readonly setModel: (model?: string) => Promise<void>;
-  readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
+  readonly setModel: (model?: string, signal?: AbortSignal) => Promise<void>;
+  readonly setPermissionMode: (mode: PermissionMode, signal?: AbortSignal) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
   readonly close: () => void;
@@ -3644,6 +3648,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) return;
 
     context.stopped = true;
+    context.permissionControlGeneration += 1;
+    context.modelControlGeneration += 1;
     yield* markQueryReady(context);
 
     for (const [requestId, pending] of context.pendingApprovals) {
@@ -3763,23 +3769,106 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       Effect.map((ready) => Option.isSome(ready) && !context.stopped),
     );
 
-  const applyQueryControl = Effect.fn("applyQueryControl")(function* (
-    threadId: ThreadId,
-    method: string,
-    run: () => Promise<void>,
-  ) {
+  const applyQueryControl = Effect.fn("applyQueryControl")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly method: string;
+    readonly nextGeneration: () => number;
+    readonly isCurrentGeneration: (generation: number) => boolean;
+    readonly run: (signal: AbortSignal) => Promise<void>;
+    readonly onApplied: () => void;
+    readonly reassert: () => Effect.Effect<void>;
+  }) {
+    const generation = input.nextGeneration();
+    const controller = new AbortController();
+    const request = input.run(controller.signal);
     const completed = yield* Effect.tryPromise({
-      try: run,
-      catch: (cause) => toRequestError(threadId, method, cause),
+      try: () => request,
+      catch: (cause) => toRequestError(input.threadId, input.method, cause),
     }).pipe(Effect.timeoutOption(QUERY_CONTROL_TIMEOUT));
     if (Option.isSome(completed)) {
-      return true;
+      if (input.isCurrentGeneration(generation)) {
+        input.onApplied();
+        return true;
+      }
+      return false;
     }
+    controller.abort();
     yield* Effect.logWarning("claude.turn.query-control-timeout", {
-      threadId,
-      method,
+      threadId: input.threadId,
+      method: input.method,
     });
+    // The SDK may still complete after abort. Reconcile so a late restore
+    // cannot leave a later plan turn running with bypass permissions.
+    yield* Effect.promise(() => request).pipe(
+      Effect.flatMap(() =>
+        Effect.suspend(() =>
+          input.isCurrentGeneration(generation) ? Effect.sync(input.onApplied) : input.reassert(),
+        ),
+      ),
+      Effect.ignore,
+      Effect.forkDetach,
+    );
     return false;
+  });
+
+  const reassertPermissionMode = Effect.fn("reassertPermissionMode")(function* (
+    context: ClaudeSessionContext,
+    threadId: ThreadId,
+  ) {
+    if (context.stopped) {
+      return;
+    }
+    const permission = context.targetPermissionMode;
+    if (permission === undefined) {
+      return;
+    }
+    const applied = yield* applyQueryControl({
+      threadId,
+      method: "turn/setPermissionMode",
+      nextGeneration: () => {
+        context.permissionControlGeneration += 1;
+        return context.permissionControlGeneration;
+      },
+      isCurrentGeneration: (generation) => generation === context.permissionControlGeneration,
+      run: (signal) => context.query.setPermissionMode(permission, signal),
+      onApplied: () => {
+        context.currentPermissionMode = permission;
+      },
+      reassert: () => reassertPermissionMode(context, threadId),
+    });
+    if (!applied) {
+      context.currentPermissionMode = undefined;
+    }
+  });
+
+  const reassertModel = Effect.fn("reassertModel")(function* (
+    context: ClaudeSessionContext,
+    threadId: ThreadId,
+  ) {
+    if (context.stopped) {
+      return;
+    }
+    const model = context.targetApiModelId;
+    if (model === undefined) {
+      return;
+    }
+    const applied = yield* applyQueryControl({
+      threadId,
+      method: "turn/setModel",
+      nextGeneration: () => {
+        context.modelControlGeneration += 1;
+        return context.modelControlGeneration;
+      },
+      isCurrentGeneration: (generation) => generation === context.modelControlGeneration,
+      run: (signal) => context.query.setModel(model, signal),
+      onApplied: () => {
+        context.currentApiModelId = model;
+      },
+      reassert: () => reassertModel(context, threadId),
+    });
+    if (!applied) {
+      context.currentApiModelId = undefined;
+    }
   });
 
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
@@ -4300,8 +4389,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         startedAt,
         basePermissionMode: permissionMode,
         currentPermissionMode: permissionMode ?? "default",
+        targetPermissionMode: permissionMode ?? "default",
+        permissionControlGeneration: 0,
         queryReady,
         currentApiModelId: apiModelId,
+        targetApiModelId: apiModelId,
+        modelControlGeneration: 0,
         currentEffort: effectiveEffort ?? undefined,
         resumeSessionId: sessionId,
         pendingApprovals,
@@ -4431,6 +4524,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     const nextApiModelId =
       modelSelection?.model !== undefined ? resolveClaudeApiModelId(modelSelection) : undefined;
+    if (nextApiModelId !== undefined) {
+      context.targetApiModelId = nextApiModelId;
+    }
     const needsModelUpdate =
       nextApiModelId !== undefined && context.currentApiModelId !== nextApiModelId;
     // "plan" maps to the SDK's plan permission mode; "default" restores the
@@ -4441,6 +4537,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         : input.interactionMode === "default"
           ? (context.basePermissionMode ?? "default")
           : undefined;
+    if (desiredPermissionMode !== undefined) {
+      context.targetPermissionMode = desiredPermissionMode;
+    }
     const needsPermissionUpdate =
       desiredPermissionMode !== undefined &&
       desiredPermissionMode !== context.currentPermissionMode;
@@ -4455,19 +4554,41 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
       if (queryReady) {
         if (needsModelUpdate && nextApiModelId !== undefined) {
-          const applied = yield* applyQueryControl(input.threadId, "turn/setModel", () =>
-            context.query.setModel(nextApiModelId),
-          );
-          if (applied) {
-            context.currentApiModelId = nextApiModelId;
+          const applied = yield* applyQueryControl({
+            threadId: input.threadId,
+            method: "turn/setModel",
+            nextGeneration: () => {
+              context.modelControlGeneration += 1;
+              return context.modelControlGeneration;
+            },
+            isCurrentGeneration: (generation) => generation === context.modelControlGeneration,
+            run: (signal) => context.query.setModel(nextApiModelId, signal),
+            onApplied: () => {
+              context.currentApiModelId = nextApiModelId;
+            },
+            reassert: () => reassertModel(context, input.threadId),
+          });
+          if (!applied) {
+            context.currentApiModelId = undefined;
           }
         }
         if (needsPermissionUpdate && desiredPermissionMode !== undefined) {
-          const applied = yield* applyQueryControl(input.threadId, "turn/setPermissionMode", () =>
-            context.query.setPermissionMode(desiredPermissionMode),
-          );
-          if (applied) {
-            context.currentPermissionMode = desiredPermissionMode;
+          const applied = yield* applyQueryControl({
+            threadId: input.threadId,
+            method: "turn/setPermissionMode",
+            nextGeneration: () => {
+              context.permissionControlGeneration += 1;
+              return context.permissionControlGeneration;
+            },
+            isCurrentGeneration: (generation) => generation === context.permissionControlGeneration,
+            run: (signal) => context.query.setPermissionMode(desiredPermissionMode, signal),
+            onApplied: () => {
+              context.currentPermissionMode = desiredPermissionMode;
+            },
+            reassert: () => reassertPermissionMode(context, input.threadId),
+          });
+          if (!applied) {
+            context.currentPermissionMode = undefined;
           }
         }
       } else {

@@ -61,6 +61,13 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public hangSetModel = false;
   public hangSetPermissionMode = false;
+  public ignorePermissionModeAbort = false;
+  public readonly permissionModeAborts: Array<PermissionMode> = [];
+  private readonly permissionModeWaiters: Array<{
+    readonly mode: PermissionMode;
+    readonly resolve: () => void;
+    readonly reject: (reason: unknown) => void;
+  }> = [];
   public closeCalls = 0;
 
   emit(message: SDKMessage): void {
@@ -105,19 +112,64 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.stopTaskCalls.push(taskId);
   };
 
-  readonly setModel = async (model?: string): Promise<void> => {
+  readonly setModel = async (model?: string, signal?: AbortSignal): Promise<void> => {
     this.setModelCalls.push(model);
     if (this.hangSetModel) {
-      await new Promise<void>(() => undefined);
+      await new Promise<void>((_resolve, reject) => {
+        if (signal?.aborted) {
+          reject(signal.reason ?? new Error("Aborted"));
+          return;
+        }
+        signal?.addEventListener(
+          "abort",
+          () => {
+            reject(signal.reason ?? new Error("Aborted"));
+          },
+          { once: true },
+        );
+      });
     }
   };
 
-  readonly setPermissionMode = async (mode: PermissionMode): Promise<void> => {
+  readonly setPermissionMode = async (
+    mode: PermissionMode,
+    signal?: AbortSignal,
+  ): Promise<void> => {
     this.setPermissionModeCalls.push(mode);
-    if (this.hangSetPermissionMode) {
-      await new Promise<void>(() => undefined);
+    if (!this.hangSetPermissionMode) {
+      return;
     }
+    await new Promise<void>((resolve, reject) => {
+      const waiter = { mode, resolve, reject };
+      const abort = () => {
+        this.permissionModeAborts.push(mode);
+        if (this.ignorePermissionModeAbort) {
+          return;
+        }
+        const index = this.permissionModeWaiters.indexOf(waiter);
+        if (index >= 0) {
+          this.permissionModeWaiters.splice(index, 1);
+        }
+        reject(signal?.reason ?? new Error("Aborted"));
+      };
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      signal?.addEventListener("abort", abort, { once: true });
+      this.permissionModeWaiters.push(waiter);
+    });
   };
+
+  resolveHungPermissionMode(mode?: PermissionMode): boolean {
+    const index =
+      mode === undefined
+        ? 0
+        : this.permissionModeWaiters.findIndex((waiter) => waiter.mode === mode);
+    const waiter = index >= 0 ? this.permissionModeWaiters.splice(index, 1)[0] : undefined;
+    waiter?.resolve();
+    return waiter !== undefined;
+  }
 
   readonly setMaxThinkingTokens = async (maxThinkingTokens: number | null): Promise<void> => {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
@@ -4209,11 +4261,91 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(String(turn.turnId).length > 0, true);
       assert.equal(turnStarted._tag, "Some");
       assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
+      assert.deepEqual(harness.query.permissionModeAborts, ["plan"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect(
+    "re-sends plan after a timed-out restore so a late bypass cannot skip the next plan turn",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "plan this",
+          interactionMode: "plan",
+          attachments: [],
+        });
+
+        const firstCompletedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.completed",
+        ).pipe(Stream.runHead, Effect.forkChild);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: "sdk-session-late-restore",
+          uuid: "result-plan",
+        } as unknown as SDKMessage);
+        yield* Fiber.join(firstCompletedFiber);
+
+        harness.query.hangSetPermissionMode = true;
+        harness.query.ignorePermissionModeAbort = true;
+        const restoreFiber = yield* adapter
+          .sendTurn({
+            threadId: THREAD_ID,
+            input: "now do it",
+            interactionMode: "default",
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+        yield* TestClock.adjust("5 seconds");
+        yield* Fiber.join(restoreFiber);
+
+        harness.query.hangSetPermissionMode = false;
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "plan again",
+          interactionMode: "plan",
+          attachments: [],
+        });
+
+        assert.deepEqual(harness.query.setPermissionModeCalls, [
+          "plan",
+          "bypassPermissions",
+          "plan",
+        ]);
+
+        assert.equal(harness.query.resolveHungPermissionMode("bypassPermissions"), true);
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+
+        assert.deepEqual(harness.query.setPermissionModeCalls, [
+          "plan",
+          "bypassPermissions",
+          "plan",
+          "plan",
+        ]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("captures ExitPlanMode as a proposed plan and denies auto-exit", () => {
     const harness = makeHarness();
