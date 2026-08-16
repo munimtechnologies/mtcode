@@ -847,6 +847,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     providers: providerStatuses,
     selectedProvider,
     selectedInstanceId,
+    preserveExistingThreadModel: routeKind === "server",
     threadModelSelection: activeThreadModelSelection,
     projectModelSelection: activeProjectDefaultModelSelection,
     settings,
