@@ -501,7 +501,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         yield* runCliWithRuntime([
           "project",
           "relink",
-          addedProject?.id ?? "",
+          workspaceRoot,
           relinkedWorkspaceRoot,
           "--base-dir",
           baseDir,

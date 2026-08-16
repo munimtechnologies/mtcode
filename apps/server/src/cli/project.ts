@@ -277,6 +277,19 @@ const findActiveProjectTarget = Effect.fn("findActiveProjectTarget")(function* (
     } satisfies ProjectMutationTarget;
   }
 
+  // A relink may be the first command run after the workspace moved, so the
+  // stored root can be valid project identity even though it no longer exists.
+  const staleWorkspaceRootMatch = activeProjects.find(
+    (project) => project.workspaceRoot === trimmedIdentifier,
+  );
+  if (staleWorkspaceRootMatch) {
+    return {
+      id: staleWorkspaceRootMatch.id,
+      title: staleWorkspaceRootMatch.title,
+      workspaceRoot: staleWorkspaceRootMatch.workspaceRoot,
+    } satisfies ProjectMutationTarget;
+  }
+
   const normalizedWorkspaceRootResult = yield* Effect.result(
     normalizeWorkspaceRootForProjectCommand(trimmedIdentifier),
   );
