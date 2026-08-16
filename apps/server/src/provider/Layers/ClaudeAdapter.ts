@@ -277,6 +277,7 @@ interface ClaudeSessionContext {
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
+  currentPermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
   /** Effective effort for the session's turns; subagents without an explicit
    * effort override inherit this. */
@@ -3865,19 +3866,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       sessionId: _ignoredSessionId,
       resume: _ignoredResume,
       resumeSessionAt: _ignoredResumeSessionAt,
+      allowDangerouslySkipPermissions: _ignoredSkip,
       ...baseQueryOptions
     } = context.queryOptions;
-    const nextOptions: ClaudeQueryOptions =
-      pinnedLastAssistantUuid && pinnedResumeSessionId
+    const liveModelId = context.currentApiModelId;
+    const livePermissionMode = context.currentPermissionMode;
+    const nextOptions: ClaudeQueryOptions = {
+      ...baseQueryOptions,
+      ...(liveModelId !== undefined ? { model: liveModelId } : {}),
+      ...(livePermissionMode !== undefined ? { permissionMode: livePermissionMode } : {}),
+      ...(livePermissionMode === "bypassPermissions"
+        ? { allowDangerouslySkipPermissions: true }
+        : {}),
+      ...(pinnedLastAssistantUuid && pinnedResumeSessionId
         ? {
-            ...baseQueryOptions,
             resume: pinnedResumeSessionId,
             resumeSessionAt: pinnedLastAssistantUuid,
           }
         : {
-            ...baseQueryOptions,
             sessionId: yield* randomUUIDv4,
-          };
+          }),
+    };
     if (nextOptions.sessionId) {
       context.resumeSessionId = nextOptions.sessionId;
     }
@@ -4424,6 +4433,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
+        currentPermissionMode: permissionMode,
         currentApiModelId: apiModelId,
         currentEffort: effectiveEffort ?? undefined,
         resumeSessionId: sessionId,
@@ -4531,6 +4541,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         context.currentApiModelId = apiModelId;
       }
+      context.queryOptions = {
+        ...context.queryOptions,
+        model: apiModelId,
+      };
       context.session = {
         ...context.session,
         model: modelSelection.model,
@@ -4553,11 +4567,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
+      context.currentPermissionMode = "plan";
+      context.queryOptions = {
+        ...context.queryOptions,
+        permissionMode: "plan",
+      };
     } else if (input.interactionMode === "default") {
+      const restoredPermissionMode = context.basePermissionMode ?? "default";
       yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode(context.basePermissionMode ?? "default"),
+        try: () => context.query.setPermissionMode(restoredPermissionMode),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
+      context.currentPermissionMode = restoredPermissionMode;
+      context.queryOptions = {
+        ...context.queryOptions,
+        permissionMode: restoredPermissionMode,
+        ...(restoredPermissionMode === "bypassPermissions"
+          ? { allowDangerouslySkipPermissions: true }
+          : {}),
+      };
     }
 
     const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);

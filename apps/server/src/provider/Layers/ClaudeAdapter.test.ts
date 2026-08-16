@@ -3995,6 +3995,79 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("replaceQueryAfterRollback keeps mid-session model and permission mode", () => {
+    const harness = makeHarness();
+    const durableSessionId = "550e8400-e29b-41d4-a716-446655440333";
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "first",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        interactionMode: "plan",
+        attachments: [],
+      });
+      const firstCompletedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runHead, Effect.forkChild);
+      emitSuccessfulTurn(harness, {
+        sessionId: durableSessionId,
+        assistantUuid: "assistant-keep-options",
+        resultUuid: "result-keep-options",
+      });
+      yield* Fiber.join(firstCompletedFiber);
+      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]"]);
+      assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "second",
+        attachments: [],
+      });
+      const secondCompletedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runHead, Effect.forkChild);
+      emitSuccessfulTurn(harness, {
+        sessionId: durableSessionId,
+        assistantUuid: "assistant-revert-options",
+        resultUuid: "result-revert-options",
+      });
+      yield* Fiber.join(secondCompletedFiber);
+
+      yield* adapter.rollbackThread(session.threadId, 1);
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "after revert",
+        attachments: [],
+      });
+
+      const restarted = harness.getLastCreateQueryInput();
+      assert.equal(restarted?.options.resumeSessionAt, "assistant-keep-options");
+      assert.equal(restarted?.options.model, "claude-opus-4-6[1m]");
+      assert.equal(restarted?.options.permissionMode, "plan");
+      assert.equal(restarted?.options.allowDangerouslySkipPermissions, undefined);
+      // Recreated query already has the mid-session options; sendTurn must
+      // not skip-apply by assuming the new process inherited them implicitly.
+      assert.deepEqual(harness.query.setModelCalls, []);
+      assert.deepEqual(harness.query.setPermissionModeCalls, []);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("restarts a fresh Claude query after rollback when no assistant uuid remains", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
