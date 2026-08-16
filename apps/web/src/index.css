@@ -1603,7 +1603,8 @@ code {
   margin: 0.65rem 0;
 }
 
-.chat-markdown .katex-display {
+.chat-markdown .katex-display,
+.chat-markdown :not(.katex-display) > .katex {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1613,9 +1614,6 @@ code {
 
 .chat-markdown :not(.katex-display) > .katex {
   display: inline-block;
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
   vertical-align: middle;
 }
 
@@ -1623,11 +1621,13 @@ code {
   text-align: left;
 }
 
-.chat-markdown .katex-display::-webkit-scrollbar {
+.chat-markdown .katex-display::-webkit-scrollbar,
+.chat-markdown :not(.katex-display) > .katex::-webkit-scrollbar {
   height: 7px;
 }
 
-.chat-markdown .katex-display::-webkit-scrollbar-thumb {
+.chat-markdown .katex-display::-webkit-scrollbar-thumb,
+.chat-markdown :not(.katex-display) > .katex::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: color-mix(in srgb, var(--border) 78%, transparent);
 }
