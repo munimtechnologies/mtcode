@@ -452,6 +452,7 @@ function collapseDerivedWorkLogEntries(
   // Subagent rows collapse by identity, not adjacency (quiet-timeline
   // guarantee; mirrors web's session-logic).
   const taskRowIndex = new Map<string, number>();
+  const toolRowIndex = new Map<string, number>();
   for (const entry of entries) {
     const isTaskRow =
       entry.taskId !== undefined &&
@@ -468,12 +469,32 @@ function collapseDerivedWorkLogEntries(
       collapsed.push(entry);
       continue;
     }
+    // Late tool_result after completeTurn force-completes every in-flight
+    // tool is not adjacent to its row. Merge by toolCallId, not adjacency.
+    const toolCallId =
+      entry.activityKind === "tool.updated" || entry.activityKind === "tool.completed"
+        ? entry.toolCallId
+        : undefined;
+    if (toolCallId !== undefined) {
+      const existingIndex = toolRowIndex.get(toolCallId);
+      if (existingIndex !== undefined) {
+        collapsed[existingIndex] = mergeDerivedWorkLogEntries(collapsed[existingIndex]!, entry);
+        continue;
+      }
+    }
     const previous = collapsed.at(-1);
     if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
-      collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
+      const merged = mergeDerivedWorkLogEntries(previous, entry);
+      collapsed[collapsed.length - 1] = merged;
+      if (merged.toolCallId !== undefined) {
+        toolRowIndex.set(merged.toolCallId, collapsed.length - 1);
+      }
       continue;
     }
     collapsed.push(entry);
+    if (toolCallId !== undefined) {
+      toolRowIndex.set(toolCallId, collapsed.length - 1);
+    }
   }
   return collapsed;
 }

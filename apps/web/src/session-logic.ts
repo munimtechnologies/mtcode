@@ -943,6 +943,7 @@ function collapseDerivedWorkLogEntries(
   // contains or how their progress rows interleave (quiet-timeline
   // guarantee).
   const spawnRowIndex = new Map<string, number>();
+  const toolRowIndex = new Map<string, number>();
   // Batch membership is decided once, at the FIRST row seen for a taskId.
   // Claude background subagents settle between turns, so their completion
   // rows carry fresh synthetic turn ids (or none) — keying each row by its
@@ -993,12 +994,32 @@ function collapseDerivedWorkLogEntries(
       });
       continue;
     }
+    // Late tool_result after completeTurn force-completes every in-flight
+    // tool is not adjacent to its row. Merge by toolCallId, not adjacency.
+    const toolCallId =
+      entry.activityKind === "tool.updated" || entry.activityKind === "tool.completed"
+        ? entry.toolCallId
+        : undefined;
+    if (toolCallId !== undefined) {
+      const existingIndex = toolRowIndex.get(toolCallId);
+      if (existingIndex !== undefined) {
+        collapsed[existingIndex] = mergeDerivedWorkLogEntries(collapsed[existingIndex]!, entry);
+        continue;
+      }
+    }
     const previous = collapsed.at(-1);
     if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
-      collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
+      const merged = mergeDerivedWorkLogEntries(previous, entry);
+      collapsed[collapsed.length - 1] = merged;
+      if (merged.toolCallId !== undefined) {
+        toolRowIndex.set(merged.toolCallId, collapsed.length - 1);
+      }
       continue;
     }
     collapsed.push(entry);
+    if (toolCallId !== undefined) {
+      toolRowIndex.set(toolCallId, collapsed.length - 1);
+    }
   }
   return collapsed;
 }
