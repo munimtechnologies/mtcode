@@ -1710,7 +1710,11 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             {contentMatch ? (
               <span className="truncate text-xs text-muted-foreground/85">
                 <span
-                  className={contentMatch.source === "user" ? "text-blue-400" : "text-emerald-400"}
+                  className={
+                    contentMatch.source === "user"
+                      ? "text-blue-600 dark:text-blue-400"
+                      : "text-emerald-600 dark:text-emerald-400"
+                  }
                 >
                   {contentMatch.source === "user" ? "You:" : "Agent:"}
                 </span>{" "}
