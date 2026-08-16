@@ -606,17 +606,14 @@ export function PullRequestDetailPanel({
           currentAppliedSnapshot.revision,
           observedSnapshot,
         );
-  const codeTabSnapshot = useMemo(
-    () =>
-      currentAppliedSnapshot === null || codeTabDetail === null
-        ? null
-        : {
-            detail: codeTabDetail,
-            version: currentAppliedSnapshot.version,
-            firstPageDiff: currentAppliedSnapshot.firstPageDiff,
-          },
-    [codeTabDetail, currentAppliedSnapshot],
-  );
+  const codeTabSnapshot =
+    currentAppliedSnapshot === null || codeTabDetail === null
+      ? null
+      : {
+          detail: codeTabDetail,
+          version: currentAppliedSnapshot.version,
+          firstPageDiff: currentAppliedSnapshot.firstPageDiff,
+        };
   const displayDetail = tab === "code" ? (codeTabDetail ?? detail) : detail;
   const coordinatorRef = useRef<ReturnType<
     typeof createPullRequestDiffRefreshCoordinator<PullRequestDetailView, PullRequestDiffResult>
