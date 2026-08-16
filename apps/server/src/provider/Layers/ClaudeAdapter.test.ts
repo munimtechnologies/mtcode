@@ -59,6 +59,8 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public hangSetModel = false;
+  public hangSetPermissionMode = false;
   public closeCalls = 0;
 
   emit(message: SDKMessage): void {
@@ -105,10 +107,16 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   readonly setModel = async (model?: string): Promise<void> => {
     this.setModelCalls.push(model);
+    if (this.hangSetModel) {
+      await new Promise<void>(() => undefined);
+    }
   };
 
   readonly setPermissionMode = async (mode: PermissionMode): Promise<void> => {
     this.setPermissionModeCalls.push(mode);
+    if (this.hangSetPermissionMode) {
+      await new Promise<void>(() => undefined);
+    }
   };
 
   readonly setMaxThinkingTokens = async (maxThinkingTokens: number | null): Promise<void> => {
@@ -162,7 +170,7 @@ function makeHarness(config?: {
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
 }) {
-  const query = new FakeClaudeQuery();
+  let query = new FakeClaudeQuery();
   let createInput:
     | {
         readonly prompt: AsyncIterable<SDKUserMessage>;
@@ -174,6 +182,7 @@ function makeHarness(config?: {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
     createQuery: (input) => {
       createInput = input;
+      query = new FakeClaudeQuery();
       return query;
     },
     ...(config?.nativeEventLogger
@@ -205,7 +214,9 @@ function makeHarness(config?: {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     ),
-    query,
+    get query() {
+      return query;
+    },
     getLastCreateQueryInput: () => createInput,
   };
 }
@@ -271,6 +282,33 @@ async function readFirstPromptMessage(
 
 const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
+const RESUME_SESSION_ID = "550e8400-e29b-41d4-a716-446655440000";
+const RESUME_CURSOR = {
+  threadId: "resume-thread-1",
+  resume: RESUME_SESSION_ID,
+  resumeSessionAt: "assistant-99",
+  turnCount: 3,
+} as const;
+
+function emitClaudeInit(query: FakeClaudeQuery, sessionId = RESUME_SESSION_ID): void {
+  query.emit({
+    type: "system",
+    subtype: "init",
+    apiKeySource: "none",
+    claude_code_version: "test",
+    cwd: "/tmp/claude-adapter-test",
+    tools: [],
+    mcp_servers: [],
+    model: "claude-sonnet-4-5",
+    permissionMode: "bypassPermissions",
+    slash_commands: [],
+    output_style: "default",
+    skills: [],
+    plugins: [],
+    session_id: sessionId,
+    uuid: "resume-init",
+  } as unknown as SDKMessage);
+}
 
 describe("ClaudeAdapterLive", () => {
   it.effect("returns validation error for non-claude provider on startSession", () => {
@@ -4016,6 +4054,161 @@ describe("ClaudeAdapterLive", () => {
       });
 
       assert.deepEqual(harness.query.setPermissionModeCalls, []);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "starts a turn after idle session.exited without waiting on a hung setPermissionMode",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const turnStartedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.started",
+        ).pipe(Stream.runHead, Effect.forkChild);
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        yield* adapter.stopSession(THREAD_ID);
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          resumeCursor: RESUME_CURSOR,
+          runtimeMode: "full-access",
+        });
+        harness.query.hangSetPermissionMode = true;
+        const turn = yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "after idle",
+          interactionMode: "default",
+          attachments: [],
+        });
+
+        const turnStarted = yield* Fiber.join(turnStartedFiber);
+        assert.equal(turnStarted._tag, "Some");
+        if (turnStarted._tag === "Some" && turnStarted.value.type === "turn.started") {
+          assert.equal(String(turnStarted.value.turnId), String(turn.turnId));
+        }
+        assert.deepEqual(harness.query.setPermissionModeCalls, []);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "skips setPermissionMode on startSession + immediate sendTurn when the query is not ready",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const turnStartedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.started",
+        ).pipe(Stream.runHead, Effect.forkChild);
+
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          resumeCursor: RESUME_CURSOR,
+          runtimeMode: "full-access",
+        });
+        harness.query.hangSetPermissionMode = true;
+        const turnFiber = yield* adapter
+          .sendTurn({
+            threadId: RESUME_THREAD_ID,
+            input: "plan this",
+            interactionMode: "plan",
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+
+        yield* TestClock.adjust("5 seconds");
+        const turn = yield* Fiber.join(turnFiber);
+        const turnStarted = yield* Fiber.join(turnStartedFiber);
+
+        assert.equal(String(turn.turnId).length > 0, true);
+        assert.equal(turnStarted._tag, "Some");
+        if (turnStarted._tag === "Some") {
+          assert.equal(turnStarted.value.type, "turn.started");
+        }
+        assert.deepEqual(harness.query.setPermissionModeCalls, []);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("sets permission mode on an in-session sendTurn after the query becomes usable", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: RESUME_CURSOR,
+        runtimeMode: "full-access",
+      });
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      emitClaudeInit(harness.query);
+      yield* Stream.take(adapter.streamEvents, 1).pipe(Stream.runDrain);
+
+      yield* adapter.sendTurn({
+        threadId: RESUME_THREAD_ID,
+        input: "plan this",
+        interactionMode: "plan",
+        attachments: [],
+      });
+
+      assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("times out a hung in-session setPermissionMode and still starts the turn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const turnStartedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.started",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      harness.query.hangSetPermissionMode = true;
+      const turnFiber = yield* adapter
+        .sendTurn({
+          threadId: THREAD_ID,
+          input: "plan this",
+          interactionMode: "plan",
+          attachments: [],
+        })
+        .pipe(Effect.forkChild);
+
+      yield* TestClock.adjust("5 seconds");
+      const turn = yield* Fiber.join(turnFiber);
+      const turnStarted = yield* Fiber.join(turnStartedFiber);
+
+      assert.equal(String(turn.turnId).length > 0, true);
+      assert.equal(turnStarted._tag, "Some");
+      assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
