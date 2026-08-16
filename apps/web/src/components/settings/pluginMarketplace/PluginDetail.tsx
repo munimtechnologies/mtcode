@@ -66,7 +66,7 @@ import { HarnessIcon, HarnessSupportBadges, PluginLogo } from "./PluginMarketpla
 
 function LoadingPlugin() {
   return (
-    <SettingsPageContainer className="max-w-5xl gap-10">
+    <SettingsPageContainer className="max-w-4xl gap-10">
       <Skeleton className="h-8 w-24" />
       <div className="flex items-start gap-4">
         <Skeleton className="size-16 rounded-2xl" />

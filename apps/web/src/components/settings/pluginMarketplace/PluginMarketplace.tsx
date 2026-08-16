@@ -41,7 +41,8 @@ import {
   type MarketplaceKindFilter,
 } from "~/pluginMarketplace/filter";
 import { usePluginMarketplaceStore } from "~/pluginMarketplace/store";
-import { SettingsPageContainer } from "../settingsLayout";
+import { searchableSetting } from "../settingsSearch";
+import { SettingsPageContainer, SettingsSection } from "../settingsLayout";
 import { HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
 
 const KIND_FILTERS: ReadonlyArray<{
@@ -374,45 +375,50 @@ export function PluginMarketplace() {
         </div>
       </header>
 
-      {status === "idle" || status === "loading" ? <LoadingMarketplace /> : null}
-      {status === "error" ? (
-        <Empty className="min-h-64 border border-dashed border-foreground/10">
-          <EmptyMedia variant="icon">
-            <PackageOpenIcon />
-          </EmptyMedia>
-          <EmptyHeader>
-            <EmptyTitle>Plugin marketplaces are unavailable</EmptyTitle>
-            <EmptyDescription>{error}</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void loadCatalog(true).catch(() => undefined)}
-            >
-              <RefreshCwIcon />
-              Try again
-            </Button>
-          </EmptyContent>
-        </Empty>
-      ) : null}
-      {status === "ready" ? (
-        <>
-          {error ? (
-            <p
-              className="rounded-lg border border-warning/32 bg-warning-surface px-3 py-2 text-warning-foreground text-sm"
-              role="alert"
-            >
-              Showing cached plugin data because the latest refresh failed: {error}
-            </p>
-          ) : null}
-          <MarketplaceResults
-            plugins={filteredPlugins}
-            filtered={isFiltered}
-            onSelectCategory={setCategory}
-          />
-        </>
-      ) : null}
+      <SettingsSection
+        {...searchableSetting("plugin-marketplace")}
+        className="space-y-0 [&>div:first-child]:hidden [&>div:last-child]:space-y-10"
+      >
+        {status === "idle" || status === "loading" ? <LoadingMarketplace /> : null}
+        {status === "error" ? (
+          <Empty className="min-h-64 border border-dashed border-foreground/10">
+            <EmptyMedia variant="icon">
+              <PackageOpenIcon />
+            </EmptyMedia>
+            <EmptyHeader>
+              <EmptyTitle>Plugin marketplaces are unavailable</EmptyTitle>
+              <EmptyDescription>{error}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void loadCatalog(true).catch(() => undefined)}
+              >
+                <RefreshCwIcon />
+                Try again
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : null}
+        {status === "ready" ? (
+          <>
+            {error ? (
+              <p
+                className="rounded-lg border border-warning/32 bg-warning-surface px-3 py-2 text-warning-foreground text-sm"
+                role="alert"
+              >
+                Showing cached plugin data because the latest refresh failed: {error}
+              </p>
+            ) : null}
+            <MarketplaceResults
+              plugins={filteredPlugins}
+              filtered={isFiltered}
+              onSelectCategory={setCategory}
+            />
+          </>
+        ) : null}
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }
