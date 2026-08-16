@@ -21,6 +21,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
@@ -231,6 +232,12 @@ interface OpenCodeSessionContext {
   readonly pendingQuestions: Map<string, QuestionRequest>;
   /** False once teardown starts so the event pump cannot open new requests. */
   readonly acceptingRequests: Ref.Ref<boolean>;
+  /**
+   * Serializes `permission.asked` / `question.asked` against pending settlement
+   * so an in-flight asked handler cannot emit `request.opened` after teardown
+   * has already cancelled the same id.
+   */
+  readonly pendingGate: Semaphore.Semaphore;
   readonly messageRoleById: Map<string, "user" | "assistant">;
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
@@ -644,46 +651,48 @@ export function makeOpenCodeAdapter(
       Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
 
     const settleOpenCodePendingAsCancelled = (context: OpenCodeSessionContext) =>
-      Effect.gen(function* () {
-        yield* Ref.set(context.acceptingRequests, false);
-        const permissions = [...context.pendingPermissions.entries()];
-        yield* Effect.forEach(
-          permissions,
-          ([requestId, request]) =>
-            Effect.gen(function* () {
-              yield* emit({
-                ...(yield* buildEventBase({
-                  threadId: context.session.threadId,
-                  requestId,
-                })),
-                type: "request.resolved",
-                payload: {
-                  requestType: mapPermissionToRequestType(request.permission),
-                  decision: "cancel",
-                },
-              });
-              context.pendingPermissions.delete(requestId);
-            }),
-          { discard: true },
-        );
-        const questions = [...context.pendingQuestions.keys()];
-        yield* Effect.forEach(
-          questions,
-          (requestId) =>
-            Effect.gen(function* () {
-              yield* emit({
-                ...(yield* buildEventBase({
-                  threadId: context.session.threadId,
-                  requestId,
-                })),
-                type: "user-input.resolved",
-                payload: { answers: {} },
-              });
-              context.pendingQuestions.delete(requestId);
-            }),
-          { discard: true },
-        );
-      });
+      context.pendingGate.withPermits(1)(
+        Effect.gen(function* () {
+          yield* Ref.set(context.acceptingRequests, false);
+          const permissions = [...context.pendingPermissions.entries()];
+          yield* Effect.forEach(
+            permissions,
+            ([requestId, request]) =>
+              Effect.gen(function* () {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    requestId,
+                  })),
+                  type: "request.resolved",
+                  payload: {
+                    requestType: mapPermissionToRequestType(request.permission),
+                    decision: "cancel",
+                  },
+                });
+                context.pendingPermissions.delete(requestId);
+              }),
+            { discard: true },
+          );
+          const questions = [...context.pendingQuestions.keys()];
+          yield* Effect.forEach(
+            questions,
+            (requestId) =>
+              Effect.gen(function* () {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    requestId,
+                  })),
+                  type: "user-input.resolved",
+                  payload: { answers: {} },
+                });
+                context.pendingQuestions.delete(requestId);
+              }),
+            { discard: true },
+          );
+        }),
+      );
 
     // Layer-level finalizer: when the adapter layer shuts down, settle every
     // pending request then stop the session. Each session's `Scope.close`
@@ -1006,40 +1015,44 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.asked": {
-          if (!(yield* Ref.get(context.acceptingRequests))) {
-            yield* emit({
-              ...(yield* buildEventBase({
-                threadId: context.session.threadId,
-                turnId,
-                requestId: event.properties.id,
-                raw: event,
-              })),
-              type: "request.resolved",
-              payload: {
-                requestType: mapPermissionToRequestType(event.properties.permission),
-                decision: "cancel",
-              },
-            });
-            break;
-          }
-          context.pendingPermissions.set(event.properties.id, event.properties);
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId: context.session.threadId,
-              turnId,
-              requestId: event.properties.id,
-              raw: event,
-            })),
-            type: "request.opened",
-            payload: {
-              requestType: mapPermissionToRequestType(event.properties.permission),
-              detail:
-                event.properties.patterns.length > 0
-                  ? event.properties.patterns.join("\n")
-                  : event.properties.permission,
-              args: event.properties.metadata,
-            },
-          });
+          yield* context.pendingGate.withPermits(1)(
+            Effect.gen(function* () {
+              if (!(yield* Ref.get(context.acceptingRequests))) {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    turnId,
+                    requestId: event.properties.id,
+                    raw: event,
+                  })),
+                  type: "request.resolved",
+                  payload: {
+                    requestType: mapPermissionToRequestType(event.properties.permission),
+                    decision: "cancel",
+                  },
+                });
+                return;
+              }
+              context.pendingPermissions.set(event.properties.id, event.properties);
+              yield* emit({
+                ...(yield* buildEventBase({
+                  threadId: context.session.threadId,
+                  turnId,
+                  requestId: event.properties.id,
+                  raw: event,
+                })),
+                type: "request.opened",
+                payload: {
+                  requestType: mapPermissionToRequestType(event.properties.permission),
+                  detail:
+                    event.properties.patterns.length > 0
+                      ? event.properties.patterns.join("\n")
+                      : event.properties.permission,
+                  args: event.properties.metadata,
+                },
+              });
+            }),
+          );
           break;
         }
 
@@ -1062,32 +1075,36 @@ export function makeOpenCodeAdapter(
         }
 
         case "question.asked": {
-          if (!(yield* Ref.get(context.acceptingRequests))) {
-            yield* emit({
-              ...(yield* buildEventBase({
-                threadId: context.session.threadId,
-                turnId,
-                requestId: event.properties.id,
-                raw: event,
-              })),
-              type: "user-input.resolved",
-              payload: { answers: {} },
-            });
-            break;
-          }
-          context.pendingQuestions.set(event.properties.id, event.properties);
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId: context.session.threadId,
-              turnId,
-              requestId: event.properties.id,
-              raw: event,
-            })),
-            type: "user-input.requested",
-            payload: {
-              questions: normalizeQuestionRequest(event.properties),
-            },
-          });
+          yield* context.pendingGate.withPermits(1)(
+            Effect.gen(function* () {
+              if (!(yield* Ref.get(context.acceptingRequests))) {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    turnId,
+                    requestId: event.properties.id,
+                    raw: event,
+                  })),
+                  type: "user-input.resolved",
+                  payload: { answers: {} },
+                });
+                return;
+              }
+              context.pendingQuestions.set(event.properties.id, event.properties);
+              yield* emit({
+                ...(yield* buildEventBase({
+                  threadId: context.session.threadId,
+                  turnId,
+                  requestId: event.properties.id,
+                  raw: event,
+                })),
+                type: "user-input.requested",
+                payload: {
+                  questions: normalizeQuestionRequest(event.properties),
+                },
+              });
+            }),
+          );
           break;
         }
 
@@ -1475,6 +1492,7 @@ export function makeOpenCodeAdapter(
           pendingPermissions: new Map(),
           pendingQuestions: new Map(),
           acceptingRequests: yield* Ref.make(true),
+          pendingGate: yield* Semaphore.make(1),
           partById: new Map(),
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
