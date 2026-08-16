@@ -186,6 +186,86 @@ const makeTestPreviewWebContents = (
     capturePage,
   }) as never;
 
+const SNAPSHOT_PAGE = {
+  url: "https://example.com",
+  title: "Example",
+  loading: false,
+  visibleText: "Hello",
+  interactiveElements: [],
+};
+
+const makeSnapshotImage = () => {
+  const image = {
+    getSize: () => ({ width: 800, height: 600 }),
+    resize: vi.fn(() => image),
+    toPNG: () => Buffer.from("png"),
+  };
+  return image;
+};
+
+const makeAutomationWebContents = (options?: {
+  readonly capturePage?: () => Promise<ReturnType<typeof makeSnapshotImage>>;
+  readonly id?: number;
+}) => {
+  const debuggerListeners = new Map<string, (...args: never[]) => void>();
+  let attached = false;
+  const attach = vi.fn(() => {
+    attached = true;
+  });
+  const detach = vi.fn(() => {
+    attached = false;
+    debuggerListeners.get("detach")?.();
+  });
+  const sendCommand = vi.fn(async (method: string) => {
+    if (method === "Runtime.evaluate") {
+      return { result: { value: SNAPSHOT_PAGE } };
+    }
+    if (method === "Accessibility.getFullAXTree") {
+      return { nodes: [] };
+    }
+    return undefined;
+  });
+  const capturePage = options?.capturePage ?? (async () => makeSnapshotImage());
+  const webContents = {
+    id: options?.id ?? 42,
+    isDestroyed: () => false,
+    isDevToolsOpened: () => false,
+    getType: () => "webview",
+    getURL: () => "https://example.com",
+    getTitle: () => "Example",
+    isLoading: () => false,
+    getZoomFactor: () => 1,
+    setZoomFactor: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
+    ipc: { on: vi.fn(), off: vi.fn() },
+    send: webviewSend,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    setWindowOpenHandler: vi.fn(),
+    debugger: {
+      isAttached: () => attached,
+      attach,
+      detach,
+      sendCommand,
+      on: vi.fn((event: string, listener: (...args: never[]) => void) => {
+        debuggerListeners.set(event, listener);
+      }),
+      off: vi.fn((event: string) => {
+        debuggerListeners.delete(event);
+      }),
+    },
+    capturePage: vi.fn(capturePage),
+  };
+  return {
+    attach,
+    detach,
+    debuggerListeners,
+    sendCommand,
+    webContents: webContents as never,
+    capturePage: webContents.capturePage,
+  };
+};
+
 const TEST_FAVICON = "data:image/png;base64,cG5n";
 
 const makeSourcePng = (width = 1, height = 1): Buffer => {
@@ -2735,6 +2815,115 @@ describe("PreviewManager", () => {
           detailLength: text.length,
           cause: exceptionDetails,
         });
+      }),
+    ),
+  );
+
+  effectIt.effect("does not detach a live tab when the same webview re-registers", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeAutomationWebContents();
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_leave_reregister");
+        yield* manager.registerWebview("tab_leave_reregister", 42);
+        yield* Effect.yieldNow;
+        const attachesAfterRegister = preview.attach.mock.calls.length;
+        expect(attachesAfterRegister).toBeGreaterThan(0);
+
+        yield* manager.registerWebview("tab_leave_reregister", 42);
+        yield* Effect.yieldNow;
+
+        expect(preview.detach).not.toHaveBeenCalled();
+        expect(preview.attach).toHaveBeenCalledTimes(attachesAfterRegister);
+
+        const snapshot = yield* manager.automationSnapshot("tab_leave_reregister");
+        expect(snapshot).toMatchObject(SNAPSHOT_PAGE);
+        expect(preview.capturePage).toHaveBeenCalledOnce();
+        expect(preview.detach).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect(
+    "restores the control session on the next snapshot after a hidden-tab detach",
+    () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const preview = makeAutomationWebContents();
+          fromId.mockReturnValue(preview.webContents);
+
+          yield* manager.createTab("tab_leave_reattach");
+          yield* manager.registerWebview("tab_leave_reattach", 42);
+          yield* Effect.yieldNow;
+          const attachesAfterRegister = preview.attach.mock.calls.length;
+
+          preview.debuggerListeners.get("detach")?.();
+          yield* Effect.yieldNow;
+
+          const snapshot = yield* manager.automationSnapshot("tab_leave_reattach");
+          expect(snapshot).toMatchObject(SNAPSHOT_PAGE);
+          expect(preview.attach.mock.calls.length).toBeGreaterThan(attachesAfterRegister);
+          expect(preview.capturePage).toHaveBeenCalledOnce();
+        }),
+      ),
+  );
+
+  effectIt.effect("retries snapshot after UnknownVizError by restoring the control session", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeAutomationWebContents();
+        preview.capturePage.mockRejectedValueOnce(new Error("UnknownVizError"));
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_viz_retry");
+        yield* manager.registerWebview("tab_viz_retry", 42);
+        yield* Effect.yieldNow;
+        const attachesAfterRegister = preview.attach.mock.calls.length;
+
+        const snapshot = yield* manager.automationSnapshot("tab_viz_retry");
+        expect(snapshot).toMatchObject(SNAPSHOT_PAGE);
+        expect(preview.capturePage).toHaveBeenCalledTimes(2);
+        expect(preview.attach.mock.calls.length).toBeGreaterThan(attachesAfterRegister);
+      }),
+    ),
+  );
+
+  effectIt.effect("fails a hung snapshot quickly instead of waiting minutes", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeAutomationWebContents({
+          capturePage: () => new Promise(() => undefined),
+        });
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_viz_timeout");
+        yield* manager.registerWebview("tab_viz_timeout", 42);
+        yield* Effect.yieldNow;
+
+        const fiber = yield* manager
+          .automationSnapshot("tab_viz_timeout")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS);
+        const exit = yield* Fiber.await(fiber);
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isSuccess(exit)) return;
+        const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
+        expect(PreviewManager.isPreviewOperationError(error)).toBe(true);
+        if (!PreviewManager.isPreviewOperationError(error)) return;
+        expect(error).toMatchObject({
+          _tag: "PreviewOperationError",
+          operation: "automationSnapshot.capturePage",
+          tabId: "tab_viz_timeout",
+        });
+        expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(
+          "UnknownVizError",
+        );
+        expect(preview.capturePage.mock.calls.length).toBeLessThanOrEqual(2);
       }),
     ),
   );

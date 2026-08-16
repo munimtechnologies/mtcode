@@ -36,6 +36,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -114,6 +115,9 @@ const DIAGNOSTIC_BUFFER_LIMIT = 200;
 const MAX_ARTIFACT_SITE_SLUG_LENGTH = 80;
 const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
+// Hidden guests can stall capturePage for minutes after CDP detaches.
+// Bound the compositor grab so a poisoned tab fails fast and can reattach.
+export const AUTOMATION_CAPTURE_TIMEOUT_MS = 8_000;
 const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const DEFAULT_ANNOTATION_THEME: DesktopPreviewAnnotationTheme = {
   colorScheme: "light",
@@ -421,6 +425,13 @@ export const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
   !input.shift &&
   !input.alt;
 
+const isUnknownVizCause = (cause: unknown): boolean => {
+  if (cause instanceof Error) {
+    return cause.name === "UnknownVizError" || cause.message.includes("UnknownVizError");
+  }
+  return typeof cause === "string" && cause.includes("UnknownVizError");
+};
+
 const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal => {
   if (typeof value !== "object" || value === null || !("kind" in value)) return false;
   if (value.kind === "pointer") {
@@ -676,7 +687,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewWebviewNotInitializedError({ tabId });
     }
     const wc = webContents.fromId(tab.webContentsId);
-    if (!wc) {
+    if (!wc || wc.isDestroyed()) {
       return yield* new PreviewWebContentsNotFoundError({
         tabId,
         webContentsId: tab.webContentsId,
@@ -949,6 +960,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
             runFork(handleDebuggerMessage(method, params));
           };
+          const onDetach = () => {
+            // Chromium can drop the debugger when a guest is hidden offscreen.
+            // Forget the stale session so the next automation call reattaches;
+            // do not restore here or a hidden guest can loop attach/detach.
+            runFork(detachControlSession(wc.id));
+          };
           yield* Scope.addFinalizer(
             scope,
             Effect.all(
@@ -960,6 +977,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                 ),
                 attempt({ operation: "detachControlSession", webContentsId: wc.id }, () => {
                   wc.debugger.off("message", onMessage);
+                  wc.debugger.off("detach", onDetach);
                   if (wc.debugger.isAttached()) wc.debugger.detach();
                 }).pipe(Effect.ignore),
               ],
@@ -984,6 +1002,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             );
             yield* attempt({ operation: "attachDebuggerListeners", webContentsId: wc.id }, () => {
               wc.debugger.on("message", onMessage);
+              wc.debugger.on("detach", onDetach);
               wc.debugger.attach("1.3");
             });
             yield* Effect.all(
@@ -1065,6 +1084,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     };
     yield* pushAction(tabId, actionEvent);
     const epoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0;
+    yield* restoreControlSession(tabId, wc);
     const control = yield* ensureControlSession(wc);
     const execute = Effect.fn("PreviewManager.executeControlAction")(function* () {
       yield* update(tabId, { controller: "agent" });
@@ -2180,10 +2200,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
-  // Re-establish the control session after a detach, restoring any
-  // color-scheme override the tab carries. The scheme is read after the
-  // session attaches so a concurrent setColorScheme is not overwritten with
-  // a stale snapshot.
+  // Re-establish the control session after a detach (hidden-thread guest
+  // teardown, webview swap, DevTools close), restoring any color-scheme
+  // override the tab carries. The scheme is read after the session attaches
+  // so a concurrent setColorScheme is not overwritten with a stale snapshot.
   const restoreControlSession = (tabId: string, wc: Electron.WebContents) =>
     Effect.gen(function* () {
       const beforeAttach = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
@@ -2919,6 +2939,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             webContentsId: wc.id,
           },
           () => wc.capturePage(),
+        ).pipe(
+          Effect.timeout(Duration.millis(AUTOMATION_CAPTURE_TIMEOUT_MS)),
+          Effect.mapError((error) =>
+            Cause.isTimeoutError(error)
+              ? new PreviewOperationError({
+                  operation: "automationSnapshot.capturePage",
+                  tabId,
+                  webContentsId: wc.id,
+                  cause: new Error("UnknownVizError"),
+                })
+              : error,
+          ),
         ),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),
@@ -2951,7 +2983,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   ) {
     const wc = yield* requireWebContents(tabId);
     return yield* withControlSession(tabId, wc, "snapshot", (send) =>
-      captureAutomationSnapshot(tabId, wc, send),
+      captureAutomationSnapshot(tabId, wc, send).pipe(
+        Effect.catchIf(
+          (error): error is PreviewOperationError =>
+            isPreviewOperationError(error) && isUnknownVizCause(error.cause),
+          () =>
+            Effect.gen(function* () {
+              yield* detachControlSession(wc.id);
+              yield* restoreControlSession(tabId, wc);
+              return yield* captureAutomationSnapshot(tabId, wc, send);
+            }),
+        ),
+      ),
     );
   });
 
