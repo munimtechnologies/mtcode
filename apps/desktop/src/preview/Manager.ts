@@ -425,13 +425,6 @@ export const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
   !input.shift &&
   !input.alt;
 
-const isUnknownVizCause = (cause: unknown): boolean => {
-  if (cause instanceof Error) {
-    return cause.name === "UnknownVizError" || cause.message.includes("UnknownVizError");
-  }
-  return typeof cause === "string" && cause.includes("UnknownVizError");
-};
-
 const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal => {
   if (typeof value !== "object" || value === null || !("kind" in value)) return false;
   if (value.kind === "pointer") {
@@ -862,17 +855,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const detachControlSession = Effect.fn("PreviewManager.detachControlSession")(function* (
     webContentsId: number,
+    expected?: BrowserControlSession,
   ) {
-    const control = yield* SynchronizedRef.modify(controlSessionsRef, (sessions) => [
-      sessions.get(webContentsId),
-      replaceMap(sessions, (copy) => {
-        copy.delete(webContentsId);
-      }),
-    ]);
+    const control = yield* SynchronizedRef.modify(controlSessionsRef, (sessions) => {
+      const current = sessions.get(webContentsId);
+      if (!current || (expected !== undefined && current !== expected)) {
+        return [undefined, sessions] as const;
+      }
+      return [
+        current,
+        replaceMap(sessions, (copy) => {
+          copy.delete(webContentsId);
+        }),
+      ] as const;
+    });
     if (control) {
       yield* Scope.close(control.scope, Exit.void).pipe(Effect.ignore);
       return;
     }
+    if (expected !== undefined) return;
     yield* Ref.update(diagnosticsRef, (diagnostics) =>
       replaceMap(diagnostics, (copy) => {
         copy.delete(webContentsId);
@@ -960,36 +961,48 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
             runFork(handleDebuggerMessage(method, params));
           };
-          const onDetach = () => {
-            // Chromium can drop the debugger when a guest is hidden offscreen.
-            // Forget the stale session so the next automation call reattaches;
-            // do not restore here or a hidden guest can loop attach/detach.
-            runFork(detachControlSession(wc.id));
-          };
-          yield* Scope.addFinalizer(
-            scope,
-            Effect.all(
-              [
-                Ref.update(diagnosticsRef, (diagnostics) =>
-                  replaceMap(diagnostics, (copy) => {
-                    copy.delete(wc.id);
-                  }),
-                ),
-                attempt({ operation: "detachControlSession", webContentsId: wc.id }, () => {
-                  wc.debugger.off("message", onMessage);
-                  wc.debugger.off("detach", onDetach);
-                  if (wc.debugger.isAttached()) wc.debugger.detach();
-                }).pipe(Effect.ignore),
-              ],
-              { discard: true },
-            ),
-          );
           const control: BrowserControlSession = {
             webContentsId: wc.id,
             semaphore,
             scope,
             onMessage,
           };
+          const onDetach = () => {
+            // Chromium can drop the debugger when a guest is hidden offscreen.
+            // Forget only this session so a replacement is not torn down.
+            runFork(detachControlSession(wc.id, control));
+          };
+          yield* Scope.addFinalizer(
+            scope,
+            Effect.gen(function* () {
+              // Hold the session lock across detach so a replacement that
+              // attaches after we left the map cannot be detached by this
+              // finalizer.
+              const ownsDebugger = yield* SynchronizedRef.modifyEffect(
+                controlSessionsRef,
+                (sessions) =>
+                  Effect.gen(function* () {
+                    const current = sessions.get(wc.id);
+                    const owns = current === undefined || current === control;
+                    yield* attempt(
+                      { operation: "detachControlSession", webContentsId: wc.id },
+                      () => {
+                        wc.debugger.off("message", onMessage);
+                        wc.debugger.off("detach", onDetach);
+                        if (owns && wc.debugger.isAttached()) wc.debugger.detach();
+                      },
+                    ).pipe(Effect.ignore);
+                    return [owns, sessions] as const;
+                  }),
+              );
+              if (!ownsDebugger) return;
+              yield* Ref.update(diagnosticsRef, (diagnostics) =>
+                replaceMap(diagnostics, (copy) => {
+                  copy.delete(wc.id);
+                }),
+              );
+            }),
+          );
           const initialize = Effect.fn("PreviewManager.initializeControlSession")(function* () {
             yield* Ref.update(diagnosticsRef, (diagnostics) =>
               replaceMap(diagnostics, (copy) => {
@@ -1145,13 +1158,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         const interrupted = isPreviewAutomationControlInterruptedError(error);
         const errorMessage = isPreviewOperationError(error)
           ? PreviewOperationError.toTimelineMessage(error)
-          : isPreviewAutomationEvaluationError(error)
-            ? PreviewAutomationEvaluationError.toTimelineMessage(error)
-            : isPreviewAutomationInvalidSelectorError(error)
-              ? PreviewAutomationInvalidSelectorError.toTimelineMessage(error)
-              : error instanceof Error
-                ? error.message
-                : String(error);
+          : isPreviewCaptureUnavailableError(error)
+            ? error.message
+            : isPreviewAutomationEvaluationError(error)
+              ? PreviewAutomationEvaluationError.toTimelineMessage(error)
+              : isPreviewAutomationInvalidSelectorError(error)
+                ? PreviewAutomationInvalidSelectorError.toTimelineMessage(error)
+                : error instanceof Error
+                  ? error.message
+                  : String(error);
         yield* replaceAction(tabId, {
           ...actionEvent,
           status: interrupted ? "interrupted" : "failed",
@@ -2862,6 +2877,32 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         };
   });
 
+  const captureAutomationPage = (
+    tabId: string,
+    wc: Electron.WebContents,
+  ): Effect.Effect<Electron.NativeImage, PreviewCaptureUnavailableError> =>
+    Effect.tryPromise({
+      try: () => wc.capturePage(),
+      catch: (cause) =>
+        new PreviewCaptureUnavailableError({
+          tabId,
+          webContentsId: wc.id,
+          cause,
+        }),
+    }).pipe(
+      Effect.timeout(Duration.millis(AUTOMATION_CAPTURE_TIMEOUT_MS)),
+      Effect.catchTags({
+        TimeoutError: (cause) =>
+          Effect.fail(
+            new PreviewCaptureUnavailableError({
+              tabId,
+              webContentsId: wc.id,
+              cause,
+            }),
+          ),
+      }),
+    );
+
   const captureAutomationSnapshot = Effect.fn("PreviewManager.captureAutomationSnapshot")(
     function* (tabId: string, wc: Electron.WebContents, send: SendCommand) {
       yield* Effect.all([send("Runtime.enable"), send("Accessibility.enable")], {
@@ -2932,26 +2973,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
         send("Accessibility.getFullAXTree"),
-        attemptPromise(
-          {
-            operation: "automationSnapshot.capturePage",
-            tabId,
-            webContentsId: wc.id,
-          },
-          () => wc.capturePage(),
-        ).pipe(
-          Effect.timeout(Duration.millis(AUTOMATION_CAPTURE_TIMEOUT_MS)),
-          Effect.mapError((error) =>
-            Cause.isTimeoutError(error)
-              ? new PreviewOperationError({
-                  operation: "automationSnapshot.capturePage",
-                  tabId,
-                  webContentsId: wc.id,
-                  cause: new Error("UnknownVizError"),
-                })
-              : error,
-          ),
-        ),
+        captureAutomationPage(tabId, wc),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),
       ]);
@@ -2983,18 +3005,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   ) {
     const wc = yield* requireWebContents(tabId);
     return yield* withControlSession(tabId, wc, "snapshot", (send) =>
-      captureAutomationSnapshot(tabId, wc, send).pipe(
-        Effect.catchIf(
-          (error): error is PreviewOperationError =>
-            isPreviewOperationError(error) && isUnknownVizCause(error.cause),
-          () =>
-            Effect.gen(function* () {
-              yield* detachControlSession(wc.id);
-              yield* restoreControlSession(tabId, wc);
-              return yield* captureAutomationSnapshot(tabId, wc, send);
-            }),
-        ),
-      ),
+      captureAutomationSnapshot(tabId, wc, send),
+    ).pipe(
+      Effect.catchTags({
+        PreviewCaptureUnavailableError: () =>
+          Effect.gen(function* () {
+            yield* detachControlSession(wc.id);
+            return yield* withControlSession(tabId, wc, "snapshot", (send) =>
+              captureAutomationSnapshot(tabId, wc, send),
+            );
+          }),
+      }),
     );
   });
 
@@ -3634,6 +3655,21 @@ export class PreviewOperationError extends Schema.TaggedErrorClass<PreviewOperat
 
 export const isPreviewOperationError = Schema.is(PreviewOperationError);
 
+export class PreviewCaptureUnavailableError extends Schema.TaggedErrorClass<PreviewCaptureUnavailableError>()(
+  "PreviewCaptureUnavailableError",
+  {
+    tabId: Schema.String,
+    webContentsId: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Preview snapshot could not capture tab ${this.tabId}; reattach the session or create a new preview tab`;
+  }
+}
+
+export const isPreviewCaptureUnavailableError = Schema.is(PreviewCaptureUnavailableError);
+
 export class PreviewArtifactPathOutsideDirectoryError extends Schema.TaggedErrorClass<PreviewArtifactPathOutsideDirectoryError>()(
   "PreviewArtifactPathOutsideDirectoryError",
   {
@@ -3815,6 +3851,7 @@ export const PreviewManagerError = Schema.Union([
   PreviewWebContentsNotFoundError,
   PreviewWebviewNotInitializedError,
   PreviewOperationError,
+  PreviewCaptureUnavailableError,
   PreviewArtifactPathOutsideDirectoryError,
   PreviewArtifactImageLoadError,
   PreviewAutomationDevToolsOpenError,

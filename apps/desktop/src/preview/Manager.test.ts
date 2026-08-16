@@ -2869,6 +2869,29 @@ describe("PreviewManager", () => {
       ),
   );
 
+  effectIt.effect("does not let a stale control-session finalizer detach its replacement", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeAutomationWebContents();
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_session_race");
+        yield* manager.registerWebview("tab_session_race", 42);
+        yield* Effect.yieldNow;
+
+        const inFlight = yield* manager
+          .automationSnapshot("tab_session_race")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        preview.debuggerListeners.get("detach")?.();
+        const first = yield* Fiber.join(inFlight);
+        expect(first).toMatchObject(SNAPSHOT_PAGE);
+
+        const second = yield* manager.automationSnapshot("tab_session_race");
+        expect(second).toMatchObject(SNAPSHOT_PAGE);
+      }),
+    ),
+  );
+
   effectIt.effect("retries snapshot after UnknownVizError by restoring the control session", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -2913,20 +2936,40 @@ describe("PreviewManager", () => {
         expect(Exit.isFailure(exit)).toBe(true);
         if (Exit.isSuccess(exit)) return;
         const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
-        expect(PreviewManager.isPreviewOperationError(error)).toBe(true);
-        if (!PreviewManager.isPreviewOperationError(error)) return;
+        expect(PreviewManager.isPreviewCaptureUnavailableError(error)).toBe(true);
+        if (!PreviewManager.isPreviewCaptureUnavailableError(error)) return;
         expect(error).toMatchObject({
-          _tag: "PreviewOperationError",
-          operation: "automationSnapshot.capturePage",
+          _tag: "PreviewCaptureUnavailableError",
           tabId: "tab_viz_timeout",
+          webContentsId: 42,
         });
-        expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(
-          "UnknownVizError",
-        );
+        expect(Cause.isTimeoutError(error.cause)).toBe(true);
+        expect(error.message).not.toContain("UnknownVizError");
         expect(preview.capturePage.mock.calls.length).toBeLessThanOrEqual(2);
       }),
     ),
   );
+});
+
+describe("PreviewCaptureUnavailableError", () => {
+  it("keeps the real timeout as cause and retries from the tag", () => {
+    const cause = new Cause.TimeoutError();
+    const error = new PreviewManager.PreviewCaptureUnavailableError({
+      tabId: "tab_1",
+      webContentsId: 42,
+      cause,
+    });
+
+    expect(error._tag).toBe("PreviewCaptureUnavailableError");
+    expect(error.cause).toBe(cause);
+    expect(Cause.isTimeoutError(error.cause)).toBe(true);
+    expect(error.message).not.toContain("UnknownVizError");
+    expect(encodePreviewManagerError(error)).toMatchObject({
+      _tag: "PreviewCaptureUnavailableError",
+      tabId: "tab_1",
+      webContentsId: 42,
+    });
+  });
 });
 
 describe("PreviewOperationError", () => {
