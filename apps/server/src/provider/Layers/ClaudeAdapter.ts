@@ -2193,6 +2193,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       readonly toolUseId: string;
       readonly rawMethod: string;
       readonly rawPayload: unknown;
+      readonly turnId?: TurnId;
     },
   ) {
     const plan = planStepsFromClaudeTasks(context.claudeTasks);
@@ -2200,6 +2201,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
+    const planTurnId = input.turnId ?? context.turnState?.turnId;
     const stamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
       type: "turn.plan.updated",
@@ -2207,7 +2209,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       provider: PROVIDER,
       createdAt: stamp.createdAt,
       threadId: context.session.threadId,
-      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      ...(planTurnId ? { turnId: asCanonicalTurnId(planTurnId) } : {}),
       payload: {
         explanation: "Claude Tasks",
         plan,
@@ -2752,6 +2754,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const index = toolEntry?.[0];
+      const alreadyCompleted = finalized !== undefined;
       const eventTurnId = toolEntry
         ? context.turnState
           ? asCanonicalTurnId(context.turnState.turnId)
@@ -2776,7 +2779,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         itemId: asRuntimeItemId(tool.itemId),
         payload: {
           itemType: tool.itemType,
-          status: toolResult.isError ? "failed" : "inProgress",
+          status: alreadyCompleted || toolResult.isError ? itemStatus : "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
@@ -2794,7 +2797,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
 
       const streamKind = toolResultStreamKind(tool.itemType);
-      if (streamKind && toolResult.text.length > 0 && context.turnState) {
+      if (streamKind && toolResult.text.length > 0 && eventTurnId) {
         const deltaStamp = yield* makeEventStamp();
         yield* offerRuntimeEvent({
           type: "content.delta",
@@ -2802,7 +2805,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           provider: PROVIDER,
           createdAt: deltaStamp.createdAt,
           threadId: context.session.threadId,
-          turnId: context.turnState.turnId,
+          turnId: eventTurnId,
           itemId: asRuntimeItemId(tool.itemId),
           payload: {
             streamKind,
@@ -2819,33 +2822,35 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
-      const completedStamp = yield* makeEventStamp();
-      yield* offerRuntimeEvent({
-        type: "item.completed",
-        eventId: completedStamp.eventId,
-        provider: PROVIDER,
-        createdAt: completedStamp.createdAt,
-        threadId: context.session.threadId,
-        ...(eventTurnId ? { turnId: eventTurnId } : {}),
-        itemId: asRuntimeItemId(tool.itemId),
-        payload: {
-          itemType: tool.itemType,
-          status: itemStatus,
-          title: tool.title,
-          ...(tool.detail ? { detail: tool.detail } : {}),
-          ...(tool.agentId ? { agentId: tool.agentId } : {}),
-          ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
-          data: toolData,
-        },
-        providerRefs: nativeProviderRefs(context, {
-          providerItemId: tool.itemId,
-        }),
-        raw: {
-          source: "claude.sdk.message",
-          method: "claude/user",
-          payload: message,
-        },
-      });
+      if (!alreadyCompleted) {
+        const completedStamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "item.completed",
+          eventId: completedStamp.eventId,
+          provider: PROVIDER,
+          createdAt: completedStamp.createdAt,
+          threadId: context.session.threadId,
+          ...(eventTurnId ? { turnId: eventTurnId } : {}),
+          itemId: asRuntimeItemId(tool.itemId),
+          payload: {
+            itemType: tool.itemType,
+            status: itemStatus,
+            title: tool.title,
+            ...(tool.detail ? { detail: tool.detail } : {}),
+            ...(tool.agentId ? { agentId: tool.agentId } : {}),
+            ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
+            data: toolData,
+          },
+          providerRefs: nativeProviderRefs(context, {
+            providerItemId: tool.itemId,
+          }),
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/user",
+            payload: message,
+          },
+        });
+      }
 
       // The Workflow tool's result carries the run handles (runId, scriptPath,
       // transcriptDir, sessionUrl). Attach them to the workflow's task agent so
@@ -2892,6 +2897,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           toolUseId: tool.itemId,
           rawMethod: "claude/user",
           rawPayload: message,
+          ...(eventTurnId ? { turnId: eventTurnId } : {}),
         });
       }
 
