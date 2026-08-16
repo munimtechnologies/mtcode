@@ -4,18 +4,18 @@
 
 **Blocked by:** 01 — Set, replace, and clear a Goal
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] When a Goal is Active and the Session becomes ready (no running Turn, no pending approval, no pending user-input), T3 starts a Continuation with no user message
-- [ ] An Activity records that the Goal continued; the assistant output is the visible work
-- [ ] T3-authored Continuation text names the Objective and the complete/blocked markers, and never contains `goal`, `/goal`, or `slash goal`
-- [ ] Stop interrupts the Turn and Pauses the Goal; the next Continuation does not start until Resume
-- [ ] `/goal pause` Pauses without interrupting a running Turn; it only prevents the next Continuation
-- [ ] `/goal resume` on an idle Thread makes the Goal Active and starts a Continuation immediately
-- [ ] Resume while a Turn is running only marks Active; it does not double-start
-- [ ] Settle, Snooze, and disconnect do not Pause an Active Goal
-- [ ] Continuations are idempotent per completed Turn (a duplicate ready event does not start two)
-- [ ] The session reaper does not treat an Active Goal as idle
-- [ ] After process death, T3 still has the Goal and a later Continuation can start a fresh Session
-- [ ] Codex `thread/goal/*` is not called
-- [ ] Orchestration tests cover continue-on-ready, no-continue-when-paused, Stop-pauses, pause-without-interrupt, resume-starts-continuation, settle/snooze do not pause, idempotent continue, continue prompt must not say “goal”
+- [x] When a Goal is Active and the Session becomes ready (no running Turn, no pending approval, no pending user-input), T3 starts a Continuation with no user message
+- [x] An Activity records that the Goal continued; the assistant output is the visible work
+- [x] T3-authored Continuation text names the Objective and the complete/blocked markers, and never contains `goal`, `/goal`, or `slash goal`
+- [x] Stop interrupts the Turn and Pauses the Goal; the next Continuation does not start until Resume
+- [x] `/goal pause` Pauses without interrupting a running Turn; it only prevents the next Continuation
+- [x] `/goal resume` on an idle Thread makes the Goal Active and starts a Continuation immediately
+- [x] Resume while a Turn is running only marks Active; it does not double-start
+- [x] Settle, Snooze, and disconnect do not Pause an Active Goal
+- [x] Continuations are idempotent per completed Turn (a duplicate ready event does not start two)
+- [x] The session reaper does not treat an Active Goal as idle
+- [x] After process death, T3 still has the Goal and a later Continuation can start a fresh Session
+- [x] Codex `thread/goal/*` is not called
+- [x] Orchestration tests cover continue-on-ready, no-continue-when-paused, Stop-pauses, pause-without-interrupt, resume-starts-continuation, settle/snooze do not pause, idempotent continue, continue prompt must not say “goal”

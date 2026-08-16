@@ -821,6 +821,16 @@ it.effect(
     }),
 );
 
+it.effect("decodes thread.turn-start-requested payload without messageId", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.messageId, undefined);
+  }),
+);
+
 it.effect("decodes thread.turn-start-requested source proposed plan metadata when present", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartRequestedPayload({

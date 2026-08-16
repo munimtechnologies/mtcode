@@ -1,5 +1,6 @@
 import {
   CommandId,
+  EventId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
@@ -23,6 +24,7 @@ function makeReadModel(input: {
   readonly goal?: OrchestrationThread["goal"];
   readonly settledOverride?: OrchestrationThread["settledOverride"];
   readonly snoozedUntil?: string | null;
+  readonly activities?: OrchestrationThread["activities"];
 }): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
@@ -48,7 +50,7 @@ function makeReadModel(input: {
         deletedAt: null,
         messages: [],
         proposedPlans: [],
-        activities: [],
+        activities: input.activities ?? [],
         checkpoints: [],
         session: input.session ?? null,
         ...(input.goal !== undefined ? { goal: input.goal } : {}),
@@ -75,6 +77,62 @@ function existingGoal(): NonNullable<OrchestrationThread["goal"]> {
     status: "active",
     createdAt: NOW,
     updatedAt: NOW,
+  };
+}
+
+function activeGoal(
+  status: NonNullable<OrchestrationThread["goal"]>["status"] = "active",
+): NonNullable<OrchestrationThread["goal"]> {
+  return {
+    ...existingGoal(),
+    status,
+  };
+}
+
+function completedTurn(turnId = "turn-1"): NonNullable<OrchestrationThread["latestTurn"]> {
+  return {
+    turnId: TurnId.make(turnId),
+    state: "completed",
+    requestedAt: NOW,
+    startedAt: NOW,
+    completedAt: NOW,
+    assistantMessageId: null,
+  };
+}
+
+function readySession(): NonNullable<OrchestrationThread["session"]> {
+  return {
+    threadId: ThreadId.make("thread-1"),
+    status: "ready",
+    providerName: "codex",
+    runtimeMode: "full-access",
+    activeTurnId: null,
+    lastError: null,
+    updatedAt: NOW,
+  };
+}
+
+function runningSession(): NonNullable<OrchestrationThread["session"]> {
+  return {
+    threadId: ThreadId.make("thread-1"),
+    status: "running",
+    providerName: "codex",
+    runtimeMode: "full-access",
+    activeTurnId: TurnId.make("turn-running"),
+    lastError: null,
+    updatedAt: NOW,
+  };
+}
+
+function continuedActivity(): OrchestrationThread["activities"][number] {
+  return {
+    id: EventId.make("activity-continued"),
+    tone: "info",
+    kind: "goal.continued",
+    summary: "Reduce p95 below 120ms",
+    payload: {},
+    turnId: null,
+    createdAt: NOW,
   };
 }
 
@@ -296,7 +354,7 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
     }),
   );
 
-  it.effect("resumes an existing Goal as status-only without starting a Turn", () =>
+  it.effect("resumes a Paused Goal on an idle Thread by starting a Continuation immediately", () =>
     Effect.gen(function* () {
       const decided = yield* decideOrchestrationCommand({
         command: {
@@ -306,6 +364,47 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
         },
         readModel: makeReadModel({
           interactionMode: "plan",
+          goal: {
+            ...existingGoal(),
+            status: "paused",
+          },
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.goal-resumed",
+        "thread.interaction-mode-set",
+        "thread.activity-appended",
+        "thread.activity-appended",
+        "thread.turn-start-requested",
+      ]);
+      const kinds = events
+        .filter((event) => event.type === "thread.activity-appended")
+        .map((event) => event.payload.activity.kind);
+      expect(kinds).toEqual(["goal.resumed", "goal.continued"]);
+      const turnStart = events.find((event) => event.type === "thread.turn-start-requested");
+      if (turnStart?.type !== "thread.turn-start-requested") {
+        throw new Error("Expected thread.turn-start-requested.");
+      }
+      expect(turnStart.payload.messageId).toBeUndefined();
+      expect(turnStart.payload.interactionMode).toBe("default");
+    }),
+  );
+
+  it.effect("resumes while a Turn is running as status-only without starting a second Turn", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.resume",
+          commandId: CommandId.make("cmd-goal-resume-running"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          interactionMode: "plan",
+          latestTurn: runningTurn(),
+          session: runningSession(),
           goal: {
             ...existingGoal(),
             status: "paused",
@@ -405,6 +504,245 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
       const events = Array.isArray(decided) ? decided : [decided];
       expect(events.map((event) => event.type)).toContain("thread.message-sent");
       expect(events.map((event) => event.type)).not.toContain("thread.goal-set");
+    }),
+  );
+
+  it.effect("continues an Active Goal with no user message after a completed Turn", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.continue",
+          commandId: CommandId.make("cmd-goal-continue"),
+          threadId: ThreadId.make("thread-1"),
+          completedTurnId: TurnId.make("turn-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.activity-appended",
+        "thread.turn-start-requested",
+      ]);
+      expect(events.map((event) => event.type)).not.toContain("thread.message-sent");
+      const activity = events[0];
+      if (activity?.type !== "thread.activity-appended") {
+        throw new Error("Expected thread.activity-appended.");
+      }
+      expect(activity.payload.activity.kind).toBe("goal.continued");
+      expect(activity.payload.activity.tone).toBe("info");
+      expect(activity.payload.activity.summary).toBe("Reduce p95 below 120ms");
+      const turnStart = events[1];
+      if (turnStart?.type !== "thread.turn-start-requested") {
+        throw new Error("Expected thread.turn-start-requested.");
+      }
+      expect(turnStart.payload.messageId).toBeUndefined();
+      expect(turnStart.payload.interactionMode).toBe("default");
+    }),
+  );
+
+  it.effect("does not continue when the Goal is paused", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.continue",
+          commandId: CommandId.make("cmd-goal-continue-paused"),
+          threadId: ThreadId.make("thread-1"),
+          completedTurnId: TurnId.make("turn-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal("paused"),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("does not continue in plan mode", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.continue",
+          commandId: CommandId.make("cmd-goal-continue-plan"),
+          threadId: ThreadId.make("thread-1"),
+          completedTurnId: TurnId.make("turn-1"),
+        },
+        readModel: makeReadModel({
+          interactionMode: "plan",
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("does not continue while a pending approval is open", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.continue",
+          commandId: CommandId.make("cmd-goal-continue-approval"),
+          threadId: ThreadId.make("thread-1"),
+          completedTurnId: TurnId.make("turn-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          activities: [
+            {
+              id: EventId.make("activity-approval"),
+              tone: "approval",
+              kind: "approval.requested",
+              summary: "approval.requested",
+              payload: { requestId: "req-1" },
+              turnId: null,
+              createdAt: NOW,
+            },
+          ],
+        }),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("does not start a second Continuation for the same completed Turn", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.continue",
+          commandId: CommandId.make("cmd-goal-continue-again"),
+          threadId: ThreadId.make("thread-1"),
+          completedTurnId: TurnId.make("turn-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          activities: [continuedActivity()],
+        }),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("Stop interrupts the Turn and Pauses an Active Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("cmd-interrupt-goal"),
+          threadId: ThreadId.make("thread-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          latestTurn: runningTurn(),
+          session: runningSession(),
+          goal: existingGoal(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.turn-interrupt-requested",
+        "thread.goal-paused",
+        "thread.activity-appended",
+      ]);
+      const activity = events[2];
+      if (activity?.type !== "thread.activity-appended") {
+        throw new Error("Expected thread.activity-appended.");
+      }
+      expect(activity.payload.activity.kind).toBe("goal.paused");
+    }),
+  );
+
+  it.effect("Stop without an Active Goal only interrupts the Turn", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("cmd-interrupt-no-goal"),
+          threadId: ThreadId.make("thread-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          latestTurn: runningTurn(),
+          session: runningSession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.turn-interrupt-requested"]);
+    }),
+  );
+
+  it.effect("resume does not double-start after a Continuation was already requested", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.resume",
+          commandId: CommandId.make("cmd-goal-resume-idempotent"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal("paused"),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          activities: [continuedActivity()],
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.goal-resumed",
+        "thread.activity-appended",
+      ]);
+      expect(events.map((event) => event.type)).not.toContain("thread.turn-start-requested");
+    }),
+  );
+
+  it.effect("Settle does not Pause an Active Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-goal"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toContain("thread.settled");
+      expect(events.map((event) => event.type)).not.toContain("thread.goal-paused");
+    }),
+  );
+
+  it.effect("Snooze does not Pause an Active Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.snooze",
+          commandId: CommandId.make("cmd-snooze-goal"),
+          threadId: ThreadId.make("thread-1"),
+          snoozedUntil: "2099-01-01T00:00:00.000Z",
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.snoozed"]);
+      expect(events.map((event) => event.type)).not.toContain("thread.goal-paused");
     }),
   );
 });

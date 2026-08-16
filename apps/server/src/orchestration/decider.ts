@@ -64,7 +64,7 @@ function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): b
 // the window is one whose turn kept running, i.e. it was resolved or went
 // stale. (The projection pipeline's pendingApprovalCount reads the same
 // capped stream and stays consistent with this view.)
-function hasOpenBlockingRequest(thread: {
+export function hasOpenBlockingRequest(thread: {
   readonly activities: ReadonlyArray<{ readonly kind: string; readonly payload: unknown }>;
 }): boolean {
   const openRequestIds = new Set<string>();
@@ -146,7 +146,7 @@ function threadHasQueuedTurnStart(
   );
 }
 
-function isThreadIdleForGoal(
+export function isThreadIdleForGoal(
   thread: {
     readonly latestTurn: OrchestrationThread["latestTurn"];
     readonly session: OrchestrationThread["session"];
@@ -162,6 +162,37 @@ function isThreadIdleForGoal(
     return false;
   }
   return !threadHasQueuedTurnStart(thread, occurredAt);
+}
+
+function threadHasContinuationForLatestTurn(thread: {
+  readonly latestTurn: OrchestrationThread["latestTurn"];
+  readonly activities: OrchestrationThread["activities"];
+}): boolean {
+  const completedAt = thread.latestTurn?.completedAt;
+  if (completedAt == null) {
+    return false;
+  }
+  const completedAtMs = Date.parse(completedAt);
+  return thread.activities.some(
+    (activity) =>
+      activity.kind === "goal.continued" && Date.parse(activity.createdAt) >= completedAtMs,
+  );
+}
+
+function canStartGoalContinuation(
+  thread: {
+    readonly latestTurn: OrchestrationThread["latestTurn"];
+    readonly session: OrchestrationThread["session"];
+    readonly messages: OrchestrationThread["messages"];
+    readonly activities: OrchestrationThread["activities"];
+  },
+  occurredAt: string,
+): boolean {
+  return (
+    isThreadIdleForGoal(thread, occurredAt) &&
+    !hasOpenBlockingRequest(thread) &&
+    !threadHasContinuationForLatestTurn(thread)
+  );
 }
 
 const goalActivityAppendedEvent = Effect.fn("goalActivityAppendedEvent")(function* (input: {
@@ -194,6 +225,42 @@ const goalActivityAppendedEvent = Effect.fn("goalActivityAppendedEvent")(functio
       },
     },
   };
+});
+
+const goalContinuationEvents = Effect.fn("goalContinuationEvents")(function* (input: {
+  readonly commandId: OrchestrationCommand["commandId"];
+  readonly threadId: ThreadId;
+  readonly occurredAt: string;
+  readonly objective: string;
+  readonly runtimeMode: OrchestrationThread["runtimeMode"];
+}): Effect.fn.Return<
+  readonly [Omit<OrchestrationEvent, "sequence">, Omit<OrchestrationEvent, "sequence">],
+  PlatformError.PlatformError,
+  Crypto.Crypto
+> {
+  const activityEvent = yield* goalActivityAppendedEvent({
+    commandId: input.commandId,
+    threadId: input.threadId,
+    occurredAt: input.occurredAt,
+    kind: "goal.continued",
+    summary: input.objective,
+  });
+  const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+    ...(yield* withEventBase({
+      aggregateKind: "thread",
+      aggregateId: input.threadId,
+      occurredAt: input.occurredAt,
+      commandId: input.commandId,
+    })),
+    type: "thread.turn-start-requested",
+    payload: {
+      threadId: input.threadId,
+      runtimeMode: input.runtimeMode,
+      interactionMode: "default",
+      createdAt: input.occurredAt,
+    },
+  };
+  return [activityEvent, turnStartRequestedEvent];
 });
 
 function withEventBase(
@@ -950,6 +1017,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           summary: thread.goal.objective,
         }),
       );
+      if (canStartGoalContinuation(thread, occurredAt)) {
+        const continuation = yield* goalContinuationEvents({
+          commandId: command.commandId,
+          threadId: command.threadId,
+          occurredAt,
+          objective: thread.goal.objective,
+          runtimeMode: thread.runtimeMode,
+        });
+        events.push(...continuation);
+      }
       return events;
     }
 
@@ -1026,7 +1103,63 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       ];
     }
 
-    case "thread.goal.continue":
+    case "thread.goal.continue": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.goal == null || thread.goal.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no Active Goal to continue.`,
+        });
+      }
+      if (thread.interactionMode === "plan") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is in plan mode and cannot start a Continuation.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      if (!isThreadIdleForGoal(thread, occurredAt)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is not idle and cannot start a Continuation.`,
+        });
+      }
+      if (hasOpenBlockingRequest(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a pending approval or user-input request and cannot start a Continuation.`,
+        });
+      }
+      if (
+        thread.latestTurn?.turnId !== command.completedTurnId ||
+        thread.latestTurn.state === "running"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' latest Turn '${thread.latestTurn?.turnId ?? "none"}' cannot start a Continuation for '${command.completedTurnId}'.`,
+        });
+      }
+      if (threadHasContinuationForLatestTurn(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already continued after Turn '${command.completedTurnId}'.`,
+        });
+      }
+      return [
+        ...(yield* goalContinuationEvents({
+          commandId: command.commandId,
+          threadId: command.threadId,
+          occurredAt,
+          objective: thread.goal.objective,
+          runtimeMode: thread.runtimeMode,
+        })),
+      ];
+    }
+
     case "thread.goal.block": {
       return yield* new OrchestrationCommandInvariantError({
         commandType: command.type,
@@ -1407,12 +1540,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.turn.interrupt": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const interruptEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1426,6 +1559,33 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
+      if (thread.goal?.status !== "active") {
+        return interruptEvent;
+      }
+      const activeGoal = thread.goal;
+      return [
+        interruptEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.goal-paused",
+          payload: {
+            threadId: command.threadId,
+            updatedAt: command.createdAt,
+          },
+        },
+        yield* goalActivityAppendedEvent({
+          commandId: command.commandId,
+          threadId: command.threadId,
+          occurredAt: command.createdAt,
+          kind: "goal.paused",
+          summary: activeGoal.objective,
+        }),
+      ];
     }
 
     case "thread.approval.respond": {
