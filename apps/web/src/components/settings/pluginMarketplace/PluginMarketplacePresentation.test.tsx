@@ -59,6 +59,8 @@ describe("plugin marketplace presentation", () => {
   it("labels harness badges with each real bundle capability", () => {
     const markup = renderToStaticMarkup(<HarnessSupportBadges support={plugin.support} />);
 
+    expect(markup).toContain('role="group"');
+    expect(markup).toContain('role="img"');
     expect(markup).toContain('aria-label="Codex: MCP + skills + apps"');
     expect(markup).not.toContain('aria-label="Cursor:');
   });

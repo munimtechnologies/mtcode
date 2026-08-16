@@ -308,27 +308,57 @@ interface CodexRuntimePlugin {
   readonly enabled: boolean;
 }
 
-class CodexPluginRuntimeError extends Schema.TaggedErrorClass<CodexPluginRuntimeError>()(
-  "CodexPluginRuntimeError",
-  {
-    operation: Schema.Literals(["installed", "install", "remove"]),
-    pluginRef: Schema.optional(Schema.String),
-    outcome: Schema.optional(
-      Schema.Literals(["provider_unavailable", "not_found", "still_installed"]),
-    ),
-    cause: Schema.optional(Schema.Defect()),
-  },
+const CodexPluginRuntimeErrorFields = {
+  operation: Schema.Literals(["installed", "install", "remove"]),
+  pluginRef: Schema.optional(Schema.String),
+  cause: Schema.optional(Schema.Defect()),
+};
+
+class CodexPluginProviderUnavailableError extends Schema.TaggedErrorClass<CodexPluginProviderUnavailableError>()(
+  "CodexPluginProviderUnavailableError",
+  CodexPluginRuntimeErrorFields,
+) {
+  override get message(): string {
+    return "The configured Codex provider is unavailable.";
+  }
+}
+
+class CodexPluginNotFoundError extends Schema.TaggedErrorClass<CodexPluginNotFoundError>()(
+  "CodexPluginNotFoundError",
+  CodexPluginRuntimeErrorFields,
 ) {
   override get message(): string {
     const target = this.pluginRef === undefined ? "" : ` for '${this.pluginRef}'`;
-    if (this.outcome === "provider_unavailable")
-      return "The configured Codex provider is unavailable.";
-    if (this.outcome === "not_found") return `Codex could not find the plugin${target}.`;
-    if (this.outcome === "still_installed")
-      return `Codex still reports the plugin${target} as installed.`;
+    return `Codex could not find the plugin${target}.`;
+  }
+}
+
+class CodexPluginStillInstalledError extends Schema.TaggedErrorClass<CodexPluginStillInstalledError>()(
+  "CodexPluginStillInstalledError",
+  CodexPluginRuntimeErrorFields,
+) {
+  override get message(): string {
+    const target = this.pluginRef === undefined ? "" : ` for '${this.pluginRef}'`;
+    return `Codex still reports the plugin${target} as installed.`;
+  }
+}
+
+class CodexPluginOperationFailedError extends Schema.TaggedErrorClass<CodexPluginOperationFailedError>()(
+  "CodexPluginOperationFailedError",
+  CodexPluginRuntimeErrorFields,
+) {
+  override get message(): string {
+    const target = this.pluginRef === undefined ? "" : ` for '${this.pluginRef}'`;
     return `Codex plugin runtime operation '${this.operation}' failed${target}.`;
   }
 }
+const CodexPluginRuntimeError = Schema.Union([
+  CodexPluginProviderUnavailableError,
+  CodexPluginNotFoundError,
+  CodexPluginStillInstalledError,
+  CodexPluginOperationFailedError,
+]);
+type CodexPluginRuntimeError = typeof CodexPluginRuntimeError.Type;
 const isCodexPluginRuntimeError = Schema.is(CodexPluginRuntimeError);
 
 export class CodexPluginRuntime extends Context.Service<
@@ -2593,10 +2623,9 @@ const makeCodexPluginRuntime = (
             ? yield* options.resolveCommand()
             : (options.command ?? { command: "codex", env: hostEnvironment });
           if (!command) {
-            return yield* new CodexPluginRuntimeError({
+            return yield* new CodexPluginProviderUnavailableError({
               operation,
               ...(pluginRef === undefined ? {} : { pluginRef }),
-              outcome: "provider_unavailable",
             });
           }
           const spawnCommand = yield* resolveSpawnCommand(command.command, ["app-server"], {
@@ -2662,7 +2691,7 @@ const makeCodexPluginRuntime = (
           Effect.mapError((cause) =>
             isCodexPluginRuntimeError(cause)
               ? cause
-              : new CodexPluginRuntimeError({ operation: "installed", cause }),
+              : new CodexPluginOperationFailedError({ operation: "installed", cause }),
           ),
         ),
       install: (pluginName) =>
@@ -2676,10 +2705,9 @@ const makeCodexPluginRuntime = (
                 plugin.remotePluginId,
             );
             if (!candidate?.remotePluginId) {
-              return yield* new CodexPluginRuntimeError({
+              return yield* new CodexPluginNotFoundError({
                 operation: "install",
                 pluginRef: pluginName,
-                outcome: "not_found",
               });
             }
             yield* client.request("plugin/install", {
@@ -2691,7 +2719,7 @@ const makeCodexPluginRuntime = (
           Effect.mapError((error) =>
             isCodexPluginRuntimeError(error)
               ? error
-              : new CodexPluginRuntimeError({
+              : new CodexPluginOperationFailedError({
                   operation: "install",
                   pluginRef: pluginName,
                   cause: error,
@@ -2707,10 +2735,9 @@ const makeCodexPluginRuntime = (
               (plugin) => plugin.id === pluginId && plugin.installed,
             );
             if (remaining) {
-              return yield* new CodexPluginRuntimeError({
+              return yield* new CodexPluginStillInstalledError({
                 operation: "remove",
                 pluginRef: pluginId,
-                outcome: "still_installed",
               });
             }
           }),
@@ -2718,7 +2745,11 @@ const makeCodexPluginRuntime = (
           Effect.mapError((cause) =>
             isCodexPluginRuntimeError(cause)
               ? cause
-              : new CodexPluginRuntimeError({ operation: "remove", pluginRef: pluginId, cause }),
+              : new CodexPluginOperationFailedError({
+                  operation: "remove",
+                  pluginRef: pluginId,
+                  cause,
+                }),
           ),
         ),
     });

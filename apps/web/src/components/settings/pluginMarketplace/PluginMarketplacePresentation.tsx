@@ -170,7 +170,11 @@ export function HarnessSupportBadges({
   readonly compact?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1" aria-label="Supported harnesses">
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-1"
+      role="group"
+      aria-label="Supported harnesses"
+    >
       {support.map((entry) => {
         const label = supportLabel(entry);
         return (
@@ -180,6 +184,7 @@ export function HarnessSupportBadges({
                 <Badge
                   size="sm"
                   variant="outline"
+                  role="img"
                   aria-label={label}
                   className={cn(
                     "bg-background/68 text-muted-foreground",
