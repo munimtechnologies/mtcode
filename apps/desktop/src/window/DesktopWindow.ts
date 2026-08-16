@@ -666,6 +666,9 @@ export const make = Effect.gen(function* () {
       }
       clearDevelopmentLoadRetry();
       developmentLoadRetryIndex = 0;
+      // Deep links (SSO callbacks) are one-shot. After they land, later
+      // recovery must reload the app home rather than replaying the callback.
+      currentLoadUrl = applicationUrl;
       window.setTitle(environment.displayName);
     });
     window.webContents.on(

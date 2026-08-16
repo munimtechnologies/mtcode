@@ -1067,6 +1067,38 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("recovers to the home URL after a deep link finishes loading", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      });
+      const deepLink = "t3code-dev://app/sso-callback";
+
+      yield* Effect.gen(function* () {
+        queuePendingDesktopProtocolUrl(deepLink);
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const didFinishLoad = fakeWindow.webContentsListeners.get("did-finish-load");
+        const renderProcessGone = fakeWindow.webContentsListeners.get("render-process-gone");
+        if (!didFinishLoad || !renderProcessGone) {
+          return yield* Effect.die("renderer load listeners were not registered");
+        }
+
+        assert.deepEqual(fakeWindow.loadURL.mock.calls, [[deepLink]]);
+        didFinishLoad();
+        renderProcessGone({}, { reason: "crashed", exitCode: 1 });
+        yield* TestClock.adjust(500);
+        assert.deepEqual(fakeWindow.loadURL.mock.calls, [[deepLink], ["t3code-dev://app/"]]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it("retries only transient failures for the development renderer", () => {
     assert.isTrue(
       DesktopWindow.isRetryableDevelopmentRendererLoadFailure({
