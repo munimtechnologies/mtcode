@@ -2919,6 +2919,50 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("retries a snapshot against the live webview after the guest is replaced", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let resolveCaptureStarted: (() => void) | undefined;
+        let resolveAllowFailure: (() => void) | undefined;
+        const captureStarted = new Promise<void>((resolve) => {
+          resolveCaptureStarted = resolve;
+        });
+        const allowFailure = new Promise<void>((resolve) => {
+          resolveAllowFailure = resolve;
+        });
+        const original = makeAutomationWebContents({
+          id: 42,
+          capturePage: async () => {
+            resolveCaptureStarted?.();
+            await allowFailure;
+            throw new Error("UnknownVizError");
+          },
+        });
+        const replacement = makeAutomationWebContents({ id: 43 });
+        fromId.mockImplementation((id) => {
+          if (id === 42) return original.webContents;
+          if (id === 43) return replacement.webContents;
+          return null;
+        });
+
+        yield* manager.createTab("tab_retry_replaced");
+        yield* manager.registerWebview("tab_retry_replaced", 42);
+        yield* Effect.yieldNow;
+
+        const snapshot = yield* manager
+          .automationSnapshot("tab_retry_replaced")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => captureStarted);
+        yield* manager.registerWebview("tab_retry_replaced", 43);
+        resolveAllowFailure?.();
+
+        expect(yield* Fiber.join(snapshot)).toMatchObject(SNAPSHOT_PAGE);
+        expect(original.capturePage).toHaveBeenCalledOnce();
+        expect(replacement.capturePage).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
   effectIt.effect("retries snapshot after UnknownVizError by restoring the control session", () =>
     withManager((manager) =>
       Effect.gen(function* () {

@@ -3003,17 +3003,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const automationSnapshot = Effect.fn("PreviewManager.automationSnapshot")(function* (
     tabId: string,
   ) {
-    const wc = yield* requireWebContents(tabId);
-    return yield* withControlSession(tabId, wc, "snapshot", (send) =>
-      captureAutomationSnapshot(tabId, wc, send),
-    ).pipe(
+    const snapshotCurrentWebContents = Effect.fn("PreviewManager.snapshotCurrentWebContents")(
+      function* () {
+        const wc = yield* requireWebContents(tabId);
+        return yield* withControlSession(tabId, wc, "snapshot", (send) =>
+          captureAutomationSnapshot(tabId, wc, send),
+        );
+      },
+    );
+    return yield* snapshotCurrentWebContents().pipe(
       Effect.catchTags({
-        PreviewCaptureUnavailableError: () =>
+        PreviewCaptureUnavailableError: (error) =>
           Effect.gen(function* () {
-            yield* detachControlSession(wc.id);
-            return yield* withControlSession(tabId, wc, "snapshot", (send) =>
-              captureAutomationSnapshot(tabId, wc, send),
-            );
+            yield* detachControlSession(error.webContentsId);
+            return yield* snapshotCurrentWebContents();
           }),
       }),
     );
