@@ -100,7 +100,7 @@ function MarketplacePluginCard({
 
 function LoadingMarketplace() {
   return (
-    <div className="grid gap-3 lg:grid-cols-2" aria-label="Loading plugins">
+    <div className="grid gap-3 lg:grid-cols-2" role="status" aria-label="Loading plugins">
       {Array.from({ length: 8 }, (_, index) => (
         <div
           key={index}
