@@ -150,7 +150,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
-    readonly queuedTurnReadyBeforeStart?: boolean;
+    readonly queuedTurnHandoffBeforeStart?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -486,7 +486,7 @@ describe("ProviderCommandReactor", () => {
         }),
       );
     }
-    if (input?.queuedTurnReadyBeforeStart === true) {
+    if (input?.queuedTurnHandoffBeforeStart === true) {
       const queuedAt = "2026-08-16T10:00:00.000Z";
       await Effect.runPromise(
         engine.dispatch({
@@ -509,7 +509,7 @@ describe("ProviderCommandReactor", () => {
       await Effect.runPromise(
         engine.dispatch({
           type: "thread.queued-turn.dispatch",
-          commandId: CommandId.make("cmd-mark-queued-ready-before-reactor-start"),
+          commandId: CommandId.make("cmd-mark-queued-handoff-before-reactor-start"),
           threadId: ThreadId.make("thread-1"),
           messageId: asMessageId("message-queued-before-reactor-start"),
           runtimeMode: "approval-required",
@@ -3060,17 +3060,21 @@ describe("ProviderCommandReactor", () => {
     ).toBeUndefined();
   });
 
-  it("recovers a queued provider handoff that was committed before reactor startup", async () => {
-    const harness = await createHarness({ queuedTurnReadyBeforeStart: true });
+  it("does not replay an ambiguous provider handoff after reactor startup", async () => {
+    const harness = await createHarness({ queuedTurnHandoffBeforeStart: true });
     await harness.drain();
 
-    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
-    expect(harness.sendTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        threadId: "thread-1",
-        input: "Recover me",
-      }),
-    );
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const thread = (await harness.readModel()).threads[0];
+    expect(thread?.session?.status).toBe("error");
+    expect(thread?.session?.lastError).toContain("may already have received it");
+    expect(
+      thread?.activities.some(
+        (activity) =>
+          activity.kind === "provider.turn.start.failed" &&
+          activity.summary === "Queued turn handoff interrupted",
+      ),
+    ).toBe(true);
   });
 
   it("does not dispatch a queued message after it is cancelled", async () => {

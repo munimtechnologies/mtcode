@@ -133,7 +133,7 @@ export function useThreadComposerState() {
   }, [selectedThreadDetail, selectedThreadSessionActivity, selectedThreadShell]);
 
   const onSendMessage = useCallback(async () => {
-    if (!selectedThreadShell) {
+    if (!selectedThreadShell || !AsyncResult.isSuccess(preferences)) {
       return null;
     }
 
@@ -163,10 +163,7 @@ export function useThreadComposerState() {
       modelSelection: draft.modelSelection ?? thread.modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: draft.interactionMode ?? thread.interactionMode,
-      deliveryMode:
-        AsyncResult.isSuccess(preferences) && preferences.value.steerActiveTurns === false
-          ? "after-current"
-          : "immediate",
+      deliveryMode: preferences.value.steerActiveTurns === false ? "after-current" : "immediate",
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey);

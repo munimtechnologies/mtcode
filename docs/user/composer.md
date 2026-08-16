@@ -8,3 +8,7 @@ On mobile, **Settings → General → Steer active turns** controls messages sen
 working. Leave it on to steer the active turn immediately. Turn it off to store the message on the
 server and run it after the active turn finishes. Server-queued messages remain visible in the
 thread and can be cancelled before they start, even if the mobile app disconnects.
+
+If the server restarts during the narrow handoff to a provider, T3 Code reports the delivery as
+interrupted instead of replaying it automatically, because the provider may already have received
+the message. Check the provider transcript before resending it.

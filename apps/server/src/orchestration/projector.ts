@@ -147,7 +147,9 @@ function retainThreadMessagesAfterRevert(
     }
   }
 
-  return messages.filter((message) => retainedMessageIds.has(message.id));
+  return messages.filter(
+    (message) => message.deliveryState !== "queued" && retainedMessageIds.has(message.id),
+  );
 }
 
 function retainThreadActivitiesAfterRevert(

@@ -1,25 +1,81 @@
-import { ModelSelection } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  IsoDateTime,
+  MessageId,
+  ModelSelection,
+  NonNegativeInt,
+  OrchestrationProposedPlanId,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
-import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
-import {
-  ProjectionQueuedTurn,
-  ProjectionQueuedTurnMessageInput,
+import { toPersistenceDecodeError, toPersistenceSqlError } from "./Errors.ts";
+import type { ProjectionRepositoryError } from "./Errors.ts";
+
+export const ProjectionQueuedTurnStatus = Schema.Literals(["queued", "handoff"]);
+
+export const ProjectionQueuedTurn = Schema.Struct({
+  messageId: MessageId,
+  threadId: ThreadId,
+  eventId: EventId,
+  commandId: CommandId,
+  modelSelection: Schema.NullOr(ModelSelection),
+  titleSeed: Schema.NullOr(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  queuedAt: IsoDateTime,
+  eventSequence: NonNegativeInt,
+  status: ProjectionQueuedTurnStatus,
+});
+export type ProjectionQueuedTurn = typeof ProjectionQueuedTurn.Type;
+
+export const ProjectionQueuedTurnMessageInput = Schema.Struct({
+  messageId: MessageId,
+});
+export const ProjectionQueuedTurnThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
+
+export class ProjectionQueuedTurnRepository extends Context.Service<
   ProjectionQueuedTurnRepository,
-  type ProjectionQueuedTurnRepositoryShape,
-  ProjectionQueuedTurnThreadInput,
-} from "../Services/ProjectionQueuedTurns.ts";
+  {
+    readonly upsert: (row: ProjectionQueuedTurn) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly markHandoff: (
+      input: typeof ProjectionQueuedTurnMessageInput.Type,
+    ) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly deleteByMessageId: (
+      input: typeof ProjectionQueuedTurnMessageInput.Type,
+    ) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly deleteHandoffByThreadId: (
+      input: typeof ProjectionQueuedTurnThreadInput.Type,
+    ) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly deleteByThreadId: (
+      input: typeof ProjectionQueuedTurnThreadInput.Type,
+    ) => Effect.Effect<void, ProjectionRepositoryError>;
+    readonly listByThreadId: (
+      input: typeof ProjectionQueuedTurnThreadInput.Type,
+    ) => Effect.Effect<ReadonlyArray<ProjectionQueuedTurn>, ProjectionRepositoryError>;
+    readonly listAll: Effect.Effect<ReadonlyArray<ProjectionQueuedTurn>, ProjectionRepositoryError>;
+  }
+>()("t3/persistence/ProjectionQueuedTurns/ProjectionQueuedTurnRepository") {}
 
 const ProjectionQueuedTurnDbRow = Schema.Struct({
   ...ProjectionQueuedTurn.fields,
   modelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
 });
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const upsertRow = SqlSchema.void({
@@ -70,11 +126,11 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const markReadyRow = SqlSchema.void({
+  const markHandoffRow = SqlSchema.void({
     Request: ProjectionQueuedTurnMessageInput,
     execute: ({ messageId }) => sql`
       UPDATE projection_thread_turn_queue
-      SET status = 'ready'
+      SET status = 'handoff'
       WHERE message_id = ${messageId}
         AND status = 'queued'
     `,
@@ -88,12 +144,12 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const deleteReadyThreadRows = SqlSchema.void({
+  const deleteHandoffThreadRows = SqlSchema.void({
     Request: ProjectionQueuedTurnThreadInput,
     execute: ({ threadId }) => sql`
       DELETE FROM projection_thread_turn_queue
       WHERE thread_id = ${threadId}
-        AND status = 'ready'
+        AND status = 'handoff'
     `,
   });
 
@@ -158,40 +214,38 @@ const make = Effect.gen(function* () {
         ? toPersistenceDecodeError(`${operation}:decode`)(cause)
         : toPersistenceSqlError(operation)(cause),
     );
-  const upsert: ProjectionQueuedTurnRepositoryShape["upsert"] = (row) =>
+  const upsert: ProjectionQueuedTurnRepository["Service"]["upsert"] = (row) =>
     upsertRow(row).pipe(mapError("ProjectionQueuedTurnRepository.upsert:query"));
-  const markReady: ProjectionQueuedTurnRepositoryShape["markReady"] = (input) =>
-    markReadyRow(input).pipe(mapError("ProjectionQueuedTurnRepository.markReady:query"));
-  const deleteByMessageId: ProjectionQueuedTurnRepositoryShape["deleteByMessageId"] = (input) =>
+  const markHandoff: ProjectionQueuedTurnRepository["Service"]["markHandoff"] = (input) =>
+    markHandoffRow(input).pipe(mapError("ProjectionQueuedTurnRepository.markHandoff:query"));
+  const deleteByMessageId: ProjectionQueuedTurnRepository["Service"]["deleteByMessageId"] = (
+    input,
+  ) =>
     deleteMessageRow(input).pipe(
       mapError("ProjectionQueuedTurnRepository.deleteByMessageId:query"),
     );
-  const deleteReadyByThreadId: ProjectionQueuedTurnRepositoryShape["deleteReadyByThreadId"] = (
-    input,
-  ) =>
-    deleteReadyThreadRows(input).pipe(
-      mapError("ProjectionQueuedTurnRepository.deleteReadyByThreadId:query"),
-    );
-  const deleteByThreadId: ProjectionQueuedTurnRepositoryShape["deleteByThreadId"] = (input) =>
+  const deleteHandoffByThreadId: ProjectionQueuedTurnRepository["Service"]["deleteHandoffByThreadId"] =
+    (input) =>
+      deleteHandoffThreadRows(input).pipe(
+        mapError("ProjectionQueuedTurnRepository.deleteHandoffByThreadId:query"),
+      );
+  const deleteByThreadId: ProjectionQueuedTurnRepository["Service"]["deleteByThreadId"] = (input) =>
     deleteThreadRows(input).pipe(mapError("ProjectionQueuedTurnRepository.deleteByThreadId:query"));
-  const listByThreadId: ProjectionQueuedTurnRepositoryShape["listByThreadId"] = (input) =>
+  const listByThreadId: ProjectionQueuedTurnRepository["Service"]["listByThreadId"] = (input) =>
     listThreadRows(input).pipe(mapError("ProjectionQueuedTurnRepository.listByThreadId:query"));
-  const listAll: ProjectionQueuedTurnRepositoryShape["listAll"] = listAllRows(undefined).pipe(
+  const listAll: ProjectionQueuedTurnRepository["Service"]["listAll"] = listAllRows(undefined).pipe(
     mapError("ProjectionQueuedTurnRepository.listAll:query"),
   );
 
   return {
     upsert,
-    markReady,
+    markHandoff,
     deleteByMessageId,
-    deleteReadyByThreadId,
+    deleteHandoffByThreadId,
     deleteByThreadId,
     listByThreadId,
     listAll,
-  } satisfies ProjectionQueuedTurnRepositoryShape;
+  } satisfies ProjectionQueuedTurnRepository["Service"];
 });
 
-export const ProjectionQueuedTurnRepositoryLive = Layer.effect(
-  ProjectionQueuedTurnRepository,
-  make,
-);
+export const layer = Layer.effect(ProjectionQueuedTurnRepository, make);

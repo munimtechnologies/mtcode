@@ -698,6 +698,9 @@ function retainMessagesAfterRevert(
   // Keep messages that belong to a retained turn, plus system messages and
   // messages without a turn binding (pre-turn-0 user messages).
   return Arr.filter(messages, (message) => {
+    if (message.deliveryState === "queued") {
+      return false;
+    }
     if (message.role === "system") {
       return true;
     }

@@ -86,11 +86,11 @@ const ProjectionThreadMessageDbRowSchema = Schema.Struct({
   deliveryState: Schema.NullOr(Schema.Literal("queued")),
 });
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
-  Struct.assign({
-    modelSelection: Schema.fromJsonString(ModelSelection),
-  }),
-);
+const ProjectionThreadDbRowSchema = Schema.Struct({
+  ...ProjectionThread.fields,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  hasQueuedTurns: Schema.optional(Schema.Number),
+});
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -438,6 +438,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -474,6 +480,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -512,6 +524,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -537,6 +555,31 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
+        ORDER BY thread_id ASC, created_at ASC, message_id ASC
+      `,
+  });
+
+  // Commands normally avoid hydrating message history. Durable queued turns
+  // are the exception: cancellation, dispatch, and settle invariants must see
+  // them even when the ordinary detail window no longer does.
+  const listQueuedThreadMessageRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          role,
+          text,
+          attachments_json AS "attachments",
+          is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_messages
+        WHERE delivery_state = 'queued'
         ORDER BY thread_id ASC, created_at ASC, message_id ASC
       `,
   });
@@ -955,6 +998,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -1759,6 +1808,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listQueuedThreadMessageRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listQueuedThreadMessages:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listQueuedThreadMessages:decodeRows",
+              ),
+            ),
+          ),
           listThreadProposedPlanRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1795,11 +1852,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            queuedMessageRows,
+            proposedPlanRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
               const threads: OrchestrationThread[] = [];
+              const queuedMessagesByThread = new Map<string, Array<OrchestrationMessage>>();
 
               for (let index = 0; index < projectRows.length; index += 1) {
                 const row = projectRows[index];
@@ -1833,6 +1899,26 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   continue;
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (let index = 0; index < queuedMessageRows.length; index += 1) {
+                const row = queuedMessageRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const messages = queuedMessagesByThread.get(row.threadId) ?? [];
+                messages.push({
+                  id: row.messageId,
+                  role: row.role,
+                  text: row.text,
+                  ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+                  turnId: row.turnId,
+                  streaming: row.isStreaming === 1,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  deliveryState: "queued",
+                });
+                queuedMessagesByThread.set(row.threadId, messages);
               }
               for (let index = 0; index < sessionRows.length; index += 1) {
                 const row = sessionRows[index];
@@ -1917,7 +2003,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   pinOrderKey: row.pinOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
                   deletedAt: row.deletedAt,
-                  messages: [],
+                  messages: queuedMessagesByThread.get(row.threadId) ?? [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
                   activities: [],
                   checkpoints: [],
@@ -2054,6 +2140,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       titleRegeneration: mapTitleRegeneration(row),
                       session: sessionByThread.get(row.threadId) ?? null,
                       latestUserMessageAt: row.latestUserMessageAt,
+                      hasQueuedTurns: row.hasQueuedTurns === 1,
                       hasPendingApprovals: row.pendingApprovalCount > 0,
                       hasPendingUserInput: row.pendingUserInputCount > 0,
                       hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
@@ -2199,6 +2286,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   titleRegeneration: mapTitleRegeneration(row),
                   session: sessionByThread.get(row.threadId) ?? null,
                   latestUserMessageAt: row.latestUserMessageAt,
+                  hasQueuedTurns: row.hasQueuedTurns === 1,
                   hasPendingApprovals: row.pendingApprovalCount > 0,
                   hasPendingUserInput: row.pendingUserInputCount > 0,
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
@@ -2478,6 +2566,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
+        hasQueuedTurns: threadRow.value.hasQueuedTurns === 1,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,

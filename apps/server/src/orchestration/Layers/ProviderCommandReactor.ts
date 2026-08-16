@@ -47,11 +47,7 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
-import {
-  type ProjectionQueuedTurn,
-  ProjectionQueuedTurnRepository,
-} from "../../persistence/Services/ProjectionQueuedTurns.ts";
-import { ProjectionQueuedTurnRepositoryLive } from "../../persistence/Layers/ProjectionQueuedTurns.ts";
+import * as ProjectionQueuedTurns from "../../persistence/ProjectionQueuedTurns.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -316,7 +312,8 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
-  const projectionQueuedTurnRepository = yield* ProjectionQueuedTurnRepository;
+  const projectionQueuedTurnRepository =
+    yield* ProjectionQueuedTurns.ProjectionQueuedTurnRepository;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -1182,43 +1179,47 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
-  const queuedTurnStartEvent = (
-    row: ProjectionQueuedTurn,
-  ): Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }> => ({
-    sequence: row.eventSequence,
-    eventId: row.eventId,
-    aggregateKind: "thread",
-    aggregateId: row.threadId,
-    occurredAt: row.queuedAt,
-    commandId: row.commandId,
-    causationEventId: null,
-    correlationId: row.commandId,
-    metadata: {},
-    type: "thread.turn-start-requested",
-    payload: {
-      threadId: row.threadId,
-      messageId: row.messageId,
-      ...(row.modelSelection !== null ? { modelSelection: row.modelSelection } : {}),
-      ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
-      runtimeMode: row.runtimeMode,
-      interactionMode: row.interactionMode,
-      ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
-        ? {
-            sourceProposedPlan: {
-              threadId: row.sourceProposedPlanThreadId,
-              planId: row.sourceProposedPlanId,
-            },
-          }
-        : {}),
-      createdAt: row.queuedAt,
+  const recoverAmbiguousQueuedTurnHandoff = Effect.fn("recoverAmbiguousQueuedTurnHandoff")(
+    function* (row: ProjectionQueuedTurns.ProjectionQueuedTurn) {
+      const thread = yield* resolveThread(row.threadId);
+      if (thread === undefined) {
+        return;
+      }
+      const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+      const detail =
+        "T3 Code restarted while handing this queued message to the provider. It was not sent again because the provider may already have received it. Check the provider transcript, then resend if needed.";
+      yield* setThreadSession({
+        threadId: thread.id,
+        session: {
+          ...(thread.session ?? {
+            threadId: thread.id,
+            providerName: null,
+            providerInstanceId: thread.modelSelection.instanceId,
+            runtimeMode: thread.runtimeMode,
+          }),
+          status: "error",
+          activeTurnId: null,
+          lastError: detail,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+      yield* appendProviderFailureActivity({
+        threadId: thread.id,
+        kind: "provider.turn.start.failed",
+        summary: "Queued turn handoff interrupted",
+        detail,
+        turnId: null,
+        createdAt,
+      });
     },
-  });
+  );
 
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
   ) {
     const rows = yield* projectionQueuedTurnRepository.listByThreadId({ threadId });
-    if (rows.some((row) => row.status === "ready")) {
+    if (rows.some((row) => row.status === "handoff")) {
       return;
     }
     const next = rows.find((row) => row.status === "queued");
@@ -1504,8 +1505,8 @@ const make = Effect.gen(function* () {
     yield* Effect.gen(function* () {
       const persistedQueuedTurns = yield* projectionQueuedTurnRepository.listAll;
       yield* Effect.forEach(
-        persistedQueuedTurns.filter((row) => row.status === "ready"),
-        (row) => worker.enqueue(queuedTurnStartEvent(row)),
+        persistedQueuedTurns.filter((row) => row.status === "handoff"),
+        recoverAmbiguousQueuedTurnHandoff,
         { concurrency: 1, discard: true },
       );
       yield* Effect.forEach(
@@ -1527,7 +1528,10 @@ const make = Effect.gen(function* () {
     // Title regeneration still uses the hot event stream and cannot resume a
     // pre-start request. Correlated completions only clear the request captured
     // here, leaving any newer request untouched. Queued turns are recovered
-    // separately above from their durable projection.
+    // separately above from their durable projection. A pre-handoff queued
+    // row is safe to resume. A committed handoff is deliberately surfaced as
+    // ambiguous instead of replayed because provider CLIs do not share a
+    // durable idempotency key with orchestration.
     const clearInterrupted = clearInterruptedThreadTitleRegenerations(
       interruptedTitleRegenerations,
     ).pipe(
@@ -1561,5 +1565,5 @@ const make = Effect.gen(function* () {
 });
 
 export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
-  Layer.provideMerge(ProjectionQueuedTurnRepositoryLive),
+  Layer.provideMerge(ProjectionQueuedTurns.layer),
 );

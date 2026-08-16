@@ -35,7 +35,7 @@ import {
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
-import { ProjectionQueuedTurnRepository } from "../../persistence/Services/ProjectionQueuedTurns.ts";
+import * as ProjectionQueuedTurns from "../../persistence/ProjectionQueuedTurns.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -45,7 +45,6 @@ import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/La
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
-import { ProjectionQueuedTurnRepositoryLive } from "../../persistence/Layers/ProjectionQueuedTurns.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -288,7 +287,9 @@ function retainProjectionMessagesAfterRevert(
     }
   }
 
-  return messages.filter((message) => retainedMessageIds.has(message.messageId));
+  return messages.filter(
+    (message) => message.deliveryState !== "queued" && retainedMessageIds.has(message.messageId),
+  );
 }
 
 function retainProjectionActivitiesAfterRevert(
@@ -483,7 +484,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
-    const projectionQueuedTurnRepository = yield* ProjectionQueuedTurnRepository;
+    const projectionQueuedTurnRepository =
+      yield* ProjectionQueuedTurns.ProjectionQueuedTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
@@ -1097,7 +1099,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.queued-turn-dispatched":
-          yield* projectionQueuedTurnRepository.markReady({
+          yield* projectionQueuedTurnRepository.markHandoff({
             messageId: event.payload.messageId,
           });
           return;
@@ -1115,7 +1117,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             event.payload.session.status === "stopped" ||
             event.payload.session.status === "interrupted"
           ) {
-            yield* projectionQueuedTurnRepository.deleteReadyByThreadId({
+            yield* projectionQueuedTurnRepository.deleteHandoffByThreadId({
               threadId: event.payload.threadId,
             });
           }
@@ -1857,7 +1859,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
-  Layer.provideMerge(ProjectionQueuedTurnRepositoryLive),
+  Layer.provideMerge(ProjectionQueuedTurns.layer),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
 );

@@ -18,7 +18,7 @@ export default Effect.gen(function* () {
       source_proposed_plan_id TEXT,
       queued_at TEXT NOT NULL,
       event_sequence INTEGER NOT NULL UNIQUE,
-      status TEXT NOT NULL CHECK (status IN ('queued', 'ready'))
+      status TEXT NOT NULL CHECK (status IN ('queued', 'handoff'))
     )
   `;
 

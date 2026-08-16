@@ -476,6 +476,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
+  // Durable server queue state. Optional so older servers and cached shells
+  // continue to decode; absent means the server did not expose this signal.
+  hasQueuedTurns: Schema.optional(Schema.Boolean),
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
