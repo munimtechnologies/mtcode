@@ -533,3 +533,22 @@ export function terminalNavigationShortcutData(
 
   return null;
 }
+
+export function terminalEmacsShortcutData(event: ShortcutEventLike): string | null {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return null;
+  }
+
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+    return null;
+  }
+
+  const key = normalizeEventKey(event.key);
+  if (key === "a") {
+    return TERMINAL_LINE_START;
+  }
+  if (key === "e") {
+    return TERMINAL_LINE_END;
+  }
+  return null;
+}
