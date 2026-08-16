@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
@@ -150,6 +151,7 @@ export const make = Effect.gen(function* () {
         ElectronWindow.ElectronWindow | DesktopWindow.DesktopWindow
       >();
       const runPromise = Effect.runPromiseWith(context);
+      const createMainGate = yield* Semaphore.make(1);
 
       const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
       const revealAndDispatch = Effect.fn("desktop.clerk.revealAndDispatchProtocolUrl")(function* (
@@ -169,9 +171,23 @@ export const make = Effect.gen(function* () {
 
         if (url !== null) {
           queuePendingDesktopProtocolUrl(url);
-          // Opens the real main when the backend is already ready (macOS with
-          // no windows). Otherwise createMain applies the queued URL later.
-          yield* desktopWindow.createMainIfBackendReady.pipe(Effect.ignore);
+          // Serialize so concurrent open-url / second-instance events cannot
+          // each pass the empty-main check and create two untracked windows.
+          yield* createMainGate.withPermits(1)(
+            Effect.gen(function* () {
+              const existing = yield* electronWindow.main;
+              if (Option.isSome(existing)) {
+                yield* electronWindow.reveal(existing.value);
+                yield* Effect.sync(() => {
+                  loadDesktopProtocolUrl(existing.value, url);
+                });
+                return;
+              }
+              // Opens the real main when the backend is already ready (macOS
+              // with no windows). Otherwise createMain applies the queued URL.
+              yield* desktopWindow.createMainIfBackendReady.pipe(Effect.ignore);
+            }),
+          );
           return;
         }
 
