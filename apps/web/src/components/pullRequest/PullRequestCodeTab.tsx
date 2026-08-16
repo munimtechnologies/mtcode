@@ -322,8 +322,9 @@ export function PullRequestCodeTab({
     if (appliedRefreshToken.current === refreshToken) return;
     appliedRefreshToken.current = refreshToken;
     setSliceState({ key: scopeKey, cursor: null, slices: NO_SLICES });
-    refreshFirstDiffPage();
-  }, [refreshToken, scopeKey, refreshFirstDiffPage]);
+    // The panel already refreshes the mutable aggregate after invalidating the host cache.
+    if (commit !== null) refreshFirstDiffPage();
+  }, [commit, refreshToken, scopeKey, refreshFirstDiffPage]);
   const reviewKey = referenceKey;
   const pendingComments = usePendingReviewComments(reference);
   const addComment = usePullRequestReviewStore((store) => store.addComment);

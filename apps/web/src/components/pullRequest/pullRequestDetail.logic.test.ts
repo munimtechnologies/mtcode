@@ -27,6 +27,7 @@ import {
   readableFailure,
   shouldRefreshPullRequestActivity,
   resolveBaseFreshness,
+  refreshCurrentPullRequestDiff,
   buildPullRequestTimeline,
   describePullRequestState,
   editPullRequestThreadComment,
@@ -114,6 +115,38 @@ describe("review thread comment pages", () => {
       { id: "c2", body: "saved body" },
       { id: "c3", body: "another loaded comment" },
     ]);
+  });
+});
+
+describe("pull request diff freshness", () => {
+  it("ignores a stale invalidation completion", async () => {
+    let finishInvalidation!: () => void;
+    const invalidation = new Promise<void>((resolve) => {
+      finishInvalidation = resolve;
+    });
+    let currentRevision = "pr-a@1";
+    let refreshes = 0;
+    const stale = refreshCurrentPullRequestDiff(
+      "pr-a@1",
+      () => invalidation,
+      () => currentRevision,
+      () => refreshes++,
+    );
+
+    currentRevision = "pr-a@2";
+    finishInvalidation();
+    expect(await stale).toBe(false);
+    expect(refreshes).toBe(0);
+
+    expect(
+      await refreshCurrentPullRequestDiff(
+        currentRevision,
+        async () => undefined,
+        () => currentRevision,
+        () => refreshes++,
+      ),
+    ).toBe(true);
+    expect(refreshes).toBe(1);
   });
 });
 

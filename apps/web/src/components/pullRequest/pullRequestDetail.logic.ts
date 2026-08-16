@@ -43,6 +43,19 @@ export function editPullRequestThreadComment<
   return comments.map((comment) => (comment.id === commentId ? { ...comment, body } : comment));
 }
 
+/** Invalidate first, then refresh only if the panel still shows the revision that asked. */
+export async function refreshCurrentPullRequestDiff(
+  revision: string,
+  invalidate: () => Promise<unknown>,
+  getCurrentRevision: () => string,
+  refresh: () => void,
+): Promise<boolean> {
+  await invalidate();
+  if (getCurrentRevision() !== revision) return false;
+  refresh();
+  return true;
+}
+
 /**
  * Whether the pull request on a right-panel surface is the thread's own one. Repository and
  * number are not enough: one environment can hold two checkouts of the same repository under

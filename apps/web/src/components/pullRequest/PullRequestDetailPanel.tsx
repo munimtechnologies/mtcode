@@ -110,6 +110,7 @@ import {
   pullRequestHandoffLabels,
   readableFailure,
   resolveBaseFreshness,
+  refreshCurrentPullRequestDiff,
   type PullRequestFinding,
   shouldRefreshPullRequestActivity,
 } from "./pullRequestDetail.logic";
@@ -484,7 +485,7 @@ export function PullRequestDetailPanel({
   // no cursor) is started here too rather than waiting for the Code tab to mount. This is one
   // extra cached read per opened pull request even for readers who never open the tab, but it
   // turns the tab's first paint from a cold request into a cache hit.
-  const _diffWarmUpQuery = useEnvironmentQuery(
+  const diffWarmUpQuery = useEnvironmentQuery(
     pullRequestEnvironment.diff({ environmentId, input: { ...reference } }),
   );
   const coreDetail = detailQuery.data;
@@ -546,11 +547,40 @@ export function PullRequestDetailPanel({
   // and at worst answer from it.
   const invalidate = useAtomCommand(pullRequestEnvironment.invalidate, { reportFailure: false });
   const [refreshToken, setRefreshToken] = useState(0);
+  const detailUpdatedAt = detail?.updatedAt ?? "";
+  const renderedDiffRevision = JSON.stringify([pullRequestKey, detailUpdatedAt]);
+  const activeDiffRevision = useRef(renderedDiffRevision);
+  activeDiffRevision.current = renderedDiffRevision;
+  const observedDiffRevision = useRef<{ pullRequestKey: string; updatedAt: string } | null>(null);
+  const refreshDiffFromHost = useCallback(
+    (revision: string) =>
+      refreshCurrentPullRequestDiff(
+        revision,
+        () => invalidate({ environmentId, input: { reference } }),
+        () => activeDiffRevision.current,
+        () => {
+          diffWarmUpQuery.refresh();
+          setRefreshToken((token) => token + 1);
+        },
+      ),
+    [diffWarmUpQuery.refresh, environmentId, invalidate, reference],
+  );
   const refreshFromHost = useCallback(async () => {
-    await invalidate({ environmentId, input: { reference } });
-    refreshDetail();
-    setRefreshToken((token) => token + 1);
-  }, [environmentId, invalidate, reference, refreshDetail]);
+    if (await refreshDiffFromHost(activeDiffRevision.current)) refreshDetail();
+  }, [refreshDetail, refreshDiffFromHost]);
+  useEffect(() => {
+    if (detailUpdatedAt === "") return;
+    const next = { pullRequestKey, updatedAt: detailUpdatedAt };
+    const previous = observedDiffRevision.current;
+    observedDiffRevision.current = next;
+    if (
+      previous === null ||
+      previous.pullRequestKey !== next.pullRequestKey ||
+      previous.updatedAt === next.updatedAt
+    )
+      return;
+    void refreshDiffFromHost(renderedDiffRevision);
+  }, [detailUpdatedAt, pullRequestKey, refreshDiffFromHost, renderedDiffRevision]);
   // A refresh asked for by the page: the detail, and through the token below, the diff with it.
   const appliedForcedToken = useRef(forcedRefreshToken);
   useEffect(() => {
