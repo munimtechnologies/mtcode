@@ -124,7 +124,27 @@ interface ClaudeResumeState {
   readonly threadId?: ThreadId;
   readonly resume?: string;
   readonly resumeSessionAt?: string;
+  /** Set after rollback so the next start/resume may pin `resumeSessionAt`. */
+  readonly pinResumeSessionAt?: boolean;
   readonly turnCount?: number;
+}
+
+interface ClaudeCompletedTurn {
+  readonly id: TurnId;
+  readonly items: Array<unknown>;
+  readonly lastAssistantUuid?: string;
+}
+
+function lastRetainedAssistantUuid(
+  turns: ReadonlyArray<ClaudeCompletedTurn>,
+): string | undefined {
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const uuid = turns[index]?.lastAssistantUuid;
+    if (typeof uuid === "string" && uuid.length > 0) {
+      return uuid;
+    }
+  }
+  return undefined;
 }
 
 interface ClaudeTurnState {
@@ -142,6 +162,7 @@ interface ClaudeTurnState {
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
   readonly capturedProposedPlanKeys: Set<string>;
   nextSyntheticAssistantBlockIndex: number;
+  lastAssistantUuid?: string;
 }
 
 interface AssistantTextBlockState {
@@ -243,8 +264,9 @@ interface ClaudeTaskAgentState {
 
 interface ClaudeSessionContext {
   session: ProviderSession;
-  readonly promptQueue: Queue.Queue<PromptQueueItem>;
-  readonly query: ClaudeQueryRuntime;
+  promptQueue: Queue.Queue<PromptQueueItem>;
+  query: ClaudeQueryRuntime;
+  queryOptions: ClaudeQueryOptions;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
@@ -255,10 +277,7 @@ interface ClaudeSessionContext {
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
-  readonly turns: Array<{
-    id: TurnId;
-    items: Array<unknown>;
-  }>;
+  readonly turns: Array<ClaudeCompletedTurn>;
   readonly inFlightTools: Map<number, ToolInFlight>;
   readonly claudeTasks: Map<string, ClaudeTaskState>;
   readonly taskAgents: Map<string, ClaudeTaskAgentState>;
@@ -277,6 +296,11 @@ interface ClaudeSessionContext {
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastKnownTotalProcessedTokens: number | undefined;
   lastAssistantUuid: string | undefined;
+  /** After rollback, the next start/resume may pass `resumeSessionAt` to the SDK. */
+  pinResumeSessionAt: boolean;
+  /** Live query still includes reverted transcript until it is recreated. */
+  needsPinnedQueryRestart: boolean;
+  replacingQuery: boolean;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
 }
@@ -665,6 +689,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     resume?: unknown;
     sessionId?: unknown;
     resumeSessionAt?: unknown;
+    pinResumeSessionAt?: unknown;
     turnCount?: unknown;
   };
 
@@ -682,12 +707,14 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   const resume = resumeCandidate && isUuid(resumeCandidate) ? resumeCandidate : undefined;
   const resumeSessionAt =
     typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
+  const pinResumeSessionAt = cursor.pinResumeSessionAt === true;
   const turnCountValue = typeof cursor.turnCount === "number" ? cursor.turnCount : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
     ...(resume ? { resume } : {}),
     ...(resumeSessionAt ? { resumeSessionAt } : {}),
+    ...(pinResumeSessionAt ? { pinResumeSessionAt: true } : {}),
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
@@ -1776,6 +1803,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       threadId,
       ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
       ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
+      ...(context.pinResumeSessionAt && context.lastAssistantUuid
+        ? { pinResumeSessionAt: true }
+        : {}),
       turnCount: context.turns.length,
     };
 
@@ -2348,6 +2378,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context.turns.push({
       id: turnState.turnId,
       items: [...turnState.items],
+      ...(turnState.lastAssistantUuid ? { lastAssistantUuid: turnState.lastAssistantUuid } : {}),
     });
 
     yield* emitThreadTokenUsage(context, usageSnapshot, {
@@ -2882,6 +2913,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         owningAgent.model = snapshotModel;
       }
       context.lastAssistantUuid = message.uuid;
+      context.pinResumeSessionAt = false;
       yield* updateResumeCursor(context);
       return;
     }
@@ -2958,11 +2990,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (context.turnState) {
+      context.turnState.lastAssistantUuid = message.uuid;
       context.turnState.items.push(message.message);
       yield* backfillAssistantTextBlocksFromSnapshot(context, message);
     }
 
     context.lastAssistantUuid = message.uuid;
+    context.pinResumeSessionAt = false;
     yield* updateResumeCursor(context);
   });
 
@@ -3601,7 +3635,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
     exit: Exit.Exit<void, ProviderAdapterProcessError>,
   ) {
-    if (context.stopped) {
+    if (context.stopped || context.replacingQuery) {
       return;
     }
 
@@ -3746,6 +3780,114 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return Effect.succeed(context);
   };
 
+  const makePromptIterable = (promptQueue: Queue.Queue<PromptQueueItem>) =>
+    Stream.fromQueue(promptQueue).pipe(
+      Stream.filter((item) => item.type === "message"),
+      Stream.map((item) => item.message),
+      Stream.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.failCause(cause),
+      ),
+      Stream.toAsyncIterable,
+    );
+
+  const forkSdkStream = (
+    context: ClaudeSessionContext,
+    runFork: (effect: Effect.Effect<void, never>) => Fiber.Fiber<void, never>,
+  ) => {
+    let streamFiber: Fiber.Fiber<void, never>;
+    streamFiber = runFork(
+      Effect.exit(runSdkStream(context)).pipe(
+        Effect.flatMap((exit) => {
+          if (context.stopped || context.replacingQuery) {
+            return Effect.void;
+          }
+          if (context.streamFiber === streamFiber) {
+            context.streamFiber = undefined;
+          }
+          return handleStreamExit(context, exit).pipe(
+            Effect.catch((cause) =>
+              Effect.logError("Failed to close Claude runtime stream.", { cause }),
+            ),
+          );
+        }),
+      ),
+    );
+    context.streamFiber = streamFiber;
+    streamFiber.addObserver(() => {
+      if (context.streamFiber === streamFiber) {
+        context.streamFiber = undefined;
+      }
+    });
+  };
+
+  const replaceQueryAfterRollback = Effect.fn("replaceQueryAfterRollback")(function* (
+    context: ClaudeSessionContext,
+  ) {
+    const threadId = context.session.threadId;
+    context.replacingQuery = true;
+    const streamFiber = context.streamFiber;
+    context.streamFiber = undefined;
+    if (streamFiber && streamFiber.pollUnsafe() === undefined) {
+      yield* Fiber.interrupt(streamFiber);
+    }
+    yield* Queue.shutdown(context.promptQueue);
+    yield* Effect.try({
+      try: () => context.query.close(),
+      catch: (cause) =>
+        new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId,
+          detail: "Failed to close Claude runtime query for rollback.",
+          cause,
+        }),
+    }).pipe(Effect.ignore);
+
+    const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
+    const {
+      sessionId: _ignoredSessionId,
+      resume: _ignoredResume,
+      resumeSessionAt: _ignoredResumeSessionAt,
+      ...baseQueryOptions
+    } = context.queryOptions;
+    const nextOptions: ClaudeQueryOptions =
+      context.lastAssistantUuid && context.resumeSessionId
+        ? {
+            ...baseQueryOptions,
+            resume: context.resumeSessionId,
+            resumeSessionAt: context.lastAssistantUuid,
+          }
+        : {
+            ...baseQueryOptions,
+            sessionId: yield* randomUUIDv4,
+          };
+    if (nextOptions.sessionId) {
+      context.resumeSessionId = nextOptions.sessionId;
+    }
+
+    const queryRuntime = yield* Effect.try({
+      try: () =>
+        createQuery({
+          prompt: makePromptIterable(promptQueue),
+          options: nextOptions,
+        }),
+      catch: (cause) =>
+        new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId,
+          detail: "Failed to restart Claude runtime session after rollback.",
+          cause,
+        }),
+    }).pipe(Effect.onExit(() => Effect.sync(() => (context.replacingQuery = false))));
+
+    context.promptQueue = promptQueue;
+    context.query = queryRuntime;
+    context.queryOptions = nextOptions;
+    yield* updateResumeCursor(context);
+
+    const runtimeContext = yield* Effect.context<never>();
+    forkSdkStream(context, Effect.runForkWith(runtimeContext));
+  });
+
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
       if (input.provider !== undefined && input.provider !== PROVIDER) {
@@ -3789,14 +3931,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const runPromise = Effect.runPromiseWith(runtimeContext);
 
       const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
-      const prompt = Stream.fromQueue(promptQueue).pipe(
-        Stream.filter((item) => item.type === "message"),
-        Stream.map((item) => item.message),
-        Stream.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.failCause(cause),
-        ),
-        Stream.toAsyncIterable,
-      );
+      const prompt = makePromptIterable(promptQueue);
 
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
@@ -4170,6 +4305,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
+        // Ordinary resume omits resumeSessionAt so a stale last-assistant
+        // checkpoint cannot truncate a live session. After rollback the
+        // cursor is explicitly pinned to the last retained assistant uuid.
+        ...(existingResumeSessionId &&
+        resumeState?.pinResumeSessionAt === true &&
+        resumeState.resumeSessionAt
+          ? { resumeSessionAt: resumeState.resumeSessionAt }
+          : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
@@ -4244,6 +4387,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(threadId ? { threadId } : {}),
           ...(sessionId ? { resume: sessionId } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
+          ...(resumeState?.pinResumeSessionAt === true && resumeState.resumeSessionAt
+            ? { pinResumeSessionAt: true }
+            : {}),
           turnCount: resumeState?.turnCount ?? 0,
         },
         createdAt: startedAt,
@@ -4254,6 +4400,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         session,
         promptQueue,
         query: queryRuntime,
+        queryOptions,
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
@@ -4273,6 +4420,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTokenUsage: undefined,
         lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
+        pinResumeSessionAt: resumeState?.pinResumeSessionAt === true,
+        needsPinnedQueryRestart: false,
+        replacingQuery: false,
         lastThreadStartedId: undefined,
         stopped: false,
       };
@@ -4322,30 +4472,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         providerRefs: {},
       });
 
-      let streamFiber: Fiber.Fiber<void, never>;
-      streamFiber = runFork(
-        Effect.exit(runSdkStream(context)).pipe(
-          Effect.flatMap((exit) => {
-            if (context.stopped) {
-              return Effect.void;
-            }
-            if (context.streamFiber === streamFiber) {
-              context.streamFiber = undefined;
-            }
-            return handleStreamExit(context, exit).pipe(
-              Effect.catch((cause) =>
-                Effect.logError("Failed to close Claude runtime stream.", { cause }),
-              ),
-            );
-          }),
-        ),
-      );
-      context.streamFiber = streamFiber;
-      streamFiber.addObserver(() => {
-        if (context.streamFiber === streamFiber) {
-          context.streamFiber = undefined;
-        }
-      });
+      forkSdkStream(context, runFork);
 
       return {
         ...session,
@@ -4355,6 +4482,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);
+    if (context.needsPinnedQueryRestart) {
+      yield* replaceQueryAfterRollback(context);
+      context.needsPinnedQueryRestart = false;
+    }
     const modelSelection =
       input.modelSelection !== undefined && input.modelSelection.instanceId === boundInstanceId
         ? input.modelSelection
@@ -4537,6 +4668,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const context = yield* requireSession(threadId);
       const nextLength = Math.max(0, context.turns.length - numTurns);
       context.turns.splice(nextLength);
+      context.lastAssistantUuid = lastRetainedAssistantUuid(context.turns);
+      if (context.lastAssistantUuid) {
+        context.pinResumeSessionAt = true;
+        context.needsPinnedQueryRestart = true;
+      } else if (context.turns.length === 0) {
+        context.resumeSessionId = undefined;
+        context.pinResumeSessionAt = false;
+        context.needsPinnedQueryRestart = true;
+      } else {
+        context.pinResumeSessionAt = false;
+        context.needsPinnedQueryRestart = false;
+      }
       yield* updateResumeCursor(context);
       return yield* snapshotThread(context);
     },
