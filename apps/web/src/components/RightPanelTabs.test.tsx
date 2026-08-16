@@ -39,7 +39,10 @@ const favicon = (dataUrl: string, pageUrl: string): DesktopPreviewFavicon => ({
   capturedAt: 1,
 });
 
-function overlay(icon: DesktopPreviewFavicon | null) {
+function overlay(
+  icon: DesktopPreviewFavicon | null,
+  audio?: { audible?: boolean; audioMuted?: boolean },
+) {
   return {
     hasWebContents: true,
     canGoBack: false,
@@ -48,12 +51,19 @@ function overlay(icon: DesktopPreviewFavicon | null) {
     zoomFactor: 1,
     pictureInPicture: false,
     colorScheme: "system" as const,
+    audioMuted: audio?.audioMuted ?? false,
+    audible: audio?.audible ?? false,
     controller: "none" as const,
     favicon: icon,
   };
 }
 
-function renderTabs(first: DesktopPreviewFavicon | null, second?: DesktopPreviewFavicon) {
+function renderTabs(
+  first: DesktopPreviewFavicon | null,
+  second?: DesktopPreviewFavicon,
+  audio?: { audible?: boolean; audioMuted?: boolean },
+  previewRuntimeTabId: ((tabId: string) => string) | null = (tabId) => `runtime:${tabId}`,
+) {
   return renderToStaticMarkup(
     <RightPanelTabs
       mode="inline"
@@ -62,9 +72,10 @@ function renderTabs(first: DesktopPreviewFavicon | null, second?: DesktopPreview
       pendingSurfaceIds={new Set()}
       previewSessions={sessions}
       desktopByTabId={{
-        "tab-1": overlay(first),
+        "tab-1": overlay(first, audio),
         ...(second ? { "tab-2": overlay(second) } : {}),
       }}
+      {...(previewRuntimeTabId ? { previewRuntimeTabId } : {})}
       terminalLabelsById={new Map()}
       onActivate={() => undefined}
       onCloseSurface={() => undefined}
@@ -111,5 +122,43 @@ describe("RightPanelTabs preview favicon", () => {
   it("hides a capture while the server session still describes another origin", () => {
     const html = renderTabs(favicon("data:image/png;base64,AAAA", "https://example.com/"));
     expect(html).not.toContain("data:image/png;base64,AAAA");
+  });
+});
+
+describe("RightPanelTabs audio indicator", () => {
+  // A muted tab only shows the indicator while it is actually making sound:
+  // arming mute on a quiet tab is deliberate and stays invisible until there
+  // is something to suppress.
+  const cases = [
+    { audible: false, audioMuted: false, label: null },
+    { audible: false, audioMuted: true, label: null },
+    { audible: true, audioMuted: false, label: "Mute Local site" },
+    { audible: true, audioMuted: true, label: "Unmute Local site" },
+  ] as const;
+
+  it.each(cases)("audible=$audible muted=$audioMuted", ({ audible, audioMuted, label }) => {
+    const html = renderTabs(null, undefined, { audible, audioMuted });
+    if (label === null) {
+      expect(html).not.toContain("Mute Local site");
+      expect(html).not.toContain("Unmute Local site");
+    } else {
+      expect(html).toContain(`aria-label="${label}"`);
+    }
+  });
+
+  it("addresses the desktop by runtime tab id, never the server session id", () => {
+    // Session ids are only unique per server process; sending one to the
+    // Electron manager raises PreviewTabNotFoundError and silently no-ops.
+    const seen: string[] = [];
+    renderTabs(null, undefined, { audible: true }, (tabId) => {
+      seen.push(tabId);
+      return `runtime:${tabId}`;
+    });
+    expect(seen).toContain("tab-1");
+  });
+
+  it("hides the toggle when no runtime tab id can be resolved", () => {
+    const html = renderTabs(null, undefined, { audible: true }, null);
+    expect(html).not.toContain("Mute Local site");
   });
 });
