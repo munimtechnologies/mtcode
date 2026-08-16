@@ -14,6 +14,8 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 /** Bundle / window names electron-builder ships for stable and nightly. */
 export const DESKTOP_APP_NAMES = ["T3 Code (Alpha)", "T3 Code (Nightly)", "T3 Code"] as const;
 
+const FIXED_LINUX_DESKTOP_ENTRY_IDS = ["com.t3tools.t3code", "t3-code", "t3code"] as const;
+
 const DETACHED_IGNORE_STDIO_OPTIONS = {
   detached: true,
   stdin: "ignore",
@@ -35,6 +37,31 @@ export function windowsDesktopExecutableCandidates(localAppData: string): Readon
     out.push(NodePath.join(programs, name, `${name}.exe`));
   }
   return out;
+}
+
+/** True when a FreeDesktop entry looks like an installed T3 Code desktop app. */
+export function isT3LinuxDesktopEntry(contents: string): boolean {
+  return (
+    /(?:^|\n)\s*Name\s*=\s*T3 Code(?:\s|\(|$)/im.test(contents) ||
+    /com\.t3tools\.t3code/i.test(contents) ||
+    /(?:^|\n)\s*Exec\s*=.*(?:[Tt]3[ -]?[Cc]ode|t3-code|t3code)/m.test(contents)
+  );
+}
+
+/**
+ * Map `.desktop` filenames + contents to `gtk-launch` ids, including AppImage
+ * installs that mint `appimagekit_<hash>-....desktop` names.
+ */
+export function linuxDesktopEntryLaunchIds(
+  entries: ReadonlyArray<{ readonly fileName: string; readonly contents: string }>,
+): ReadonlyArray<string> {
+  const ids: Array<string> = [];
+  for (const entry of entries) {
+    if (!entry.fileName.toLowerCase().endsWith(".desktop")) continue;
+    if (!isT3LinuxDesktopEntry(entry.contents)) continue;
+    ids.push(entry.fileName.replace(/\.desktop$/i, ""));
+  }
+  return ids;
 }
 
 /** True when the command exits with status 0 (used for `open` / `gtk-launch`). */
@@ -82,6 +109,34 @@ const resolveWindowsLocalAppData = Effect.fn("desktopLaunch.resolveWindowsLocalA
   },
 );
 
+const discoverLinuxDesktopEntryIds = Effect.fn("desktopLaunch.discoverLinuxDesktopEntryIds")(
+  function* () {
+    const env = yield* HostProcessEnvironment;
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const home = env.HOME?.trim();
+    const dirs = [
+      ...(home ? [path.join(home, ".local", "share", "applications")] : []),
+      "/usr/share/applications",
+      "/usr/local/share/applications",
+    ];
+
+    const entries: Array<{ readonly fileName: string; readonly contents: string }> = [];
+    for (const dir of dirs) {
+      const fileNames = yield* fs.readDirectory(dir).pipe(Effect.catch(() => Effect.succeed([])));
+      for (const fileName of fileNames) {
+        if (!fileName.toLowerCase().endsWith(".desktop")) continue;
+        const contents = yield* fs
+          .readFileString(path.join(dir, fileName))
+          .pipe(Effect.catch(() => Effect.succeed("")));
+        if (contents.length === 0) continue;
+        entries.push({ fileName, contents });
+      }
+    }
+    return linuxDesktopEntryLaunchIds(entries);
+  },
+);
+
 /** Activate a running desktop app, or launch it if installed. */
 export const tryLaunchDesktopApp = Effect.fn("tryLaunchDesktopApp")(function* () {
   const platform = yield* HostProcessPlatform;
@@ -110,12 +165,14 @@ export const tryLaunchDesktopApp = Effect.fn("tryLaunchDesktopApp")(function* ()
     return false;
   }
 
-  // Linux: AppImage / desktop-entry installs vary; gtk-launch is best-effort.
-  if (yield* spawnExitOk("gtk-launch", ["com.t3tools.t3code"])) {
-    return true;
-  }
-  for (const name of ["t3-code", "t3code"]) {
-    if (yield* spawnExitOk("gtk-launch", [name])) {
+  // Linux: try known desktop-file ids, then scan applications dirs for AppImage
+  // installs that mint `appimagekit_<hash>-….desktop` names.
+  const launchIds = new Set<string>([
+    ...FIXED_LINUX_DESKTOP_ENTRY_IDS,
+    ...(yield* discoverLinuxDesktopEntryIds()),
+  ]);
+  for (const id of launchIds) {
+    if (yield* spawnExitOk("gtk-launch", [id])) {
       return true;
     }
   }

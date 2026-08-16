@@ -614,46 +614,43 @@ export const openLiveProjectIfPresent = Effect.fn("openLiveProjectIfPresent")(fu
           }
           const snapshot = snapshotAttempt.success;
 
-          const openAttempt = yield* Effect.result(
-            Effect.gen(function* () {
-              const workspaceRoot =
-                yield* normalizeWorkspaceRootForProjectCommand(workspaceRootInput);
-              const existingProject = snapshot.projects.find(
-                (project) => project.deletedAt === null && project.workspaceRoot === workspaceRoot,
+          return yield* Effect.gen(function* () {
+            const workspaceRoot =
+              yield* normalizeWorkspaceRootForProjectCommand(workspaceRootInput);
+            const existingProject = snapshot.projects.find(
+              (project) => project.deletedAt === null && project.workspaceRoot === workspaceRoot,
+            );
+            if (existingProject) {
+              yield* Console.log(
+                `Opened project ${existingProject.id} (${existingProject.title}) at ${workspaceRoot}.`,
               );
-              if (existingProject) {
-                yield* Console.log(
-                  `Opened project ${existingProject.id} (${existingProject.title}) at ${workspaceRoot}.`,
-                );
-                return;
-              }
+              return;
+            }
 
-              const title = yield* resolveProjectTitle(workspaceRoot);
-              const projectId = ProjectId.make(yield* projectCommandUuid);
-              yield* dispatchLiveOrchestrationCommand(origin, token, {
-                type: "project.create",
-                commandId: CommandId.make(yield* projectCommandUuid),
-                projectId,
-                title,
-                workspaceRoot,
-                defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
-                createdAt: DateTime.formatIso(yield* DateTime.now),
-              });
-              yield* Console.log(`Opened project ${projectId} (${title}) at ${workspaceRoot}.`);
-            }),
-          );
-          if (openAttempt._tag === "Failure") {
+            const title = yield* resolveProjectTitle(workspaceRoot);
+            const projectId = ProjectId.make(yield* projectCommandUuid);
+            yield* dispatchLiveOrchestrationCommand(origin, token, {
+              type: "project.create",
+              commandId: CommandId.make(yield* projectCommandUuid),
+              projectId,
+              title,
+              workspaceRoot,
+              defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
+              createdAt: DateTime.formatIso(yield* DateTime.now),
+            });
+            yield* Console.log(`Opened project ${projectId} (${title}) at ${workspaceRoot}.`);
+          }).pipe(
+            Effect.as({ _tag: "Opened" as const }),
             // Path/title validation should stop; transport/dispatch flakes during
             // desktop attach polling should soft-miss and retry.
-            if (
-              Schema.is(ProjectLiveServerRequestError)(openAttempt.failure) ||
-              Schema.is(ProjectLiveServerUndeclaredStatusError)(openAttempt.failure)
-            ) {
-              return { _tag: "Miss" as const, cause: openAttempt.failure };
-            }
-            return { _tag: "Fail" as const, error: openAttempt.failure };
-          }
-          return { _tag: "Opened" as const };
+            Effect.catchTags({
+              ProjectLiveServerRequestError: (cause) =>
+                Effect.succeed({ _tag: "Miss" as const, cause }),
+              ProjectLiveServerUndeclaredStatusError: (cause) =>
+                Effect.succeed({ _tag: "Miss" as const, cause }),
+            }),
+            Effect.catch((error) => Effect.succeed({ _tag: "Fail" as const, error })),
+          );
         }),
       );
     }).pipe(
