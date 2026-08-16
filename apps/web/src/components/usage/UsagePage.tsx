@@ -214,7 +214,10 @@ export function UsagePage() {
                     </div>
 
                     {orderedProviders.map((provider) => {
-                      const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+                      const share =
+                        metric === "cost" && !costUnavailable
+                          ? provider.costShare
+                          : provider.tokenShare;
                       return (
                         <div key={provider.provider} className="flex flex-col gap-1.5">
                           <div className="flex items-baseline justify-between">
@@ -279,8 +282,13 @@ export function UsagePage() {
                       </div>
                     </div>
                     {metric === "cost" && costUnavailable ? (
-                      <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-                        Cost unavailable
+                      <div className="flex flex-col gap-1">
+                        <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                          Cost unavailable
+                        </div>
+                        <div className="flex justify-between pl-16 text-[10px] text-muted-foreground uppercase">
+                          <span>&nbsp;</span>
+                        </div>
                       </div>
                     ) : (
                       <UsageProviderChart
@@ -388,7 +396,7 @@ export function UsagePage() {
                                 </span>
                               </td>
                               <td className="py-2 text-right text-foreground tabular-nums">
-                                {formatCost(model.costUsd)}
+                                {costUnavailable ? "—" : formatUsd(model.costUsd)}
                               </td>
                               <td className="py-2 text-right text-muted-foreground tabular-nums">
                                 {costUnavailable ? "—" : formatPercent(model.costShare)}
@@ -438,11 +446,13 @@ export function UsagePage() {
                                   key={provider}
                                   className="py-2 text-right text-muted-foreground tabular-nums"
                                 >
-                                  {formatCost(period.byProvider.get(provider)?.costUsd ?? 0)}
+                                  {costUnavailable
+                                    ? "—"
+                                    : formatUsd(period.byProvider.get(provider)?.costUsd ?? 0)}
                                 </td>
                               ))}
                               <td className="py-2 text-right text-foreground tabular-nums">
-                                {formatCost(period.costUsd)}
+                                {costUnavailable ? "—" : formatUsd(period.costUsd)}
                               </td>
                               <td className="py-2 text-right text-muted-foreground tabular-nums">
                                 {formatTokens(period.totalTokens)}

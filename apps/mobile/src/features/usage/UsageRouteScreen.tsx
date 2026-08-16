@@ -322,7 +322,8 @@ function ProviderSection(props: {
   return (
     <SettingsSection title="Providers" card>
       {ordered.map((provider, index) => {
-        const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+        const share =
+          metric === "cost" && !costUnavailable ? provider.costShare : provider.tokenShare;
         return (
           <View
             key={provider.provider}
