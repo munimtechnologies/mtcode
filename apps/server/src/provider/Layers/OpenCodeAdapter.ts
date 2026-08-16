@@ -229,6 +229,8 @@ interface OpenCodeSessionContext {
   readonly openCodeSessionId: string;
   readonly pendingPermissions: Map<string, PermissionRequest>;
   readonly pendingQuestions: Map<string, QuestionRequest>;
+  /** False once teardown starts so the event pump cannot open new requests. */
+  readonly acceptingRequests: Ref.Ref<boolean>;
   readonly messageRoleById: Map<string, "user" | "assistant">;
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
@@ -671,38 +673,41 @@ export function makeOpenCodeAdapter(
 
     const settleOpenCodePendingAsCancelled = (context: OpenCodeSessionContext) =>
       Effect.gen(function* () {
+        yield* Ref.set(context.acceptingRequests, false);
         const permissions = [...context.pendingPermissions.entries()];
-        context.pendingPermissions.clear();
         yield* Effect.forEach(
           permissions,
           ([requestId, request]) =>
-            emit({
-              ...(yield *
-                buildEventBase({
+            Effect.gen(function* () {
+              yield* emit({
+                ...(yield* buildEventBase({
                   threadId: context.session.threadId,
                   requestId,
                 })),
-              type: "request.resolved",
-              payload: {
-                requestType: mapPermissionToRequestType(request.permission),
-                decision: "cancel",
-              },
+                type: "request.resolved",
+                payload: {
+                  requestType: mapPermissionToRequestType(request.permission),
+                  decision: "cancel",
+                },
+              });
+              context.pendingPermissions.delete(requestId);
             }),
           { discard: true },
         );
         const questions = [...context.pendingQuestions.keys()];
-        context.pendingQuestions.clear();
         yield* Effect.forEach(
           questions,
           (requestId) =>
-            emit({
-              ...(yield *
-                buildEventBase({
+            Effect.gen(function* () {
+              yield* emit({
+                ...(yield* buildEventBase({
                   threadId: context.session.threadId,
                   requestId,
                 })),
-              type: "user-input.resolved",
-              payload: { answers: {} },
+                type: "user-input.resolved",
+                payload: { answers: {} },
+              });
+              context.pendingQuestions.delete(requestId);
             }),
           { discard: true },
         );
@@ -996,6 +1001,22 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.asked": {
+          if (!(yield* Ref.get(context.acceptingRequests))) {
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                requestId: event.properties.id,
+                raw: event,
+              })),
+              type: "request.resolved",
+              payload: {
+                requestType: mapPermissionToRequestType(event.properties.permission),
+                decision: "cancel",
+              },
+            });
+            break;
+          }
           context.pendingPermissions.set(event.properties.id, event.properties);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1036,6 +1057,19 @@ export function makeOpenCodeAdapter(
         }
 
         case "question.asked": {
+          if (!(yield* Ref.get(context.acceptingRequests))) {
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                requestId: event.properties.id,
+                raw: event,
+              })),
+              type: "user-input.resolved",
+              payload: { answers: {} },
+            });
+            break;
+          }
           context.pendingQuestions.set(event.properties.id, event.properties);
           yield* emit({
             ...(yield* buildEventBase({
@@ -1435,6 +1469,7 @@ export function makeOpenCodeAdapter(
           openCodeSessionId: started.openCodeSession.id,
           pendingPermissions: new Map(),
           pendingQuestions: new Map(),
+          acceptingRequests: yield* Ref.make(true),
           partById: new Map(),
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
