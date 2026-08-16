@@ -546,6 +546,7 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
                 <div className="mt-3 flex flex-col gap-2 border-t border-foreground/8 pt-3 sm:ml-6 sm:flex-row">
                   <Input
                     nativeInput
+                    size="sm"
                     value={callbackUrls[key] ?? ""}
                     placeholder="Paste the full callback URL"
                     aria-label={`OAuth callback URL for ${connection.serverName}`}
