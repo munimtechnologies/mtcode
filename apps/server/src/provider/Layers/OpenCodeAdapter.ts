@@ -668,6 +668,45 @@ export function makeOpenCodeAdapter(
 
     const emit = (event: ProviderRuntimeEvent) =>
       Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
+
+    const settleOpenCodePendingAsCancelled = (context: OpenCodeSessionContext) =>
+      Effect.gen(function* () {
+        const permissions = [...context.pendingPermissions.entries()];
+        context.pendingPermissions.clear();
+        yield* Effect.forEach(
+          permissions,
+          ([requestId, request]) =>
+            emit({
+              ...(yield *
+                buildEventBase({
+                  threadId: context.session.threadId,
+                  requestId,
+                })),
+              type: "request.resolved",
+              payload: {
+                requestType: mapPermissionToRequestType(request.permission),
+                decision: "cancel",
+              },
+            }),
+          { discard: true },
+        );
+        const questions = [...context.pendingQuestions.keys()];
+        context.pendingQuestions.clear();
+        yield* Effect.forEach(
+          questions,
+          (requestId) =>
+            emit({
+              ...(yield *
+                buildEventBase({
+                  threadId: context.session.threadId,
+                  requestId,
+                })),
+              type: "user-input.resolved",
+              payload: { answers: {} },
+            }),
+          { discard: true },
+        );
+      });
     const writeNativeEvent = (
       threadId: ThreadId,
       event: {
@@ -696,6 +735,7 @@ export function makeOpenCodeAdapter(
       }
       const turnId = context.activeTurnId;
       sessions.delete(context.session.threadId);
+      yield* settleOpenCodePendingAsCancelled(context).pipe(Effect.ignore);
       // Emit lifecycle events BEFORE tearing down the scope. Both call sites
       // run this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
       // closing that scope triggers the fiber-interrupt finalizer, so any
@@ -1210,6 +1250,7 @@ export function makeOpenCodeAdapter(
         const resumeSessionId = parseOpenCodeResume(input.resumeCursor)?.sessionId;
         const existing = sessions.get(input.threadId);
         if (existing) {
+          yield* settleOpenCodePendingAsCancelled(existing);
           yield* stopOpenCodeContext(existing);
           sessions.delete(input.threadId);
         }
@@ -1626,6 +1667,7 @@ export function makeOpenCodeAdapter(
             threadId,
           });
         }
+        yield* settleOpenCodePendingAsCancelled(context);
         const stopped = yield* stopOpenCodeContext(context);
         sessions.delete(threadId);
         if (!stopped) {
@@ -1710,7 +1752,12 @@ export function makeOpenCodeAdapter(
         // interrupt the sibling fibers. Same pattern as the layer finalizer.
         yield* Effect.forEach(
           contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
+          (context) =>
+            Effect.ignoreCause(
+              settleOpenCodePendingAsCancelled(context).pipe(
+                Effect.andThen(stopOpenCodeContext(context)),
+              ),
+            ),
           { concurrency: "unbounded", discard: true },
         );
       });
