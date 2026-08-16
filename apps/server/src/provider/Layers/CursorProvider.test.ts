@@ -18,6 +18,7 @@ import {
   discoverCursorModelsViaAcp,
   getCursorFallbackModels,
   getCursorParameterizedModelPickerUnsupportedMessage,
+  applyCursorApiKeyAuth,
   parseCursorAboutOutput,
   parseCursorCliConfigChannel,
   parseCursorVersionDate,
@@ -354,13 +355,14 @@ describe("buildCursorProviderSnapshot", () => {
           version: "2026.04.09-f2b0fcd",
           status: "error",
           auth: { status: "unauthenticated" },
-          message: "Cursor Agent is not authenticated. Run `agent login` and try again.",
+          message:
+            "Cursor Agent is not authenticated. Run `agent login` or set `CURSOR_API_KEY` and try again.",
         },
         discoveryWarning: cursorAcpDiscoveryFailedMessage,
       }),
     ).toMatchObject({
       status: "error",
-      message: `Cursor Agent is not authenticated. Run \`agent login\` and try again. ${cursorAcpDiscoveryFailedMessage}`,
+      message: `Cursor Agent is not authenticated. Run \`agent login\` or set \`CURSOR_API_KEY\` and try again. ${cursorAcpDiscoveryFailedMessage}`,
       models: [
         {
           slug: "claude-sonnet-4-6",
@@ -555,7 +557,8 @@ describe("parseCursorAboutOutput", () => {
       auth: {
         status: "unauthenticated",
       },
-      message: "Cursor Agent is not authenticated. Run `agent login` and try again.",
+      message:
+        "Cursor Agent is not authenticated. Run `agent login` or set `CURSOR_API_KEY` and try again.",
     });
   });
 
@@ -576,8 +579,51 @@ describe("parseCursorAboutOutput", () => {
       auth: {
         status: "unauthenticated",
       },
-      message: "Cursor Agent is not authenticated. Run `agent login` and try again.",
+      message:
+        "Cursor Agent is not authenticated. Run `agent login` or set `CURSOR_API_KEY` and try again.",
     });
+  });
+});
+
+describe("applyCursorApiKeyAuth", () => {
+  const loggedOut = parseCursorAboutOutput({
+    code: 0,
+    stdout: JSON.stringify({
+      cliVersion: "2026.08.11-e8db854",
+      subscriptionTier: null,
+      userEmail: null,
+    }),
+    stderr: "",
+  });
+
+  it("keeps a saved login when CURSOR_API_KEY is also set", () => {
+    const loggedIn = parseCursorAboutOutput({
+      code: 0,
+      stdout: JSON.stringify({
+        cliVersion: "2026.08.11-e8db854",
+        subscriptionTier: "Ultra",
+        userEmail: "user@example.com",
+      }),
+      stderr: "",
+    });
+
+    expect(applyCursorApiKeyAuth(loggedIn, { CURSOR_API_KEY: "crsr_test" })).toEqual(loggedIn);
+  });
+
+  it("treats a null about email as API-key auth when CURSOR_API_KEY is set", () => {
+    expect(applyCursorApiKeyAuth(loggedOut, { CURSOR_API_KEY: "crsr_test" })).toEqual({
+      version: "2026.08.11-e8db854",
+      status: "ready",
+      auth: {
+        status: "authenticated",
+        type: "apiKey",
+        label: "Cursor API Key",
+      },
+    });
+  });
+
+  it("leaves a logged-out about probe unauthenticated without CURSOR_API_KEY", () => {
+    expect(applyCursorApiKeyAuth(loggedOut, {})).toEqual(loggedOut);
   });
 });
 

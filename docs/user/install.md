@@ -58,12 +58,13 @@ to use, then authenticate it.
 | ---------- | ----------------------------------------------------- | -------------- | --------------------- |
 | Codex      | [Codex CLI](https://developers.openai.com/codex/cli)  | `codex`        | `codex login`         |
 | Claude     | [Claude Code](https://claude.com/product/claude-code) | `claude`       | `claude auth login`   |
-| Cursor     | [Cursor CLI](https://cursor.com/cli)                  | `cursor-agent` | `agent login`         |
+| Cursor     | [Cursor CLI](https://cursor.com/cli)                  | `cursor-agent` | `agent login` or `CURSOR_API_KEY` |
 | Grok Build | [Grok Build CLI](https://x.ai/cli)                    | `grok`         | `grok login`          |
 | OpenCode   | [OpenCode](https://opencode.ai)                       | `opencode`     | `opencode auth login` |
 
 Cursor is the one to watch: install Cursor CLI, which provides the `cursor-agent` binary that
-T3 Code looks for, but authenticate with `agent login`, not `cursor-agent login`.
+T3 Code looks for. Authenticate with `agent login` or `CURSOR_API_KEY`, not
+`cursor-agent login`. See [Cursor CLI authentication](https://cursor.com/docs/cli/reference/authentication).
 
 Run the login command on the machine running the T3 Code server, not on the device you browse
 from.
