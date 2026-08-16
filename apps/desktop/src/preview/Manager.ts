@@ -1061,6 +1061,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         );
       });
     });
+  const dropAction = (tabId: string, actionId: string) =>
+    Ref.update(actionTimelineRef, (timelines) => {
+      const timeline = timelines.get(tabId);
+      if (!timeline) return timelines;
+      return replaceMap(timelines, (copy) => {
+        copy.set(
+          tabId,
+          timeline.filter((candidate) => candidate.id !== actionId),
+        );
+      });
+    });
 
   type SendCommand = (
     method: string,
@@ -1155,6 +1166,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         });
       } else {
         const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
+        if (isPreviewCaptureUnavailableError(error)) {
+          // Retryable compositor miss: drop this attempt so a later success
+          // is the only snapshot row in the action timeline.
+          yield* dropAction(tabId, actionEvent.id);
+          return;
+        }
         const interrupted = isPreviewAutomationControlInterruptedError(error);
         const errorMessage = isPreviewOperationError(error)
           ? PreviewOperationError.toTimelineMessage(error)
