@@ -643,6 +643,14 @@ export const openLiveProjectIfPresent = Effect.fn("openLiveProjectIfPresent")(fu
             }),
           );
           if (openAttempt._tag === "Failure") {
+            // Path/title validation should stop; transport/dispatch flakes during
+            // desktop attach polling should soft-miss and retry.
+            if (
+              Schema.is(ProjectLiveServerRequestError)(openAttempt.failure) ||
+              Schema.is(ProjectLiveServerUndeclaredStatusError)(openAttempt.failure)
+            ) {
+              return { _tag: "Miss" as const, cause: openAttempt.failure };
+            }
             return { _tag: "Fail" as const, error: openAttempt.failure };
           }
           return { _tag: "Opened" as const };
