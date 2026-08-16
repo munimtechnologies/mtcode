@@ -4,6 +4,7 @@ import {
   ServerSettingsError,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -11,13 +12,17 @@ import * as Fiber from "effect/Fiber";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { ProviderProbeTimeoutError } from "./providerSnapshot.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
+
+const isProviderProbeTimeoutError = Schema.is(ProviderProbeTimeoutError);
 
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
@@ -32,7 +37,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>;
-  readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
+  readonly checkProvider: Effect.Effect<
+    ServerProvider,
+    ServerSettingsError | ProviderProbeTimeoutError
+  >;
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
@@ -59,6 +67,9 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     enrichmentGeneration: 0,
   });
   const settingsRef = yield* Ref.make(initialSettings);
+  // Gates the "keep what we knew" path: before the first successful check there
+  // is no known status, only the pending placeholder.
+  const hasCompletedCheck = yield* Ref.make(false);
   const enrichmentFiberRef = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
   const scope = yield* Effect.scope;
 
@@ -110,6 +121,47 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     yield* Ref.set(enrichmentFiberRef, fiber);
   });
 
+  /**
+   * Decide what a provider looks like after a probe misses its deadline.
+   *
+   * Once a check has succeeded, reporting `error` would replace a working
+   * provider with a verdict the probe never reached, and `ProviderRegistry`
+   * persists that snapshot to the status cache, so one busy moment would
+   * outlive itself and keep the provider unusable for new sessions. Status,
+   * auth, version, and models are carried forward; only `checkedAt` and
+   * `message` move. That is still a change, so the snapshot reaches clients and
+   * the cache, a manual refresh visibly does something, and the timeout is
+   * stated rather than leaving the provider silently frozen.
+   *
+   * Before the first successful check there is nothing worth carrying forward.
+   * The pending snapshot describes a check that has not run, not one that ran
+   * out of time, so the timeout is reported plainly instead.
+   */
+  const snapshotAfterProbeTimeout = Effect.fn("snapshotAfterProbeTimeout")(function* (
+    error: ProviderProbeTimeoutError,
+  ) {
+    const checkedAt = DateTime.formatIso(yield* DateTime.now);
+    const checkedBefore = yield* Ref.get(hasCompletedCheck);
+    const next = yield* Ref.modify(snapshotStateRef, (state) => {
+      const snapshot: ServerProvider = checkedBefore
+        ? {
+            ...state.snapshot,
+            checkedAt,
+            message: `${error.message} Showing the last known status.`,
+          }
+        : {
+            ...state.snapshot,
+            checkedAt,
+            installed: error.installed,
+            status: "error",
+            message: error.message,
+          };
+      return [snapshot, { ...state, snapshot }] as const;
+    });
+    yield* PubSub.publish(changesPubSub, next);
+    return next;
+  });
+
   const applySnapshotBase = Effect.fn("applySnapshot")(function* (
     nextSettings: Settings,
     options?: { readonly forceRefresh?: boolean },
@@ -121,7 +173,26 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    const nextSnapshot = yield* input.checkProvider;
+    const checkOutcome = yield* input.checkProvider.pipe(
+      Effect.tap(() => Ref.set(hasCompletedCheck, true)),
+      Effect.catchTag("ProviderProbeTimeoutError", (error) =>
+        Effect.logWarning("Provider status probe timed out.").pipe(
+          Effect.annotateLogs({
+            "provider.name": error.provider,
+            "provider.probe": error.probe,
+            "provider.probe.timeout_ms": error.timeoutMs,
+          }),
+          Effect.as(error),
+        ),
+      ),
+    );
+    if (isProviderProbeTimeoutError(checkOutcome)) {
+      // `settingsRef` deliberately stays on the previous value: these settings
+      // were never applied to a snapshot, so the next emission must still count
+      // as a change and re-probe rather than short-circuiting above.
+      return yield* snapshotAfterProbeTimeout(checkOutcome);
+    }
+    const nextSnapshot = checkOutcome;
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
       const generation = input.enrichSnapshot
         ? state.enrichmentGeneration + 1

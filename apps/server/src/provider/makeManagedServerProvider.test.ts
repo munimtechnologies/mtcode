@@ -20,6 +20,7 @@ import { TestClock } from "effect/testing";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
+import { ProviderProbeTimeoutError } from "./providerSnapshot.ts";
 
 const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
@@ -92,6 +93,13 @@ const enrichedSnapshot: ServerProvider = {
     },
   ],
 };
+
+const probeTimeout = new ProviderProbeTimeoutError({
+  provider: "Codex",
+  probe: "app-server status",
+  timeoutMs: 10_000,
+  installed: true,
+});
 
 const refreshedSnapshotSecond: ServerProvider = {
   ...refreshedSnapshot,
@@ -450,6 +458,115 @@ describe("makeManagedServerProvider", () => {
           enrichedSnapshotSecond,
         ]);
         assert.deepStrictEqual(latest, enrichedSnapshotSecond);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("keeps the last known status when a provider status probe times out", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const releaseFirstCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.await(releaseFirstCheck).pipe(Effect.as(refreshedSnapshot))
+                : Effect.fail(probeTimeout),
+            ),
+          ),
+          refreshInterval: "1 hour",
+        });
+
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 1).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releaseFirstCheck, undefined);
+        assert.deepStrictEqual(Array.from(yield* Fiber.join(updatesFiber)), [refreshedSnapshot]);
+
+        // Reporting an error would hide a working provider and write that error
+        // to the status cache, so everything the check established is carried
+        // forward. Only the timestamp and the message move.
+        const afterTimeout = yield* provider.refresh;
+
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+        assert.strictEqual(afterTimeout.status, "ready");
+        assert.strictEqual(afterTimeout.installed, true);
+        assert.strictEqual(afterTimeout.version, refreshedSnapshot.version);
+        assert.deepStrictEqual(afterTimeout.auth, refreshedSnapshot.auth);
+        assert.deepStrictEqual(afterTimeout.models, refreshedSnapshot.models);
+        assert.deepStrictEqual(yield* provider.getSnapshot, afterTimeout);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("publishes a timeout so a manual refresh is never a silent no-op", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const releaseFirstCheck = yield* Deferred.make<void>();
+        const checkCalls = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.await(releaseFirstCheck).pipe(Effect.as(refreshedSnapshot))
+                : Effect.fail(probeTimeout),
+            ),
+          ),
+          refreshInterval: "1 hour",
+        });
+
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 2).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releaseFirstCheck, undefined);
+        yield* provider.refresh;
+
+        const updates = Array.from(yield* Fiber.join(updatesFiber));
+        assert.strictEqual(updates.length, 2);
+        // Second update carries the timeout, so clients and the status cache
+        // both learn the check was attempted and did not finish.
+        assert.notStrictEqual(updates[1]!.checkedAt, refreshedSnapshot.checkedAt);
+        assert.match(updates[1]!.message ?? "", /timed out after 10000ms/);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("reports the timeout plainly when no check has ever succeeded", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Effect.fail(probeTimeout),
+          refreshInterval: "1 hour",
+        });
+
+        // There is no known status to keep, and the pending placeholder claims
+        // the check has not run yet. Saying it timed out is the honest answer.
+        const afterTimeout = yield* provider.refresh;
+
+        assert.strictEqual(afterTimeout.status, "error");
+        assert.strictEqual(afterTimeout.installed, true);
+        assert.match(afterTimeout.message ?? "", /timed out after 10000ms/);
+        assert.notMatch(afterTimeout.message ?? "", /last known status/);
       }),
     ).pipe(Effect.provide(AlwaysRunTestLayer)),
   );
