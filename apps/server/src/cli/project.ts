@@ -346,6 +346,7 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
   function* (
     environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"],
     config: ServerConfig.ServerConfig["Service"],
+    options?: { readonly clearOnFailure?: boolean },
   ) {
     const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
     if (Option.isNone(runtimeState)) {
@@ -369,7 +370,10 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     });
-    yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    // ponytail: skip clear while polling a just-launched desktop backend
+    if (options?.clearOnFailure !== false) {
+      yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    }
     return Option.none<{ readonly origin: string }>();
   },
 );
@@ -569,6 +573,65 @@ const projectRenameCommand = Command.make("rename", {
     ),
   ),
 );
+
+/** Attach `cwd` to a live server. Returns false when none is running. */
+export const openLiveProjectIfPresent = Effect.fn("openLiveProjectIfPresent")(function* (flags: {
+  readonly baseDir: Option.Option<string>;
+  readonly cwd: Option.Option<string>;
+  readonly clearOnFailure?: boolean;
+}) {
+  const logLevel = yield* GlobalFlag.LogLevel;
+  const config = yield* resolveCliAuthConfig({ baseDir: flags.baseDir ?? Option.none() }, logLevel);
+  const workspaceRootInput = Option.getOrElse(flags.cwd ?? Option.none(), () => process.cwd());
+
+  return yield* Effect.gen(function* () {
+    const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    const liveMode = yield* tryResolveLiveProjectExecutionMode(environmentAuth, config, {
+      clearOnFailure: flags.clearOnFailure,
+    });
+    if (Option.isNone(liveMode)) {
+      return false;
+    }
+
+    yield* withProjectCliSessionToken(environmentAuth, (token) =>
+      Effect.gen(function* () {
+        const snapshot = yield* fetchLiveOrchestrationSnapshot(liveMode.value.origin, token);
+        const workspaceRoot = yield* normalizeWorkspaceRootForProjectCommand(workspaceRootInput);
+        const existingProject = snapshot.projects.find(
+          (project) => project.deletedAt === null && project.workspaceRoot === workspaceRoot,
+        );
+        if (existingProject) {
+          yield* Console.log(
+            `Opened project ${existingProject.id} (${existingProject.title}) at ${workspaceRoot}.`,
+          );
+          return;
+        }
+
+        const title = yield* resolveProjectTitle(workspaceRoot);
+        const projectId = ProjectId.make(yield* projectCommandUuid);
+        yield* dispatchLiveOrchestrationCommand(liveMode.value.origin, token, {
+          type: "project.create",
+          commandId: CommandId.make(yield* projectCommandUuid),
+          projectId,
+          title,
+          workspaceRoot,
+          defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
+          createdAt: DateTime.formatIso(yield* DateTime.now),
+        });
+        yield* Console.log(`Opened project ${projectId} (${title}) at ${workspaceRoot}.`);
+      }),
+    );
+    return true;
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(EnvironmentAuth.runtimeLayer, WorkspacePaths.layer).pipe(
+        Layer.provideMerge(FetchHttpClient.layer),
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),
+      ),
+    ),
+  );
+});
 
 export const projectCommand = Command.make("project").pipe(
   Command.withDescription("Manage projects."),

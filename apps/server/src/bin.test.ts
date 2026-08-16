@@ -572,6 +572,41 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
+  it.effect("opens a directory on a running server instead of starting another", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-cli-open-live-test-"));
+      const workspaceRoot = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-open-live-workspace-"),
+      );
+
+      yield* withLiveProjectCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          const first = yield* captureStdout(
+            runCli([workspaceRoot, "--base-dir", baseDir, "--no-browser"]),
+          );
+          const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+          const afterAdd = yield* projectionSnapshotQuery.getSnapshot();
+          const addedProject = afterAdd.projects.find(
+            (project) => project.workspaceRoot === workspaceRoot && project.deletedAt === null,
+          );
+          assert.isTrue(addedProject !== undefined);
+          assert.include(first.output, "Opened project");
+          assert.include(first.output, workspaceRoot);
+
+          const second = yield* captureStdout(
+            runCli([workspaceRoot, "--base-dir", baseDir, "--no-browser"]),
+          );
+          const afterSecond = yield* projectionSnapshotQuery.getSnapshot();
+          const matching = afterSecond.projects.filter(
+            (project) => project.workspaceRoot === workspaceRoot && project.deletedAt === null,
+          );
+          assert.equal(matching.length, 1);
+          assert.include(second.output, addedProject?.id ?? "");
+        }),
+      );
+    }),
+  );
+
   it.effect("rejects dev-url on project commands", () =>
     Effect.gen(function* () {
       const workspaceRoot = NodeFS.mkdtempSync(
