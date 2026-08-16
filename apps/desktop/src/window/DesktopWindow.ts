@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 
 import * as Electron from "electron";
 
@@ -285,6 +286,11 @@ export const make = Effect.gen(function* () {
   // createMainIfBackendReady, which gates the post-readiness window
   // open in development and the macOS "activate without windows" path.
   const backendReadyRef = yield* Ref.make(false);
+  // createMainIfBackendReady, ensureMain, and activate all check for an
+  // existing main then create. A WSL splash makes currentMainWindow None
+  // until setMain, so those callers must not race each other — or a deep
+  // link can load on a window that later loses the registered-main slot.
+  const createMainGate = yield* Semaphore.make(1);
   // The transient "Connecting to WSL" splash window, tracked separately so it
   // is never mistaken for the real main window.
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
@@ -766,7 +772,7 @@ export const make = Effect.gen(function* () {
     return window;
   });
 
-  const createMain = Effect.gen(function* () {
+  const createMainUnlocked = Effect.gen(function* () {
     const window = yield* createWindow();
     yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
@@ -776,13 +782,19 @@ export const make = Effect.gen(function* () {
     return window;
   }).pipe(Effect.withSpan("desktop.window.createMain"));
 
-  const ensureMain = Effect.gen(function* () {
-    const existingWindow = yield* currentMainWindow;
-    if (Option.isSome(existingWindow)) {
-      return existingWindow.value;
-    }
-    return yield* createMain;
-  }).pipe(Effect.withSpan("desktop.window.ensureMain"));
+  const createMain = createMainGate.withPermits(1)(createMainUnlocked);
+
+  const ensureMain = createMainGate
+    .withPermits(1)(
+      Effect.gen(function* () {
+        const existingWindow = yield* currentMainWindow;
+        if (Option.isSome(existingWindow)) {
+          return existingWindow.value;
+        }
+        return yield* createMainUnlocked;
+      }),
+    )
+    .pipe(Effect.withSpan("desktop.window.ensureMain"));
 
   const revealOrCreateMain = Effect.gen(function* () {
     const window = yield* ensureMain;
@@ -790,13 +802,25 @@ export const make = Effect.gen(function* () {
     return window;
   }).pipe(Effect.withSpan("desktop.window.revealOrCreateMain"));
 
-  const createMainIfBackendReady = Effect.gen(function* () {
-    const backendReady = yield* Ref.get(backendReadyRef);
-    if (!backendReady) return;
-    const existingWindow = yield* currentMainWindow;
-    if (Option.isSome(existingWindow)) return;
-    yield* createMain;
-  }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
+  const createMainIfBackendReady = createMainGate
+    .withPermits(1)(
+      Effect.gen(function* () {
+        const backendReady = yield* Ref.get(backendReadyRef);
+        if (!backendReady) return;
+        const existingWindow = yield* currentMainWindow;
+        if (Option.isSome(existingWindow)) {
+          // A deep link may have been queued while another caller held the
+          // create gate. Apply it to the registered main instead of opening
+          // a second window that would overwrite setMain.
+          yield* Effect.sync(() => {
+            applyPendingDesktopProtocolUrl(existingWindow.value);
+          });
+          return;
+        }
+        yield* createMainUnlocked;
+      }),
+    )
+    .pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
 
   const showConnectingSplash = Effect.gen(function* () {
     // Only when nothing is shown yet: no real window, no existing splash.

@@ -299,7 +299,15 @@ function makeTestLayer(input: {
 // currentMainOrFirst mirrors the real fallback to the first live window (the
 // splash, before any main is registered). Reveal targets are recorded so tests
 // can assert what activation actually surfaced.
-const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | null)[]) =>
+const makeSplashScenario = (
+  createOutcomes: readonly (Electron.BrowserWindow | null)[],
+  options?: {
+    readonly holdMainCreate?: {
+      readonly started: Deferred.Deferred<void>;
+      readonly release: Deferred.Deferred<void>;
+    };
+  },
+) =>
   Effect.gen(function* () {
     const createdWindows = yield* Ref.make<Electron.BrowserWindow[]>([]);
     const createCalls = yield* Ref.make(0);
@@ -350,6 +358,14 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
             });
           }
           yield* Ref.update(createdWindows, (windows) => [...windows, outcome]);
+          // Hold only the first real main create so a concurrent
+          // createMainIfBackendReady/activate can observe splash-filtered
+          // "no main" before setMain. Later creates must not wait — that
+          // is how an unserialized race opens a second window.
+          if (index === 1 && options?.holdMainCreate !== undefined) {
+            yield* Deferred.succeed(options.holdMainCreate.started, undefined);
+            yield* Deferred.await(options.holdMainCreate.release);
+          }
           return outcome;
         }),
       main: Ref.get(mainWindow),
@@ -1162,6 +1178,56 @@ describe("DesktopWindow", () => {
         assert.deepEqual(openedExternalUrls, ["https://accounts.microsoft.com/oauth"]);
       }).pipe(Effect.provide(layer));
     }),
+  );
+
+  it.effect(
+    "does not create a second main when backend-ready races a deep-link create while the splash is showing",
+    () =>
+      Effect.gen(function* () {
+        const splash = makeFakeBrowserWindow();
+        const firstMain = makeFakeBrowserWindow();
+        const secondMain = makeFakeBrowserWindow();
+        const holdMainCreate = {
+          started: yield* Deferred.make<void>(),
+          release: yield* Deferred.make<void>(),
+        };
+        const scenario = yield* makeSplashScenario(
+          [splash.window, firstMain.window, secondMain.window],
+          { holdMainCreate },
+        );
+        const deepLink = "t3code-dev://app/sso-callback";
+
+        yield* Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          yield* desktopWindow.showConnectingSplash;
+          queuePendingDesktopProtocolUrl(deepLink);
+
+          const ready = yield* desktopWindow
+            .handleBackendReady(new URL("http://127.0.0.1:3773"))
+            .pipe(Effect.forkChild({ startImmediately: true }));
+          yield* Deferred.await(holdMainCreate.started);
+
+          const extra = yield* desktopWindow.createMainIfBackendReady.pipe(
+            Effect.forkChild({ startImmediately: true }),
+          );
+          const activated = yield* desktopWindow.activate.pipe(
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* Effect.yieldNow;
+          yield* Deferred.succeed(holdMainCreate.release, undefined);
+
+          yield* Fiber.join(ready);
+          yield* Fiber.join(extra);
+          yield* Fiber.join(activated);
+
+          assert.equal(yield* Ref.get(scenario.createCalls), 2);
+          const registeredMain = yield* Ref.get(scenario.mainWindow);
+          assert.isTrue(Option.isSome(registeredMain));
+          assert.equal(Option.getOrThrow(registeredMain), firstMain.window);
+          assert.deepEqual(firstMain.loadURL.mock.calls, [[deepLink]]);
+          assert.deepEqual(secondMain.loadURL.mock.calls, []);
+        }).pipe(Effect.provide(scenario.layer));
+      }),
   );
 
   it.effect(
