@@ -1293,6 +1293,316 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("applies a late tool_result after completeTurn drains the in-flight tool", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-late-tool-result",
+        uuid: "stream-late-tool-start",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "tool-late-1",
+            name: "Grep",
+            input: {
+              pattern: "foo",
+              path: "src",
+            },
+          },
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-late-tool-result",
+        uuid: "result-late-tool",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-late-tool-result",
+        uuid: "user-late-tool-result",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-late-1",
+              content: "src/example.ts:1:foo",
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const turnCompletedIndex = runtimeEvents.findIndex((event) => event.type === "turn.completed");
+      assert.equal(turnCompletedIndex >= 0, true);
+      assert.equal(
+        runtimeEvents.some(
+          (event, index) => event.type === "turn.started" && index > turnCompletedIndex,
+        ),
+        false,
+      );
+
+      const toolCompletions = runtimeEvents.filter(
+        (event) =>
+          event.type === "item.completed" && String(event.itemId) === "tool-late-1",
+      );
+      assert.equal(toolCompletions.length, 2);
+
+      const forceCompleted = toolCompletions[0];
+      assert.equal(forceCompleted?.type, "item.completed");
+      if (forceCompleted?.type === "item.completed") {
+        assert.equal(String(forceCompleted.turnId), String(turn.turnId));
+        assert.deepEqual(forceCompleted.payload.data, {
+          toolName: "Grep",
+          input: {
+            pattern: "foo",
+            path: "src",
+          },
+        });
+      }
+
+      const lateUpdated = runtimeEvents.find(
+        (event, index) =>
+          index > turnCompletedIndex &&
+          event.type === "item.updated" &&
+          (event.payload.data as { result?: { tool_use_id?: string } } | undefined)?.result
+            ?.tool_use_id === "tool-late-1",
+      );
+      assert.equal(lateUpdated?.type, "item.updated");
+      if (lateUpdated?.type === "item.updated") {
+        assert.equal(String(lateUpdated.turnId), String(turn.turnId));
+        assert.equal(
+          (lateUpdated.payload.data as { result?: { content?: string } }).result?.content,
+          "src/example.ts:1:foo",
+        );
+      }
+
+      const lateCompleted = toolCompletions[1];
+      assert.equal(lateCompleted?.type, "item.completed");
+      if (lateCompleted?.type === "item.completed") {
+        assert.equal(String(lateCompleted.turnId), String(turn.turnId));
+        assert.equal(lateCompleted.payload.status, "completed");
+        assert.equal(
+          (lateCompleted.payload.data as { result?: { content?: string } }).result?.content,
+          "src/example.ts:1:foo",
+        );
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("does not throw when a tool_result arrives for an unknown toolUseId after finalize", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-unknown-tool-result",
+        uuid: "result-unknown-tool",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-unknown-tool-result",
+        uuid: "user-unknown-tool-result",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-unknown-1",
+              content: "should not be attached",
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      assert.equal(
+        runtimeEvents.some(
+          (event) =>
+            (event.type === "item.started" ||
+              event.type === "item.updated" ||
+              event.type === "item.completed") &&
+            String(event.itemId) === "tool-unknown-1",
+        ),
+        false,
+      );
+      assert.equal(
+        runtimeEvents.some(
+          (event) =>
+            event.type === "item.completed" &&
+            (event.payload.data as { result?: { tool_use_id?: string } } | undefined)?.result
+              ?.tool_use_id === "tool-unknown-1",
+        ),
+        false,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("still completes an in-flight tool when tool_result arrives before completeTurn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-happy-tool-result",
+        uuid: "stream-happy-tool-start",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "tool-happy-1",
+            name: "Grep",
+            input: {
+              pattern: "bar",
+              path: "src",
+            },
+          },
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-happy-tool-result",
+        uuid: "user-happy-tool-result",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-happy-1",
+              content: "src/example.ts:1:bar",
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-happy-tool-result",
+        uuid: "result-happy-tool",
+      } as unknown as SDKMessage);
+
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const toolCompletions = runtimeEvents.filter(
+        (event) =>
+          event.type === "item.completed" && String(event.itemId) === "tool-happy-1",
+      );
+      assert.equal(toolCompletions.length, 1);
+
+      const toolCompleted = toolCompletions[0];
+      assert.equal(toolCompleted?.type, "item.completed");
+      if (toolCompleted?.type === "item.completed") {
+        assert.equal(String(toolCompleted.turnId), String(turn.turnId));
+        assert.equal(toolCompleted.payload.status, "completed");
+        assert.equal(
+          (toolCompleted.payload.data as { result?: { content?: string } }).result?.content,
+          "src/example.ts:1:bar",
+        );
+      }
+
+      const turnCompletedIndex = runtimeEvents.findIndex((event) => event.type === "turn.completed");
+      const toolCompletedIndex = runtimeEvents.findIndex(
+        (event) =>
+          event.type === "item.completed" && String(event.itemId) === "tool-happy-1",
+      );
+      assert.equal(turnCompletedIndex > toolCompletedIndex, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("falls back to a default plan step label for blank TodoWrite content", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
