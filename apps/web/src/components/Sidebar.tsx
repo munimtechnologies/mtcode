@@ -38,6 +38,7 @@ import {
   ArchiveIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -199,6 +200,16 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Keep the v2 key so existing preferences survive the v2-to-default rename.
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar-v2:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar-v2:snoozed-expanded";
+const SIDEBAR_PLATFORM_EXPANSION_PREFIX = "sidebar-platform:";
+const SIDEBAR_PLATFORM_PROJECT_EXPANSION_PREFIX = "sidebar-platform-project:";
+
+function platformExpansionKey(platformKey: string): string {
+  return `${SIDEBAR_PLATFORM_EXPANSION_PREFIX}${platformKey}`;
+}
+
+function platformProjectExpansionKey(platformKey: string, projectKey: string): string {
+  return `${SIDEBAR_PLATFORM_PROJECT_EXPANSION_PREFIX}${platformKey}:${projectKey}`;
+}
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -1749,6 +1760,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
+  const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -2211,15 +2224,7 @@ export default function Sidebar() {
     setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   }
   const visibleSettledThreads = useMemo(() => {
-    const buckets = new Map<string, EnvironmentThreadShell[]>();
-    for (const thread of settledThreads) {
-      const instanceId = thread.modelSelection.instanceId;
-      const key = driverByInstanceId.get(instanceId) ?? `instance:${instanceId}`;
-      const bucket = buckets.get(key) ?? [];
-      bucket.push(thread);
-      buckets.set(key, bucket);
-    }
-    const visible = [...buckets.values()].flatMap((bucket) => bucket.slice(0, settledVisibleCount));
+    const visible = settledThreads.slice(0, settledVisibleCount);
     // The open thread must never hide under "Show more": navigating into a
     // deep settled thread (search, deep link) pulls its row into the visible
     // tail so the highlight and the un-settle affordance stay reachable.
@@ -2233,7 +2238,7 @@ export default function Sidebar() {
       if (routeThread !== undefined) visible.push(routeThread);
     }
     return visible;
-  }, [driverByInstanceId, routeThreadKey, settledThreads, settledVisibleCount]);
+  }, [routeThreadKey, settledThreads, settledVisibleCount]);
   const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
   const showMoreSettled = useCallback(
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
@@ -3966,6 +3971,8 @@ export default function Sidebar() {
                   }
                   const hierarchyItems: ReactNode[] = [];
                   for (const platform of platformGroups) {
+                    const platformExpanded =
+                      projectExpandedById[platformExpansionKey(platform.key)] ?? true;
                     const PlatformIcon =
                       (platform.driver ? getDriverOption(platform.driver)?.icon : undefined) ??
                       MessageSquareIcon;
@@ -3973,29 +3980,75 @@ export default function Sidebar() {
                       <li
                         key={`platform:${platform.key}`}
                         data-testid={`sidebar-platform-${platform.key}`}
-                        className="mt-3 flex h-7 list-none items-center gap-2 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/70 first:mt-1"
+                        data-thread-selection-safe
+                        className="mt-3 list-none first:mt-1"
                       >
-                        <PlatformIcon className="size-3.5 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">{platform.label}</span>
-                        <span className="font-normal tabular-nums text-sidebar-muted-foreground/60">
-                          {platform.threadCount}
-                        </span>
+                        <button
+                          type="button"
+                          aria-expanded={platformExpanded}
+                          onClick={() =>
+                            setProjectExpanded(
+                              platformExpansionKey(platform.key),
+                              !platformExpanded,
+                            )
+                          }
+                          className="flex h-7 w-full cursor-pointer items-center gap-2 px-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/70 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                        >
+                          <ChevronRightIcon
+                            aria-hidden
+                            className={cn(
+                              "size-3 shrink-0 transition-transform",
+                              platformExpanded && "rotate-90",
+                            )}
+                          />
+                          <PlatformIcon className="size-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">{platform.label}</span>
+                          <span className="font-normal tabular-nums text-sidebar-muted-foreground/60">
+                            {platform.threadCount}
+                          </span>
+                        </button>
                       </li>,
                     );
+                    if (!platformExpanded) continue;
                     for (const project of platform.projects) {
+                      const projectExpanded =
+                        projectExpandedById[
+                          platformProjectExpansionKey(platform.key, project.key)
+                        ] ?? true;
                       hierarchyItems.push(
                         <li
                           key={`platform:${platform.key}:project:${project.key}`}
                           data-testid="sidebar-platform-project"
-                          className="flex h-7 list-none items-center gap-2 border-l border-sidebar-border/60 pl-3 pr-2 text-xs font-medium text-sidebar-muted-foreground"
+                          data-thread-selection-safe
+                          className="list-none"
                         >
-                          <FolderIcon className="size-3 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{project.title}</span>
-                          <span className="text-[10px] font-normal tabular-nums opacity-60">
-                            {project.threadCount}
-                          </span>
+                          <button
+                            type="button"
+                            aria-expanded={projectExpanded}
+                            onClick={() =>
+                              setProjectExpanded(
+                                platformProjectExpansionKey(platform.key, project.key),
+                                !projectExpanded,
+                              )
+                            }
+                            className="flex h-7 w-full cursor-pointer items-center gap-2 border-l border-sidebar-border/60 pl-3 pr-2 text-left text-xs font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                          >
+                            <ChevronRightIcon
+                              aria-hidden
+                              className={cn(
+                                "size-3 shrink-0 transition-transform",
+                                projectExpanded && "rotate-90",
+                              )}
+                            />
+                            <FolderIcon className="size-3 shrink-0" />
+                            <span className="min-w-0 flex-1 truncate">{project.title}</span>
+                            <span className="text-[10px] font-normal tabular-nums opacity-60">
+                              {project.threadCount}
+                            </span>
+                          </button>
                         </li>,
                       );
+                      if (!projectExpanded) continue;
                       for (const thread of project.threads) {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
