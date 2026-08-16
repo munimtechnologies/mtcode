@@ -226,6 +226,10 @@ const makeAutomationWebContents = (options?: {
     return undefined;
   });
   const capturePage = options?.capturePage ?? (async () => makeSnapshotImage());
+  const emitDetach = () => {
+    attached = false;
+    debuggerListeners.get("detach")?.();
+  };
   const webContents = {
     id: options?.id ?? 42,
     isDestroyed: () => false,
@@ -259,6 +263,7 @@ const makeAutomationWebContents = (options?: {
   return {
     attach,
     detach,
+    emitDetach,
     debuggerListeners,
     sendCommand,
     webContents: webContents as never,
@@ -2858,7 +2863,7 @@ describe("PreviewManager", () => {
           yield* Effect.yieldNow;
           const attachesAfterRegister = preview.attach.mock.calls.length;
 
-          preview.debuggerListeners.get("detach")?.();
+          preview.emitDetach();
           yield* Effect.yieldNow;
 
           const snapshot = yield* manager.automationSnapshot("tab_leave_reattach");
@@ -2869,7 +2874,26 @@ describe("PreviewManager", () => {
       ),
   );
 
-  effectIt.effect("does not let a stale control-session finalizer detach its replacement", () =>
+  effectIt.effect("reattaches when Chromium has detached before the session is forgotten", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeAutomationWebContents();
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_stale_session");
+        yield* manager.registerWebview("tab_stale_session", 42);
+        yield* Effect.yieldNow;
+        const attachesAfterRegister = preview.attach.mock.calls.length;
+
+        preview.emitDetach();
+        const snapshot = yield* manager.automationSnapshot("tab_stale_session");
+        expect(snapshot).toMatchObject(SNAPSHOT_PAGE);
+        expect(preview.attach.mock.calls.length).toBeGreaterThan(attachesAfterRegister);
+      }),
+    ),
+  );
+
+  effectIt.effect("does not let a stale control-session detach tear down its replacement", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const preview = makeAutomationWebContents();
@@ -2878,16 +2902,19 @@ describe("PreviewManager", () => {
         yield* manager.createTab("tab_session_race");
         yield* manager.registerWebview("tab_session_race", 42);
         yield* Effect.yieldNow;
+        const staleDetach = preview.debuggerListeners.get("detach");
 
-        const inFlight = yield* manager
-          .automationSnapshot("tab_session_race")
-          .pipe(Effect.forkChild({ startImmediately: true }));
-        preview.debuggerListeners.get("detach")?.();
-        const first = yield* Fiber.join(inFlight);
-        expect(first).toMatchObject(SNAPSHOT_PAGE);
+        preview.emitDetach();
+        yield* Effect.yieldNow;
+        const restored = yield* manager.automationSnapshot("tab_session_race");
+        expect(restored).toMatchObject(SNAPSHOT_PAGE);
+        const attachesAfterRestore = preview.attach.mock.calls.length;
 
-        const second = yield* manager.automationSnapshot("tab_session_race");
-        expect(second).toMatchObject(SNAPSHOT_PAGE);
+        staleDetach?.();
+        yield* Effect.yieldNow;
+        const reused = yield* manager.automationSnapshot("tab_session_race");
+        expect(reused).toMatchObject(SNAPSHOT_PAGE);
+        expect(preview.attach.mock.calls.length).toBe(attachesAfterRestore);
       }),
     ),
   );
@@ -2908,6 +2935,54 @@ describe("PreviewManager", () => {
         expect(snapshot).toMatchObject(SNAPSHOT_PAGE);
         expect(preview.capturePage).toHaveBeenCalledTimes(2);
         expect(preview.attach.mock.calls.length).toBeGreaterThan(attachesAfterRegister);
+      }),
+    ),
+  );
+
+  effectIt.effect("holds the restored session lock across a snapshot retry", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let captures = 0;
+        let resolveRetryStarted: (() => void) | undefined;
+        let resolveRetryRelease: (() => void) | undefined;
+        const retryStarted = new Promise<void>((resolve) => {
+          resolveRetryStarted = resolve;
+        });
+        const retryRelease = new Promise<void>((resolve) => {
+          resolveRetryRelease = resolve;
+        });
+        const preview = makeAutomationWebContents({
+          capturePage: async () => {
+            const n = ++captures;
+            if (n === 1) throw new Error("UnknownVizError");
+            if (n === 2) {
+              resolveRetryStarted?.();
+              await retryRelease;
+            }
+            return makeSnapshotImage();
+          },
+        });
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_viz_mutex");
+        yield* manager.registerWebview("tab_viz_mutex", 42);
+        yield* Effect.yieldNow;
+
+        const first = yield* manager
+          .automationSnapshot("tab_viz_mutex")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.promise(() => retryStarted);
+
+        const second = yield* manager
+          .automationSnapshot("tab_viz_mutex")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        for (let i = 0; i < 8; i++) yield* Effect.yieldNow;
+        expect(captures).toBe(2);
+
+        resolveRetryRelease?.();
+        expect(yield* Fiber.join(first)).toMatchObject(SNAPSHOT_PAGE);
+        expect(yield* Fiber.join(second)).toMatchObject(SNAPSHOT_PAGE);
+        expect(captures).toBe(3);
       }),
     ),
   );
