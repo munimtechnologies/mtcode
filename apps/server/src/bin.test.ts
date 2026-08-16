@@ -655,6 +655,39 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
+  it.effect("surfaces open failures against a live server instead of starting another", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-cli-open-live-fail-test-"),
+      );
+      const missingWorkspace = NodePath.join(
+        NodeOS.tmpdir(),
+        `t3-cli-open-live-missing-${Date.now()}`,
+      );
+
+      yield* withLiveProjectCliServer(baseDir, () =>
+        Effect.gen(function* () {
+          const error = yield* runCli([
+            missingWorkspace,
+            "--base-dir",
+            baseDir,
+            "--no-browser",
+          ]).pipe(Effect.flip);
+          const rendered = String(
+            typeof error === "object" && error !== null && "message" in error
+              ? error.message
+              : error,
+          );
+          assert.match(rendered, /does not exist|not exist|ENOENT|WorkspaceRoot/i);
+          // Soft-miss path must not have cleared the live runtime file.
+          assert.isTrue(
+            NodeFS.existsSync(NodePath.join(baseDir, "userdata", "server-runtime.json")),
+          );
+        }),
+      );
+    }),
+  );
+
   it.effect("rejects dev-url on project commands", () =>
     Effect.gen(function* () {
       const workspaceRoot = NodeFS.mkdtempSync(
