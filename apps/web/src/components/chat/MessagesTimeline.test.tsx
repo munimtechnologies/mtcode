@@ -492,6 +492,8 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Queued");
     expect(markup).toContain("Cancel");
+    expect(markup).toContain('aria-label="Cancel queued message"');
+    expect(markup).toContain('data-slot="button"');
     expect(markup).toContain("opacity-100");
   });
 

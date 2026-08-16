@@ -1050,13 +1050,16 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           {row.message.deliveryState === "queued" ? (
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <span>Queued</span>
-              <button
+              <Button
                 type="button"
-                className="font-medium text-destructive hover:underline"
+                size="xs"
+                variant="link"
+                aria-label="Cancel queued message"
+                className="px-0 text-destructive"
                 onClick={() => ctx.onCancelQueuedMessage(row.message.id)}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           ) : null}
           <Tooltip>
