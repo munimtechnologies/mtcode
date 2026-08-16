@@ -19,6 +19,7 @@ import type {
   PluginMarketplaceHarnessId,
   PluginMarketplaceMcpAuthStatus,
 } from "@t3tools/contracts";
+import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@t3tools/shared/hostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -404,13 +405,14 @@ export const make = (options: McpOAuthRuntimeOptions = {}) =>
     const activeSessions = yield* Ref.make(new Map<string, ActiveSession>());
     const failures = yield* Ref.make(new Map<string, string>());
     const sessionLock = yield* Semaphore.make(1);
-    const cwd = options.cwd ?? process.cwd();
+    const cwd = options.cwd ?? (yield* HostProcessWorkingDirectory);
+    const hostEnvironment = yield* HostProcessEnvironment;
     const commandFor = Effect.fn("McpOAuthRuntime.commandFor")(function* (
       harness: McpOAuthHarness,
       fallback: string,
     ) {
       if (options.resolveCommand) return yield* options.resolveCommand(harness);
-      return options.commands?.[harness] ?? { command: fallback, env: process.env };
+      return options.commands?.[harness] ?? { command: fallback, env: hostEnvironment };
     });
 
     const clearFailure = (key: string) =>

@@ -42,7 +42,11 @@ import {
   type PluginMarketplaceSkill,
   type PluginMarketplaceHarnessId,
 } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  HostProcessEnvironment,
+  HostProcessPlatform,
+  HostProcessWorkingDirectory,
+} from "@t3tools/shared/hostProcess";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
@@ -767,13 +771,14 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     const cachedSnapshot = yield* Ref.make<CatalogSnapshot | null>(null);
     const snapshotLock = yield* Semaphore.make(1);
     const platform = options.platform ?? (yield* HostProcessPlatform);
-    const marketplaceCwd = options.cwd ?? process.cwd();
+    const marketplaceCwd = options.cwd ?? (yield* HostProcessWorkingDirectory);
+    const hostEnvironment = yield* HostProcessEnvironment;
     const commandFor = Effect.fn("CodexPluginMarketplace.commandFor")(function* (
       harness: McpOAuthRuntime.McpOAuthHarness,
       fallback: string,
     ) {
       if (options.resolveCommand) return yield* options.resolveCommand(harness);
-      return options.commands?.[harness] ?? { command: fallback, env: process.env };
+      return options.commands?.[harness] ?? { command: fallback, env: hostEnvironment };
     });
 
     const safePluginAbsolutePath = Effect.fn("CodexPluginMarketplace.safePluginAbsolutePath")(
@@ -1449,9 +1454,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       const temporaryDirectoryIndex = pluginRoot.indexOf(temporaryDirectoryMarker);
       if (temporaryDirectoryIndex > 0) return pluginRoot.slice(0, temporaryDirectoryIndex);
 
-      const configuredHome = process.env.CODEX_HOME?.trim();
+      const configuredHome = hostEnvironment.CODEX_HOME?.trim();
       if (configuredHome) return configuredHome;
-      const userHome = process.env.HOME?.trim() || process.env.USERPROFILE?.trim();
+      const userHome = hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim();
       return userHome ? path.join(userHome, ".codex") : null;
     };
 
@@ -1733,7 +1738,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             (cause) => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid", cause }),
           ),
         );
-        const home = process.env.HOME ?? process.env.USERPROFILE;
+        const home = hostEnvironment.HOME ?? hostEnvironment.USERPROFILE;
         return yield* Effect.forEach(
           plugins,
           (plugin): Effect.Effect<PluginSourceRecord> =>
@@ -2575,7 +2580,8 @@ const makeCodexPluginRuntime = (
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const cwd = options.cwd ?? process.cwd();
+    const cwd = options.cwd ?? (yield* HostProcessWorkingDirectory);
+    const hostEnvironment = yield* HostProcessEnvironment;
     const withClient = <A, E>(
       operation: CodexPluginRuntimeError["operation"],
       pluginRef: string | undefined,
@@ -2585,7 +2591,7 @@ const makeCodexPluginRuntime = (
         Effect.gen(function* () {
           const command = options.resolveCommand
             ? yield* options.resolveCommand()
-            : (options.command ?? { command: "codex", env: process.env });
+            : (options.command ?? { command: "codex", env: hostEnvironment });
           if (!command) {
             return yield* new CodexPluginRuntimeError({
               operation,
@@ -2721,6 +2727,7 @@ const makeCodexPluginRuntime = (
 const makePluginProviderCommands = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const path = yield* Path.Path;
+  const hostEnvironment = yield* HostProcessEnvironment;
 
   const resolve = Effect.fn("PluginProviderCommands.resolve")(function* (
     harness: McpOAuthRuntime.McpOAuthHarness,
@@ -2732,7 +2739,10 @@ const makePluginProviderCommands = Effect.gen(function* () {
     );
     if (matches.length !== 1) return undefined;
     const instance = matches[0]!;
-    const environment = mergeProviderInstanceEnvironment(instance.environment ?? []);
+    const environment = mergeProviderInstanceEnvironment(
+      instance.environment ?? [],
+      hostEnvironment,
+    );
 
     if (harness === "codex") {
       const config = decodeCodexSettingsOption(instance.config ?? {});
