@@ -30,7 +30,9 @@ const openProjectViaDesktopOrLiveServer = Effect.fn("openProjectViaDesktopOrLive
     readonly cwd: Option.Option<string>;
   }) {
     // Already attached to whatever is serving this home (CLI or desktop backend).
-    if (yield* openLiveProjectIfPresent(flags)) {
+    // Never clear discovery here: a transient miss must not delete a live
+    // desktop/server runtime file before we launch/poll.
+    if (yield* openLiveProjectIfPresent({ ...flags, clearOnFailure: false })) {
       return true;
     }
 
