@@ -415,10 +415,11 @@ describe("buildThreadFeed", () => {
       return;
     }
 
-    expect(group.activities).toHaveLength(2);
-    expect(new Set(group.activities.map((activity) => activity.id))).toEqual(
-      new Set(["tool-a-late", "tool-b-complete"]),
-    );
+    expect(group.activities.map((activity) => activity.id)).toEqual([
+      "tool-a-late",
+      "tool-b-complete",
+    ]);
+    expect(group.activities[0]?.createdAt).toBe("2026-04-01T00:00:01.000Z");
   });
 
   it("keeps MCP inputs available to expanded mobile work rows", () => {

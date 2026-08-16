@@ -1003,7 +1003,13 @@ function collapseDerivedWorkLogEntries(
     if (toolCallId !== undefined) {
       const existingIndex = toolRowIndex.get(toolCallId);
       if (existingIndex !== undefined) {
-        collapsed[existingIndex] = mergeDerivedWorkLogEntries(collapsed[existingIndex]!, entry);
+        const existing = collapsed[existingIndex]!;
+        // Keep the first row's createdAt so a late result does not sort
+        // past intervening tools or the assistant reply.
+        collapsed[existingIndex] = {
+          ...mergeDerivedWorkLogEntries(existing, entry),
+          createdAt: existing.createdAt,
+        };
         continue;
       }
     }
