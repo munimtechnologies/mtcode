@@ -1,31 +1,76 @@
-import type { OrchestrationThreadGoal } from "@t3tools/contracts";
-import { truncateGoalObjectivePreview } from "@t3tools/shared/composerTrigger";
-import { View } from "react-native";
+import type { OrchestrationThreadGoalShell } from "@t3tools/contracts";
+import {
+  formatGoalStatusLabel,
+  GOAL_PAUSE_HINT,
+  goalChipActionLabel,
+  goalChipActions,
+  type GoalChipAction,
+} from "@t3tools/shared/composerTrigger";
+import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 
-type GoalChipGoal =
-  | OrchestrationThreadGoal
-  | { readonly objectivePreview: string; readonly status: string };
+export type { GoalChipAction };
 
-function goalChipLabel(goal: GoalChipGoal): string {
-  const objective = "objective" in goal ? goal.objective : goal.objectivePreview;
-  return truncateGoalObjectivePreview(objective);
+function goalStatusClass(status: string): string {
+  if (status === "blocked") {
+    return "text-red-600 dark:text-red-400";
+  }
+  if (status === "usageLimited") {
+    return "text-amber-700 dark:text-amber-400";
+  }
+  return "text-foreground-muted";
 }
 
-export function GoalChip({ goal }: { readonly goal: GoalChipGoal | null | undefined }) {
+export function GoalChip({
+  goal,
+  onAction,
+}: {
+  readonly goal: OrchestrationThreadGoalShell | null | undefined;
+  readonly onAction?: ((action: GoalChipAction) => void) | undefined;
+}) {
   if (goal == null) {
     return null;
   }
 
-  const label = goalChipLabel(goal);
+  const statusLabel = formatGoalStatusLabel(goal.status);
+  const actions = onAction == null ? [] : goalChipActions(goal.status);
 
   return (
-    <View className="px-4 pb-2" accessibilityLabel={`Objective: ${label}`}>
+    <View className="px-4 pb-2" accessibilityLabel={`${statusLabel}: ${goal.objectivePreview}`}>
       <View className="self-start max-w-[80%] rounded-md border border-border bg-card px-2 py-1">
         <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-          {label}
+          <Text className={`text-xs font-t3-medium ${goalStatusClass(goal.status)}`}>
+            {statusLabel}
+          </Text>
+          {`  ${goal.objectivePreview}`}
         </Text>
+        {actions.length > 0 ? (
+          <View className="mt-1 flex-row flex-wrap gap-x-3 gap-y-1">
+            {actions.map((action) => (
+              <Pressable
+                key={action}
+                accessibilityRole="button"
+                accessibilityLabel={goalChipActionLabel(action)}
+                hitSlop={6}
+                onPress={() => onAction?.(action)}
+              >
+                <Text
+                  className={
+                    action === "clear"
+                      ? "text-xs text-red-600 dark:text-red-400"
+                      : "text-xs text-foreground"
+                  }
+                >
+                  {goalChipActionLabel(action)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {goal.status === "active" ? (
+          <Text className="mt-1 text-3xs text-foreground-muted">{GOAL_PAUSE_HINT}</Text>
+        ) : null}
       </View>
     </View>
   );

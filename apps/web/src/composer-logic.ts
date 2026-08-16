@@ -2,7 +2,14 @@ import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default" | "goal";
+export type ComposerSlashCommand =
+  | "model"
+  | "plan"
+  | "default"
+  | "goal"
+  | "goal pause"
+  | "goal resume"
+  | "goal clear";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;

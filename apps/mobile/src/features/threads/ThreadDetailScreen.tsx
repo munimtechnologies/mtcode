@@ -1,4 +1,8 @@
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentThreadStatus } from "@t3tools/client-runtime/state/threads";
 import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
 import type { LegendListRef } from "@legendapp/list/react-native";
@@ -30,6 +34,7 @@ import {
 import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
 import {
   AppState,
+  Alert,
   Keyboard,
   Platform,
   useColorScheme,
@@ -66,6 +71,8 @@ import type {
   ThreadFeedEntry,
 } from "../../lib/threadActivity";
 import { useSelectedThreadDetail } from "../../state/use-thread-detail";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import {
@@ -73,7 +80,7 @@ import {
   ESTIMATED_KEYBOARD_HEIGHT,
   USER_INPUT_TOGGLE_DURATION_MS,
 } from "./pendingUserInputLayout";
-import { GoalChip } from "./GoalChip";
+import { GoalChip, type GoalChipAction } from "./GoalChip";
 import {
   COMPOSER_COLLAPSED_CHROME,
   COMPOSER_EXPANDED_CHROME,
@@ -217,6 +224,43 @@ const USER_INPUT_TOGGLE_TIMING = {
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
   const insets = useSafeAreaInsets();
+  const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
+  const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
+  const completeThreadGoal = useAtomCommand(threadEnvironment.completeGoal, {
+    reportFailure: false,
+  });
+  const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
+  const handleGoalAction = useCallback(
+    async (action: GoalChipAction) => {
+      const run =
+        action === "pause"
+          ? pauseThreadGoal
+          : action === "resume"
+            ? resumeThreadGoal
+            : action === "complete"
+              ? completeThreadGoal
+              : clearThreadGoal;
+      const result = await run({
+        environmentId: props.environmentId,
+        input: { threadId: props.selectedThread.id },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        Alert.alert(
+          "Could not update the Objective",
+          error instanceof Error ? error.message : "An error occurred.",
+        );
+      }
+    },
+    [
+      clearThreadGoal,
+      completeThreadGoal,
+      pauseThreadGoal,
+      props.environmentId,
+      props.selectedThread.id,
+      resumeThreadGoal,
+    ],
+  );
   const selectedThreadDetail = useSelectedThreadDetail();
   const threadGoal = selectedThreadDetail?.goal ?? props.selectedThread.goal ?? null;
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
@@ -585,7 +629,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           onTouchEnd={handleFeedTouchEnd}
           onTouchCancel={handleFeedTouchCancel}
         >
-          <GoalChip goal={threadGoal} />
+          <GoalChip
+            goal={threadGoal}
+            onAction={
+              props.serverConfig?.environment.capabilities.threadGoal === true
+                ? handleGoalAction
+                : undefined
+            }
+          />
           <ThreadFeed
             key={props.selectedThread.id}
             environmentId={props.environmentId}

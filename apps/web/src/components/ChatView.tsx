@@ -256,6 +256,7 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
+import { useThreadGoalActions } from "../hooks/useThreadGoalActions";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -1235,6 +1236,7 @@ function ChatViewContent(props: ChatViewProps) {
   const pauseGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
   const clearGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
+  const { runGoalAction } = useThreadGoalActions();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -6363,6 +6365,17 @@ function ChatViewContent(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
             goal={activeThread.goal ?? null}
+            onGoalAction={
+              supportsGoal
+                ? (action) => {
+                    void runGoalAction({
+                      environmentId,
+                      threadId: activeThread.id,
+                      action,
+                    });
+                  }
+                : undefined
+            }
             changeRequestState={activeThreadPr?.state ?? null}
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}

@@ -19,7 +19,10 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import {
+  BUILT_IN_GOAL_SLASH_COMMANDS,
+  serializeComposerFileLink,
+} from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   memo,
@@ -1053,13 +1056,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
-        {
-          id: "slash:goal",
-          type: "slash-command",
-          command: "goal",
-          label: "/goal",
-          description: "Set an Objective on this Thread",
-        },
+        ...BUILT_IN_GOAL_SLASH_COMMANDS.map((item) => ({
+          id: `slash:${item.command.replaceAll(" ", "-")}`,
+          type: "slash-command" as const,
+          command: item.command,
+          label: item.label,
+          description: item.description,
+        })),
         ...(planModeUiEnabled
           ? ([
               {
@@ -1725,8 +1728,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        if (item.command === "goal") {
-          const replacement = "/goal ";
+        if (item.command === "goal" || item.command.startsWith("goal ")) {
+          const replacement = item.command === "goal" ? "/goal " : `/${item.command}`;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,

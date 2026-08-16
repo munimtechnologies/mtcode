@@ -1,5 +1,44 @@
 export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand =
+  | "model"
+  | "plan"
+  | "default"
+  | "goal"
+  | "goal pause"
+  | "goal resume"
+  | "goal clear";
+
+export type GoalChipAction = "pause" | "resume" | "complete" | "clear";
+
+export const GOAL_PAUSE_HINT =
+  "Pause prevents the next Continuation. Stop interrupts this Turn and also Pauses.";
+
+export const BUILT_IN_GOAL_SLASH_COMMANDS = [
+  {
+    command: "goal",
+    label: "/goal",
+    description: "Set an Objective this Thread keeps working toward",
+  },
+  {
+    command: "goal pause",
+    label: "/goal pause",
+    description: "Pause — prevent the next Continuation",
+  },
+  {
+    command: "goal resume",
+    label: "/goal resume",
+    description: "Resume a Paused, Blocked, or Usage-limited Goal",
+  },
+  {
+    command: "goal clear",
+    label: "/goal clear",
+    description: "Clear the Goal from this Thread",
+  },
+] as const satisfies ReadonlyArray<{
+  readonly command: ComposerSlashCommand;
+  readonly label: string;
+  readonly description: string;
+}>;
 
 export const GOAL_OBJECTIVE_PREVIEW_MAX_CHARS = 80;
 
@@ -53,17 +92,86 @@ export function parseGoalComposerCommand(text: string): ParsedGoalComposerComman
   return { action: "set", objective: rest };
 }
 
+export function formatGoalStatusLabel(status: string): string {
+  if (status === "usageLimited") {
+    return "Usage-limited";
+  }
+  if (status.length === 0) {
+    return status;
+  }
+  return `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`;
+}
+
 export function formatGoalStatusMessage(
   goal: { readonly status: string; readonly objective: string } | null | undefined,
 ): string {
   if (goal == null) {
     return "No Objective on this Thread. Type /goal followed by the outcome to set one.";
   }
-  const statusLabel =
-    goal.status === "usageLimited"
-      ? "Usage-limited"
-      : `${goal.status.slice(0, 1).toUpperCase()}${goal.status.slice(1)}`;
-  return `${statusLabel}: ${goal.objective}`;
+  return `${formatGoalStatusLabel(goal.status)}: ${goal.objective}`;
+}
+
+export function goalChipActions(status: string): ReadonlyArray<GoalChipAction> {
+  const actions: GoalChipAction[] = [];
+  if (status === "active") {
+    actions.push("pause");
+  }
+  if (status === "paused" || status === "blocked" || status === "usageLimited") {
+    actions.push("resume");
+  }
+  if (status !== "complete") {
+    actions.push("complete");
+  }
+  actions.push("clear");
+  return actions;
+}
+
+export function goalChipActionLabel(action: GoalChipAction): string {
+  switch (action) {
+    case "pause":
+      return "Pause";
+    case "resume":
+      return "Resume";
+    case "complete":
+      return "Complete";
+    case "clear":
+      return "Clear";
+  }
+}
+
+export function threadHasActiveGoal(goal: { readonly status: string } | null | undefined): boolean {
+  return goal?.status === "active";
+}
+
+export function formatGoalActivityLabel(kind: string): string | null {
+  switch (kind) {
+    case "goal.set":
+      return "Objective set";
+    case "goal.continued":
+      return "Continued";
+    case "goal.paused":
+      return "Paused";
+    case "goal.resumed":
+      return "Resumed";
+    case "goal.cleared":
+      return "Cleared";
+    case "goal.completed":
+      return "Complete";
+    case "goal.blocked":
+      return "Blocked";
+    case "goal.usage-limited":
+      return "Usage-limited";
+    default:
+      return null;
+  }
+}
+
+export function isBuiltInGoalSlashCommand(command: string): boolean {
+  return command === "goal" || command.startsWith("goal ");
+}
+
+export function composerTextForGoalSlashCommand(command: string): string {
+  return command === "goal" ? "/goal " : `/${command}`;
 }
 
 export function truncateGoalObjectivePreview(objective: string): string {

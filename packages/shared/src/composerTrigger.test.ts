@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  BUILT_IN_GOAL_SLASH_COMMANDS,
+  formatGoalActivityLabel,
+  formatGoalStatusLabel,
   formatGoalStatusMessage,
   GOAL_OBJECTIVE_PREVIEW_MAX_CHARS,
+  goalChipActionLabel,
+  goalChipActions,
   isGoalCommandForm,
   parseGoalComposerCommand,
   serializeComposerFileLink,
@@ -128,6 +133,58 @@ describe("formatGoalStatusMessage", () => {
     expect(
       formatGoalStatusMessage({ status: "usageLimited", objective: "Reduce p95 below 120ms" }),
     ).toBe("Usage-limited: Reduce p95 below 120ms");
+  });
+});
+
+describe("goalChipActions", () => {
+  it("offers Pause, Complete, and Clear for an Active Goal", () => {
+    expect(goalChipActions("active")).toEqual(["pause", "complete", "clear"]);
+  });
+
+  it("offers Resume, Complete, and Clear for Paused, Blocked, and Usage-limited", () => {
+    expect(goalChipActions("paused")).toEqual(["resume", "complete", "clear"]);
+    expect(goalChipActions("blocked")).toEqual(["resume", "complete", "clear"]);
+    expect(goalChipActions("usageLimited")).toEqual(["resume", "complete", "clear"]);
+  });
+
+  it("offers only Clear for a Complete Goal", () => {
+    expect(goalChipActions("complete")).toEqual(["clear"]);
+  });
+});
+
+describe("formatGoalStatusLabel", () => {
+  it("capitalizes status labels", () => {
+    expect(formatGoalStatusLabel("active")).toBe("Active");
+    expect(formatGoalStatusLabel("usageLimited")).toBe("Usage-limited");
+    expect(formatGoalStatusLabel("complete")).toBe("Complete");
+  });
+});
+
+describe("goalChipActionLabel", () => {
+  it("labels chip actions", () => {
+    expect(goalChipActionLabel("pause")).toBe("Pause");
+    expect(goalChipActionLabel("resume")).toBe("Resume");
+    expect(goalChipActionLabel("complete")).toBe("Complete");
+    expect(goalChipActionLabel("clear")).toBe("Clear");
+  });
+});
+
+describe("formatGoalActivityLabel", () => {
+  it("labels Goal activities without provider wording", () => {
+    expect(formatGoalActivityLabel("goal.continued")).toBe("Continued");
+    expect(formatGoalActivityLabel("goal.set")).toBe("Objective set");
+    expect(formatGoalActivityLabel("tool.completed")).toBeNull();
+  });
+});
+
+describe("BUILT_IN_GOAL_SLASH_COMMANDS", () => {
+  it("lists the built-in Goal slash commands", () => {
+    expect(BUILT_IN_GOAL_SLASH_COMMANDS.map((item) => item.command)).toEqual([
+      "goal",
+      "goal pause",
+      "goal resume",
+      "goal clear",
+    ]);
   });
 });
 
