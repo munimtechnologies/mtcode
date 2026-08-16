@@ -24,15 +24,21 @@ vi.mock("@clerk/electron/storage", () => ({
 
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+const makeDesktopClerkLayer = (
+  isDevelopment = true,
+  events: string[] = [],
+  platform: NodeJS.Platform = "linux",
+) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
     isDevelopment,
+    platform,
     appDataDirectory: "/tmp/app-data",
     userDataDirName: isDevelopment ? "t3code-dev" : "t3code",
     legacyUserDataDirName: isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)",
@@ -176,6 +182,138 @@ describe("DesktopClerk", () => {
       assert.deepEqual(registeredEvents, ["second-instance"]);
     }).pipe(
       Effect.provide(makeDesktopClerkLayer()),
+      Effect.provideService(ElectronApp.ElectronApp, electronApp),
+      Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+    );
+  });
+
+  it.effect("loads a second-instance protocol URL on the existing window", () => {
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+    const listeners = new Map<string, (...args: readonly unknown[]) => void>();
+    const loadURL = vi.fn(() => Promise.resolve());
+    const mainWindow = { loadURL };
+    const revealed: unknown[] = [];
+    const electronApp = {
+      quit: Effect.void,
+      on: (eventName: string, listener: (...args: readonly unknown[]) => void) =>
+        Effect.sync(() => {
+          listeners.set(eventName, listener);
+        }),
+    } as unknown as ElectronApp.ElectronApp["Service"];
+    const electronWindow = {
+      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      reveal: (window: unknown) =>
+        Effect.sync(() => {
+          revealed.push(window);
+        }),
+    } as unknown as ElectronWindow.ElectronWindow["Service"];
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const clerk = yield* DesktopClerk.DesktopClerk;
+        yield* clerk.configure;
+
+        const url = "t3code-dev://app/CLERK-ROUTER/VIRTUAL/sign-in?__clerk_status=complete";
+        listeners.get("second-instance")?.({}, ["electron", "--hidden", url], process.cwd());
+        yield* Effect.promise(() =>
+          vi.waitFor(() => {
+            assert.deepEqual(revealed, [mainWindow]);
+            assert.deepEqual(loadURL.mock.calls, [[url]]);
+          }),
+        );
+      }),
+    ).pipe(
+      Effect.provide(makeDesktopClerkLayer()),
+      Effect.provideService(ElectronApp.ElectronApp, electronApp),
+      Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+    );
+  });
+
+  it.effect("reveals the window when second-instance argv has no protocol URL", () => {
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+    const listeners = new Map<string, (...args: readonly unknown[]) => void>();
+    const loadURL = vi.fn(() => Promise.resolve());
+    const mainWindow = { loadURL };
+    const revealed: unknown[] = [];
+    const electronApp = {
+      quit: Effect.void,
+      on: (eventName: string, listener: (...args: readonly unknown[]) => void) =>
+        Effect.sync(() => {
+          listeners.set(eventName, listener);
+        }),
+    } as unknown as ElectronApp.ElectronApp["Service"];
+    const electronWindow = {
+      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      reveal: (window: unknown) =>
+        Effect.sync(() => {
+          revealed.push(window);
+        }),
+    } as unknown as ElectronWindow.ElectronWindow["Service"];
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const clerk = yield* DesktopClerk.DesktopClerk;
+        yield* clerk.configure;
+
+        listeners.get("second-instance")?.({}, ["electron", "--hidden"], process.cwd());
+        yield* Effect.promise(() =>
+          vi.waitFor(() => {
+            assert.deepEqual(revealed, [mainWindow]);
+          }),
+        );
+        assert.deepEqual(loadURL.mock.calls, []);
+      }),
+    ).pipe(
+      Effect.provide(makeDesktopClerkLayer()),
+      Effect.provideService(ElectronApp.ElectronApp, electronApp),
+      Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+    );
+  });
+
+  it.effect("loads macOS open-url deep links on the existing window", () => {
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+    const listeners = new Map<string, (...args: readonly unknown[]) => void>();
+    const loadURL = vi.fn(() => Promise.resolve());
+    const mainWindow = { loadURL };
+    const revealed: unknown[] = [];
+    const electronApp = {
+      quit: Effect.void,
+      on: (eventName: string, listener: (...args: readonly unknown[]) => void) =>
+        Effect.sync(() => {
+          listeners.set(eventName, listener);
+        }),
+    } as unknown as ElectronApp.ElectronApp["Service"];
+    const electronWindow = {
+      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      reveal: (window: unknown) =>
+        Effect.sync(() => {
+          revealed.push(window);
+        }),
+    } as unknown as ElectronWindow.ElectronWindow["Service"];
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const clerk = yield* DesktopClerk.DesktopClerk;
+        yield* clerk.configure;
+
+        assert.deepEqual([...listeners.keys()], ["second-instance", "open-url"]);
+
+        const url = "t3code-dev://app/sso-callback";
+        const preventDefault = vi.fn();
+        listeners.get("open-url")?.({ preventDefault }, url);
+        yield* Effect.promise(() =>
+          vi.waitFor(() => {
+            assert.equal(preventDefault.mock.calls.length, 1);
+            assert.deepEqual(revealed, [mainWindow]);
+            assert.deepEqual(loadURL.mock.calls, [[url]]);
+          }),
+        );
+      }),
+    ).pipe(
+      Effect.provide(makeDesktopClerkLayer(true, [], "darwin")),
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );

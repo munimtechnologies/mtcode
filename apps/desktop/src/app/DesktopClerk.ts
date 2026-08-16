@@ -13,6 +13,7 @@ import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { extractDesktopProtocolUrl, isDesktopProtocolUrl } from "./desktopProtocolUrl.ts";
 
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -52,6 +53,8 @@ export class DesktopClerk extends Context.Service<
     >;
   }
 >()("@t3tools/desktop/app/DesktopClerk") {}
+
+const isStringArg = (value: unknown): value is string => typeof value === "string";
 
 export function resolveDesktopClerkFrontendApiHostname(
   publishableKey: string | undefined,
@@ -135,16 +138,42 @@ export const make = Effect.gen(function* () {
         return yield* Effect.interrupt;
       }
 
-      yield* electronApp.on("second-instance", () => {
+      const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
+      const revealAndDispatch = Effect.fn("desktop.clerk.revealAndDispatchProtocolUrl")(function* (
+        url: string | null,
+      ) {
+        const mainWindow = yield* electronWindow.currentMainOrFirst;
+        if (Option.isNone(mainWindow)) {
+          return;
+        }
+        yield* electronWindow.reveal(mainWindow.value);
+        if (url === null) {
+          return;
+        }
+        // Same path as first-launch renderer loads: the custom protocol serves
+        // t3code:// (and t3code-dev://) on the existing window.
+        yield* Effect.sync(() => {
+          void Promise.resolve(mainWindow.value.loadURL(url)).catch(() => undefined);
+        });
+      });
+
+      yield* electronApp.on("second-instance", (_event, argv) => {
         void runPromise(
-          Effect.gen(function* () {
-            const mainWindow = yield* electronWindow.currentMainOrFirst;
-            if (Option.isSome(mainWindow)) {
-              yield* electronWindow.reveal(mainWindow.value);
-            }
-          }),
+          revealAndDispatch(
+            extractDesktopProtocolUrl(Array.isArray(argv) ? argv.filter(isStringArg) : [], scheme),
+          ),
         );
       });
+
+      if (environment.platform === "darwin") {
+        yield* electronApp.on("open-url", (event, url) => {
+          if (typeof url !== "string" || !isDesktopProtocolUrl(url, scheme)) {
+            return;
+          }
+          (event as { preventDefault?: () => void } | undefined)?.preventDefault?.();
+          void runPromise(revealAndDispatch(url));
+        });
+      }
     }).pipe(Effect.withSpan("desktop.clerk.configure")),
   });
 });
