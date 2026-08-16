@@ -8,6 +8,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { isGoalCommandForm } from "@t3tools/shared/composerTrigger";
+import { parseObjectiveSignal } from "@t3tools/shared/goalContinuation";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -201,6 +202,7 @@ const goalActivityAppendedEvent = Effect.fn("goalActivityAppendedEvent")(functio
   readonly occurredAt: string;
   readonly kind: string;
   readonly summary: string;
+  readonly tone?: "info" | "error";
 }) {
   const crypto = yield* Crypto.Crypto;
   const activityId = EventId.make(yield* crypto.randomUUIDv4);
@@ -216,7 +218,7 @@ const goalActivityAppendedEvent = Effect.fn("goalActivityAppendedEvent")(functio
       threadId: input.threadId,
       activity: {
         id: activityId,
-        tone: "info" as const,
+        tone: input.tone ?? "info",
         kind: input.kind,
         summary: input.summary,
         payload: {},
@@ -976,6 +978,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Thread '${command.threadId}' has no Goal to resume.`,
         });
       }
+      if (thread.goal.status === "complete") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' Goal is complete and cannot be resumed.`,
+        });
+      }
       const occurredAt = yield* nowIso;
       const events: Array<Omit<OrchestrationEvent, "sequence">> = [
         {
@@ -1161,10 +1169,41 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.goal.block": {
-      return yield* new OrchestrationCommandInvariantError({
-        commandType: command.type,
-        detail: `${command.type} is not implemented.`,
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
       });
+      if (thread.goal == null || thread.goal.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no Active Goal to block.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return [
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.goal-blocked",
+          payload: {
+            threadId: command.threadId,
+            updatedAt: occurredAt,
+          },
+        },
+        yield* goalActivityAppendedEvent({
+          commandId: command.commandId,
+          threadId: command.threadId,
+          occurredAt,
+          kind: "goal.blocked",
+          summary: thread.goal.objective,
+          tone: "error",
+        }),
+      ];
     }
 
     case "thread.pin": {
@@ -1732,27 +1771,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // surfaces immediately — effectiveSnoozed refuses to classify a thread
       // with a raised hand (approval / input / failure / fresh completion)
       // as snoozed, without spending the return ticket.
+      const events: Array<Omit<OrchestrationEvent, "sequence">> = [sessionSetEvent];
       const isSessionActivity =
         command.session.status === "starting" || command.session.status === "running";
       // Real activity resets ANY override (settled wakes, active unpins).
-      if (thread.settledOverride === null || !isSessionActivity) {
-        return sessionSetEvent;
+      if (thread.settledOverride !== null && isSessionActivity) {
+        events.unshift({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.unsettled",
+          payload: {
+            threadId: command.threadId,
+            reason: "activity",
+            updatedAt: command.createdAt,
+          },
+        });
       }
-      const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.unsettled",
-        payload: {
-          threadId: command.threadId,
-          reason: "activity",
-          updatedAt: command.createdAt,
-        },
-      };
-      return [unsettledEvent, sessionSetEvent];
+      return events.length === 1 ? events[0]! : events;
     }
 
     case "thread.message.assistant.delta": {
@@ -1783,30 +1822,85 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.assistant.complete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.message-sent",
-        payload: {
-          threadId: command.threadId,
-          messageId: command.messageId,
-          role: "assistant",
-          text: "",
-          turnId: command.turnId ?? null,
-          streaming: false,
-          createdAt: command.createdAt,
-          updatedAt: command.createdAt,
+      const events: Array<Omit<OrchestrationEvent, "sequence">> = [
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: command.messageId,
+            role: "assistant",
+            text: "",
+            turnId: command.turnId ?? null,
+            streaming: false,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
         },
-      };
+      ];
+      if (thread.goal?.status === "active") {
+        const message = thread.messages.find((entry) => entry.id === command.messageId);
+        const signal = parseObjectiveSignal(message?.text ?? "");
+        if (signal === "complete") {
+          events.push(
+            {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.goal-completed",
+              payload: {
+                threadId: command.threadId,
+                updatedAt: command.createdAt,
+              },
+            },
+            yield* goalActivityAppendedEvent({
+              commandId: command.commandId,
+              threadId: command.threadId,
+              occurredAt: command.createdAt,
+              kind: "goal.completed",
+              summary: thread.goal.objective,
+            }),
+          );
+        } else if (signal === "blocked") {
+          events.push(
+            {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.goal-blocked",
+              payload: {
+                threadId: command.threadId,
+                updatedAt: command.createdAt,
+              },
+            },
+            yield* goalActivityAppendedEvent({
+              commandId: command.commandId,
+              threadId: command.threadId,
+              occurredAt: command.createdAt,
+              kind: "goal.blocked",
+              summary: thread.goal.objective,
+              tone: "error",
+            }),
+          );
+        }
+      }
+      return events;
     }
 
     case "thread.proposed-plan.upsert": {

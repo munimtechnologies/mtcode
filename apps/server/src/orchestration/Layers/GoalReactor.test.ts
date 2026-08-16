@@ -8,7 +8,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationThread,
 } from "@t3tools/contracts";
-import { goalContinuationCommandId } from "@t3tools/shared/goalContinuation";
+import { goalBlockCommandId, goalContinuationCommandId } from "@t3tools/shared/goalContinuation";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -319,5 +319,67 @@ describe("GoalReactor", () => {
     );
     expect(harness.dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId }));
     expect(harness.dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId }));
+  });
+
+  it("Blocks after three empty Continuations instead of starting another", async () => {
+    const harness = await createHarness([
+      makeThread({
+        goal: activeGoal(),
+        activities: [
+          {
+            id: EventId.make("activity-set"),
+            tone: "info",
+            kind: "goal.set",
+            summary: "Reduce p95 below 120ms",
+            payload: {},
+            turnId: null,
+            createdAt: NOW,
+          },
+          {
+            id: EventId.make("activity-continued-1"),
+            tone: "info",
+            kind: "goal.continued",
+            summary: "Reduce p95 below 120ms",
+            payload: {},
+            turnId: null,
+            createdAt: "2026-01-01T00:01:00.000Z",
+          },
+          {
+            id: EventId.make("activity-continued-2"),
+            tone: "info",
+            kind: "goal.continued",
+            summary: "Reduce p95 below 120ms",
+            payload: {},
+            turnId: null,
+            createdAt: "2026-01-01T00:02:00.000Z",
+          },
+          {
+            id: EventId.make("activity-continued-3"),
+            tone: "info",
+            kind: "goal.continued",
+            summary: "Reduce p95 below 120ms",
+            payload: {},
+            turnId: null,
+            createdAt: "2026-01-01T00:03:00.000Z",
+          },
+        ],
+      }),
+    ]);
+    await harness.offer(
+      sessionSetEvent({ status: "ready", occurredAt: "2026-01-01T00:04:00.000Z" }),
+    );
+    await waitFor(() => harness.dispatch.mock.calls.length === 1);
+    await harness.drain();
+    expect(harness.dispatch).toHaveBeenCalledWith({
+      type: "thread.goal.block",
+      commandId: CommandId.make(
+        goalBlockCommandId({
+          threadId: THREAD_ID,
+          goalUpdatedAt: NOW,
+          completedTurnId: TURN_ID,
+        }),
+      ),
+      threadId: THREAD_ID,
+    });
   });
 });

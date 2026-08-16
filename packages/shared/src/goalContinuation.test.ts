@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildGoalContinuationPrompt, goalContinuationCommandId } from "./goalContinuation.ts";
+import {
+  buildGoalContinuationPrompt,
+  countTrailingEmptyGoalContinuations,
+  goalBlockCommandId,
+  goalContinuationCommandId,
+  parseObjectiveSignal,
+} from "./goalContinuation.ts";
 
 describe("buildGoalContinuationPrompt", () => {
   it("names the Objective and complete/blocked markers without saying goal", () => {
@@ -45,5 +51,130 @@ describe("goalContinuationCommandId", () => {
         goalUpdatedAt: "2026-01-02T00:00:00.000Z",
       }),
     ).not.toBe(baseline);
+  });
+});
+
+describe("goalBlockCommandId", () => {
+  it("is stable per Goal generation and completed Turn", () => {
+    expect(
+      goalBlockCommandId({
+        threadId: "thread-1",
+        goalUpdatedAt: "2026-01-01T00:00:00.000Z",
+        completedTurnId: "turn-1",
+      }),
+    ).toBe("goal-block:thread-1:2026-01-01T00:00:00.000Z:turn-1");
+  });
+});
+
+describe("parseObjectiveSignal", () => {
+  it("reads Complete and Blocked tags and ignores prose", () => {
+    expect(parseObjectiveSignal("we're done")).toBeNull();
+    expect(parseObjectiveSignal("I'm stuck")).toBeNull();
+    expect(parseObjectiveSignal("<objective_complete>p95 is 90ms</objective_complete>")).toBe(
+      "complete",
+    );
+    expect(parseObjectiveSignal("<objective_blocked>tests fail</objective_blocked>")).toBe(
+      "blocked",
+    );
+  });
+
+  it("uses the first tag when both are present", () => {
+    expect(
+      parseObjectiveSignal(
+        "<objective_blocked>nope</objective_blocked>\n<objective_complete>later</objective_complete>",
+      ),
+    ).toBe("blocked");
+  });
+});
+
+describe("countTrailingEmptyGoalContinuations", () => {
+  const NOW = "2026-01-01T00:03:00.000Z";
+
+  it("does not count the originating user Turn", () => {
+    expect(
+      countTrailingEmptyGoalContinuations(
+        {
+          activities: [
+            {
+              kind: "goal.set",
+              tone: "info",
+              createdAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          checkpoints: [],
+        },
+        NOW,
+      ),
+    ).toBe(0);
+  });
+
+  it("counts consecutive empty Continuations and resets after Resume or progress", () => {
+    expect(
+      countTrailingEmptyGoalContinuations(
+        {
+          activities: [
+            { kind: "goal.set", tone: "info", createdAt: "2026-01-01T00:00:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:01:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:02:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:03:00.000Z" },
+          ],
+          checkpoints: [],
+        },
+        "2026-01-01T00:04:00.000Z",
+      ),
+    ).toBe(3);
+
+    expect(
+      countTrailingEmptyGoalContinuations(
+        {
+          activities: [
+            { kind: "goal.set", tone: "info", createdAt: "2026-01-01T00:00:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:01:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:02:00.000Z" },
+            { kind: "tool.completed", tone: "tool", createdAt: "2026-01-01T00:02:30.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:03:00.000Z" },
+          ],
+          checkpoints: [],
+        },
+        "2026-01-01T00:04:00.000Z",
+      ),
+    ).toBe(1);
+
+    expect(
+      countTrailingEmptyGoalContinuations(
+        {
+          activities: [
+            { kind: "goal.set", tone: "info", createdAt: "2026-01-01T00:00:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:01:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:02:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:03:00.000Z" },
+            { kind: "goal.resumed", tone: "info", createdAt: "2026-01-01T00:05:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:06:00.000Z" },
+          ],
+          checkpoints: [],
+        },
+        "2026-01-01T00:07:00.000Z",
+      ),
+    ).toBe(1);
+  });
+
+  it("treats a non-empty checkpoint diff as progress", () => {
+    expect(
+      countTrailingEmptyGoalContinuations(
+        {
+          activities: [
+            { kind: "goal.set", tone: "info", createdAt: "2026-01-01T00:00:00.000Z" },
+            { kind: "goal.continued", tone: "info", createdAt: "2026-01-01T00:01:00.000Z" },
+          ],
+          checkpoints: [
+            {
+              files: [{ additions: 3, deletions: 1 }],
+              completedAt: "2026-01-01T00:01:30.000Z",
+            },
+          ],
+        },
+        NOW,
+      ),
+    ).toBe(0);
   });
 });

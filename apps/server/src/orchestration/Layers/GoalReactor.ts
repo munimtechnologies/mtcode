@@ -1,6 +1,11 @@
 import { CommandId, type OrchestrationEvent } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { goalContinuationCommandId } from "@t3tools/shared/goalContinuation";
+import {
+  countTrailingEmptyGoalContinuations,
+  EMPTY_GOAL_CONTINUATION_LIMIT,
+  goalBlockCommandId,
+  goalContinuationCommandId,
+} from "@t3tools/shared/goalContinuation";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -54,6 +59,36 @@ const make = Effect.gen(function* () {
     }
     const completedTurnId = thread.latestTurn?.turnId;
     if (completedTurnId == null || thread.latestTurn?.state === "running") {
+      return;
+    }
+
+    if (
+      countTrailingEmptyGoalContinuations(thread, event.occurredAt) >= EMPTY_GOAL_CONTINUATION_LIMIT
+    ) {
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.goal.block",
+          commandId: CommandId.make(
+            goalBlockCommandId({
+              threadId: thread.id,
+              goalUpdatedAt: goal.updatedAt,
+              completedTurnId,
+            }),
+          ),
+          threadId: thread.id,
+        })
+        .pipe(
+          Effect.catchIf(isIgnorableContinueDispatchError, () => Effect.void),
+          Effect.catchCause((cause) => {
+            if (Cause.hasInterruptsOnly(cause)) {
+              return Effect.interrupt;
+            }
+            return Effect.logWarning("goal reactor failed to Block after empty Continuations", {
+              threadId: thread.id,
+              cause: Cause.pretty(cause),
+            });
+          }),
+        );
       return;
     }
 

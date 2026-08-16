@@ -31,3 +31,97 @@ export function goalContinuationCommandId(input: {
 }): string {
   return `goal-continue:${input.threadId}:${input.goalUpdatedAt}:${input.completedTurnId}`;
 }
+
+export function goalBlockCommandId(input: {
+  readonly threadId: string;
+  readonly goalUpdatedAt: string;
+  readonly completedTurnId: string;
+}): string {
+  return `goal-block:${input.threadId}:${input.goalUpdatedAt}:${input.completedTurnId}`;
+}
+
+export const EMPTY_GOAL_CONTINUATION_LIMIT = 3;
+
+const OBJECTIVE_COMPLETE_TAG = /<objective_complete>([\s\S]*?)<\/objective_complete>/;
+const OBJECTIVE_BLOCKED_TAG = /<objective_blocked>([\s\S]*?)<\/objective_blocked>/;
+
+export type ObjectiveSignal = "complete" | "blocked";
+
+/** First structured Complete/Blocked tag in assistant text. Prose is ignored. */
+export function parseObjectiveSignal(text: string): ObjectiveSignal | null {
+  const complete = OBJECTIVE_COMPLETE_TAG.exec(text);
+  const blocked = OBJECTIVE_BLOCKED_TAG.exec(text);
+  const completeIndex = complete?.index;
+  const blockedIndex = blocked?.index;
+  if (completeIndex === undefined && blockedIndex === undefined) {
+    return null;
+  }
+  if (completeIndex === undefined) {
+    return "blocked";
+  }
+  if (blockedIndex === undefined) {
+    return "complete";
+  }
+  return completeIndex <= blockedIndex ? "complete" : "blocked";
+}
+
+export function countTrailingEmptyGoalContinuations(
+  thread: {
+    readonly activities: ReadonlyArray<{
+      readonly kind: string;
+      readonly tone: string;
+      readonly createdAt: string;
+    }>;
+    readonly checkpoints: ReadonlyArray<{
+      readonly files: ReadonlyArray<{ readonly additions?: number; readonly deletions?: number }>;
+      readonly completedAt: string;
+    }>;
+  },
+  occurredAt: string,
+): number {
+  let resetAt = "";
+  for (const activity of thread.activities) {
+    if (
+      (activity.kind === "goal.set" || activity.kind === "goal.resumed") &&
+      activity.createdAt > resetAt
+    ) {
+      resetAt = activity.createdAt;
+    }
+  }
+  const continuations = thread.activities
+    .filter((activity) => activity.kind === "goal.continued" && activity.createdAt >= resetAt)
+    .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+  if (continuations.length === 0) {
+    return 0;
+  }
+
+  const windowIsEmpty = (start: string, end: string, endInclusive: boolean): boolean => {
+    const inWindow = (timestamp: string) =>
+      timestamp >= start && (endInclusive ? timestamp <= end : timestamp < end);
+    const hasTool = thread.activities.some(
+      (activity) => activity.tone === "tool" && inWindow(activity.createdAt),
+    );
+    const hasDiff = thread.checkpoints.some(
+      (checkpoint) => inWindow(checkpoint.completedAt) && checkpoint.files.length > 0,
+    );
+    return !hasTool && !hasDiff;
+  };
+
+  let trailing = 0;
+  for (let index = continuations.length - 1; index >= 0; index -= 1) {
+    const start = continuations[index]?.createdAt;
+    if (start === undefined) {
+      break;
+    }
+    const next = continuations[index + 1]?.createdAt;
+    const empty =
+      next === undefined
+        ? windowIsEmpty(start, occurredAt, true)
+        : windowIsEmpty(start, next, false);
+    if (!empty) {
+      break;
+    }
+    trailing += 1;
+  }
+  return trailing;
+}

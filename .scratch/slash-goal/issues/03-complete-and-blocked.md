@@ -4,14 +4,14 @@
 
 **Blocked by:** 02 — Pause, Stop, and Continuations
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Assistant `<objective_complete>…</objective_complete>` Completes the Goal; Continuations stop
-- [ ] Assistant `<objective_blocked>…</objective_blocked>` enters Blocked; Continuations stop
-- [ ] Chat prose (“done”, “I’m stuck”) does not change Goal status
-- [ ] The user can Complete the Goal explicitly; Continuations stop
-- [ ] After three consecutive Continuations with no tool item and no non-empty checkpoint diff, T3 enters Blocked
-- [ ] The originating user Turn does not count toward that empty-Continuation streak
-- [ ] Resume from Blocked makes the Goal Active, resets the empty streak, and on idle starts a Continuation
-- [ ] Pause and Blocked are different statuses (thin chip may just show the status word until UX)
-- [ ] Orchestration tests cover structured complete, structured blocked, prose ignored, user complete, three empty Continuations → Blocked, first user Turn not counted, resume from Blocked continues
+- [x] Assistant `<objective_complete>…</objective_complete>` Completes the Goal; Continuations stop
+- [x] Assistant `<objective_blocked>…</objective_blocked>` enters Blocked; Continuations stop
+- [x] Chat prose (“done”, “I’m stuck”) does not change Goal status
+- [x] The user can Complete the Goal explicitly; Continuations stop
+- [x] After three consecutive Continuations with no tool item and no non-empty checkpoint diff, T3 enters Blocked
+- [x] The originating user Turn does not count toward that empty-Continuation streak
+- [x] Resume from Blocked makes the Goal Active, resets the empty streak, and on idle starts a Continuation
+- [x] Pause and Blocked are different statuses (thin chip may just show the status word until UX)
+- [x] Orchestration tests cover structured complete, structured blocked, prose ignored, user complete, three empty Continuations → Blocked, first user Turn not counted, resume from Blocked continues

@@ -25,6 +25,8 @@ function makeReadModel(input: {
   readonly settledOverride?: OrchestrationThread["settledOverride"];
   readonly snoozedUntil?: string | null;
   readonly activities?: OrchestrationThread["activities"];
+  readonly messages?: OrchestrationThread["messages"];
+  readonly checkpoints?: OrchestrationThread["checkpoints"];
 }): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
@@ -48,10 +50,10 @@ function makeReadModel(input: {
         snoozedUntil: input.snoozedUntil ?? null,
         snoozedAt: input.snoozedUntil != null ? NOW : null,
         deletedAt: null,
-        messages: [],
+        messages: input.messages ?? [],
         proposedPlans: [],
         activities: input.activities ?? [],
-        checkpoints: [],
+        checkpoints: input.checkpoints ?? [],
         session: input.session ?? null,
         ...(input.goal !== undefined ? { goal: input.goal } : {}),
       },
@@ -743,6 +745,179 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
       const events = Array.isArray(decided) ? decided : [decided];
       expect(events.map((event) => event.type)).toEqual(["thread.snoozed"]);
       expect(events.map((event) => event.type)).not.toContain("thread.goal-paused");
+    }),
+  );
+
+  it.effect("structured Complete tag Completes an Active Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make("cmd-assistant-complete-tag"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          messages: [
+            {
+              id: MessageId.make("assistant-1"),
+              role: "assistant",
+              text: "<objective_complete>p95 is 90ms</objective_complete>",
+              turnId: TurnId.make("turn-1"),
+              streaming: false,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          ],
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.message-sent",
+        "thread.goal-completed",
+        "thread.activity-appended",
+      ]);
+    }),
+  );
+
+  it.effect("structured Blocked tag Blocks an Active Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make("cmd-assistant-blocked-tag"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          messages: [
+            {
+              id: MessageId.make("assistant-1"),
+              role: "assistant",
+              text: "<objective_blocked>tests fail in CI</objective_blocked>",
+              turnId: TurnId.make("turn-1"),
+              streaming: false,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          ],
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.message-sent",
+        "thread.goal-blocked",
+        "thread.activity-appended",
+      ]);
+    }),
+  );
+
+  it.effect("assistant prose does not Complete or Block", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make("cmd-assistant-prose"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          messages: [
+            {
+              id: MessageId.make("assistant-1"),
+              role: "assistant",
+              text: "we're done. I'm stuck.",
+              turnId: TurnId.make("turn-1"),
+              streaming: false,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          ],
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.message-sent"]);
+    }),
+  );
+
+  it.effect("blocks an Active Goal after empty Continuations", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.block",
+          commandId: CommandId.make("cmd-goal-block"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.goal-blocked",
+        "thread.activity-appended",
+      ]);
+      expect(events.map((event) => event.type)).not.toContain("thread.goal-paused");
+    }),
+  );
+
+  it.effect("resumes a Blocked Goal on an idle Thread by starting a Continuation", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.resume",
+          commandId: CommandId.make("cmd-goal-resume-blocked"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal("blocked"),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.goal-resumed",
+        "thread.activity-appended",
+        "thread.activity-appended",
+        "thread.turn-start-requested",
+      ]);
+      const kinds = events
+        .filter((event) => event.type === "thread.activity-appended")
+        .map((event) => event.payload.activity.kind);
+      expect(kinds).toEqual(["goal.resumed", "goal.continued"]);
+    }),
+  );
+
+  it.effect("refuses to resume a Complete Goal", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.resume",
+          commandId: CommandId.make("cmd-goal-resume-complete"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal("complete"),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
     }),
   );
 });
