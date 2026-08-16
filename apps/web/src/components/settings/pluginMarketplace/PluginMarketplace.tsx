@@ -129,10 +129,10 @@ function MarketplaceResults({
   if (plugins.length === 0) {
     return (
       <Empty className="min-h-64 border border-dashed border-foreground/10">
+        <EmptyMedia variant="icon">
+          <PackageOpenIcon />
+        </EmptyMedia>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <PackageOpenIcon />
-          </EmptyMedia>
           <EmptyTitle>No plugins found</EmptyTitle>
           <EmptyDescription>Try a different search, harness, or category.</EmptyDescription>
         </EmptyHeader>
