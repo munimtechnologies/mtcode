@@ -606,6 +606,17 @@ export function PullRequestDetailPanel({
           currentAppliedSnapshot.revision,
           observedSnapshot,
         );
+  const codeTabSnapshot = useMemo(
+    () =>
+      currentAppliedSnapshot === null || codeTabDetail === null
+        ? null
+        : {
+            detail: codeTabDetail,
+            version: currentAppliedSnapshot.version,
+            firstPageDiff: currentAppliedSnapshot.firstPageDiff,
+          },
+    [codeTabDetail, currentAppliedSnapshot],
+  );
   const displayDetail = tab === "code" ? (codeTabDetail ?? detail) : detail;
   const coordinatorRef = useRef<ReturnType<
     typeof createPullRequestDiffRefreshCoordinator<PullRequestDetailView, PullRequestDiffResult>
@@ -1184,8 +1195,7 @@ export function PullRequestDetailPanel({
   const selectedMergeMethod = allowedMergeMethods.includes(mergeMethod)
     ? mergeMethod
     : (allowedMergeMethods[0] ?? "merge");
-  const actionDetail = displayDetail ?? detail;
-  const conflicting = actionDetail?.state === "open" && actionDetail.mergeability === "conflicting";
+  const conflicting = detail?.state === "open" && detail.mergeability === "conflicting";
   // Only an outright yes arms it. A host that reports nothing has not said the merge is already
   // spoken for, and an off switch for something that may not be on says the wrong thing twice.
   const autoMergeArmed = detail?.state === "open" && detail.autoMergeEnabled === true;
@@ -2108,35 +2118,23 @@ export function PullRequestDetailPanel({
             ) : null}
             {mountedTabs.has("code") ? (
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
-                {currentAppliedSnapshot === null || codeTabDetail === null ? (
-                  codeBootstrapError === null ? (
-                    <DiffPanelLoadingState label="Loading pull request diff..." />
-                  ) : (
-                    <PullRequestsUnavailableState
-                      error={codeBootstrapError}
-                      onRetry={() => void refreshFromHost()}
-                    />
-                  )
-                ) : (
-                  <Suspense
-                    fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}
-                  >
-                    <PullRequestCodeTab
-                      {...(attachTarget ? { onAddToAgentSelection: addSelectionToAgent } : {})}
-                      environmentId={environmentId}
-                      reference={reference}
-                      detail={codeTabDetail}
-                      snapshotVersion={currentAppliedSnapshot.version}
-                      firstPageDiff={currentAppliedSnapshot.firstPageDiff}
-                      selectedCommitOid={selectedCodeCommitOid}
-                      onSelectedCommitChange={selectCodeCommit}
-                      pendingFinding={handoff}
-                      fixFindingLabel={handoffLabels.fixFinding}
-                      onFixFinding={startFixFinding}
-                      onRefresh={refreshDetail}
-                    />
-                  </Suspense>
-                )}
+                <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
+                  <PullRequestCodeTab
+                    {...(attachTarget ? { onAddToAgentSelection: addSelectionToAgent } : {})}
+                    environmentId={environmentId}
+                    reference={reference}
+                    detail={detail}
+                    snapshot={codeTabSnapshot}
+                    bootstrapError={codeBootstrapError}
+                    onBootstrapRetry={refreshFromHost}
+                    selectedCommitOid={selectedCodeCommitOid}
+                    onSelectedCommitChange={selectCodeCommit}
+                    pendingFinding={handoff}
+                    fixFindingLabel={handoffLabels.fixFinding}
+                    onFixFinding={startFixFinding}
+                    onRefresh={refreshDetail}
+                  />
+                </Suspense>
               </div>
             ) : null}
           </>

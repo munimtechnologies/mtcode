@@ -24,7 +24,7 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { RegistryContext, useAtomRefresh } from "@effect/atom-react";
+import { RegistryContext } from "@effect/atom-react";
 import {
   useCallback,
   useContext,
@@ -80,6 +80,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PendingReviewCommentCard, ReviewThreadCard } from "./PullRequestReviewAnnotation";
 import { PullRequestReviewBar } from "./PullRequestReviewBar";
+import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
 import {
   isFileDiffCollapsed,
   isLineInFileDiff,
@@ -166,6 +167,32 @@ export interface PullRequestAgentSelectionInput {
   readonly request: string;
 }
 
+interface PullRequestCodeSnapshot {
+  readonly detail: PullRequestDetailView;
+  /** Monotonic identity for successful refreshes, including same-revision replacements. */
+  readonly version: number;
+  /** Aggregate first page applied atomically with `detail`. */
+  readonly firstPageDiff: PullRequestDiffResult;
+}
+
+interface AppliedCommitSnapshotIdentity {
+  readonly version: number | null;
+  readonly commit: string | null;
+}
+
+export function shouldRefreshAppliedCommitDiff(
+  previous: AppliedCommitSnapshotIdentity,
+  next: AppliedCommitSnapshotIdentity,
+): boolean {
+  return (
+    previous.version !== null &&
+    next.version !== null &&
+    previous.version !== next.version &&
+    next.commit !== null &&
+    previous.commit === next.commit
+  );
+}
+
 /** The contract's sides named the way the diff viewer names them, and back again. */
 function toViewerSide(side: PullRequestDiffSide) {
   return side === "left" ? ("deletions" as const) : ("additions" as const);
@@ -188,6 +215,25 @@ function getReviewPositionAnchor(position: PullRequestReviewPosition): {
   }
 }
 
+/** The bootstrap occupies the diff body so the toolbar around it never changes ownership. */
+export function PullRequestCodeBootstrapBody({
+  error,
+  onRetry,
+}: {
+  error: string | null;
+  onRetry: () => void;
+}) {
+  return error === null ? (
+    <DiffPanelLoadingState label="Loading pull request diff..." />
+  ) : (
+    <PullRequestsUnavailableState
+      title="Could not load pull request diff"
+      error={error}
+      onRetry={onRetry}
+    />
+  );
+}
+
 /**
  * Whether the viewer draws this line at all. A line counts the new file on the right and the old
  * one on the left, and each hunk covers one run of each; a line outside every run — a
@@ -202,9 +248,10 @@ function getReviewPositionAnchor(position: PullRequestReviewPosition): {
 export function PullRequestCodeTab({
   environmentId,
   reference,
-  detail,
-  snapshotVersion,
-  firstPageDiff,
+  detail: liveDetail,
+  snapshot,
+  bootstrapError,
+  onBootstrapRetry,
   selectedCommitOid,
   onSelectedCommitChange,
   pendingFinding,
@@ -215,11 +262,12 @@ export function PullRequestCodeTab({
 }: {
   environmentId: EnvironmentId;
   reference: PullRequestRef;
+  /** Live detail keeps the toolbar available while the first aggregate page is bootstrapped. */
   detail: PullRequestDetailView;
-  /** Monotonic identity for successful refreshes, including same-revision replacements. */
-  snapshotVersion: number;
-  /** Aggregate first page applied by the panel with `detail`. */
-  firstPageDiff: PullRequestDiffResult;
+  /** Cohesive detail and first-page diff; null until the aggregate bootstrap is complete. */
+  snapshot: PullRequestCodeSnapshot | null;
+  bootstrapError: string | null;
+  onBootstrapRetry: () => void;
   /** Commit whose diff is open. Null keeps the whole pull-request diff selected. */
   selectedCommitOid: string | null;
   onSelectedCommitChange: (oid: string | null) => void;
@@ -231,6 +279,12 @@ export function PullRequestCodeTab({
   onAddToAgentSelection?: (input: PullRequestAgentSelectionInput) => void;
   onRefresh: () => void;
 }) {
+  // Once a snapshot exists, every diff-dependent surface reads its applied detail. Before then,
+  // live detail supplies the same toolbar chrome without allowing any diff request to start here.
+  const detail = snapshot?.detail ?? liveDetail;
+  const hasSnapshot = snapshot !== null;
+  const snapshotVersion = snapshot?.version ?? 0;
+  const firstPageDiff = snapshot?.firstPageDiff ?? null;
   const { resolvedTheme } = useTheme();
   const settings = useClientSettings();
   const [toggledFiles, setToggledFiles] = useState<ReadonlySet<string>>(() => new Set());
@@ -267,10 +321,14 @@ export function PullRequestCodeTab({
   // everything below is keyed by both.
   const scopeKey =
     commit === null ? `${referenceKey}@aggregate:${snapshotVersion}` : `${referenceKey}@${commit}`;
-  const firstPageSlice = useMemo(() => diffSlice(null, firstPageDiff), [firstPageDiff]);
+  const firstPageSlice = useMemo(
+    () => (firstPageDiff === null ? null : diffSlice(null, firstPageDiff)),
+    [firstPageDiff],
+  );
   const initialSlices = useMemo(
-    () => (commit === null ? [firstPageSlice] : NO_SLICES),
-    [commit, firstPageSlice],
+    () =>
+      hasSnapshot && commit === null && firstPageSlice !== null ? [firstPageSlice] : NO_SLICES,
+    [commit, firstPageSlice, hasSnapshot],
   );
   // The panel keeps this mounted across pull requests, so an open composer would otherwise
   // survive the switch and attach its comment to whichever one is on screen when it is sent.
@@ -293,7 +351,7 @@ export function PullRequestCodeTab({
   const loadedSlices = sliceState.key === scopeKey ? sliceState.slices : initialSlices;
   const cursor = sliceState.key === scopeKey ? sliceState.cursor : null;
   const diffQuery = useEnvironmentQuery(
-    commit === null
+    !hasSnapshot || commit === null
       ? null
       : pullRequestEnvironment.diff({
           environmentId,
@@ -354,11 +412,11 @@ export function PullRequestCodeTab({
   }>({ key: "", error: null, pending: false });
   const aggregateCursorGeneration = useRef(0);
   const aggregateCursorKey =
-    commit === null && cursor !== null
+    hasSnapshot && commit === null && cursor !== null
       ? JSON.stringify([environmentId, referenceKey, snapshotVersion, cursor])
       : null;
   const refreshAggregateCursor = useCallback(async () => {
-    if (commit !== null || cursor === null || aggregateCursorKey === null) return;
+    if (!hasSnapshot || commit !== null || cursor === null || aggregateCursorKey === null) return;
     const generation = ++aggregateCursorGeneration.current;
     setAggregateCursorLoad({ key: aggregateCursorKey, error: null, pending: true });
     const target = {
@@ -389,6 +447,7 @@ export function PullRequestCodeTab({
     repository,
     registry,
     runDiffQuery,
+    hasSnapshot,
   ]);
   useEffect(() => {
     if (aggregateCursorKey === null) return;
@@ -408,24 +467,28 @@ export function PullRequestCodeTab({
               aggregateCursorLoad.key !== aggregateCursorKey || aggregateCursorLoad.pending,
           }
         : diffQuery;
-  // The refresh button rereads from the first page rather than the page the reader is on:
-  // pages are positions in one snapshot of the diff, and a fresh snapshot starts over.
-  const refreshFirstDiffPage = useAtomRefresh(
-    pullRequestEnvironment.diff({
-      environmentId,
-      input: { ...reference, ...(commit === null ? {} : { commit }) },
-    }),
-  );
-  const appliedSnapshotVersion = useRef(snapshotVersion);
+  // A later snapshot rereads a selected commit from its first page rather than the page the
+  // reader is on: cursors are positions in one snapshot, and a fresh snapshot starts over.
+  const appliedCommitSnapshot = useRef<AppliedCommitSnapshotIdentity>({
+    version: snapshot?.version ?? null,
+    commit,
+  });
   useEffect(() => {
-    if (appliedSnapshotVersion.current === snapshotVersion) return;
-    appliedSnapshotVersion.current = snapshotVersion;
+    const next = { version: snapshot?.version ?? null, commit };
+    const previous = appliedCommitSnapshot.current;
+    appliedCommitSnapshot.current = next;
+    // A newly selected commit mounts its atom and performs the sole first read. Only a later
+    // applied snapshot for that same commit needs to force the atom whose key did not change.
+    if (!shouldRefreshAppliedCommitDiff(previous, next) || next.commit === null) return;
     // The panel already refreshes the mutable aggregate after invalidating the host cache.
-    if (commit !== null) {
-      setSliceState({ key: scopeKey, cursor: null, slices: NO_SLICES });
-      refreshFirstDiffPage();
-    }
-  }, [commit, snapshotVersion, scopeKey, refreshFirstDiffPage]);
+    setSliceState({ key: scopeKey, cursor: null, slices: NO_SLICES });
+    registry.refresh(
+      pullRequestEnvironment.diff({
+        environmentId,
+        input: { ...reference, commit: next.commit },
+      }),
+    );
+  }, [commit, environmentId, reference, registry, scopeKey, snapshot?.version]);
   const reviewKey = referenceKey;
   const pendingComments = usePendingReviewComments(reference);
   const addComment = usePullRequestReviewStore((store) => store.addComment);
@@ -445,13 +508,23 @@ export function PullRequestCodeTab({
   const getDiffFileContents = useAtomCommand(pullRequestEnvironment.diffFileContents);
   const loadDiffFiles = useMemo(
     () =>
-      createPullRequestDiffFileContentsLoader(getDiffFileContents, {
-        environmentId,
-        reference,
-        commit,
-        cacheKey: `pull-request:${environmentId}:${referenceKey}:${snapshotVersion}:${commit ?? "all"}`,
-      }),
-    [commit, environmentId, getDiffFileContents, reference, referenceKey, snapshotVersion],
+      !hasSnapshot
+        ? undefined
+        : createPullRequestDiffFileContentsLoader(getDiffFileContents, {
+            environmentId,
+            reference,
+            commit,
+            cacheKey: `pull-request:${environmentId}:${referenceKey}:${snapshotVersion}:${commit ?? "all"}`,
+          }),
+    [
+      commit,
+      environmentId,
+      getDiffFileContents,
+      hasSnapshot,
+      reference,
+      referenceKey,
+      snapshotVersion,
+    ],
   );
 
   // What is offered is the intersection of two different questions: what this host can do at
@@ -860,7 +933,7 @@ export function PullRequestCodeTab({
       theme: resolveDiffThemeName(resolvedTheme),
       themeType: resolvedTheme,
       stickyHeaders: true,
-      loadDiffFiles,
+      ...(loadDiffFiles ? { loadDiffFiles } : {}),
       enableGutterUtility: canCommentOnLines && draft === null,
       enableLineSelection: canCommentOnLines && draft === null,
       // Two gestures reach the same place: dragging the line numbers selects a range, and the
@@ -1287,6 +1360,12 @@ export function PullRequestCodeTab({
       </div>
     </div>
   );
+
+  if (!hasSnapshot) {
+    return withReviewBar(
+      <PullRequestCodeBootstrapBody error={bootstrapError} onRetry={onBootstrapRetry} />,
+    );
+  }
 
   // Under the toolbar rather than in place of it, so choosing a commit does not take the
   // dropdown that was just used off the screen while its diff loads.
