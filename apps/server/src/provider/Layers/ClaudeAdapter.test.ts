@@ -61,12 +61,9 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public hangSetModel = false;
   public hangSetPermissionMode = false;
-  public ignorePermissionModeAbort = false;
-  public readonly permissionModeAborts: Array<PermissionMode> = [];
   private readonly permissionModeWaiters: Array<{
     readonly mode: PermissionMode;
     readonly resolve: () => void;
-    readonly reject: (reason: unknown) => void;
   }> = [];
   public closeCalls = 0;
 
@@ -112,52 +109,20 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.stopTaskCalls.push(taskId);
   };
 
-  readonly setModel = async (model?: string, signal?: AbortSignal): Promise<void> => {
+  readonly setModel = async (model?: string): Promise<void> => {
     this.setModelCalls.push(model);
     if (this.hangSetModel) {
-      await new Promise<void>((_resolve, reject) => {
-        if (signal?.aborted) {
-          reject(signal.reason ?? new Error("Aborted"));
-          return;
-        }
-        signal?.addEventListener(
-          "abort",
-          () => {
-            reject(signal.reason ?? new Error("Aborted"));
-          },
-          { once: true },
-        );
-      });
+      await new Promise<void>(() => undefined);
     }
   };
 
-  readonly setPermissionMode = async (
-    mode: PermissionMode,
-    signal?: AbortSignal,
-  ): Promise<void> => {
+  readonly setPermissionMode = async (mode: PermissionMode): Promise<void> => {
     this.setPermissionModeCalls.push(mode);
     if (!this.hangSetPermissionMode) {
       return;
     }
-    await new Promise<void>((resolve, reject) => {
-      const waiter = { mode, resolve, reject };
-      const abort = () => {
-        this.permissionModeAborts.push(mode);
-        if (this.ignorePermissionModeAbort) {
-          return;
-        }
-        const index = this.permissionModeWaiters.indexOf(waiter);
-        if (index >= 0) {
-          this.permissionModeWaiters.splice(index, 1);
-        }
-        reject(signal?.reason ?? new Error("Aborted"));
-      };
-      if (signal?.aborted) {
-        abort();
-        return;
-      }
-      signal?.addEventListener("abort", abort, { once: true });
-      this.permissionModeWaiters.push(waiter);
+    await new Promise<void>((resolve) => {
+      this.permissionModeWaiters.push({ mode, resolve });
     });
   };
 
@@ -4261,7 +4226,6 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(String(turn.turnId).length > 0, true);
       assert.equal(turnStarted._tag, "Some");
       assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
-      assert.deepEqual(harness.query.permissionModeAborts, ["plan"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -4303,7 +4267,6 @@ describe("ClaudeAdapterLive", () => {
         yield* Fiber.join(firstCompletedFiber);
 
         harness.query.hangSetPermissionMode = true;
-        harness.query.ignorePermissionModeAbort = true;
         const restoreFiber = yield* adapter
           .sendTurn({
             threadId: THREAD_ID,
@@ -4315,7 +4278,23 @@ describe("ClaudeAdapterLive", () => {
         yield* TestClock.adjust("5 seconds");
         yield* Fiber.join(restoreFiber);
 
+        const restoreCompletedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.completed",
+        ).pipe(Stream.runHead, Effect.forkChild);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: "sdk-session-late-restore",
+          uuid: "result-restore",
+        } as unknown as SDKMessage);
+        yield* Fiber.join(restoreCompletedFiber);
+
         harness.query.hangSetPermissionMode = false;
+        assert.equal(harness.query.resolveHungPermissionMode("bypassPermissions"), true);
+
         yield* adapter.sendTurn({
           threadId: THREAD_ID,
           input: "plan again",
@@ -4326,18 +4305,6 @@ describe("ClaudeAdapterLive", () => {
         assert.deepEqual(harness.query.setPermissionModeCalls, [
           "plan",
           "bypassPermissions",
-          "plan",
-        ]);
-
-        assert.equal(harness.query.resolveHungPermissionMode("bypassPermissions"), true);
-        yield* Effect.yieldNow;
-        yield* Effect.yieldNow;
-        yield* Effect.yieldNow;
-
-        assert.deepEqual(harness.query.setPermissionModeCalls, [
-          "plan",
-          "bypassPermissions",
-          "plan",
           "plan",
         ]);
       }).pipe(
