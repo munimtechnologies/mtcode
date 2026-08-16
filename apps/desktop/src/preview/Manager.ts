@@ -1170,13 +1170,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           // Retryable compositor miss: drop this attempt so a later success
           // is the only snapshot row in the action timeline.
           yield* dropAction(tabId, actionEvent.id);
-          return;
-        }
-        const interrupted = isPreviewAutomationControlInterruptedError(error);
-        const errorMessage = isPreviewOperationError(error)
-          ? PreviewOperationError.toTimelineMessage(error)
-          : isPreviewCaptureUnavailableError(error)
-            ? error.message
+        } else {
+          const interrupted = isPreviewAutomationControlInterruptedError(error);
+          const errorMessage = isPreviewOperationError(error)
+            ? PreviewOperationError.toTimelineMessage(error)
             : isPreviewAutomationEvaluationError(error)
               ? PreviewAutomationEvaluationError.toTimelineMessage(error)
               : isPreviewAutomationInvalidSelectorError(error)
@@ -1184,12 +1181,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                 : error instanceof Error
                   ? error.message
                   : String(error);
-        yield* replaceAction(tabId, {
-          ...actionEvent,
-          status: interrupted ? "interrupted" : "failed",
-          completedAt,
-          error: errorMessage,
-        });
+          yield* replaceAction(tabId, {
+            ...actionEvent,
+            status: interrupted ? "interrupted" : "failed",
+            completedAt,
+            error: errorMessage,
+          });
+        }
       }
       const tabs = yield* SynchronizedRef.get(tabsRef);
       if (tabs.has(tabId)) yield* update(tabId, { controller: "none" });

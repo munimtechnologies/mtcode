@@ -3068,6 +3068,40 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  effectIt.effect("clears agent controller after a snapshot capture miss", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeAutomationWebContents({
+          capturePage: () => new Promise(() => undefined),
+        });
+        fromId.mockReturnValue(preview.webContents);
+        const states: PreviewManager.PreviewTabState[] = [];
+        yield* manager.subscribeStateChanges((_tabId, state) =>
+          Effect.sync(() => {
+            states.push(state);
+          }),
+        );
+
+        yield* manager.createTab("tab_viz_controller");
+        yield* manager.registerWebview("tab_viz_controller", 42);
+        yield* Effect.yieldNow;
+
+        const fiber = yield* manager
+          .automationSnapshot("tab_viz_controller")
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS);
+        const exit = yield* Fiber.await(fiber);
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(states.some((state) => state.controller === "agent")).toBe(true);
+        expect(states.at(-1)?.controller).toBe("none");
+      }),
+    ),
+  );
 });
 
 describe("PreviewCaptureUnavailableError", () => {
