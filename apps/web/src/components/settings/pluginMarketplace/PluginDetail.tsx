@@ -1063,7 +1063,7 @@ export function PluginDetail({ pluginId }: { readonly pluginId: string }) {
           Plugins
         </Button>
         <div className="flex min-w-0 items-start gap-3">
-          <PluginLogo plugin={plugin} />
+          <PluginLogo plugin={plugin} size="large" />
           <div className="min-w-0 flex-1 space-y-2">
             <div>
               <h1 className="text-balance font-semibold text-2xl tracking-tight text-foreground">
