@@ -625,6 +625,37 @@ describe("applyCursorApiKeyAuth", () => {
   it("leaves a logged-out about probe unauthenticated without CURSOR_API_KEY", () => {
     expect(applyCursorApiKeyAuth(loggedOut, {})).toEqual(loggedOut);
   });
+
+  it("does not treat an unknown about probe as API-key auth", () => {
+    const unknown = parseCursorAboutOutput({
+      code: 0,
+      stdout: JSON.stringify({
+        cliVersion: "2026.08.11-e8db854",
+        subscriptionTier: null,
+      }),
+      stderr: "",
+    });
+
+    expect(unknown).toEqual({
+      version: "2026.08.11-e8db854",
+      status: "ready",
+      auth: { status: "unknown" },
+    });
+    expect(applyCursorApiKeyAuth(unknown, { CURSOR_API_KEY: "crsr_test" })).toEqual(unknown);
+  });
+
+  it("does not treat an unverifiable about probe as API-key auth", () => {
+    const unverifiable = parseCursorAboutOutput({
+      code: 1,
+      stdout: "Could not verify Cursor Agent authentication status.",
+      stderr: "",
+    });
+
+    expect(unverifiable.auth.status).toBe("unknown");
+    expect(applyCursorApiKeyAuth(unverifiable, { CURSOR_API_KEY: "crsr_test" })).toEqual(
+      unverifiable,
+    );
+  });
 });
 
 describe("Cursor parameterized model picker preview gating", () => {
