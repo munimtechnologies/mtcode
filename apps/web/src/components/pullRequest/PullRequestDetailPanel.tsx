@@ -3,6 +3,8 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type {
   EnvironmentId,
   PullRequestAction,
+  PullRequestDetailView,
+  PullRequestDiffResult,
   PullRequestMergeMethod,
   PullRequestUpdateMethod,
   PullRequestRef,
@@ -35,11 +37,13 @@ import {
   ServerIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { RegistryContext } from "@effect/atom-react";
 import {
   lazy,
   Suspense,
   type MouseEvent as ReactMouseEvent,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -60,6 +64,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import {
@@ -101,16 +106,18 @@ import {
   buildFixFindingHandoff,
   buildFixFindingsHandoff,
   buildResolveConflictsPrompt,
+  createPullRequestDiffRefreshCoordinator,
   handoffPrompt,
   handoffReviewComments,
   pullRequestActionMenuHasGroup,
   pullRequestActionNeedsHostRefresh,
+  pullRequestCodeRevision,
+  pullRequestCodeTabDetail,
   pullRequestComposerTarget,
   pullRequestFindingKey,
   pullRequestHandoffLabels,
   readableFailure,
   resolveBaseFreshness,
-  refreshCurrentPullRequestDiff,
   type PullRequestFinding,
   shouldRefreshPullRequestActivity,
 } from "./pullRequestDetail.logic";
@@ -427,6 +434,7 @@ export function PullRequestDetailPanel({
       previous.has(tab) ? previous : new Set<DetailTab>(previous).add(tab),
     );
   }, [tab]);
+  const codeMounted = mountedTabs.has("code");
   const [chromeCondensed, setChromeCondensed] = useState(false);
   // Each tab remembers whether its chrome was condensed. Only the active tab can emit scroll
   // events, so the capture handler always writes the active tab's entry — and a tab switch
@@ -480,13 +488,6 @@ export function PullRequestDetailPanel({
   );
   const activityQuery = useEnvironmentQuery(
     pullRequestEnvironment.activity({ environmentId, input: reference }),
-  );
-  // Detail and diff are independent server reads, so the diff for the default view (no commit,
-  // no cursor) is started here too rather than waiting for the Code tab to mount. This is one
-  // extra cached read per opened pull request even for readers who never open the tab, but it
-  // turns the tab's first paint from a cold request into a cache hit.
-  const diffWarmUpQuery = useEnvironmentQuery(
-    pullRequestEnvironment.diff({ environmentId, input: { ...reference } }),
   );
   const coreDetail = detailQuery.data;
   const activity = activityQuery.data;
@@ -546,42 +547,185 @@ export function PullRequestDetailPanel({
   // invalidation goes first so the re-reads miss that cache; if it fails, the reads still run
   // and at worst answer from it.
   const invalidate = useAtomCommand(pullRequestEnvironment.invalidate, { reportFailure: false });
-  const [refreshToken, setRefreshToken] = useState(0);
-  const detailUpdatedAt = detail?.updatedAt ?? "";
-  const renderedDiffRevision = JSON.stringify([pullRequestKey, detailUpdatedAt]);
-  const activeDiffRevision = useRef(renderedDiffRevision);
-  activeDiffRevision.current = renderedDiffRevision;
-  const observedDiffRevision = useRef<{ pullRequestKey: string; updatedAt: string } | null>(null);
-  const refreshDiffFromHost = useCallback(
-    (revision: string) =>
-      refreshCurrentPullRequestDiff(
-        revision,
-        () => invalidate({ environmentId, input: { reference } }),
-        () => activeDiffRevision.current,
-        () => {
-          diffWarmUpQuery.refresh();
-          setRefreshToken((token) => token + 1);
-        },
-      ),
-    [diffWarmUpQuery.refresh, environmentId, invalidate, reference],
-  );
-  const refreshFromHost = useCallback(async () => {
-    if (await refreshDiffFromHost(activeDiffRevision.current)) refreshDetail();
-  }, [refreshDetail, refreshDiffFromHost]);
+  const runDetailQuery = useAtomQueryRunner(pullRequestEnvironment.detail, {
+    reportFailure: false,
+  });
+  const runActivityQuery = useAtomQueryRunner(pullRequestEnvironment.activity, {
+    reportFailure: false,
+  });
+  const runDiffQuery = useAtomQueryRunner(pullRequestEnvironment.diff, {
+    reportFailure: false,
+  });
+  const registry = useContext(RegistryContext);
+  const diffScope = JSON.stringify([environmentId, pullRequestKey]);
+  // Keep the last complete snapshot while the two halves refresh. Comment-only refreshes must not
+  // unmount the Code tab, and split responses must not look like two code revisions.
+  const [observedSnapshotState, setObservedSnapshotState] = useState<{
+    scope: string;
+    detail: PullRequestDetailView | null;
+  }>({ scope: diffScope, detail: null });
   useEffect(() => {
-    if (detailUpdatedAt === "") return;
-    const next = { pullRequestKey, updatedAt: detailUpdatedAt };
-    const previous = observedDiffRevision.current;
-    observedDiffRevision.current = next;
     if (
-      previous === null ||
-      previous.pullRequestKey !== next.pullRequestKey ||
-      previous.updatedAt === next.updatedAt
+      activity === null ||
+      detail === null ||
+      activityQuery.isPending ||
+      detailQuery.isPending ||
+      activityQuery.error !== null ||
+      detailQuery.error !== null
     )
       return;
-    void refreshDiffFromHost(renderedDiffRevision);
-  }, [detailUpdatedAt, pullRequestKey, refreshDiffFromHost, renderedDiffRevision]);
-  // A refresh asked for by the page: the detail, and through the token below, the diff with it.
+    setObservedSnapshotState({ scope: diffScope, detail });
+  }, [
+    activity,
+    activityQuery.error,
+    activityQuery.isPending,
+    detail,
+    detailQuery.error,
+    detailQuery.isPending,
+    diffScope,
+  ]);
+  const observedSnapshot =
+    observedSnapshotState.scope === diffScope ? observedSnapshotState.detail : null;
+  const [appliedSnapshot, setAppliedSnapshot] = useState<{
+    scope: string;
+    version: number;
+    revision: string;
+    detail: PullRequestDetailView;
+    firstPageDiff: PullRequestDiffResult;
+  } | null>(null);
+  const [diffBootstrapFailure, setDiffBootstrapFailure] = useState<{
+    scope: string;
+    error: string;
+  } | null>(null);
+  const currentAppliedSnapshot = appliedSnapshot?.scope === diffScope ? appliedSnapshot : null;
+  const codeTabDetail =
+    currentAppliedSnapshot === null
+      ? null
+      : pullRequestCodeTabDetail(
+          currentAppliedSnapshot.detail,
+          currentAppliedSnapshot.revision,
+          observedSnapshot,
+        );
+  const displayDetail = tab === "code" ? codeTabDetail : detail;
+  const coordinatorRef = useRef<ReturnType<
+    typeof createPullRequestDiffRefreshCoordinator<PullRequestDetailView, PullRequestDiffResult>
+  > | null>(null);
+  const coordinator =
+    coordinatorRef.current ??
+    createPullRequestDiffRefreshCoordinator<PullRequestDetailView, PullRequestDiffResult>(
+      pullRequestCodeRevision,
+    );
+  coordinatorRef.current = coordinator;
+  const refreshWork = useMemo(
+    () => ({
+      invalidate: () => invalidate({ environmentId, input: { reference } }),
+      readSnapshot: async () => {
+        detailQuery.refresh();
+        activityQuery.refresh();
+        const [nextDetail, nextActivity] = await Promise.all([
+          runDetailQuery({ environmentId, input: reference }),
+          runActivityQuery({ environmentId, input: reference }),
+        ]);
+        if (nextDetail._tag !== "Success" || nextActivity._tag !== "Success") {
+          const failure =
+            nextDetail._tag === "Failure"
+              ? squashAtomCommandFailure(nextDetail)
+              : nextActivity._tag === "Failure"
+                ? squashAtomCommandFailure(nextActivity)
+                : null;
+          return {
+            _tag: "Failure" as const,
+            error: readableFailure(failure, "The pull request could not be loaded."),
+          };
+        }
+        const core = nextDetail.value;
+        const activity = nextActivity.value;
+        return {
+          _tag: "Success" as const,
+          value: {
+            ...core,
+            author: activity.author ?? core.author,
+            reviewers: activity.reviewers ?? core.reviewers,
+            comments: activity.comments,
+            commentCount: activity.commentCount,
+            commentsTruncated: activity.commentsTruncated,
+            reviewThreads: activity.reviewThreads,
+            commits: activity.commits,
+            reactions: activity.reactions ?? [],
+          },
+        };
+      },
+      refreshAggregate: async () => {
+        registry.refresh(pullRequestEnvironment.diff({ environmentId, input: { ...reference } }));
+        const result = await runDiffQuery({ environmentId, input: { ...reference } });
+        if (result._tag === "Failure") {
+          return {
+            _tag: "Failure" as const,
+            error: readableFailure(
+              squashAtomCommandFailure(result),
+              "The pull request diff could not be loaded.",
+            ),
+          };
+        }
+        return { _tag: "Success" as const, value: result.value };
+      },
+      setFailure: (error: string | null) =>
+        setDiffBootstrapFailure(error === null ? null : { scope: diffScope, error }),
+      apply: (
+        scope: string,
+        revision: string,
+        appliedDetail: PullRequestDetailView,
+        firstPageDiff: PullRequestDiffResult,
+      ) => {
+        setAppliedSnapshot((previous) => ({
+          scope,
+          version: (previous?.version ?? 0) + 1,
+          revision,
+          detail: appliedDetail,
+          firstPageDiff,
+        }));
+      },
+    }),
+    [
+      activityQuery.refresh,
+      detailQuery.refresh,
+      diffScope,
+      environmentId,
+      invalidate,
+      reference,
+      registry,
+      runActivityQuery,
+      runDetailQuery,
+      runDiffQuery,
+    ],
+  );
+  const refreshFromHost = useCallback(async () => {
+    if (!codeMounted) {
+      await refreshWork.invalidate();
+      detailQuery.refresh();
+      activityQuery.refresh();
+      return;
+    }
+    await coordinator.refresh(diffScope, refreshWork);
+  }, [
+    activityQuery.refresh,
+    codeMounted,
+    coordinator,
+    detailQuery.refresh,
+    diffScope,
+    refreshWork,
+  ]);
+  useEffect(() => {
+    if (!codeMounted || observedSnapshot === null) return;
+    void coordinator.observe(diffScope, observedSnapshot, refreshWork);
+  }, [codeMounted, coordinator, diffScope, observedSnapshot, refreshWork]);
+  const codeBootstrapError =
+    currentAppliedSnapshot === null
+      ? (detailQuery.error ??
+        activityQuery.error ??
+        (diffBootstrapFailure?.scope === diffScope ? diffBootstrapFailure.error : null))
+      : null;
+  // A refresh asked for by the page joins the same causally ordered detail-and-diff lane.
   const appliedForcedToken = useRef(forcedRefreshToken);
   useEffect(() => {
     if (appliedForcedToken.current === forcedRefreshToken) return;
@@ -1040,13 +1184,14 @@ export function PullRequestDetailPanel({
   const selectedMergeMethod = allowedMergeMethods.includes(mergeMethod)
     ? mergeMethod
     : (allowedMergeMethods[0] ?? "merge");
-  const conflicting = detail?.state === "open" && detail.mergeability === "conflicting";
+  const actionDetail = displayDetail ?? detail;
+  const conflicting = actionDetail?.state === "open" && actionDetail.mergeability === "conflicting";
   // Only an outright yes arms it. A host that reports nothing has not said the merge is already
   // spoken for, and an off switch for something that may not be on says the wrong thing twice.
   const autoMergeArmed = detail?.state === "open" && detail.autoMergeEnabled === true;
   // Out of date with the base, and still cleanly mergeable — the one pairing an update button
   // exists for. Null everywhere else, including hosts that cannot compare at all.
-  const freshness = detail === null ? null : resolveBaseFreshness(detail);
+  const freshness = displayDetail === null ? null : resolveBaseFreshness(displayDetail);
   // A host that cannot produce a patch has no Code tab to open. The tabs themselves stay hidden
   // until the detail arrives, so the loading ghost is the panel's only unfinished UI.
   const visibleTabs = TABS.filter(
@@ -1538,41 +1683,48 @@ export function PullRequestDetailPanel({
                     </button>
                   ))}
                 </nav>
-                <span className="ml-auto inline-flex min-w-0 shrink items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="truncate" />}>
-                      {detail.baseBranch}
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{`${detail.baseBranch} ← ${detail.headBranch}`}</TooltipPopup>
-                  </Tooltip>
-                  {freshness ? (
-                    <PullRequestBaseFreshnessWarning
-                      baseBranch={detail.baseBranch}
-                      freshness={freshness}
-                      pending={actionPending}
-                      onUpdate={(method) => void perform("update-branch", undefined, method)}
-                      iconClassName="size-3"
-                    />
-                  ) : null}
-                  <ArrowLeftIcon aria-label="receives changes from" className="size-3 shrink-0" />
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="truncate" />}>
-                      {detail.headBranch}
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{`${detail.baseBranch} ← ${detail.headBranch}`}</TooltipPopup>
-                  </Tooltip>
-                </span>
-                <span className="ml-2 inline-flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-                  <span className="inline-flex items-center gap-1 tabular-nums">
-                    <FileDiffIcon className="size-3" />
-                    {detail.changedFiles.toLocaleString()}
-                  </span>
-                  <PullRequestDiffStat
-                    additions={detail.additions}
-                    deletions={detail.deletions}
-                    className="shrink-0 font-mono text-[11px]"
-                  />
-                </span>
+                {displayDetail ? (
+                  <>
+                    <span className="ml-auto inline-flex min-w-0 shrink items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                      <Tooltip>
+                        <TooltipTrigger render={<span className="truncate" />}>
+                          {displayDetail.baseBranch}
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">{`${displayDetail.baseBranch} ← ${displayDetail.headBranch}`}</TooltipPopup>
+                      </Tooltip>
+                      {freshness ? (
+                        <PullRequestBaseFreshnessWarning
+                          baseBranch={displayDetail.baseBranch}
+                          freshness={freshness}
+                          pending={actionPending}
+                          onUpdate={(method) => void perform("update-branch", undefined, method)}
+                          iconClassName="size-3"
+                        />
+                      ) : null}
+                      <ArrowLeftIcon
+                        aria-label="receives changes from"
+                        className="size-3 shrink-0"
+                      />
+                      <Tooltip>
+                        <TooltipTrigger render={<span className="truncate" />}>
+                          {displayDetail.headBranch}
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">{`${displayDetail.baseBranch} ← ${displayDetail.headBranch}`}</TooltipPopup>
+                      </Tooltip>
+                    </span>
+                    <span className="ml-2 inline-flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 tabular-nums">
+                        <FileDiffIcon className="size-3" />
+                        {displayDetail.changedFiles.toLocaleString()}
+                      </span>
+                      <PullRequestDiffStat
+                        additions={displayDetail.additions}
+                        deletions={displayDetail.deletions}
+                        className="shrink-0 font-mono text-[11px]"
+                      />
+                    </span>
+                  </>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1673,74 +1825,76 @@ export function PullRequestDetailPanel({
                   <span>updated {formatRelativeTimeLabel(detail.updatedAt)}</span>
                 </PullRequestMetaLine>
 
-                <div className="mt-4 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <code className="min-w-0 max-w-48 shrink truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground">
-                          {detail.baseBranch}
+                {displayDetail ? (
+                  <div className="mt-4 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <code className="min-w-0 max-w-48 shrink truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground">
+                            {displayDetail.baseBranch}
+                          </code>
+                        }
+                      />
+                      <TooltipPopup side="top">{displayDetail.baseBranch}</TooltipPopup>
+                    </Tooltip>
+                    {freshness ? (
+                      <PullRequestBaseFreshnessWarning
+                        baseBranch={displayDetail.baseBranch}
+                        freshness={freshness}
+                        pending={actionPending}
+                        onUpdate={(method) => void perform("update-branch", undefined, method)}
+                      />
+                    ) : null}
+                    <ArrowLeftIcon aria-label="receives changes from" className="size-4 shrink-0" />
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="grid min-w-0 max-w-64 shrink cursor-pointer rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            aria-label={
+                              isBranchCopied ? "Branch name copied" : "Copy pull request branch"
+                            }
+                            onClick={() => copyBranchToClipboard(displayDetail.headBranch)}
+                          />
+                        }
+                      >
+                        <code
+                          className={cn(
+                            "col-start-1 row-start-1 min-w-0 truncate transition-opacity duration-150 motion-reduce:transition-none",
+                            isBranchCopied ? "opacity-0" : "opacity-100",
+                          )}
+                        >
+                          {displayDetail.headBranch}
                         </code>
-                      }
-                    />
-                    <TooltipPopup side="top">{detail.baseBranch}</TooltipPopup>
-                  </Tooltip>
-                  {freshness ? (
-                    <PullRequestBaseFreshnessWarning
-                      baseBranch={detail.baseBranch}
-                      freshness={freshness}
-                      pending={actionPending}
-                      onUpdate={(method) => void perform("update-branch", undefined, method)}
-                    />
-                  ) : null}
-                  <ArrowLeftIcon aria-label="receives changes from" className="size-4 shrink-0" />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="grid min-w-0 max-w-64 shrink cursor-pointer rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                          aria-label={
-                            isBranchCopied ? "Branch name copied" : "Copy pull request branch"
-                          }
-                          onClick={() => copyBranchToClipboard(detail.headBranch)}
-                        />
-                      }
-                    >
-                      <code
-                        className={cn(
-                          "col-start-1 row-start-1 min-w-0 truncate transition-opacity duration-150 motion-reduce:transition-none",
-                          isBranchCopied ? "opacity-0" : "opacity-100",
-                        )}
-                      >
-                        {detail.headBranch}
-                      </code>
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "col-start-1 row-start-1 truncate text-center transition-opacity duration-150 motion-reduce:transition-none",
-                          isBranchCopied ? "opacity-100" : "opacity-0",
-                        )}
-                      >
-                        Copied
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "col-start-1 row-start-1 truncate text-center transition-opacity duration-150 motion-reduce:transition-none",
+                            isBranchCopied ? "opacity-100" : "opacity-0",
+                          )}
+                        >
+                          Copied
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">
+                        {`${isBranchCopied ? "Copied" : "Copy pull request branch"}: ${displayDetail.headBranch}`}
+                      </TooltipPopup>
+                    </Tooltip>
+                    <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
+                      <span className="inline-flex items-center gap-1.5 tabular-nums">
+                        <FileDiffIcon className="size-3.5" />
+                        {displayDetail.changedFiles.toLocaleString()}{" "}
+                        {displayDetail.changedFiles === 1 ? "file" : "files"}
                       </span>
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">
-                      {`${isBranchCopied ? "Copied" : "Copy pull request branch"}: ${detail.headBranch}`}
-                    </TooltipPopup>
-                  </Tooltip>
-                  <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
-                    <span className="inline-flex items-center gap-1.5 tabular-nums">
-                      <FileDiffIcon className="size-3.5" />
-                      {detail.changedFiles.toLocaleString()}{" "}
-                      {detail.changedFiles === 1 ? "file" : "files"}
+                      <PullRequestDiffStat
+                        additions={displayDetail.additions}
+                        deletions={displayDetail.deletions}
+                        className="shrink-0 font-mono text-xs"
+                      />
                     </span>
-                    <PullRequestDiffStat
-                      additions={detail.additions}
-                      deletions={detail.deletions}
-                      className="shrink-0 font-mono text-xs"
-                    />
-                  </span>
-                </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -1954,21 +2108,35 @@ export function PullRequestDetailPanel({
             ) : null}
             {mountedTabs.has("code") ? (
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
-                <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
-                  <PullRequestCodeTab
-                    {...(attachTarget ? { onAddToAgentSelection: addSelectionToAgent } : {})}
-                    environmentId={environmentId}
-                    reference={reference}
-                    detail={detail}
-                    selectedCommitOid={selectedCodeCommitOid}
-                    onSelectedCommitChange={selectCodeCommit}
-                    pendingFinding={handoff}
-                    fixFindingLabel={handoffLabels.fixFinding}
-                    onFixFinding={startFixFinding}
-                    onRefresh={refreshDetail}
-                    refreshToken={refreshToken}
-                  />
-                </Suspense>
+                {currentAppliedSnapshot === null || codeTabDetail === null ? (
+                  codeBootstrapError === null ? (
+                    <DiffPanelLoadingState label="Loading pull request diff..." />
+                  ) : (
+                    <PullRequestsUnavailableState
+                      error={codeBootstrapError}
+                      onRetry={() => void refreshFromHost()}
+                    />
+                  )
+                ) : (
+                  <Suspense
+                    fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}
+                  >
+                    <PullRequestCodeTab
+                      {...(attachTarget ? { onAddToAgentSelection: addSelectionToAgent } : {})}
+                      environmentId={environmentId}
+                      reference={reference}
+                      detail={codeTabDetail}
+                      snapshotVersion={currentAppliedSnapshot.version}
+                      firstPageDiff={currentAppliedSnapshot.firstPageDiff}
+                      selectedCommitOid={selectedCodeCommitOid}
+                      onSelectedCommitChange={selectCodeCommit}
+                      pendingFinding={handoff}
+                      fixFindingLabel={handoffLabels.fixFinding}
+                      onFixFinding={startFixFinding}
+                      onRefresh={refreshDetail}
+                    />
+                  </Suspense>
+                )}
               </div>
             ) : null}
           </>
