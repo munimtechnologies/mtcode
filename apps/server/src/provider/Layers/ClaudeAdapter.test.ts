@@ -4057,7 +4057,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(restarted?.options.resumeSessionAt, "assistant-keep-options");
       assert.equal(restarted?.options.model, "claude-opus-4-6[1m]");
       assert.equal(restarted?.options.permissionMode, "plan");
-      assert.equal(restarted?.options.allowDangerouslySkipPermissions, undefined);
+      assert.equal(restarted?.options.allowDangerouslySkipPermissions, true);
       // Recreated query already has the mid-session options; sendTurn must
       // not skip-apply by assuming the new process inherited them implicitly.
       assert.deepEqual(harness.query.setModelCalls, []);

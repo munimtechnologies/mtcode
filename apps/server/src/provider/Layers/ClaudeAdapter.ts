@@ -3875,7 +3875,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...baseQueryOptions,
       ...(liveModelId !== undefined ? { model: liveModelId } : {}),
       ...(livePermissionMode !== undefined ? { permissionMode: livePermissionMode } : {}),
-      ...(livePermissionMode === "bypassPermissions"
+      // The SDK only honors setPermissionMode("bypassPermissions") if the
+      // query was created with this flag. Keep it whenever the session's
+      // base mode is bypass, even if the live mode is currently plan.
+      ...(context.basePermissionMode === "bypassPermissions" ||
+      livePermissionMode === "bypassPermissions"
         ? { allowDangerouslySkipPermissions: true }
         : {}),
       ...(pinnedLastAssistantUuid && pinnedResumeSessionId
