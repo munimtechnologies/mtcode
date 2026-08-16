@@ -273,6 +273,8 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
       probe: "ACP model discovery",
       timeoutMs: GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS,
       installed: true,
+      // `grok --version` already answered, so keep what it told us.
+      ...(version ? { version } : {}),
     });
   }
   const discoveredModels = discoveryExit.value.value;

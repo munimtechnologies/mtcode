@@ -61,9 +61,10 @@ export class ProviderProbeTimeoutError extends Schema.TaggedErrorClass<ProviderP
     /**
      * What the probe had established about the CLI before it ran out of time.
      * Only consulted when there is no earlier status to fall back on, so the
-     * first-ever check still reports something truthful.
+     * first-ever check still reports everything it did manage to learn.
      */
     installed: Schema.Boolean,
+    version: Schema.optionalKey(Schema.String),
   },
 ) {
   override get message(): string {

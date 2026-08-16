@@ -94,6 +94,15 @@ const enrichedSnapshot: ServerProvider = {
   ],
 };
 
+const missingCliSnapshot: ServerProvider = {
+  ...refreshedSnapshot,
+  installed: false,
+  version: null,
+  status: "error",
+  auth: { status: "unknown" },
+  message: "Codex CLI (`codex`) is not installed or not on PATH.",
+};
+
 const probeTimeout = new ProviderProbeTimeoutError({
   provider: "Codex",
   probe: "app-server status",
@@ -542,6 +551,76 @@ describe("makeManagedServerProvider", () => {
         // both learn the check was attempted and did not finish.
         assert.notStrictEqual(updates[1]!.checkedAt, refreshedSnapshot.checkedAt);
         assert.match(updates[1]!.message ?? "", /timed out after 10000ms/);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("does not let stale enrichment publish over a probe timeout", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const publishCallbacks: Array<(snapshot: ServerProvider) => Effect.Effect<void>> = [];
+        const enrichmentReady = yield* Deferred.make<void>();
+        const checkCalls = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1 ? Effect.succeed(refreshedSnapshot) : Effect.fail(probeTimeout),
+            ),
+          ),
+          enrichSnapshot: ({ publishSnapshot }) =>
+            Effect.gen(function* () {
+              publishCallbacks.push(publishSnapshot);
+              yield* Deferred.succeed(enrichmentReady, undefined).pipe(Effect.ignore);
+            }),
+          refreshInterval: "1 hour",
+        });
+
+        yield* Deferred.await(enrichmentReady);
+        const afterTimeout = yield* provider.refresh;
+
+        // Enrichment started against the pre-timeout snapshot. Publishing now
+        // would restore the old checkedAt and drop the timeout message, which
+        // is how a manual refresh became a silent no-op in the first place.
+        yield* publishCallbacks[0]!(enrichedSnapshot);
+
+        assert.deepStrictEqual(yield* provider.getSnapshot, afterTimeout);
+        assert.match(afterTimeout.message ?? "", /timed out after 10000ms/);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("does not carry a failed check forward as if it were a known good status", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1 ? Effect.succeed(missingCliSnapshot) : Effect.fail(probeTimeout),
+            ),
+          ),
+          refreshInterval: "1 hour",
+        });
+
+        yield* Effect.yieldNow;
+        // The CLI was missing last time and may since have been installed. The
+        // timeout knows the probe got far enough to spawn, so keeping the old
+        // "not installed" verdict would be the more wrong of the two answers.
+        const afterTimeout = yield* provider.refresh;
+
+        assert.strictEqual(afterTimeout.installed, true);
+        assert.match(afterTimeout.message ?? "", /timed out after 10000ms/);
+        assert.notMatch(afterTimeout.message ?? "", /last known status/);
       }),
     ).pipe(Effect.provide(AlwaysRunTestLayer)),
   );
