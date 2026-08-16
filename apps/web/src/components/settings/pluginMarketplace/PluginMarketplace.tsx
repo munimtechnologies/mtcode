@@ -377,7 +377,9 @@ export function PluginMarketplace() {
 
       <SettingsSection
         {...searchableSetting("plugin-marketplace")}
-        className="space-y-0 [&>div:first-child]:hidden [&>div:last-child]:space-y-10"
+        className="space-y-0"
+        contentClassName="space-y-10"
+        hideHeader
       >
         {status === "idle" || status === "loading" ? <LoadingMarketplace /> : null}
         {status === "error" ? (
