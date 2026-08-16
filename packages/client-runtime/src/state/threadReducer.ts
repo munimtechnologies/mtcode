@@ -257,6 +257,46 @@ export function applyThreadDetailEvent(
         },
       };
 
+    case "thread.turn-queued":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.map((message) =>
+            message.id === event.payload.messageId
+              ? { ...message, deliveryState: "queued" as const }
+              : message,
+          ),
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.queued-turn-dispatched":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.map((message) => {
+            if (message.id !== event.payload.messageId) {
+              return message;
+            }
+            const { deliveryState: _, ...deliveredMessage } = message;
+            return deliveredMessage;
+          }),
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.queued-turn-cancelled":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.filter((message) => message.id !== event.payload.messageId),
+          updatedAt: event.occurredAt,
+        },
+      };
+
     case "thread.turn-interrupt-requested": {
       if (event.payload.turnId === undefined) {
         return { kind: "unchanged" };

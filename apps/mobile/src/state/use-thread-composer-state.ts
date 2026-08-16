@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo } from "react";
 
 import {
@@ -41,6 +42,7 @@ import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
+import { mobilePreferencesAtom } from "./preferences";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -78,6 +80,7 @@ export function useThreadComposerState() {
   const selectedThreadDetail = useSelectedThreadDetail();
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
+  const preferences = useAtomValue(mobilePreferencesAtom);
 
   useEffect(() => {
     ensureComposerDraftsLoaded();
@@ -160,6 +163,10 @@ export function useThreadComposerState() {
       modelSelection: draft.modelSelection ?? thread.modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: draft.interactionMode ?? thread.interactionMode,
+      deliveryMode:
+        AsyncResult.isSuccess(preferences) && preferences.value.steerActiveTurns === false
+          ? "after-current"
+          : "immediate",
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey);
@@ -175,7 +182,7 @@ export function useThreadComposerState() {
       );
     });
     return messageId;
-  }, [selectedThreadDetail, selectedThreadShell]);
+  }, [preferences, selectedThreadDetail, selectedThreadShell]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {

@@ -16,6 +16,7 @@ import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shar
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -46,6 +47,11 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import {
+  type ProjectionQueuedTurn,
+  ProjectionQueuedTurnRepository,
+} from "../../persistence/Services/ProjectionQueuedTurns.ts";
+import { ProjectionQueuedTurnRepositoryLive } from "../../persistence/Layers/ProjectionQueuedTurns.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -55,11 +61,13 @@ type ProviderIntentEvent = Extract<
     type:
       | "thread.meta-updated"
       | "thread.runtime-mode-set"
+      | "thread.turn-queued"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
-      | "thread.session-stop-requested";
+      | "thread.session-stop-requested"
+      | "thread.session-set";
   }
 >;
 
@@ -308,6 +316,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const projectionQueuedTurnRepository = yield* ProjectionQueuedTurnRepository;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -1084,7 +1093,7 @@ const make = Effect.gen(function* () {
     }
 
     const isFirstUserMessageTurn =
-      thread.messages.filter((entry) => entry.role === "user").length === 1;
+      thread.messages.find((entry) => entry.role === "user")?.id === event.payload.messageId;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
@@ -1171,6 +1180,80 @@ const make = Effect.gen(function* () {
     yield* providerService
       .sendTurn(sendTurnRequest.value)
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+  });
+
+  const queuedTurnStartEvent = (
+    row: ProjectionQueuedTurn,
+  ): Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }> => ({
+    sequence: row.eventSequence,
+    eventId: row.eventId,
+    aggregateKind: "thread",
+    aggregateId: row.threadId,
+    occurredAt: row.queuedAt,
+    commandId: row.commandId,
+    causationEventId: null,
+    correlationId: row.commandId,
+    metadata: {},
+    type: "thread.turn-start-requested",
+    payload: {
+      threadId: row.threadId,
+      messageId: row.messageId,
+      ...(row.modelSelection !== null ? { modelSelection: row.modelSelection } : {}),
+      ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
+      runtimeMode: row.runtimeMode,
+      interactionMode: row.interactionMode,
+      ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
+        ? {
+            sourceProposedPlan: {
+              threadId: row.sourceProposedPlanThreadId,
+              planId: row.sourceProposedPlanId,
+            },
+          }
+        : {}),
+      createdAt: row.queuedAt,
+    },
+  });
+
+  const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
+    threadId: ThreadId,
+  ) {
+    const rows = yield* projectionQueuedTurnRepository.listByThreadId({ threadId });
+    if (rows.some((row) => row.status === "ready")) {
+      return;
+    }
+    const next = rows.find((row) => row.status === "queued");
+    if (next === undefined) {
+      return;
+    }
+    const thread = yield* resolveThread(threadId);
+    if (thread === undefined) {
+      return;
+    }
+    const status = thread.session?.status;
+    if (status === "starting" || status === "running" || status === "error") {
+      return;
+    }
+    const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    yield* orchestrationEngine.dispatch({
+      type: "thread.queued-turn.dispatch",
+      commandId: next.commandId,
+      threadId: next.threadId,
+      messageId: next.messageId,
+      ...(next.modelSelection !== null ? { modelSelection: next.modelSelection } : {}),
+      ...(next.titleSeed !== null ? { titleSeed: next.titleSeed } : {}),
+      runtimeMode: next.runtimeMode,
+      interactionMode: next.interactionMode,
+      ...(next.sourceProposedPlanThreadId !== null && next.sourceProposedPlanId !== null
+        ? {
+            sourceProposedPlan: {
+              threadId: next.sourceProposedPlanThreadId,
+              planId: next.sourceProposedPlanId,
+            },
+          }
+        : {}),
+      queuedAt: next.queuedAt,
+      createdAt,
+    });
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1343,6 +1426,9 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.turn-queued":
+        yield* tryDispatchNextQueuedTurn(event.payload.threadId);
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -1357,6 +1443,15 @@ const make = Effect.gen(function* () {
         return;
       case "thread.session-stop-requested":
         yield* processSessionStopRequested(event);
+        return;
+      case "thread.session-set":
+        if (
+          event.payload.session.status !== "starting" &&
+          event.payload.session.status !== "running" &&
+          event.payload.session.status !== "error"
+        ) {
+          yield* tryDispatchNextQueuedTurn(event.payload.threadId);
+        }
         return;
     }
   });
@@ -1392,11 +1487,13 @@ const make = Effect.gen(function* () {
       if (
         (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
         event.type === "thread.runtime-mode-set" ||
+        event.type === "thread.turn-queued" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
-        event.type === "thread.session-stop-requested"
+        event.type === "thread.session-stop-requested" ||
+        event.type === "thread.session-set"
       ) {
         return yield* worker.enqueue(event);
       }
@@ -1404,9 +1501,33 @@ const make = Effect.gen(function* () {
 
     yield* forkParked(Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent));
 
-    // The domain event stream is hot, so work pending before this reactor
-    // starts cannot be resumed. Correlated completions only clear the request
-    // captured here, leaving any newer request untouched.
+    yield* Effect.gen(function* () {
+      const persistedQueuedTurns = yield* projectionQueuedTurnRepository.listAll;
+      yield* Effect.forEach(
+        persistedQueuedTurns.filter((row) => row.status === "ready"),
+        (row) => worker.enqueue(queuedTurnStartEvent(row)),
+        { concurrency: 1, discard: true },
+      );
+      yield* Effect.forEach(
+        new Set(persistedQueuedTurns.map((row) => row.threadId)),
+        tryDispatchNextQueuedTurn,
+        { concurrency: 1, discard: true },
+      );
+    }).pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.interrupt;
+        }
+        return Effect.logWarning("provider command reactor failed to recover queued turns", {
+          cause: Cause.pretty(cause),
+        });
+      }),
+    );
+
+    // Title regeneration still uses the hot event stream and cannot resume a
+    // pre-start request. Correlated completions only clear the request captured
+    // here, leaving any newer request untouched. Queued turns are recovered
+    // separately above from their durable projection.
     const clearInterrupted = clearInterruptedThreadTitleRegenerations(
       interruptedTitleRegenerations,
     ).pipe(
@@ -1439,4 +1560,6 @@ const make = Effect.gen(function* () {
   } satisfies ProviderCommandReactorShape;
 });
 
-export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make);
+export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
+  Layer.provideMerge(ProjectionQueuedTurnRepositoryLive),
+);

@@ -79,12 +79,12 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
-const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
-  Struct.assign({
-    isStreaming: Schema.Number,
-    attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
-  }),
-);
+const ProjectionThreadMessageDbRowSchema = Schema.Struct({
+  ...ProjectionThreadMessage.fields,
+  isStreaming: Schema.Number,
+  attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+  deliveryState: Schema.NullOr(Schema.Literal("queued")),
+});
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
@@ -533,6 +533,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -976,6 +977,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1219,6 +1221,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1564,6 +1567,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   streaming: row.isStreaming === 1,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
+                  ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
                 });
                 messagesByThread.set(row.threadId, threadMessages);
               }
@@ -2623,6 +2627,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             streaming: row.isStreaming === 1,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
+            ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
           };
           if (row.attachments !== null) {
             return Object.assign(message, { attachments: row.attachments });
