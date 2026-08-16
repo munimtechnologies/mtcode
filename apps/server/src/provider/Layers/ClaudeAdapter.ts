@@ -4417,20 +4417,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* completeTurn(context, "completed");
     }
 
-    if (modelSelection?.model) {
-      context.session = {
-        ...context.session,
-        model: modelSelection.model,
-      };
-      const turnCaps = getClaudeModelCapabilities(modelSelection.model);
-      const turnEffort = resolveClaudeEffort(
-        turnCaps,
-        getModelSelectionStringOptionValue(modelSelection, "effort"),
-      );
-      context.currentEffort =
-        getEffectiveClaudeAgentEffort(turnEffort ?? null, modelSelection.model) ?? undefined;
-    }
-
     const nextApiModelId =
       modelSelection?.model !== undefined ? resolveClaudeApiModelId(modelSelection) : undefined;
     const needsModelUpdate =
@@ -4477,6 +4463,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
     }
 
+    const modelAppliedOnCli =
+      modelSelection?.model === undefined ||
+      !needsModelUpdate ||
+      context.currentApiModelId === nextApiModelId;
+    if (modelSelection?.model && modelAppliedOnCli) {
+      context.session = {
+        ...context.session,
+        model: modelSelection.model,
+      };
+      const turnCaps = getClaudeModelCapabilities(modelSelection.model);
+      const turnEffort = resolveClaudeEffort(
+        turnCaps,
+        getModelSelectionStringOptionValue(modelSelection, "effort"),
+      );
+      context.currentEffort =
+        getEffectiveClaudeAgentEffort(turnEffort ?? null, modelSelection.model) ?? undefined;
+    }
+
     if (context.stopped) {
       return yield* new ProviderAdapterSessionClosedError({
         provider: PROVIDER,
@@ -4513,7 +4517,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         createdAt: turnStartedStamp.createdAt,
         threadId: context.session.threadId,
         turnId,
-        payload: modelSelection?.model ? { model: modelSelection.model } : {},
+        payload: context.session.model ? { model: context.session.model } : {},
         providerRefs: {},
       });
     }

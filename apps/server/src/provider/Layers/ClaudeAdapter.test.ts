@@ -3972,6 +3972,108 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "does not advertise a model on turn.started or the session when setModel times out",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const startedModel = createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          "claude-opus-4-6",
+          [{ id: "contextWindow", value: "200k" }],
+        );
+        const requestedModel = createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          "claude-opus-4-6",
+          [{ id: "contextWindow", value: "1m" }],
+        );
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          modelSelection: startedModel,
+          runtimeMode: "full-access",
+        });
+
+        const turnStartedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.started",
+        ).pipe(Stream.runHead, Effect.forkChild);
+
+        harness.query.hangSetModel = true;
+        const turnFiber = yield* adapter
+          .sendTurn({
+            threadId: THREAD_ID,
+            input: "hello",
+            modelSelection: requestedModel,
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+
+        yield* TestClock.adjust("5 seconds");
+        yield* Fiber.join(turnFiber);
+        const turnStarted = yield* Fiber.join(turnStartedFiber);
+
+        assert.equal(turnStarted._tag, "Some");
+        if (turnStarted._tag === "Some" && turnStarted.value.type === "turn.started") {
+          assert.deepEqual(turnStarted.value.payload, { model: "claude-opus-4-6" });
+        }
+        const sessions = yield* adapter.listSessions();
+        assert.equal(sessions[0]?.model, "claude-opus-4-6");
+        assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]"]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("does not advertise a requested model when the resume query is not ready", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const turnStartedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.started",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: RESUME_CURSOR,
+        runtimeMode: "full-access",
+      });
+      const turnFiber = yield* adapter
+        .sendTurn({
+          threadId: RESUME_THREAD_ID,
+          input: "hello",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            "claude-opus-4-6",
+            [{ id: "contextWindow", value: "1m" }],
+          ),
+          attachments: [],
+        })
+        .pipe(Effect.forkChild);
+
+      yield* TestClock.adjust("5 seconds");
+      yield* Fiber.join(turnFiber);
+      const turnStarted = yield* Fiber.join(turnStartedFiber);
+
+      assert.equal(turnStarted._tag, "Some");
+      if (turnStarted._tag === "Some" && turnStarted.value.type === "turn.started") {
+        assert.deepEqual(turnStarted.value.payload, {});
+      }
+      const sessions = yield* adapter.listSessions();
+      assert.equal(sessions[0]?.model, undefined);
+      assert.deepEqual(harness.query.setModelCalls, []);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("sets plan permission mode on sendTurn when interactionMode is plan", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
