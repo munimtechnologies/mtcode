@@ -920,4 +920,92 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
       expect(error._tag).toBe("OrchestrationCommandInvariantError");
     }),
   );
+
+  it.effect("quota or rate-limit Turn errors set an Active Goal to Usage-limited", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-rate-limit"),
+          threadId: ThreadId.make("thread-1"),
+          createdAt: NOW,
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "error",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: "HTTP 429 Too Many Requests",
+            updatedAt: NOW,
+          },
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: runningSession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.session-set",
+        "thread.goal-usage-limited",
+        "thread.activity-appended",
+      ]);
+      expect(events.map((event) => event.type)).not.toContain("thread.goal-blocked");
+      expect(events.map((event) => event.type)).not.toContain("thread.goal-paused");
+    }),
+  );
+
+  it.effect("ordinary Turn errors do not Usage-limit, Pause, or Block a Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-ordinary-error"),
+          threadId: ThreadId.make("thread-1"),
+          createdAt: NOW,
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "error",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: "turn failed",
+            updatedAt: NOW,
+          },
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: runningSession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.session-set"]);
+    }),
+  );
+
+  it.effect("resumes a Usage-limited Goal on an idle Thread by starting a Continuation", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.resume",
+          commandId: CommandId.make("cmd-goal-resume-usage-limited"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal("usageLimited"),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.goal-resumed",
+        "thread.activity-appended",
+        "thread.activity-appended",
+        "thread.turn-start-requested",
+      ]);
+    }),
+  );
 });

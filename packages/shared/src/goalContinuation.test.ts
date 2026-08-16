@@ -5,6 +5,7 @@ import {
   countTrailingEmptyGoalContinuations,
   goalBlockCommandId,
   goalContinuationCommandId,
+  isProviderAccountUsageLimitError,
   parseObjectiveSignal,
 } from "./goalContinuation.ts";
 
@@ -63,6 +64,22 @@ describe("goalBlockCommandId", () => {
         completedTurnId: "turn-1",
       }),
     ).toBe("goal-block:thread-1:2026-01-01T00:00:00.000Z:turn-1");
+  });
+});
+
+describe("isProviderAccountUsageLimitError", () => {
+  it("detects account quota and rate-limit Turn errors", () => {
+    expect(isProviderAccountUsageLimitError("HTTP 429 Too Many Requests")).toBe(true);
+    expect(isProviderAccountUsageLimitError("rate_limit_reached")).toBe(true);
+    expect(isProviderAccountUsageLimitError("You have exceeded your current quota")).toBe(true);
+    expect(isProviderAccountUsageLimitError("workspace_member_usage_limit_reached")).toBe(true);
+    expect(isProviderAccountUsageLimitError("RESOURCE_EXHAUSTED")).toBe(true);
+  });
+
+  it("does not treat ordinary Turn errors as Usage-limited", () => {
+    expect(isProviderAccountUsageLimitError("turn failed")).toBe(false);
+    expect(isProviderAccountUsageLimitError("Permission denied")).toBe(false);
+    expect(isProviderAccountUsageLimitError(null)).toBe(false);
   });
 });
 

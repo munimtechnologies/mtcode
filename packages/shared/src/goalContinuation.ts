@@ -40,6 +40,17 @@ export function goalBlockCommandId(input: {
   return `goal-block:${input.threadId}:${input.goalUpdatedAt}:${input.completedTurnId}`;
 }
 
+const USAGE_LIMIT_ERROR_PATTERN =
+  /\b429\b|too many requests|rate[\s_-]*limit|usage[\s_-]*limit|\bquota\b|resource_exhausted|tokens? (?:limit|exhausted)/i;
+
+/** True when a Turn error means the provider account cannot accept more work. */
+export function isProviderAccountUsageLimitError(message: string | null | undefined): boolean {
+  if (message == null || message.trim().length === 0) {
+    return false;
+  }
+  return USAGE_LIMIT_ERROR_PATTERN.test(message);
+}
+
 export const EMPTY_GOAL_CONTINUATION_LIMIT = 3;
 
 const OBJECTIVE_COMPLETE_TAG = /<objective_complete>([\s\S]*?)<\/objective_complete>/;

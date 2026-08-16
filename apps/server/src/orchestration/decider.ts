@@ -8,7 +8,10 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { isGoalCommandForm } from "@t3tools/shared/composerTrigger";
-import { parseObjectiveSignal } from "@t3tools/shared/goalContinuation";
+import {
+  isProviderAccountUsageLimitError,
+  parseObjectiveSignal,
+} from "@t3tools/shared/goalContinuation";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -1772,6 +1775,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // with a raised hand (approval / input / failure / fresh completion)
       // as snoozed, without spending the return ticket.
       const events: Array<Omit<OrchestrationEvent, "sequence">> = [sessionSetEvent];
+      if (
+        command.session.status === "error" &&
+        thread.goal?.status === "active" &&
+        isProviderAccountUsageLimitError(command.session.lastError)
+      ) {
+        events.push(
+          {
+            ...(yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: command.threadId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            })),
+            type: "thread.goal-usage-limited",
+            payload: {
+              threadId: command.threadId,
+              updatedAt: command.createdAt,
+            },
+          },
+          yield* goalActivityAppendedEvent({
+            commandId: command.commandId,
+            threadId: command.threadId,
+            occurredAt: command.createdAt,
+            kind: "goal.usage-limited",
+            summary: thread.goal.objective,
+            tone: "error",
+          }),
+        );
+      }
       const isSessionActivity =
         command.session.status === "starting" || command.session.status === "running";
       // Real activity resets ANY override (settled wakes, active unpins).
