@@ -2268,15 +2268,27 @@ function packedAsarPayloadBytes(directory: DirectoryRecord): number {
   return bytes;
 }
 
-async function waitForAsarWriteCompletion(asarPath: string): Promise<void> {
-  const { header, headerSize } = getRawHeader(asarPath);
+const waitForAsarWriteCompletion = Effect.fn("waitForAsarWriteCompletion")(function* (
+  asarPath: string,
+) {
+  const { header, headerSize } = yield* Effect.try({
+    try: () => getRawHeader(asarPath),
+    catch: (cause) => new WindowsServerSidecarPackError({ asarPath, cause }),
+  });
   const expectedBytes = 8 + headerSize + packedAsarPayloadBytes(header);
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    if ((await NodeFSP.stat(asarPath)).size >= expectedBytes) return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const stat = yield* Effect.tryPromise({
+      try: () => NodeFSP.stat(asarPath),
+      catch: (cause) => new WindowsServerSidecarPackError({ asarPath, cause }),
+    });
+    if (stat.size >= expectedBytes) return;
+    yield* Effect.sleep("100 millis");
   }
-  throw new Error(`ASAR writer did not flush ${expectedBytes} bytes to ${asarPath}.`);
-}
+  return yield* new WindowsServerSidecarPackError({
+    asarPath,
+    cause: new Error(`ASAR writer did not flush ${expectedBytes} bytes to ${asarPath}.`),
+  });
+});
 
 export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function* (input: {
   readonly sourceDir: string;
@@ -2284,16 +2296,15 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
 }) {
   const fs = yield* FileSystem.FileSystem;
   yield* Effect.tryPromise({
-    try: async () => {
-      await createPackageWithOptions(input.sourceDir, input.asarPath, {
+    try: () =>
+      createPackageWithOptions(input.sourceDir, input.asarPath, {
         dot: true,
         unpack: WINDOWS_SERVER_ASAR_UNPACK_GLOB,
         globOptions: { ignore: [...WINDOWS_SERVER_ASAR_IGNORE_GLOBS] },
-      });
-      await waitForAsarWriteCompletion(input.asarPath);
-    },
+      }),
     catch: (cause) => new WindowsServerSidecarPackError({ asarPath: input.asarPath, cause }),
   });
+  yield* waitForAsarWriteCompletion(input.asarPath);
   const unpackedDirPath = `${input.asarPath}.unpacked`;
   if (!(yield* fs.exists(unpackedDirPath))) {
     return yield* new WindowsServerSidecarPackError({
