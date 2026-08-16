@@ -4,6 +4,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
+import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
@@ -24,8 +25,13 @@ import {
 } from "../logicalProject";
 import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
 import { readThreadShell, useProjects, useThread } from "../state/entities";
-import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  resolveAvailableNewThreadProjectRef,
+  resolveNewDraftStartFromOrigin,
+} from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
+import { shouldReadProjectFileForNewThreadDefaults } from "../session-logic";
 import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -52,6 +58,8 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 
 export function useNewThreadHandler() {
   const projects = useProjects();
+  const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   // New-thread defaults are a user preference, and the settings UI only ever
   // edits the primary environment's settings.json. Reading the target
   // environment's own settings here would silently reset remote projects to
@@ -67,7 +75,7 @@ export function useNewThreadHandler() {
 
   return useCallback(
     (
-      projectRef: ScopedProjectRef,
+      requestedProjectRef: ScopedProjectRef,
       options?: {
         branch?: string | null;
         worktreePath?: string | null;
@@ -156,16 +164,51 @@ export function useNewThreadHandler() {
           moveComposerPromptAndImages(carryContentSourceDraftId, destinationDraftId);
         }
       };
-      const project = projects.find(
+      const requestedProject = projects.find(
         (candidate) =>
-          candidate.id === projectRef.projectId &&
-          candidate.environmentId === projectRef.environmentId,
+          candidate.id === requestedProjectRef.projectId &&
+          candidate.environmentId === requestedProjectRef.environmentId,
       );
+      const requestedLogicalProjectKey = requestedProject
+        ? deriveLogicalProjectKeyFromSettings(requestedProject, projectGroupingSettings)
+        : scopedProjectKey(requestedProjectRef);
+      const siblingProjects = requestedProject
+        ? projects.filter(
+            (candidate) =>
+              deriveLogicalProjectKeyFromSettings(candidate, projectGroupingSettings) ===
+              requestedLogicalProjectKey,
+          )
+        : [];
+      const projectRef = resolveAvailableNewThreadProjectRef({
+        requested: requestedProjectRef,
+        members: siblingProjects.map((candidate) => ({
+          environmentId: candidate.environmentId,
+          projectId: candidate.id,
+          isPrimary: candidate.environmentId === primaryEnvironmentId,
+        })),
+        isEnvironmentReachable: (environmentId) =>
+          canCreateProjectInEnvironment(
+            environments.find((environment) => environment.environmentId === environmentId)
+              ?.connection.phase,
+          ),
+      });
+      const project =
+        projects.find(
+          (candidate) =>
+            candidate.id === projectRef.projectId &&
+            candidate.environmentId === projectRef.environmentId,
+        ) ?? requestedProject;
       // The shared resolver owns the priority order. The t3.json read is
-      // skipped entirely when a higher-priority source decides, and its
-      // query atom caches per project after the first call.
+      // skipped entirely when a higher-priority source decides or the
+      // environment cannot serve: executeAtomQuery waits on a live RPC, so
+      // a down machine would leave New Thread hanging.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        const consultProjectFile = project !== undefined && project.defaultThreadEnvMode == null;
+        const connectionPhase = environments.find(
+          (environment) => environment.environmentId === projectRef.environmentId,
+        )?.connection.phase;
+        const consultProjectFile =
+          project !== undefined &&
+          shouldReadProjectFileForNewThreadDefaults(project.defaultThreadEnvMode, connectionPhase);
         return resolveDefaultThreadEnvMode({
           projectSetting: project?.defaultThreadEnvMode,
           projectFile: consultProjectFile
@@ -427,7 +470,15 @@ export function useNewThreadHandler() {
         return { draftId, threadId };
       })();
     },
-    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, projects, router],
+    [
+      environments,
+      getCurrentRouteTarget,
+      primaryEnvironmentId,
+      primaryServerSettings,
+      projectGroupingSettings,
+      projects,
+      router,
+    ],
   );
 }
 

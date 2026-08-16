@@ -2,6 +2,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  resolveAvailableNewThreadProjectRef,
   resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
   startNewThreadFromContext,
@@ -103,5 +104,61 @@ describe("chatThreadActions", () => {
 
     expect(didStart).toBe(false);
     expect(handleNewThread).not.toHaveBeenCalled();
+  });
+
+  it("keeps the requested project when its environment is reachable", () => {
+    const otherEnvironmentId = EnvironmentId.make("environment-2");
+    const requested = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+
+    expect(
+      resolveAvailableNewThreadProjectRef({
+        requested,
+        members: [
+          { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID, isPrimary: false },
+          { environmentId: otherEnvironmentId, projectId: FALLBACK_PROJECT_ID, isPrimary: true },
+        ],
+        isEnvironmentReachable: () => true,
+      }),
+    ).toEqual(requested);
+  });
+
+  it("retargets an unreachable requested environment to a reachable sibling, preferring primary", () => {
+    const reachableEnvironmentId = EnvironmentId.make("environment-2");
+    const otherEnvironmentId = EnvironmentId.make("environment-3");
+
+    expect(
+      resolveAvailableNewThreadProjectRef({
+        requested: scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
+        members: [
+          { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID, isPrimary: false },
+          {
+            environmentId: otherEnvironmentId,
+            projectId: ProjectId.make("project-3"),
+            isPrimary: false,
+          },
+          {
+            environmentId: reachableEnvironmentId,
+            projectId: FALLBACK_PROJECT_ID,
+            isPrimary: true,
+          },
+        ],
+        isEnvironmentReachable: (environmentId) => environmentId !== ENVIRONMENT_ID,
+      }),
+    ).toEqual(scopeProjectRef(reachableEnvironmentId, FALLBACK_PROJECT_ID));
+  });
+
+  it("keeps the requested project when no sibling environment is reachable", () => {
+    const requested = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+
+    expect(
+      resolveAvailableNewThreadProjectRef({
+        requested,
+        members: [
+          { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
+          { environmentId: EnvironmentId.make("environment-2"), projectId: FALLBACK_PROJECT_ID },
+        ],
+        isEnvironmentReachable: () => false,
+      }),
+    ).toEqual(requested);
   });
 });
