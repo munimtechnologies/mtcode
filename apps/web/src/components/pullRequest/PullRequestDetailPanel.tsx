@@ -606,7 +606,7 @@ export function PullRequestDetailPanel({
           currentAppliedSnapshot.revision,
           observedSnapshot,
         );
-  const displayDetail = tab === "code" ? codeTabDetail : detail;
+  const displayDetail = tab === "code" ? (codeTabDetail ?? detail) : detail;
   const coordinatorRef = useRef<ReturnType<
     typeof createPullRequestDiffRefreshCoordinator<PullRequestDetailView, PullRequestDiffResult>
   > | null>(null);
