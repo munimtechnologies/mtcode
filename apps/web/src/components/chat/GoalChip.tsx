@@ -2,7 +2,6 @@ import type { OrchestrationThreadGoal } from "@t3tools/contracts";
 import {
   formatGoalChipAriaLabel,
   formatGoalChipPrefix,
-  formatGoalStatusLabel,
   goalChipActions,
   threadHasActiveGoal,
   type GoalChipAction,
@@ -17,9 +16,11 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export type { GoalChipAction };
 
@@ -83,11 +84,37 @@ export const GoalActiveMarker = memo(function GoalActiveMarker({
   );
 });
 
-const goalChipIconButtonClass = cn(
-  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground",
-  "hover:bg-muted hover:text-foreground",
-  "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
-);
+function GoalChipIconButton(props: {
+  readonly action: GoalChipAction;
+  readonly label: string;
+  readonly onAction: (action: GoalChipAction) => void;
+  readonly children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-micro"
+            variant="ghost-muted"
+            data-goal-chip-action={props.action}
+            aria-label={props.label}
+            onPointerDown={(event) => {
+              // Keep composer focus; the action runs without stealing it.
+              event.preventDefault();
+            }}
+            onClick={() => {
+              props.onAction(props.action);
+            }}
+          >
+            {props.children}
+          </Button>
+        }
+      />
+      <TooltipPopup side="top">{props.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 /**
  * Objective pill. The text loads the Goal back into the composer for editing
@@ -117,7 +144,6 @@ export const GoalChip = memo(function GoalChip({
       data-goal-chip
       role="group"
       aria-label={label}
-      title={`${formatGoalStatusLabel(goal.status)}: ${goal.objective}`}
       className={cn(
         "inline-flex max-w-[min(100%,20rem)] shrink-0 items-center gap-1.5 rounded-full border bg-popover px-2.5 py-0.5 text-xs shadow-sm",
         "border-border/70 text-muted-foreground",
@@ -152,55 +178,19 @@ export const GoalChip = memo(function GoalChip({
         </span>
       )}
       {onAction !== undefined && actions.includes("pause") ? (
-        <button
-          type="button"
-          data-goal-chip-action="pause"
-          aria-label="Pause Goal"
-          title="Pause Goal"
-          className={goalChipIconButtonClass}
-          onPointerDown={(event) => {
-            event.preventDefault();
-          }}
-          onClick={() => {
-            onAction("pause");
-          }}
-        >
+        <GoalChipIconButton action="pause" label="Pause Goal" onAction={onAction}>
           <PauseIcon className="size-3" aria-hidden="true" />
-        </button>
+        </GoalChipIconButton>
       ) : null}
       {onAction !== undefined && actions.includes("resume") ? (
-        <button
-          type="button"
-          data-goal-chip-action="resume"
-          aria-label="Resume Goal"
-          title="Resume Goal"
-          className={goalChipIconButtonClass}
-          onPointerDown={(event) => {
-            event.preventDefault();
-          }}
-          onClick={() => {
-            onAction("resume");
-          }}
-        >
+        <GoalChipIconButton action="resume" label="Resume Goal" onAction={onAction}>
           <PlayIcon className="size-3" aria-hidden="true" />
-        </button>
+        </GoalChipIconButton>
       ) : null}
       {onAction !== undefined && actions.includes("clear") ? (
-        <button
-          type="button"
-          data-goal-chip-action="clear"
-          aria-label="Delete Goal"
-          title="Delete Goal"
-          className={cn(goalChipIconButtonClass, "hover:text-destructive-foreground")}
-          onPointerDown={(event) => {
-            event.preventDefault();
-          }}
-          onClick={() => {
-            onAction("clear");
-          }}
-        >
+        <GoalChipIconButton action="clear" label="Delete Goal" onAction={onAction}>
           <XIcon className="size-3" aria-hidden="true" />
-        </button>
+        </GoalChipIconButton>
       ) : null}
     </span>
   );
