@@ -192,6 +192,16 @@ const CodexMcpServer = Schema.Struct({
 const decodeCodexMcpServers = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Array(CodexMcpServer)),
 );
+const CodexMcpServerUrl = Schema.Struct({
+  transport: Schema.optional(
+    Schema.Struct({
+      url: Schema.optional(Schema.String),
+    }),
+  ),
+});
+const decodeCodexMcpServerUrl = Schema.decodeUnknownOption(
+  Schema.fromJsonString(CodexMcpServerUrl),
+);
 
 function cleanedCliLine(value: string): string {
   return (
@@ -208,6 +218,35 @@ function findHttpUrl(value: string): string | null {
   // eslint-disable-next-line no-control-regex -- URLs end before terminal control sequences.
   const match = value.match(/https?:\/\/[^\s\u0007\u001B]+/u)?.[0];
   return match?.replace(/[),.;]+$/u, "") ?? null;
+}
+
+export function isCodexMcpServerMissingError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const message =
+      current instanceof Error
+        ? current.message
+        : typeof current === "object" && current !== null && "message" in current
+          ? String(Reflect.get(current, "message"))
+          : String(current);
+    if (/no mcp server named/iu.test(message)) return true;
+    current =
+      current instanceof Error
+        ? current.cause
+        : typeof current === "object" && current !== null && "cause" in current
+          ? Reflect.get(current, "cause")
+          : undefined;
+  }
+  return false;
+}
+
+export function codexMcpLoginArgs(name: string, url?: string | null): ReadonlyArray<string> {
+  const trimmedUrl = url?.trim();
+  return trimmedUrl
+    ? ["-c", `mcp_servers.${name}.url=${JSON.stringify(trimmedUrl)}`, "mcp", "login", name]
+    : ["mcp", "login", name];
 }
 
 export function findClaudeMcpAuthorizationUrl(value: string): string | null {
@@ -437,7 +476,7 @@ export const make = (options: McpOAuthRuntimeOptions = {}) =>
         return next;
       });
 
-    const runCodexSession = (key: string, session: ActiveSession) =>
+    const runCodexAppServerLogin = (session: ActiveSession) =>
       Effect.scoped(
         Effect.gen(function* () {
           const configured = yield* commandFor("codex", "codex");
@@ -484,6 +523,7 @@ export const make = (options: McpOAuthRuntimeOptions = {}) =>
             capabilities: { experimentalApi: true },
           });
           yield* client.notify("initialized", undefined);
+          yield* client.request("config/mcpServer/reload", undefined).pipe(Effect.ignore);
           const response = yield* client.request("mcpServer/oauth/login", {
             name: session.name,
             timeoutSecs: 600,
@@ -539,7 +579,87 @@ export const make = (options: McpOAuthRuntimeOptions = {}) =>
             });
           }
         }),
-      ).pipe(
+      );
+
+    const runCodexCliLogin = (session: ActiveSession) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const configured = yield* commandFor("codex", "codex");
+          if (!configured) {
+            return yield* new McpOAuthProviderUnavailableError({
+              operation: "start",
+              harness: "codex",
+              serverName: session.name,
+            });
+          }
+          const listed = yield* processRunner
+            .run({
+              command: configured.command,
+              args: ["mcp", "get", session.name, "--json"],
+              cwd,
+              env: configured.env,
+              timeout: "30 seconds",
+              maxOutputBytes: 512 * 1024,
+              outputMode: "truncate",
+            })
+            .pipe(Effect.option);
+          const listedUrl =
+            Option.isSome(listed) && listed.value.code === 0
+              ? Option.match(decodeCodexMcpServerUrl(listed.value.stdout), {
+                  onNone: () => null,
+                  onSome: (server) => server.transport?.url?.trim() || null,
+                })
+              : null;
+          const environment = configured.env;
+          const spawnCommand = yield* resolveSpawnCommand(
+            configured.command,
+            [...codexMcpLoginArgs(session.name, listedUrl)],
+            {
+              env: environment,
+              extendEnv: true,
+            },
+          );
+          const child = yield* spawner.spawn(
+            ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+              cwd,
+              env: environment,
+              extendEnv: true,
+              shell: spawnCommand.shell,
+              forceKillAfter: "2 seconds",
+            }),
+          );
+          yield* Deferred.succeed(session.started, {
+            authorizationUrl: "",
+            callbackRequired: false,
+          });
+          const exitCode = yield* Effect.raceFirst(
+            child.exitCode,
+            Deferred.await(session.cancelled).pipe(
+              Effect.flatMap(() =>
+                Effect.fail(
+                  new McpOAuthAuthenticationCancelledError({
+                    operation: "start",
+                    harness: "codex",
+                    serverName: session.name,
+                  }),
+                ),
+              ),
+            ),
+          );
+          if (exitCode !== 0) {
+            return yield* new McpOAuthAuthenticationFailedError({
+              operation: "start",
+              harness: "codex",
+              serverName: session.name,
+              exitCode,
+            });
+          }
+        }),
+      );
+
+    const runCodexSession = (key: string, session: ActiveSession) =>
+      runCodexAppServerLogin(session).pipe(
+        Effect.catchIf(isCodexMcpServerMissingError, () => runCodexCliLogin(session)),
         Effect.mapError((cause) =>
           isMcpOAuthRuntimeError(cause)
             ? cause

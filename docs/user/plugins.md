@@ -33,8 +33,9 @@ that plugin's enabled skills with the turn, including in an existing thread. Sta
 changing MCP servers or apps so the harness can refresh those longer-lived connections.
 
 Remote HTTP MCP servers that require OAuth have an **MCP authentication** section after
-installation. Select **Connect** to open the provider's authorization page. Codex completes the
-loopback flow in the browser. Claude Code may ask you to paste the full callback URL back into the
+installation. Select **Connect** to open the provider's authorization page. Codex usually
+completes the loopback flow in the browser; if it opens its own sign-in window instead, finish
+there and return to T3 Code. Claude Code may ask you to paste the full callback URL back into the
 plugin page when the environment is remote. Connection status and **Disconnect** use each
 harness's native credential store, so T3 Code never keeps a separate copy of the access or refresh
 token. Cursor connections continue in Cursor's own settings. Local standard-input MCP servers do

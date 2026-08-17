@@ -415,6 +415,8 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
           } else if (window.desktopBridge) {
             await openAuthorizationUrl(result.authorizationUrl);
           }
+        } else {
+          reservedWindow?.close();
         }
         toastManager.add({
           type: "success",

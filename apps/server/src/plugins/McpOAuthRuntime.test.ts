@@ -1,12 +1,41 @@
 import { assert, it } from "@effect/vitest";
 
 import {
+  codexMcpLoginArgs,
   findClaudeMcpAuthorizationUrl,
+  isCodexMcpServerMissingError,
   parseClaudeMcpStatusOutput,
   parseCodexMcpStatusOutput,
   parseCursorMcpStatusOutput,
   validateMcpOAuthCallback,
 } from "./McpOAuthRuntime.ts";
+
+it("detects Codex missing-server errors through the cause chain", () => {
+  assert.strictEqual(
+    isCodexMcpServerMissingError(new Error("No MCP server named 'figma' found.")),
+    true,
+  );
+  assert.strictEqual(
+    isCodexMcpServerMissingError(
+      new Error("Codex is unavailable for MCP start.", {
+        cause: new Error("No MCP server named 'figma' found."),
+      }),
+    ),
+    true,
+  );
+  assert.strictEqual(isCodexMcpServerMissingError(new Error("authentication failed")), false);
+});
+
+it("seeds Codex CLI login with the listed MCP URL when app-server cannot see the server", () => {
+  assert.deepStrictEqual(codexMcpLoginArgs("figma"), ["mcp", "login", "figma"]);
+  assert.deepStrictEqual(codexMcpLoginArgs("figma", "https://mcp.figma.com/mcp"), [
+    "-c",
+    'mcp_servers.figma.url="https://mcp.figma.com/mcp"',
+    "mcp",
+    "login",
+    "figma",
+  ]);
+});
 
 it("selects Claude OAuth URLs instead of unrelated output links", () => {
   const authorizationUrl =
