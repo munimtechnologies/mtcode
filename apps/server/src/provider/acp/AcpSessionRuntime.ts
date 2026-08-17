@@ -23,7 +23,6 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
   collectSessionConfigOptionValues,
-  decideToolCallUpdateEmission,
   extractModelConfigId,
   findSessionConfigOption,
   mergeToolCallState,
@@ -36,12 +35,6 @@ import {
   type AcpSessionModeState,
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
-
-interface AcpToolCallTrackedState {
-  readonly state: AcpToolCallState;
-  readonly lastEmittedDetailLength: number | undefined;
-  readonly skippedSinceEmit: number;
-}
 
 function formatConfigOptionValue(value: string | boolean): string {
   return JSON.stringify(value);
@@ -79,7 +72,6 @@ export interface AcpSessionRuntimeOptions {
     readonly version: string;
   };
   readonly authMethodId: string;
-  readonly skipAuthenticate?: boolean;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -297,7 +289,7 @@ export const make = (
     const runtimeScope = yield* Scope.Scope;
     const eventQueue = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
-    const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallTrackedState>());
+    const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantItemRuntimeId = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -563,16 +555,10 @@ export const make = (
         acp.agent.initialize(initializePayload),
       );
 
-<<<<<<< HEAD
-      if (!options.skipAuthenticate) {
-        const authenticatePayload = {
-          methodId: options.authMethodId,
-=======
       const authMethodId = resolveAcpAuthMethodId(options.authMethodId, initializeResult);
       if (authMethodId) {
         const authenticatePayload = {
           methodId: authMethodId,
->>>>>>> pr-7160
         } satisfies EffectAcpSchema.AuthenticateRequest;
 
         yield* runLoggedRequest(
@@ -901,7 +887,7 @@ const handleSessionUpdate = ({
 }: {
   readonly queue: Queue.Queue<AcpSessionRuntimeEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
-  readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallTrackedState>>;
+  readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly assistantItemRuntimeId: string;
   readonly params: EffectAcpSchema.SessionNotification;
@@ -919,31 +905,18 @@ const handleSessionUpdate = ({
           queue,
           assistantSegmentRef,
         });
-        const { merged, decision } = yield* Ref.modify(toolCallsRef, (current) => {
-          const tracked = current.get(event.toolCall.toolCallId);
-          const previous = tracked?.state;
+        const { previous, merged } = yield* Ref.modify(toolCallsRef, (current) => {
+          const previous = current.get(event.toolCall.toolCallId);
           const nextToolCall = mergeToolCallState(previous, event.toolCall);
-          const decision = decideToolCallUpdateEmission({
-            previous,
-            next: nextToolCall,
-            lastEmittedDetailLength: tracked?.lastEmittedDetailLength,
-            skippedSinceEmit: tracked?.skippedSinceEmit ?? 0,
-          });
           const next = new Map(current);
           if (nextToolCall.status === "completed" || nextToolCall.status === "failed") {
             next.delete(nextToolCall.toolCallId);
           } else {
-            next.set(nextToolCall.toolCallId, {
-              state: nextToolCall,
-              lastEmittedDetailLength: decision.emit
-                ? nextToolCall.detail?.length
-                : tracked?.lastEmittedDetailLength,
-              skippedSinceEmit: decision.skippedSinceEmit,
-            });
+            next.set(nextToolCall.toolCallId, nextToolCall);
           }
-          return [{ merged: nextToolCall, decision }, next] as const;
+          return [{ previous, merged: nextToolCall }, next] as const;
         });
-        if (!decision.emit) {
+        if (!shouldEmitToolCallUpdate(previous, merged)) {
           continue;
         }
         yield* Queue.offer(queue, {
@@ -989,8 +962,6 @@ function updateModeState(modeState: AcpSessionModeState, nextModeId: string): Ac
     : modeState;
 }
 
-<<<<<<< HEAD
-=======
 function shouldEmitToolCallUpdate(
   previous: AcpToolCallState | undefined,
   next: AcpToolCallState,
@@ -1036,7 +1007,6 @@ function discardNonJsonStdoutLines<E>(
   );
 }
 
->>>>>>> pr-7160
 const assistantItemId = (sessionId: string, runtimeId: string, segmentIndex: number) =>
   `assistant:${sessionId}:runtime:${runtimeId}:segment:${segmentIndex}`;
 
