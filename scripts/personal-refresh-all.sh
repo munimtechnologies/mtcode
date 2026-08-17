@@ -67,6 +67,9 @@ hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force || true
 INSTALLED_APP=$(find /Applications -maxdepth 1 -name 'T3 Code*.app' -print | head -1)
 echo "Mac installed: $INSTALLED_APP ($(defaults read "$INSTALLED_APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || true))"
 echo "Mac name: $(defaults read "$INSTALLED_APP/Contents/Info" CFBundleName 2>/dev/null || true)"
+# Blade and Dell are both reopened after their install; the Mac was the one machine left shut
+# down, so every refresh ended with the app the developer is actually sitting in front of gone.
+open -a "$INSTALLED_APP" && echo "Mac relaunched" || echo "Mac relaunch failed" >&2
 
 # --- Blade (build + install) ---
 echo "-- refreshing Blade --"
