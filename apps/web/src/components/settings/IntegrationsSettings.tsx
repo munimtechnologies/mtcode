@@ -49,6 +49,8 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
+import { readLocalApi } from "~/localApi";
+
 import { toastManager } from "../ui/toast";
 import {
   AlertDialog,
@@ -114,7 +116,7 @@ const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
  * it. Anything unrecognised reads as a plain read failure rather than leaking
  * the raw message into a toast.
  */
-const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
+export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
   const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
   return (
     BrowserImportFailureReason.literals.find((reason) => message.includes(`failed: ${reason}.`)) ??
@@ -517,6 +519,14 @@ function DesktopOnlyBrowserDefaults({ children }: { readonly children: ReactNode
  * files, and the answer changes while the app is running (quitting the browser
  * clears `browserRunning`), so a value cached at mount would go stale.
  */
+/**
+ * Opens System Settings → Privacy & Security → Full Disk Access. The scheme is
+ * unchanged from the old System Preferences and still resolves on Ventura and
+ * later.
+ */
+const FULL_DISK_ACCESS_SETTINGS_URL =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFilesAccess";
+
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
@@ -842,6 +852,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           canCreateProfile={!atProfileLimit}
           onImport={(input) => runWizardImport(importSource, input)}
           onRefreshSource={() => refreshImportSource(importSource.id)}
+          onOpenFullDiskAccessSettings={() =>
+            void readLocalApi()
+              ?.shell.openExternal(FULL_DISK_ACCESS_SETTINGS_URL)
+              .catch(() => undefined)
+          }
           onClose={() => setImportSource(null)}
         />
       ) : null}
