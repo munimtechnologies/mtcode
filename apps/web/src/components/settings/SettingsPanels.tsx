@@ -9,6 +9,7 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
+  type VoiceTranscriptionProvider,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -80,6 +81,10 @@ import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../.
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import {
+  listVoiceTranscriptionModels,
+  readVoiceTranscriptionEnvironmentStatus,
+} from "../../lib/voiceTranscription";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -1618,6 +1623,240 @@ function FontFamilySettingsRow({
 
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
+const TRANSCRIPTION_API_KEY_ENV = {
+  openai: "OPENAI_API_KEY",
+  groq: "GROQ_API_KEY",
+} as const;
+
+function VoiceDictationSettingsRows({
+  settings,
+  updateSettings,
+}: {
+  settings: ReturnType<typeof usePrimarySettings>;
+  updateSettings: ReturnType<typeof useUpdatePrimarySettings>;
+}) {
+  const [environmentApiKeys, setEnvironmentApiKeys] = useState<
+    Partial<Record<VoiceTranscriptionProvider, boolean>>
+  >({});
+  const [transcriptionModels, setTranscriptionModels] = useState<string[]>([]);
+  const [transcriptionModelsLoading, setTranscriptionModelsLoading] = useState(false);
+  const [transcriptionModelsError, setTranscriptionModelsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!settings.voiceTranscriptionEnabled) return;
+    let cancelled = false;
+    void readVoiceTranscriptionEnvironmentStatus()
+      .then((status) => {
+        if (!cancelled) setEnvironmentApiKeys(status);
+      })
+      .catch(() => {
+        if (!cancelled) setEnvironmentApiKeys({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.voiceTranscriptionEnabled]);
+
+  const transcriptionProviderLabel =
+    settings.voiceTranscriptionProvider === "openai" ? "OpenAI" : "Groq";
+  const transcriptionApiKeyEnvironmentVariable =
+    TRANSCRIPTION_API_KEY_ENV[settings.voiceTranscriptionProvider];
+  const hasEnvironmentApiKey = environmentApiKeys[settings.voiceTranscriptionProvider];
+  const hasTranscriptionApiKey =
+    settings.voiceTranscriptionApiKey.trim().length > 0 || hasEnvironmentApiKey;
+
+  useEffect(() => {
+    if (!settings.voiceTranscriptionEnabled || !hasTranscriptionApiKey) {
+      setTranscriptionModels([]);
+      setTranscriptionModelsLoading(false);
+      setTranscriptionModelsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setTranscriptionModelsLoading(true);
+    setTranscriptionModelsError(null);
+    const timeout = window.setTimeout(
+      () => {
+        void listVoiceTranscriptionModels({
+          provider: settings.voiceTranscriptionProvider,
+          apiKey: settings.voiceTranscriptionApiKey,
+        })
+          .then((models) => {
+            if (cancelled) return;
+            setTranscriptionModels(models);
+            setTranscriptionModelsLoading(false);
+          })
+          .catch((error: unknown) => {
+            if (cancelled) return;
+            setTranscriptionModels([]);
+            setTranscriptionModelsLoading(false);
+            setTranscriptionModelsError(
+              error instanceof Error ? error.message : "Failed to load transcription models.",
+            );
+          });
+      },
+      settings.voiceTranscriptionApiKey.trim() ? 400 : 0,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [
+    hasTranscriptionApiKey,
+    settings.voiceTranscriptionApiKey,
+    settings.voiceTranscriptionEnabled,
+    settings.voiceTranscriptionProvider,
+  ]);
+
+  useEffect(() => {
+    if (
+      transcriptionModels.length > 0 &&
+      settings.voiceTranscriptionModel &&
+      !transcriptionModels.includes(settings.voiceTranscriptionModel)
+    ) {
+      updateSettings({ voiceTranscriptionModel: "" });
+    }
+  }, [settings.voiceTranscriptionModel, transcriptionModels, updateSettings]);
+
+  const transcriptionModelDescription = !hasTranscriptionApiKey
+    ? `Add an API key to load models available from ${transcriptionProviderLabel}.`
+    : transcriptionModelsLoading
+      ? `Loading models available from ${transcriptionProviderLabel}…`
+      : transcriptionModelsError
+        ? transcriptionModelsError
+        : transcriptionModels.length === 0
+          ? `${transcriptionProviderLabel} did not return any models.`
+          : `Loaded from ${transcriptionProviderLabel} using the configured API key.`;
+
+  const canResetVoiceDictation =
+    settings.voiceTranscriptionEnabled !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled ||
+    settings.voiceTranscriptionProvider !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider ||
+    settings.voiceTranscriptionApiKey !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey ||
+    settings.voiceTranscriptionModel !== DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel;
+
+  return (
+    <>
+      <SettingsRow
+        {...searchableSetting("voice-dictation")}
+        description="Record from the composer and turn speech into text. Uses portable browser media APIs on Linux, macOS, and Windows."
+        resetAction={
+          canResetVoiceDictation ? (
+            <SettingResetButton
+              label="voice dictation"
+              onClick={() =>
+                updateSettings({
+                  voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
+                  voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
+                  voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
+                  voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={settings.voiceTranscriptionEnabled}
+            onCheckedChange={(checked) =>
+              updateSettings({ voiceTranscriptionEnabled: Boolean(checked) })
+            }
+            aria-label="Enable voice dictation beta"
+          />
+        }
+      />
+      {settings.voiceTranscriptionEnabled ? (
+        <>
+          <SettingsRow
+            title="Transcription provider"
+            description="Use OpenAI or Groq. T3 loads the models available to the configured API key."
+            control={
+              <Select
+                value={settings.voiceTranscriptionProvider}
+                onValueChange={(value) =>
+                  updateSettings({
+                    voiceTranscriptionProvider: value as VoiceTranscriptionProvider,
+                    voiceTranscriptionApiKey: "",
+                    voiceTranscriptionModel: "",
+                  })
+                }
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Transcription provider">
+                  <SelectValue>{transcriptionProviderLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="openai">
+                    OpenAI
+                  </SelectItem>
+                  <SelectItem hideIndicator value="groq">
+                    Groq
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            title={`${transcriptionProviderLabel} API key`}
+            description={
+              hasEnvironmentApiKey
+                ? `${transcriptionApiKeyEnvironmentVariable} is configured on the connected T3 server. Enter a key here to override it for this client.`
+                : `Stored only in this client's local settings. You can also set ${transcriptionApiKeyEnvironmentVariable} on the connected T3 server.`
+            }
+            control={
+              <Input
+                type="password"
+                autoComplete="off"
+                className="w-full sm:w-64"
+                value={settings.voiceTranscriptionApiKey}
+                onChange={(event) =>
+                  updateSettings({
+                    voiceTranscriptionApiKey: event.target.value,
+                    voiceTranscriptionModel: "",
+                  })
+                }
+                placeholder={
+                  hasEnvironmentApiKey
+                    ? `Using ${transcriptionApiKeyEnvironmentVariable}`
+                    : "Required"
+                }
+                aria-label={`${transcriptionProviderLabel} transcription API key`}
+              />
+            }
+          />
+          <SettingsRow
+            title="Transcription model"
+            description={transcriptionModelDescription}
+            control={
+              <Select
+                value={settings.voiceTranscriptionModel}
+                disabled={transcriptionModelsLoading || transcriptionModels.length === 0}
+                onValueChange={(value) => {
+                  if (value !== null) updateSettings({ voiceTranscriptionModel: value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-64" aria-label="Transcription model">
+                  <SelectValue>
+                    {settings.voiceTranscriptionModel ||
+                      (transcriptionModelsLoading ? "Loading models…" : "Select model")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {transcriptionModels.map((model) => (
+                    <SelectItem hideIndicator key={model} value={model}>
+                      {model}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function AutoSettleDaysInput({
   value,
   onCommit,
@@ -1922,6 +2161,8 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+
+        <VoiceDictationSettingsRows settings={settings} updateSettings={updateSettings} />
 
         <SettingsRow
           {...searchableSetting("time-format")}

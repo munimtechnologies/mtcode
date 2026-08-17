@@ -49,6 +49,10 @@ const clientSettings: ClientSettings = {
   sidebarThreadPreviewCount: 6,
   legacySidebarEnabled: false,
   timestampFormat: "24-hour",
+  voiceTranscriptionEnabled: true,
+  voiceTranscriptionProvider: "openai",
+  voiceTranscriptionApiKey: "",
+  voiceTranscriptionModel: "",
   wordWrap: true,
 };
 

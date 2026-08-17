@@ -298,6 +298,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "computer-history-timeline",
   },
   {
+    id: "voice-dictation",
+    title: "Voice dictation",
+    to: "/settings/general",
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
