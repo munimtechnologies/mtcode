@@ -10,16 +10,14 @@ import {
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
 import { goalBlockCommandId, goalContinuationCommandId } from "@t3tools/shared/goalContinuation";
-import * as Clock from "effect/Clock";
+import { expect, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, vi } from "vite-plus/test";
 
 import { GoalReactorLive } from "./GoalReactor.ts";
 import {
@@ -36,22 +34,14 @@ const NOW = "2026-01-01T00:00:00.000Z";
 const THREAD_ID = ThreadId.make("thread-1");
 const TURN_ID = TurnId.make("turn-1");
 
-async function waitFor(
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 10_000,
-): Promise<void> {
-  const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
-  const poll = async (): Promise<void> => {
-    if (await predicate()) {
-      return;
-    }
-    if ((await Effect.runPromise(Clock.currentTimeMillis)) >= deadline) {
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
       throw new Error("Timed out waiting for expectation.");
     }
-    await Effect.runPromise(Effect.yieldNow);
-    return poll();
-  };
-  return poll();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function makeThread(input: {
@@ -180,25 +170,23 @@ function toShell(
   };
 }
 
-describe("GoalReactor", () => {
-  let runtime: ManagedRuntime.ManagedRuntime<GoalReactor, unknown> | null = null;
-  let scope: Scope.Closeable | null = null;
+function runningSession(threadId: ThreadId): NonNullable<OrchestrationThread["session"]> {
+  return {
+    threadId,
+    status: "running",
+    providerName: "codex",
+    runtimeMode: "full-access",
+    activeTurnId: TURN_ID,
+    lastError: null,
+    updatedAt: NOW,
+  };
+}
 
-  afterEach(async () => {
-    if (scope) {
-      await Effect.runPromise(Scope.close(scope, Exit.void));
-    }
-    scope = null;
-    if (runtime) {
-      await runtime.dispose();
-    }
-    runtime = null;
-  });
-
-  async function createHarness(threads: ReadonlyArray<OrchestrationThread>) {
+const createHarness = (threads: ReadonlyArray<OrchestrationThread>) =>
+  Effect.gen(function* () {
     const threadsById = new Map(threads.map((thread) => [thread.id, thread]));
     const dispatch = vi.fn(() => Effect.succeed({ sequence: 1 }));
-    const events = Effect.runSync(Queue.unbounded<OrchestrationEvent>());
+    const events = yield* Queue.unbounded<OrchestrationEvent>();
     const getThreadDetailById = vi.fn((threadId: ThreadId) =>
       Effect.succeed(Option.fromNullishOr(threadsById.get(threadId))),
     );
@@ -221,148 +209,190 @@ describe("GoalReactor", () => {
         }),
     } as unknown as ProjectionSnapshotQueryShape;
 
-    runtime = ManagedRuntime.make(
+    const context = yield* Layer.build(
       GoalReactorLive.pipe(
         Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
         Layer.provide(Layer.succeed(ProjectionSnapshotQuery, snapshotQuery)),
       ),
     );
-
-    const reactor = await runtime.runPromise(Effect.service(GoalReactor));
-    scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    const reactor = Context.get(context, GoalReactor);
+    yield* reactor.start();
 
     return {
       dispatch,
       getThreadDetailById,
-      offer: (event: OrchestrationEvent) => Effect.runPromise(Queue.offer(events, event)),
-      drain: () => runtime!.runPromise(reactor.drain),
+      // Mirrors the projection applying an event before the reactor sees it:
+      // update the detail read first, then offer the event.
+      setThread: (thread: OrchestrationThread) => {
+        threadsById.set(thread.id, thread);
+      },
+      offer: (event: OrchestrationEvent) => Queue.offer(events, event),
+      drain: reactor.drain,
     };
-  }
+  });
 
-  it("requests a Continuation when an Active Goal's Session becomes ready", async () => {
-    const harness = await createHarness([makeThread({ goal: activeGoal() })]);
-    await harness.offer(sessionSetEvent({ status: "ready" }));
-    await waitFor(() => harness.dispatch.mock.calls.length === 1);
-    await harness.drain();
+describe("GoalReactor", () => {
+  it.live("requests a Continuation when an Active Goal's Session becomes ready", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Session running at boot so the startup sweep skips the thread; the
+        // ready event below is what must trigger the Continuation.
+        const harness = yield* createHarness([
+          makeThread({ goal: activeGoal(), session: runningSession(THREAD_ID) }),
+        ]);
+        harness.setThread(makeThread({ goal: activeGoal() }));
+        yield* harness.offer(sessionSetEvent({ status: "ready" }));
+        yield* Effect.promise(() => waitFor(() => harness.dispatch.mock.calls.length === 1));
+        yield* harness.drain;
 
-    expect(harness.dispatch).toHaveBeenCalledWith({
-      type: "thread.goal.continue",
-      commandId: CommandId.make(
-        goalContinuationCommandId({
+        expect(harness.dispatch).toHaveBeenCalledWith({
+          type: "thread.goal.continue",
+          commandId: CommandId.make(
+            goalContinuationCommandId({
+              threadId: THREAD_ID,
+              goalUpdatedAt: NOW,
+              completedTurnId: TURN_ID,
+            }),
+          ),
           threadId: THREAD_ID,
-          goalUpdatedAt: NOW,
           completedTurnId: TURN_ID,
-        }),
-      ),
-      threadId: THREAD_ID,
-      completedTurnId: TURN_ID,
-    });
-  });
-
-  it("does not request a Continuation when the Goal is paused", async () => {
-    const harness = await createHarness([makeThread({ goal: activeGoal("paused") })]);
-    await harness.offer(sessionSetEvent({ status: "ready" }));
-    await waitFor(() => harness.getThreadDetailById.mock.calls.length === 1);
-    await harness.drain();
-    expect(harness.dispatch).not.toHaveBeenCalled();
-  });
-
-  it("does not request a Continuation when the Goal is Usage-limited", async () => {
-    const harness = await createHarness([makeThread({ goal: activeGoal("usageLimited") })]);
-    await harness.offer(sessionSetEvent({ status: "ready" }));
-    await waitFor(() => harness.getThreadDetailById.mock.calls.length === 1);
-    await harness.drain();
-    expect(harness.dispatch).not.toHaveBeenCalled();
-  });
-
-  it("does not request a Continuation in plan mode", async () => {
-    const harness = await createHarness([
-      makeThread({ goal: activeGoal(), interactionMode: "plan" }),
-    ]);
-    await harness.offer(sessionSetEvent({ status: "ready" }));
-    await waitFor(() => harness.getThreadDetailById.mock.calls.length === 1);
-    await harness.drain();
-    expect(harness.dispatch).not.toHaveBeenCalled();
-  });
-
-  it("does not request a Continuation while a pending approval is open", async () => {
-    const harness = await createHarness([
-      makeThread({
-        goal: activeGoal(),
-        activities: [
-          {
-            id: EventId.make("activity-approval"),
-            tone: "approval",
-            kind: "approval.requested",
-            summary: "approval.requested",
-            payload: { requestId: "req-1" },
-            turnId: null,
-            createdAt: NOW,
-          },
-        ],
+        });
       }),
-    ]);
-    await harness.offer(sessionSetEvent({ status: "ready" }));
-    await waitFor(() => harness.getThreadDetailById.mock.calls.length === 1);
-    await harness.drain();
-    expect(harness.dispatch).not.toHaveBeenCalled();
-  });
+    ),
+  );
 
-  it("does not request a Continuation for a non-ready Session", async () => {
-    const readyThreadId = ThreadId.make("thread-ready");
-    const harness = await createHarness([
-      makeThread({ goal: activeGoal() }),
-      makeThread({
-        id: readyThreadId,
-        goal: activeGoal(),
-        session: {
-          threadId: readyThreadId,
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "full-access",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: NOW,
-        },
+  it.live("does not request a Continuation when the Goal is paused", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([makeThread({ goal: activeGoal("paused") })]);
+        yield* harness.offer(sessionSetEvent({ status: "ready" }));
+        yield* Effect.promise(() =>
+          waitFor(() => harness.getThreadDetailById.mock.calls.length === 1),
+        );
+        yield* harness.drain;
+        expect(harness.dispatch).not.toHaveBeenCalled();
       }),
-    ]);
-    await harness.offer(sessionSetEvent({ status: "running", sequence: 1 }));
-    await harness.offer(sessionSetEvent({ threadId: readyThreadId, status: "ready", sequence: 2 }));
-    await waitFor(() => harness.dispatch.mock.calls.length === 1);
-    await harness.drain();
-    expect(harness.dispatch).toHaveBeenCalledTimes(1);
-    expect(harness.dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "thread.goal.continue",
-        threadId: readyThreadId,
+    ),
+  );
+
+  it.live("does not request a Continuation when the Goal is Usage-limited", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([makeThread({ goal: activeGoal("usageLimited") })]);
+        yield* harness.offer(sessionSetEvent({ status: "ready" }));
+        yield* Effect.promise(() =>
+          waitFor(() => harness.getThreadDetailById.mock.calls.length === 1),
+        );
+        yield* harness.drain;
+        expect(harness.dispatch).not.toHaveBeenCalled();
       }),
-    );
-  });
+    ),
+  );
 
-  it("uses a stable command id for duplicate Session-ready events", async () => {
-    const harness = await createHarness([makeThread({ goal: activeGoal() })]);
-    await harness.offer(sessionSetEvent({ status: "ready", sequence: 1 }));
-    await harness.offer(sessionSetEvent({ status: "ready", sequence: 2 }));
-    await waitFor(() => harness.dispatch.mock.calls.length === 2);
-    await harness.drain();
-
-    const commandId = CommandId.make(
-      goalContinuationCommandId({
-        threadId: THREAD_ID,
-        goalUpdatedAt: NOW,
-        completedTurnId: TURN_ID,
+  it.live("does not request a Continuation in plan mode", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([
+          makeThread({ goal: activeGoal(), interactionMode: "plan" }),
+        ]);
+        yield* harness.offer(sessionSetEvent({ status: "ready" }));
+        yield* Effect.promise(() =>
+          waitFor(() => harness.getThreadDetailById.mock.calls.length === 1),
+        );
+        yield* harness.drain;
+        expect(harness.dispatch).not.toHaveBeenCalled();
       }),
-    );
-    expect(harness.dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId }));
-    expect(harness.dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId }));
-  });
+    ),
+  );
 
-  it("Blocks after three empty Continuations instead of starting another", async () => {
-    const harness = await createHarness([
-      makeThread({
-        goal: activeGoal(),
-        activities: [
+  it.live("does not request a Continuation while a pending approval is open", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([
+          makeThread({
+            goal: activeGoal(),
+            activities: [
+              {
+                id: EventId.make("activity-approval"),
+                tone: "approval",
+                kind: "approval.requested",
+                summary: "approval.requested",
+                payload: { requestId: "req-1" },
+                turnId: null,
+                createdAt: NOW,
+              },
+            ],
+          }),
+        ]);
+        yield* harness.offer(sessionSetEvent({ status: "ready" }));
+        yield* Effect.promise(() =>
+          waitFor(() => harness.getThreadDetailById.mock.calls.length === 1),
+        );
+        yield* harness.drain;
+        expect(harness.dispatch).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  it.live("does not request a Continuation for a non-ready Session", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const readyThreadId = ThreadId.make("thread-ready");
+        const harness = yield* createHarness([
+          makeThread({ goal: activeGoal(), session: runningSession(THREAD_ID) }),
+          makeThread({
+            id: readyThreadId,
+            goal: activeGoal(),
+            session: runningSession(readyThreadId),
+          }),
+        ]);
+        harness.setThread(makeThread({ id: readyThreadId, goal: activeGoal() }));
+        yield* harness.offer(sessionSetEvent({ status: "running", sequence: 1 }));
+        yield* harness.offer(
+          sessionSetEvent({ threadId: readyThreadId, status: "ready", sequence: 2 }),
+        );
+        yield* Effect.promise(() => waitFor(() => harness.dispatch.mock.calls.length === 1));
+        yield* harness.drain;
+        expect(harness.dispatch).toHaveBeenCalledTimes(1);
+        expect(harness.dispatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "thread.goal.continue",
+            threadId: readyThreadId,
+          }),
+        );
+      }),
+    ),
+  );
+
+  it.live("uses a stable command id for duplicate Session-ready events", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([
+          makeThread({ goal: activeGoal(), session: runningSession(THREAD_ID) }),
+        ]);
+        harness.setThread(makeThread({ goal: activeGoal() }));
+        yield* harness.offer(sessionSetEvent({ status: "ready", sequence: 1 }));
+        yield* harness.offer(sessionSetEvent({ status: "ready", sequence: 2 }));
+        yield* Effect.promise(() => waitFor(() => harness.dispatch.mock.calls.length === 2));
+        yield* harness.drain;
+
+        const commandId = CommandId.make(
+          goalContinuationCommandId({
+            threadId: THREAD_ID,
+            goalUpdatedAt: NOW,
+            completedTurnId: TURN_ID,
+          }),
+        );
+        expect(harness.dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({ commandId }));
+        expect(harness.dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({ commandId }));
+      }),
+    ),
+  );
+
+  it.live("Blocks after three empty Continuations instead of starting another", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const emptyContinuationActivities = [
           {
             id: EventId.make("activity-set"),
             tone: "info",
@@ -399,130 +429,174 @@ describe("GoalReactor", () => {
             turnId: null,
             createdAt: "2026-01-01T00:03:00.000Z",
           },
-        ],
-      }),
-    ]);
-    await harness.offer(
-      sessionSetEvent({ status: "ready", occurredAt: "2026-01-01T00:04:00.000Z" }),
-    );
-    await waitFor(() => harness.dispatch.mock.calls.length === 1);
-    await harness.drain();
-    expect(harness.dispatch).toHaveBeenCalledWith({
-      type: "thread.goal.block",
-      commandId: CommandId.make(
-        goalBlockCommandId({
+        ];
+        const harness = yield* createHarness([
+          makeThread({
+            goal: activeGoal(),
+            session: runningSession(THREAD_ID),
+            activities: emptyContinuationActivities,
+          }),
+        ]);
+        harness.setThread(
+          makeThread({ goal: activeGoal(), activities: emptyContinuationActivities }),
+        );
+        yield* harness.offer(
+          sessionSetEvent({ status: "ready", occurredAt: "2026-01-01T00:04:00.000Z" }),
+        );
+        yield* Effect.promise(() => waitFor(() => harness.dispatch.mock.calls.length === 1));
+        yield* harness.drain;
+        expect(harness.dispatch).toHaveBeenCalledWith({
+          type: "thread.goal.block",
+          commandId: CommandId.make(
+            goalBlockCommandId({
+              threadId: THREAD_ID,
+              goalUpdatedAt: NOW,
+              completedTurnId: TURN_ID,
+            }),
+          ),
           threadId: THREAD_ID,
-          goalUpdatedAt: NOW,
+        });
+      }),
+    ),
+  );
+
+  it.live("settles a Turn orphaned by restart and resumes the active Goal", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([
+          makeThread({
+            goal: activeGoal(),
+            latestTurn: {
+              turnId: TURN_ID,
+              state: "running",
+              requestedAt: NOW,
+              startedAt: NOW,
+              completedAt: null,
+              assistantMessageId: null,
+            },
+            session: {
+              threadId: THREAD_ID,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: TURN_ID,
+              lastError: null,
+              updatedAt: NOW,
+            },
+          }),
+        ]);
+        yield* Effect.promise(() => waitFor(() => harness.dispatch.mock.calls.length === 2));
+
+        expect(harness.dispatch).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({
+            type: "thread.session.set",
+            commandId: CommandId.make(`goal-restart-settle:${THREAD_ID}:${TURN_ID}`),
+            threadId: THREAD_ID,
+            session: expect.objectContaining({
+              status: "interrupted",
+              activeTurnId: null,
+            }),
+          }),
+        );
+        expect(harness.dispatch).toHaveBeenNthCalledWith(2, {
+          type: "thread.goal.continue",
+          commandId: CommandId.make(
+            goalContinuationCommandId({
+              threadId: THREAD_ID,
+              goalUpdatedAt: NOW,
+              completedTurnId: TURN_ID,
+            }),
+          ),
+          threadId: THREAD_ID,
           completedTurnId: TURN_ID,
-        }),
-      ),
-      threadId: THREAD_ID,
-    });
-  });
-
-  it("settles a Turn orphaned by restart and resumes the active Goal", async () => {
-    const harness = await createHarness([
-      makeThread({
-        goal: activeGoal(),
-        latestTurn: {
-          turnId: TURN_ID,
-          state: "running",
-          requestedAt: NOW,
-          startedAt: NOW,
-          completedAt: null,
-          assistantMessageId: null,
-        },
-        session: {
-          threadId: THREAD_ID,
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "full-access",
-          activeTurnId: TURN_ID,
-          lastError: null,
-          updatedAt: NOW,
-        },
+        });
       }),
-    ]);
-    await waitFor(() => harness.dispatch.mock.calls.length === 2);
+    ),
+  );
 
-    expect(harness.dispatch).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        type: "thread.session.set",
-        commandId: CommandId.make(`goal-restart-settle:${THREAD_ID}:${TURN_ID}`),
-        threadId: THREAD_ID,
-        session: expect.objectContaining({
-          status: "interrupted",
-          activeTurnId: null,
-        }),
-      }),
-    );
-    expect(harness.dispatch).toHaveBeenNthCalledWith(2, {
-      type: "thread.goal.continue",
-      commandId: CommandId.make(
-        goalContinuationCommandId({
+  it.live("resumes an idle Active Goal at startup when its Continuation trigger was missed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([makeThread({ goal: activeGoal() })]);
+        yield* Effect.promise(() => waitFor(() => harness.dispatch.mock.calls.length === 1));
+
+        expect(harness.dispatch).toHaveBeenCalledWith({
+          type: "thread.goal.continue",
+          commandId: CommandId.make(
+            goalContinuationCommandId({
+              threadId: THREAD_ID,
+              goalUpdatedAt: NOW,
+              completedTurnId: TURN_ID,
+            }),
+          ),
           threadId: THREAD_ID,
-          goalUpdatedAt: NOW,
           completedTurnId: TURN_ID,
-        }),
-      ),
-      threadId: THREAD_ID,
-      completedTurnId: TURN_ID,
-    });
-  });
-
-  it("leaves a running Turn alone when its Session is fresh from this process", async () => {
-    const freshSessionUpdatedAt = new Date(Date.now() + 60_000).toISOString();
-    const harness = await createHarness([
-      makeThread({
-        goal: activeGoal(),
-        latestTurn: {
-          turnId: TURN_ID,
-          state: "running",
-          requestedAt: NOW,
-          startedAt: NOW,
-          completedAt: null,
-          assistantMessageId: null,
-        },
-        session: {
-          threadId: THREAD_ID,
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "full-access",
-          activeTurnId: TURN_ID,
-          lastError: null,
-          updatedAt: freshSessionUpdatedAt,
-        },
+        });
       }),
-    ]);
-    await harness.drain();
-    expect(harness.dispatch).not.toHaveBeenCalled();
-  });
+    ),
+  );
 
-  it("does not settle an orphaned Turn when the Goal is paused", async () => {
-    const harness = await createHarness([
-      makeThread({
-        goal: activeGoal("paused"),
-        latestTurn: {
-          turnId: TURN_ID,
-          state: "running",
-          requestedAt: NOW,
-          startedAt: NOW,
-          completedAt: null,
-          assistantMessageId: null,
-        },
-        session: {
-          threadId: THREAD_ID,
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "full-access",
-          activeTurnId: TURN_ID,
-          lastError: null,
-          updatedAt: NOW,
-        },
+  it.live("leaves a running Turn alone when its Session is fresh from this process", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const freshSessionUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+        const harness = yield* createHarness([
+          makeThread({
+            goal: activeGoal(),
+            latestTurn: {
+              turnId: TURN_ID,
+              state: "running",
+              requestedAt: freshSessionUpdatedAt,
+              startedAt: freshSessionUpdatedAt,
+              completedAt: null,
+              assistantMessageId: null,
+            },
+            session: {
+              threadId: THREAD_ID,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: TURN_ID,
+              lastError: null,
+              updatedAt: freshSessionUpdatedAt,
+            },
+          }),
+        ]);
+        yield* harness.drain;
+        expect(harness.dispatch).not.toHaveBeenCalled();
       }),
-    ]);
-    await harness.drain();
-    expect(harness.dispatch).not.toHaveBeenCalled();
-  });
+    ),
+  );
+
+  it.live("does not settle an orphaned Turn when the Goal is paused", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* createHarness([
+          makeThread({
+            goal: activeGoal("paused"),
+            latestTurn: {
+              turnId: TURN_ID,
+              state: "running",
+              requestedAt: NOW,
+              startedAt: NOW,
+              completedAt: null,
+              assistantMessageId: null,
+            },
+            session: {
+              threadId: THREAD_ID,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: TURN_ID,
+              lastError: null,
+              updatedAt: NOW,
+            },
+          }),
+        ]);
+        yield* harness.drain;
+        expect(harness.dispatch).not.toHaveBeenCalled();
+      }),
+    ),
+  );
 });

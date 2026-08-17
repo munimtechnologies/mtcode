@@ -15,26 +15,18 @@ import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { hasOpenBlockingRequest, isThreadIdleForGoal } from "../decider.ts";
-import {
-  OrchestrationCommandInvariantError,
-  OrchestrationCommandPreviouslyRejectedError,
-} from "../Errors.ts";
 import { forkParked, ServerActivation } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { GoalReactor, type GoalReactorShape } from "../Services/GoalReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 
 type SessionSetEvent = Extract<OrchestrationEvent, { type: "thread.session-set" }>;
-
-const isIgnorableContinueDispatchError = (error: unknown): boolean =>
-  Schema.is(OrchestrationCommandInvariantError)(error) ||
-  Schema.is(OrchestrationCommandPreviouslyRejectedError)(error);
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -51,7 +43,12 @@ const make = Effect.gen(function* () {
     threadId: string,
   ) {
     yield* orchestrationEngine.dispatch(command).pipe(
-      Effect.catchIf(isIgnorableContinueDispatchError, () => Effect.void),
+      // Stale/duplicate evaluations are part of the design (stable command
+      // ids); only unexpected failures are worth a warning.
+      Effect.catchTags({
+        OrchestrationCommandInvariantError: () => Effect.void,
+        OrchestrationCommandPreviouslyRejectedError: () => Effect.void,
+      }),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.interrupt;
@@ -164,12 +161,18 @@ const make = Effect.gen(function* () {
     if (shell.goal?.status !== "active" || latestTurn?.state !== "running") {
       return;
     }
+    // Both the Session touch and the Turn request must predate this process;
+    // otherwise the running Turn belongs to a live Session started after boot
+    // and settling it would corrupt real work.
+    if (Date.parse(latestTurn.requestedAt) >= processStartedAtMs) {
+      return;
+    }
     if (shell.session !== null && Date.parse(shell.session.updatedAt) >= processStartedAtMs) {
       return;
     }
     const occurredAt = yield* nowIso;
-    yield* dispatchGoalCommand(
-      {
+    const settleResult = yield* Effect.exit(
+      orchestrationEngine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make(`goal-restart-settle:${shell.id}:${latestTurn.turnId}`),
         threadId: shell.id,
@@ -186,10 +189,21 @@ const make = Effect.gen(function* () {
           updatedAt: occurredAt,
         },
         createdAt: occurredAt,
-      },
-      "goal reactor failed to settle a Turn orphaned by restart",
-      shell.id,
+      }),
     );
+    if (Exit.isFailure(settleResult)) {
+      if (Cause.hasInterruptsOnly(settleResult.cause)) {
+        return yield* Effect.interrupt;
+      }
+      // The sweep is one-shot per boot, so a rejected settle must not fall
+      // through to the continuation: the real Turn is still running and the
+      // continuation would be rejected against it anyway.
+      yield* Effect.logWarning("goal reactor failed to settle a Turn orphaned by restart", {
+        threadId: shell.id,
+        cause: Cause.pretty(settleResult.cause),
+      });
+      return;
+    }
     yield* Effect.logInfo("goal reactor settled a Turn orphaned by restart", {
       threadId: shell.id,
       turnId: latestTurn.turnId,
@@ -219,11 +233,32 @@ const make = Effect.gen(function* () {
     );
   });
 
+  // Boot-time catch-up for everything the live event path can miss: a Turn
+  // orphaned by the previous process (settled above) and an idle Active Goal
+  // whose continuation trigger raced startup (the projection is consistent
+  // here, and the decider dedupes any Continuation already requested).
   const resumeInterruptedGoals = Effect.gen(function* () {
     const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
     yield* Effect.forEach(snapshot.threads, resumeInterruptedGoalThread, {
       discard: true,
     });
+    yield* Effect.forEach(
+      snapshot.threads,
+      Effect.fn("resumeIdleGoalThread")(function* (shell: OrchestrationThreadShell) {
+        if (shell.goal?.status !== "active" || shell.latestTurn?.state === "running") {
+          return;
+        }
+        const thread = yield* projectionSnapshotQuery
+          .getThreadDetailById(shell.id)
+          .pipe(Effect.map(Option.getOrUndefined));
+        if (!thread) {
+          return;
+        }
+        const occurredAt = yield* nowIso;
+        yield* evaluateGoalContinuation(thread, occurredAt);
+      }),
+      { discard: true },
+    );
   }).pipe(
     Effect.catchCause((cause) => {
       if (Cause.hasInterruptsOnly(cause)) {

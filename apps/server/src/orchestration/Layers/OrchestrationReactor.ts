@@ -21,10 +21,13 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
+    // GoalReactor subscribes to the domain-event stream before the provider
+    // reactors unpark at activation, so their startup burst of session-set
+    // events cannot slip past its subscription.
+    yield* goalReactor.start();
     yield* providerRuntimeIngestion.start();
     yield* providerCommandReactor.start();
     yield* checkpointReactor.start();
-    yield* goalReactor.start();
     yield* threadDeletionReactor.start();
     yield* agentAwarenessRelay.start();
   });
