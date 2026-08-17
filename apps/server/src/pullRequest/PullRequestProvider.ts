@@ -283,6 +283,15 @@ export interface PullRequestProviderApi {
   }) => Effect.Effect<ProviderBatchedChangeRequestPage, PullRequestProviderError>;
 
   /**
+   * The repository this one was forked from, as `owner/name`, or null where it is not a fork.
+   * Optional: a host with no fork relationship to report simply leaves it out, and the caller
+   * reads no upstream for it rather than failing the listing.
+   */
+  readonly getUpstreamRepository?: (
+    input: ProviderRepositoryRef,
+  ) => Effect.Effect<string | null, PullRequestProviderError>;
+
+  /**
    * The line counts for rows a listing has already handed over. Only implemented by a provider
    * whose listing leaves them out — for everyone else the numbers arrived with the row, and the
    * caller has nothing to ask for.

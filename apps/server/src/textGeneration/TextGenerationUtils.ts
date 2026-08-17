@@ -110,3 +110,38 @@ export function normalizeCliError(
     cause: error,
   });
 }
+
+/**
+ * The model's scores, made safe to sort by. A score outside 0-100 is clamped rather than
+ * dropped — the ordering is what matters, and a model that answers 150 still meant "high" —
+ * while a row with no usable number at all is dropped, because inventing one would rank it.
+ */
+export function clampPullRequestRankings(
+  rankings: ReadonlyArray<{
+    readonly number: number;
+    readonly score: number;
+    readonly reason?: string | undefined;
+  }>,
+): ReadonlyArray<{
+  readonly number: number;
+  readonly score: number;
+  readonly reason?: string | undefined;
+}> {
+  const seen = new Set<number>();
+  const kept: Array<{ number: number; score: number; reason?: string | undefined }> = [];
+  for (const ranking of rankings) {
+    if (!Number.isInteger(ranking.number) || ranking.number <= 0) continue;
+    if (!Number.isFinite(ranking.score)) continue;
+    // A model that answers twice for one pull request is taken at its first word rather than
+    // its last: a later duplicate is a repetition, not a correction.
+    if (seen.has(ranking.number)) continue;
+    seen.add(ranking.number);
+    const reason = ranking.reason?.trim();
+    kept.push({
+      number: ranking.number,
+      score: Math.min(100, Math.max(0, Math.round(ranking.score))),
+      ...(reason ? { reason } : {}),
+    });
+  }
+  return kept;
+}

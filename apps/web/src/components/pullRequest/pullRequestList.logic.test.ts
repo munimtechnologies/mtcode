@@ -8,6 +8,7 @@ import {
   pullRequestEntryKey,
   pullRequestEnvironmentSetKey,
   groupPullRequestsByInvolvement,
+  sortPullRequestEntries,
   matchesPullRequestFilters,
   matchesPullRequestQuery,
   parsePullRequestQuery,
@@ -1013,5 +1014,94 @@ describe("the priority groups against a paginated feed", () => {
     expect(
       groups.find((group) => group.key === "others")?.entries.map((row) => row.number),
     ).toEqual([6123]);
+  });
+});
+
+describe("upstream rows", () => {
+  const viewers = { "env-1 github.com": "octocat" };
+
+  it("files a row from the upstream under its own section", () => {
+    const groups = groupPullRequestsByInvolvement(
+      [
+        entry({ number: 1, author: { login: "someone", name: null, avatarUrl: null } }),
+        entry({
+          number: 2,
+          isUpstream: true,
+          author: { login: "someone", name: null, avatarUrl: null },
+        }),
+      ],
+      viewers,
+    );
+
+    expect(groups.map((group) => group.key)).toEqual(["upstream", "others"]);
+    expect(groups.find((group) => group.key === "upstream")?.entries[0]?.number).toBe(2);
+  });
+
+  it("keeps the reader's own upstream work under Authored", () => {
+    const groups = groupPullRequestsByInvolvement(
+      [entry({ number: 1, isUpstream: true })],
+      viewers,
+    );
+
+    // Written by the viewer, so it is theirs to track rather than something to pick up.
+    expect(groups.map((group) => group.key)).toEqual(["authored"]);
+  });
+
+  it("keeps an upstream row awaiting the reader's review under Review requested", () => {
+    const groups = groupPullRequestsByInvolvement(
+      [
+        entry({
+          number: 1,
+          isUpstream: true,
+          viewerReviewRequested: true,
+          author: { login: "someone", name: null, avatarUrl: null },
+        }),
+      ],
+      viewers,
+    );
+
+    expect(groups.map((group) => group.key)).toEqual(["reviewRequested"]);
+  });
+});
+
+describe("sortPullRequestEntries", () => {
+  it("orders by recency by default", () => {
+    const sorted = sortPullRequestEntries(
+      [
+        entry({ number: 1, updatedAt: "2026-07-01T00:00:00Z" }),
+        entry({ number: 2, updatedAt: "2026-07-03T00:00:00Z" }),
+      ],
+      "updated",
+    );
+
+    expect(sorted.map((row) => row.number)).toEqual([2, 1]);
+  });
+
+  it("orders by score, and sinks a row nothing has scored yet", () => {
+    const rows = [
+      entry({ number: 1, updatedAt: "2026-07-03T00:00:00Z" }),
+      entry({ number: 2, updatedAt: "2026-07-01T00:00:00Z" }),
+      entry({ number: 3, updatedAt: "2026-07-02T00:00:00Z" }),
+    ];
+    const usefulness = new Map([
+      [pullRequestEntryKey(rows[1]!), 90],
+      [pullRequestEntryKey(rows[0]!), 40],
+    ]);
+
+    const sorted = sortPullRequestEntries(rows, "useful", usefulness);
+
+    // 2 scored highest, 1 next; 3 is unscored and sits below both rather than jumping the queue.
+    expect(sorted.map((row) => row.number)).toEqual([2, 1, 3]);
+  });
+
+  it("is the recency order until something has been scored", () => {
+    const rows = [
+      entry({ number: 1, updatedAt: "2026-07-01T00:00:00Z" }),
+      entry({ number: 2, updatedAt: "2026-07-03T00:00:00Z" }),
+    ];
+
+    expect(sortPullRequestEntries(rows, "useful", new Map()).map((row) => row.number)).toEqual([
+      2, 1,
+    ]);
   });
 });

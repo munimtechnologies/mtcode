@@ -40,6 +40,7 @@ import {
   decodePullRequestStatsJson,
   decodeReactionSubjectScopeJson,
   decodeRepositoryAccessJson,
+  decodeRepositoryParentJson,
   decodeReviewerCandidatesJson,
   decodeReviewDismissalsJson,
   decodeReviewThreadCommentsJson,
@@ -58,6 +59,7 @@ import {
   REMOVE_REACTION_GRAPHQL_MUTATION,
   gitHubReactionContent,
   REPOSITORY_ACCESS_JSON_FIELDS,
+  REPOSITORY_PARENT_JSON_FIELDS,
   RESOLVE_REVIEW_THREAD_GRAPHQL_MUTATION,
   REVIEWER_CANDIDATES_GRAPHQL_QUERY,
   REVIEW_THREAD_COMMENTS_GRAPHQL_QUERY,
@@ -445,6 +447,16 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly repository: string;
       readonly host: string;
     }) => Effect.Effect<GitHubRepositoryAccess, GitHubPullRequestCliError>;
+
+    /**
+     * The repository this one was forked from, as `owner/name`, or null where it is not a fork.
+     * Not a failure to have no parent: most repositories are nobody's fork.
+     */
+    readonly getRepositoryParent: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+    }) => Effect.Effect<string | null, GitHubPullRequestCliError>;
 
     /** The viewer's standing on its own, for deciding a write without reading the whole detail. */
     readonly getViewerAccess: (input: {
@@ -1633,6 +1645,34 @@ export const make = Effect.gen(function* () {
                     command: "gh",
                     cwd: input.cwd,
                     operation: "getRepositoryAccess",
+                    cause: decoded.failure,
+                  }),
+                );
+          }),
+        ),
+
+    getRepositoryParent: (input) =>
+      github
+        .execute({
+          cwd: input.cwd,
+          args: [
+            "repo",
+            "view",
+            `${input.host}/${input.repository}`,
+            "--json",
+            REPOSITORY_PARENT_JSON_FIELDS,
+          ],
+        })
+        .pipe(
+          Effect.flatMap((result) => {
+            const decoded = decodeRepositoryParentJson(result.stdout.trim());
+            return Result.isSuccess(decoded)
+              ? Effect.succeed(decoded.success)
+              : Effect.fail(
+                  new GitHubPullRequestReadError({
+                    command: "gh",
+                    cwd: input.cwd,
+                    operation: "getRepositoryParent",
                     cause: decoded.failure,
                   }),
                 );

@@ -9,6 +9,7 @@ import {
   ProjectId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ModelSelection } from "./orchestration.ts";
 import { SourceControlProviderKind } from "./sourceControl.ts";
 
 export const PullRequestInvolvement = Schema.Literals(["all", "reviewing", "authored"]);
@@ -466,6 +467,13 @@ export const PullRequestListEntry = Schema.Struct({
   reviewDecision: Schema.optional(PullRequestReviewDecision),
   /** Absent where the host reports no check rollup, or the change request has no checks. */
   checksState: Schema.optional(PullRequestChecksState),
+  /**
+   * Set where the row comes from the repository this project's own repository was forked from,
+   * rather than from the project's repository. `projectId` still names the local project the
+   * row was read through — the fork is what gives the upstream a checkout to be read from, and
+   * what an implement hand-off writes into — so only this flag tells the two apart.
+   */
+  isUpstream: Schema.optional(Schema.Boolean),
 });
 export type PullRequestListEntry = typeof PullRequestListEntry.Type;
 
@@ -483,6 +491,51 @@ export const PullRequestListCursors = Schema.Record(
   TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
 );
 export type PullRequestListCursors = typeof PullRequestListCursors.Type;
+
+/**
+ * Which rows to rank, and where they would be ported. One call per repository being ranked, so
+ * the model judges a batch it can compare within rather than one row at a time.
+ */
+export const PullRequestRankInput = Schema.Struct({
+  projectId: ProjectId,
+  repository: TrimmedNonEmptyString,
+  /**
+   * The rows to judge, carried from the page rather than named by number and read again: the
+   * page already holds every one of these fields, and re-reading a hundred pull requests to
+   * learn what it could have sent would cost a request each.
+   *
+   * Bounded: ranking is a model call, and a whole upstream backlog is not worth one prompt.
+   */
+  candidates: Schema.Array(
+    Schema.Struct({
+      number: PositiveInt,
+      title: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+      labels: Schema.optional(PullRequestQualifierValues),
+      changedFiles: Schema.optional(NonNegativeInt),
+    }),
+  ).check(Schema.isMaxLength(100)),
+  /**
+   * Which agent does the judging, chosen by the page rather than fixed here: the reader already
+   * picks a model everywhere else, and ranking is worth no more of a special case than a commit
+   * message is.
+   */
+  modelSelection: ModelSelection,
+});
+export type PullRequestRankInput = typeof PullRequestRankInput.Type;
+
+export const PullRequestRanking = Schema.Struct({
+  number: PositiveInt,
+  /** 0-100, higher being more worth porting. */
+  score: Schema.Int,
+  reason: Schema.optional(TrimmedNonEmptyString),
+});
+export type PullRequestRanking = typeof PullRequestRanking.Type;
+
+export const PullRequestRankResult = Schema.Struct({
+  repository: TrimmedNonEmptyString,
+  rankings: Schema.Array(PullRequestRanking),
+});
+export type PullRequestRankResult = typeof PullRequestRankResult.Type;
 
 export const PullRequestListInput = Schema.Struct({
   state: PullRequestListState,
@@ -524,6 +577,12 @@ export const PullRequestListInput = Schema.Struct({
    * anything of a search term this long.
    */
   query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+  /**
+   * Also read the repository each project's own repository was forked from. Off by default: it
+   * costs a repository lookup per project and an extra slice per fork, and a workspace of
+   * non-forks would pay both for nothing.
+   */
+  includeUpstream: Schema.optional(Schema.Boolean),
 });
 export type PullRequestListInput = typeof PullRequestListInput.Type;
 

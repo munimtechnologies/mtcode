@@ -115,6 +115,12 @@ const DETAIL_STALE_WINDOW = Duration.minutes(5);
 const DIFF_STALE_WINDOW = Duration.minutes(10);
 /** How long one host's signed-in login is believed without asking its CLI again. */
 const VIEWER_CACHE_TTL = Duration.minutes(10);
+/**
+ * How long a repository's fork parent is believed. Long, because a repository is forked once and
+ * never re-parented: the read only exists so nobody has to name their upstream by hand, and
+ * paying a `gh repo view` per list read would be a subprocess per project per page.
+ */
+const UPSTREAM_CACHE_TTL = Duration.hours(12);
 const LIST_CACHE_CAPACITY = 64;
 const LIST_STATS_CACHE_CAPACITY = 32;
 const DETAIL_CACHE_CAPACITY = 128;
@@ -216,6 +222,12 @@ interface SupportedProject {
   readonly repository: string;
   /** The host the repository lives on, which is the account boundary rather than the kind. */
   readonly host: string;
+  /**
+   * Set where `repository` is the repository the project's own repository was forked from rather
+   * than the project's. The project, its checkout and its API are the fork's either way — the
+   * fork is what gives the upstream something to be read through.
+   */
+  readonly isUpstream?: boolean;
 }
 
 /**
@@ -438,6 +450,11 @@ function withRateLimitBackoff(
       : {
           listChangeRequestStats: wrap("listChangeRequestStats", api.listChangeRequestStats),
         }),
+    ...(api.getUpstreamRepository === undefined
+      ? {}
+      : {
+          getUpstreamRepository: wrap("getUpstreamRepository", api.getUpstreamRepository),
+        }),
     getChangeRequest: wrap("getChangeRequest", api.getChangeRequest),
     getChangeRequestActivity: wrap("getChangeRequestActivity", api.getChangeRequestActivity),
     ...(api.getReviewThreadComments === undefined
@@ -633,17 +650,27 @@ export const make = Effect.gen(function* () {
         if (!match) {
           return Effect.fail(new PullRequestUnavailableError({ reason: "provider-unsupported" }));
         }
+        const wanted = ref.repository.trim().toLowerCase();
         // The repository travels through the client, so it is checked against the project's
         // own remote rather than being handed to a provider verbatim.
-        if (match.repository.toLowerCase() !== ref.repository.trim().toLowerCase()) {
-          return Effect.fail(
-            new PullRequestOperationError({
-              operation: "resolveRepository",
-              detail: "The change request does not belong to the selected project.",
-            }),
-          );
+        if (match.repository.toLowerCase() === wanted) {
+          return Effect.succeed(match);
         }
-        return Effect.succeed(match);
+        // A row the listing read from the project's upstream is opened through the same project,
+        // so the check has to admit that repository too — still a repository this service chose,
+        // never one the client named. A read the listing could not have produced still fails.
+        return resolveUpstream(match).pipe(
+          Effect.flatMap((upstream) =>
+            upstream !== null && upstream.toLowerCase() === wanted
+              ? Effect.succeed({ ...match, repository: upstream, isUpstream: true })
+              : Effect.fail(
+                  new PullRequestOperationError({
+                    operation: "resolveRepository",
+                    detail: "The change request does not belong to the selected project.",
+                  }),
+                ),
+          ),
+        );
       }),
     );
 
@@ -815,6 +842,7 @@ export const make = Effect.gen(function* () {
       ...(input.item.reviewDecision === undefined || input.item.reviewDecision === null
         ? {}
         : { reviewDecision: input.item.reviewDecision }),
+      ...(input.project.isUpstream === true ? { isUpstream: true } : {}),
     };
   };
 
@@ -826,12 +854,19 @@ export const make = Effect.gen(function* () {
       // and reading part of the listing under that assumption would quietly lose rows.
       const continuation = yield* decodeCursors(input.cursors);
       const {
-        supported: projects,
+        supported: workspaceProjects,
         unimplemented,
         viewerRoots,
       } = yield* listWorkspaceProjects(input);
+      const projects =
+        input.includeUpstream === true
+          ? yield* withUpstreamProjects(workspaceProjects)
+          : workspaceProjects;
+      // Counted over the workspace's own projects rather than the read set: an upstream is a
+      // repository this listing reads, not a project the reader has, and counting it would
+      // overstate the host in the switcher.
       const projectCounts = new Map<string, number>();
-      for (const { host } of projects) {
+      for (const { host } of workspaceProjects) {
         projectCounts.set(host, (projectCounts.get(host) ?? 0) + 1);
       }
 
@@ -1135,6 +1170,73 @@ export const make = Effect.gen(function* () {
    */
   const viewerOf = (project: SupportedProject): Effect.Effect<string | null> =>
     resolveViewers([project], new Map()).pipe(Effect.map(([resolved]) => resolved?.viewer ?? null));
+
+  // Keyed as the cursors are, `"<host> <repository>"`, so the same `owner/repo` on github.com and
+  // on an Enterprise install stay two repositories. A repository that is nobody's fork caches its
+  // null too: "not a fork" is the common answer and must not be re-asked every read.
+  const upstreamByRepository = new Map<
+    string,
+    { readonly at: number; readonly repository: string | null }
+  >();
+
+  const resolveUpstream = (project: SupportedProject): Effect.Effect<string | null> => {
+    const getUpstream = project.api.getUpstreamRepository;
+    if (getUpstream === undefined) {
+      return Effect.succeed(null);
+    }
+    const key = listCursorKey(project.host, project.repository);
+    return Effect.flatMap(Clock.currentTimeMillis, (now): Effect.Effect<string | null> => {
+      const held = upstreamByRepository.get(key);
+      if (held !== undefined && now - held.at <= Duration.toMillis(UPSTREAM_CACHE_TTL)) {
+        return Effect.succeed(held.repository);
+      }
+      return getUpstream({
+        cwd: project.project.workspaceRoot,
+        repository: project.repository,
+        host: project.host,
+      }).pipe(
+        Effect.tap((repository) =>
+          Effect.map(Clock.currentTimeMillis, (at) =>
+            upstreamByRepository.set(key, { at, repository }),
+          ),
+        ),
+        // An upstream that cannot be read is not worth failing a listing over: the reader still
+        // wants their own repositories, and the section simply does not appear.
+        Effect.orElseSucceed(() => null),
+      );
+    });
+  };
+
+  /**
+   * The upstream repositories behind a set of projects, as projects in their own right. Reading
+   * them through the fork's checkout and API is what makes them readable at all: the upstream has
+   * no project of its own, and `gh` only needs some checkout on the same host.
+   *
+   * De-duplicated against what the workspace already reads, so a reader who has both the fork and
+   * the upstream checked out does not get the upstream twice.
+   */
+  const withUpstreamProjects = (
+    supported: ReadonlyArray<SupportedProject>,
+  ): Effect.Effect<ReadonlyArray<SupportedProject>> =>
+    Effect.forEach(supported, (project) => resolveUpstream(project), {
+      concurrency: REPOSITORY_CONCURRENCY,
+    }).pipe(
+      Effect.map((upstreams) => {
+        const seen = new Set(
+          supported.map((project) => listCursorKey(project.host, project.repository)),
+        );
+        const added: SupportedProject[] = [];
+        for (const [index, upstream] of upstreams.entries()) {
+          if (upstream === null) continue;
+          const project = supported[index]!;
+          const key = listCursorKey(project.host, upstream);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          added.push({ ...project, repository: upstream, isUpstream: true });
+        }
+        return added.length === 0 ? supported : [...supported, ...added];
+      }),
+    );
 
   const detailUncached: PullRequestService["Service"]["detail"] = (input) =>
     requireProject(input).pipe(
@@ -1917,6 +2019,7 @@ export const make = Effect.gen(function* () {
         limit,
         query,
         cursorEntries,
+        includeUpstream,
       ] = JSON.parse(key) as [
         number,
         string,
@@ -1928,6 +2031,7 @@ export const make = Effect.gen(function* () {
         number | null,
         string | null,
         ReadonlyArray<[string, string]> | null,
+        boolean | null,
       ];
       return listUncached({
         state,
@@ -1939,6 +2043,7 @@ export const make = Effect.gen(function* () {
         ...(limit === null ? {} : { limit }),
         ...(query === null ? {} : { query }),
         ...(cursorEntries === null ? {} : { cursors: Object.fromEntries(cursorEntries) }),
+        ...(includeUpstream === null ? {} : { includeUpstream }),
       } as PullRequestListInput);
     },
     {
@@ -1975,6 +2080,7 @@ export const make = Effect.gen(function* () {
       input.cursors === undefined
         ? null
         : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
+      input.includeUpstream ?? null,
     ]);
     return staleList(key, Cache.get(listCache, key));
   };

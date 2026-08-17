@@ -223,6 +223,15 @@ export const make = Effect.gen(function* () {
         })
         .pipe(Effect.mapError(fail("listChangeRequestStats"))),
 
+    getUpstreamRepository: (input) =>
+      cli
+        .getRepositoryParent({
+          cwd: input.cwd,
+          repository: input.repository,
+          host: input.host,
+        })
+        .pipe(Effect.mapError(fail("getUpstreamRepository"))),
+
     getChangeRequest: (input) =>
       Effect.all(
         [

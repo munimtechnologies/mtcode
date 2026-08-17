@@ -15,12 +15,14 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildPullRequestRankingPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  clampPullRequestRankings,
 } from "./TextGenerationUtils.ts";
 import {
   applyCursorAcpModelSelection,
@@ -54,7 +56,9 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -259,10 +263,33 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] = Effect.fn(
+    "CursorTextGeneration.rankPullRequests",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestRankingPrompt({
+      repository: input.repository,
+      intoRepository: input.intoRepository,
+      candidates: input.candidates,
+    });
+
+    const generated = yield* runCursorJson({
+      operation: "rankPullRequests",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      rankings: clampPullRequestRankings(generated.rankings),
+    } satisfies TextGeneration.PullRequestRankingResult;
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    rankPullRequests,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

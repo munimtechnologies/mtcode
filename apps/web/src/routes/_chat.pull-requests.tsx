@@ -603,6 +603,10 @@ function PullRequestsRouteView() {
               ...(hasFilters ? { filters } : {}),
               ...(sentParsed.text ? { query: sentParsed.text } : {}),
               ...(cursors === undefined ? {} : { cursors }),
+              // Only for the grouped view: the Authored and Reviewing tabs are about the reader,
+              // and reading somebody else's repository for them would cost a slice per fork to
+              // fill a section neither tab shows.
+              ...(search.involvement === "all" ? { includeUpstream: true } : {}),
             } satisfies PullRequestListInput,
           },
         ];
@@ -645,6 +649,7 @@ function PullRequestsRouteView() {
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
+          ...(search.involvement === "all" ? { includeUpstream: true } : {}),
         } satisfies PullRequestListInput,
       })),
     [

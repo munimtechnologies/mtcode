@@ -3385,3 +3385,185 @@ it.effect("names the signed-in account in the detail, and says nothing where the
     assert.strictEqual(unnamed.viewer, undefined);
   }),
 );
+
+it.effect("reads the repository a project's own repository was forked from", () =>
+  Effect.gen(function* () {
+    const asked: string[] = [];
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "t3code",
+          workspaceRoot: "/a",
+          repository: "sheehanmunim/t3code",
+        }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getUpstreamRepository: () => Effect.succeed("pingdotgg/t3code"),
+          listChangeRequests: ({ repository }) => {
+            asked.push(repository);
+            return Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            });
+          },
+        }),
+      ],
+    });
+
+    const result = yield* service.list({ state: "open", includeUpstream: true });
+
+    assert.deepStrictEqual(asked.toSorted(), ["pingdotgg/t3code", "sheehanmunim/t3code"]);
+    // The upstream row is carried by the fork's project — that is the checkout it was read
+    // through, and the one an implement hand-off writes into — and only the flag tells it apart.
+    const upstream = result.entries.find((entry) => entry.repository === "pingdotgg/t3code");
+    assert.equal(upstream?.isUpstream, true);
+    assert.equal(upstream?.projectId, "p1");
+    const own = result.entries.find((entry) => entry.repository === "sheehanmunim/t3code");
+    assert.equal(own?.isUpstream, undefined);
+  }),
+);
+
+it.effect("leaves the upstream unread unless it is asked for", () =>
+  Effect.gen(function* () {
+    const asked: string[] = [];
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "t3code",
+          workspaceRoot: "/a",
+          repository: "sheehanmunim/t3code",
+        }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getUpstreamRepository: () => Effect.die("should not be asked"),
+          listChangeRequests: ({ repository }) => {
+            asked.push(repository);
+            return Effect.succeed({ items: [], truncated: false, continues: false });
+          },
+        }),
+      ],
+    });
+
+    yield* service.list({ state: "open" });
+
+    assert.deepStrictEqual(asked, ["sheehanmunim/t3code"]);
+  }),
+);
+
+it.effect("does not repeat an upstream the workspace already has a project for", () =>
+  Effect.gen(function* () {
+    const asked: string[] = [];
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "fork",
+          workspaceRoot: "/a",
+          repository: "sheehanmunim/t3code",
+        }),
+        project({
+          id: "p2",
+          title: "upstream",
+          workspaceRoot: "/b",
+          repository: "pingdotgg/t3code",
+        }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getUpstreamRepository: ({ repository }) =>
+            Effect.succeed(repository === "sheehanmunim/t3code" ? "pingdotgg/t3code" : null),
+          listChangeRequests: ({ repository }) => {
+            asked.push(repository);
+            return Effect.succeed({ items: [], truncated: false, continues: false });
+          },
+        }),
+      ],
+    });
+
+    yield* service.list({ state: "open", includeUpstream: true });
+
+    assert.deepStrictEqual(asked.toSorted(), ["pingdotgg/t3code", "sheehanmunim/t3code"]);
+  }),
+);
+
+it.effect("opens a row read from the upstream through the project that read it", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "t3code",
+          workspaceRoot: "/a",
+          repository: "sheehanmunim/t3code",
+        }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getUpstreamRepository: () => Effect.succeed("pingdotgg/t3code"),
+          getChangeRequest: () =>
+            Effect.succeed({
+              ...changeRequest(1, "2026-07-02T00:00:00Z"),
+              body: "",
+              changedFiles: 0,
+              mergedAt: null,
+              closedAt: null,
+              reviewers: [],
+              checks: [],
+              mergeCapabilities: { merge: true, squash: true, rebase: true },
+              viewerPermissions: {
+                actions: ["merge"],
+                comment: true,
+                resolve: true,
+                verdicts: ["comment", "approve", "request-changes"],
+                requestReviewers: true,
+              },
+            }),
+        }),
+      ],
+    });
+
+    const detail = yield* service.detail({
+      projectId: "p1" as ProjectId,
+      repository: "pingdotgg/t3code",
+      number: 1,
+    });
+
+    assert.equal(detail.repository, "pingdotgg/t3code");
+  }),
+);
+
+it.effect("still refuses a repository the project has nothing to do with", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "t3code",
+          workspaceRoot: "/a",
+          repository: "sheehanmunim/t3code",
+        }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getUpstreamRepository: () => Effect.succeed("pingdotgg/t3code"),
+        }),
+      ],
+    });
+
+    const error = yield* Effect.flip(
+      service.detail({
+        projectId: "p1" as ProjectId,
+        repository: "attacker/elsewhere",
+        number: 1,
+      }),
+    );
+
+    assert.strictEqual(error._tag, "PullRequestOperationError");
+    assert.include(error.message, "does not belong to the selected project");
+  }),
+);

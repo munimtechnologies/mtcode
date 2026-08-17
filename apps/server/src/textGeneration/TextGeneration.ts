@@ -73,6 +73,32 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface PullRequestRankingInput {
+  cwd: string;
+  /** The repository the pull requests come from. */
+  repository: string;
+  /** The repository they would be ported into. */
+  intoRepository: string;
+  candidates: ReadonlyArray<{
+    readonly number: number;
+    readonly title: string;
+    readonly body?: string | undefined;
+    readonly labels?: ReadonlyArray<string> | undefined;
+    readonly changedFiles?: number | undefined;
+  }>;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface PullRequestRankingResult {
+  rankings: ReadonlyArray<{
+    readonly number: number;
+    /** 0-100, higher being more worth porting. */
+    readonly score: number;
+    readonly reason?: string | undefined;
+  }>;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -80,6 +106,7 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  rankPullRequests(input: PullRequestRankingInput): Promise<PullRequestRankingResult>;
 }
 
 /**
@@ -113,6 +140,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Score upstream pull requests by how much they are worth porting into this repository. */
+    readonly rankPullRequests: (
+      input: PullRequestRankingInput,
+    ) => Effect.Effect<PullRequestRankingResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -123,7 +155,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "rankPullRequests";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -162,6 +195,10 @@ export const makeTextGenerationFromRegistry = (
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    rankPullRequests: (input) =>
+      resolveInstance(registry, "rankPullRequests", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.rankPullRequests(input)),
       ),
   });
 

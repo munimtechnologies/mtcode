@@ -25,6 +25,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildPullRequestRankingPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -33,6 +34,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
+  clampPullRequestRankings,
 } from "./TextGenerationUtils.ts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
@@ -101,7 +103,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -120,7 +124,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -162,7 +168,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -405,10 +413,33 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] = Effect.fn(
+    "CodexTextGeneration.rankPullRequests",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestRankingPrompt({
+      repository: input.repository,
+      intoRepository: input.intoRepository,
+      candidates: input.candidates,
+    });
+
+    const generated = yield* runCodexJson({
+      operation: "rankPullRequests",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      rankings: clampPullRequestRankings(generated.rankings),
+    } satisfies TextGeneration.PullRequestRankingResult;
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    rankPullRequests,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

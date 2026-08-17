@@ -552,6 +552,22 @@ const RawRepositoryAccessSchema = Schema.Struct({
   viewerPermission: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
+/**
+ * A repository that is not a fork answers `isFork: false` and a null parent, which is an answer
+ * rather than a failure — most repositories are not forks and must not cost an error path.
+ */
+const RawRepositoryParentSchema = Schema.Struct({
+  isFork: Schema.Boolean,
+  parent: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        name: Schema.String,
+        owner: Schema.Struct({ login: Schema.String }),
+      }),
+    ),
+  ),
+});
+
 const RawPullRequestFileSchema = Schema.Struct({
   filename: Schema.String,
   status: Schema.optional(Schema.NullOr(Schema.String)),
@@ -989,6 +1005,26 @@ export function buildReviewSubmissionJson(input: {
 export const REPOSITORY_ACCESS_JSON_FIELDS =
   "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,viewerPermission";
 
+/** Read on its own rather than alongside the access fields: which repository a fork came from is
+ *  wanted while listing, and the access read only ever happens on the detail path. */
+export const REPOSITORY_PARENT_JSON_FIELDS = "isFork,parent";
+
+export function decodeRepositoryParentJson(
+  raw: string,
+): Result.Result<string | null, DecodeFailure> {
+  const decoded = decodeRepositoryParent(raw);
+  if (!Result.isSuccess(decoded)) {
+    return Result.fail(decoded.failure);
+  }
+  const parent = decoded.success.parent;
+  if (!decoded.success.isFork || !parent) {
+    return Result.succeed(null);
+  }
+  const owner = parent.owner.login.trim();
+  const name = parent.name.trim();
+  return Result.succeed(owner.length > 0 && name.length > 0 ? `${owner}/${name}` : null);
+}
+
 export interface GitHubPullRequestListItem {
   /** The author's node id, kept so a batch can resolve the avatar the listing does not carry. */
   readonly authorId: string | null;
@@ -1394,6 +1430,7 @@ const decodeDetail = decodeJsonResult(RawDetailSchema);
 const decodeActivity = decodeJsonResult(RawActivitySchema);
 const decodeFileEntry = Schema.decodeUnknownExit(RawPullRequestFileSchema);
 const decodeRepositoryAccess = decodeJsonResult(RawRepositoryAccessSchema);
+const decodeRepositoryParent = decodeJsonResult(RawRepositoryParentSchema);
 const decodeReviewThreads = decodeJsonResult(RawReviewThreadsSchema);
 const decodeReviewThreadComments = decodeJsonResult(RawReviewThreadCommentsSchema);
 

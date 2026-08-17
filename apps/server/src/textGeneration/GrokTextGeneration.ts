@@ -16,12 +16,14 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildPullRequestRankingPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  clampPullRequestRankings,
 } from "./TextGenerationUtils.ts";
 import {
   applyGrokAcpModelSelection,
@@ -52,7 +54,9 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -251,10 +255,33 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] = Effect.fn(
+    "GrokTextGeneration.rankPullRequests",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestRankingPrompt({
+      repository: input.repository,
+      intoRepository: input.intoRepository,
+      candidates: input.candidates,
+    });
+
+    const generated = yield* runGrokJson({
+      operation: "rankPullRequests",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      rankings: clampPullRequestRankings(generated.rankings),
+    } satisfies TextGeneration.PullRequestRankingResult;
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    rankPullRequests,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

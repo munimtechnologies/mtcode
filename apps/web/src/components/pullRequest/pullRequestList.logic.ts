@@ -32,7 +32,7 @@ export interface EnvironmentPullRequestError extends PullRequestListProjectError
   readonly environmentId: EnvironmentId;
 }
 
-export type PullRequestGroupKey = "reviewRequested" | "authored" | "others";
+export type PullRequestGroupKey = "reviewRequested" | "authored" | "upstream" | "others";
 
 export interface PullRequestGroup<Entry extends PullRequestListEntry = PullRequestListEntry> {
   readonly key: PullRequestGroupKey;
@@ -57,6 +57,7 @@ export const pullRequestViewerKey = (entry: ScopedEntry): string =>
 const GROUP_LABELS: Record<PullRequestGroupKey, string> = {
   reviewRequested: "Review requested",
   authored: "Authored",
+  upstream: "From upstream",
   others: "Others",
 };
 
@@ -338,18 +339,24 @@ export function groupPullRequestsByInvolvement<Entry extends ScopedEntry>(
   const buckets: Record<PullRequestGroupKey, Entry[]> = {
     reviewRequested: [],
     authored: [],
+    upstream: [],
     others: [],
   };
   for (const entry of entries) {
+    // Own work and work waiting on the reader outrank where the row came from: a row from the
+    // upstream that the reader wrote, or was asked to review, is still theirs to act on, and
+    // filing it under the upstream would hide it from the two groups they look at first.
     if (isAuthoredByViewer(entry, viewers)) {
       buckets.authored.push(entry);
     } else if (entry.viewerReviewRequested) {
       buckets.reviewRequested.push(entry);
+    } else if (entry.isUpstream === true) {
+      buckets.upstream.push(entry);
     } else {
       buckets.others.push(entry);
     }
   }
-  return (["reviewRequested", "authored", "others"] as const)
+  return (["reviewRequested", "authored", "upstream", "others"] as const)
     .filter((key) => buckets[key].length > 0)
     .map((key) => ({ key, label: GROUP_LABELS[key], entries: buckets[key] }));
 }
@@ -386,6 +393,7 @@ export function partitionPullRequestsWithPriority<Entry extends PullRequestListE
     }),
   );
   const others: Entry[] = [];
+  const upstream: Entry[] = [];
   for (const entry of entries) {
     const key = pullRequestEntryKey(entry);
     // The feed's copy of a partitioned row is at least as fresh — it replaces in place.
@@ -393,6 +401,8 @@ export function partitionPullRequestsWithPriority<Entry extends PullRequestListE
       authoredByKey.set(key, entry);
     } else if (reviewByKey.has(key)) {
       reviewByKey.set(key, entry);
+    } else if (entry.isUpstream === true) {
+      upstream.push(entry);
     } else {
       others.push(entry);
     }
@@ -402,6 +412,7 @@ export function partitionPullRequestsWithPriority<Entry extends PullRequestListE
     [
       { key: "reviewRequested", entries: [...reviewByKey.values()].toSorted(byRecency) },
       { key: "authored", entries: [...authoredByKey.values()].toSorted(byRecency) },
+      { key: "upstream", entries: upstream },
       { key: "others", entries: others },
     ] as const
   )
@@ -730,6 +741,42 @@ export function resolveSelectedEnvironmentId<Id extends string>(
 ): Id | null {
   if (namedEnvironmentId === undefined) return fallbackEnvironmentId;
   return knownEnvironmentIds.has(namedEnvironmentId) ? namedEnvironmentId : fallbackEnvironmentId;
+}
+
+/**
+ * What a section is ordered by. `updated` is the timeline every listing has always shown;
+ * `useful` asks an agent what is worth porting and orders by its answer, which only means
+ * anything for rows it has scored.
+ */
+export type PullRequestSortOrder = "updated" | "useful";
+
+export const PULL_REQUEST_SORT_ORDERS = ["updated", "useful"] as const;
+
+export const isPullRequestSortOrder = (value: unknown): value is PullRequestSortOrder =>
+  value === "updated" || value === "useful";
+
+/**
+ * Rows in the asked-for order, keyed by `pullRequestEntryKey` where scores are involved.
+ *
+ * An unscored row sorts below every scored one rather than above: ranking arrives per row and a
+ * row still being judged would otherwise jump to the top and then drop, which reads as the list
+ * shuffling itself. Recency breaks ties, so an unranked section is exactly the old order.
+ */
+export function sortPullRequestEntries<Entry extends PullRequestListEntry>(
+  entries: ReadonlyArray<Entry>,
+  order: PullRequestSortOrder,
+  usefulness?: ReadonlyMap<string, number> | undefined,
+): ReadonlyArray<Entry> {
+  const byRecency = (left: Entry, right: Entry) => right.updatedAt.localeCompare(left.updatedAt);
+  if (order === "updated" || usefulness === undefined || usefulness.size === 0) {
+    return entries.toSorted(byRecency);
+  }
+  return entries.toSorted((left, right) => {
+    const leftScore = usefulness.get(pullRequestEntryKey(left)) ?? Number.NEGATIVE_INFINITY;
+    const rightScore = usefulness.get(pullRequestEntryKey(right)) ?? Number.NEGATIVE_INFINITY;
+    if (leftScore === rightScore) return byRecency(left, right);
+    return rightScore - leftScore;
+  });
 }
 
 /**

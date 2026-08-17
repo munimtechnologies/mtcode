@@ -295,6 +295,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    rankPullRequests: () => Effect.succeed({ rankings: [] }),
     ...overrides,
   };
 
@@ -338,6 +339,17 @@ function createTextGeneration(
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    rankPullRequests: (input) =>
+      implementation.rankPullRequests(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "rankPullRequests",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),

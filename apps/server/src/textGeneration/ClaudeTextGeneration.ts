@@ -23,6 +23,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildPullRequestRankingPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -31,6 +32,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
+  clampPullRequestRankings,
 } from "./TextGenerationUtils.ts";
 import {
   getModelSelectionStringOptionValue,
@@ -85,7 +87,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -115,7 +119,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "rankPullRequests"
+      | "rankPullRequests";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -359,10 +365,33 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] = Effect.fn(
+    "ClaudeTextGeneration.rankPullRequests",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestRankingPrompt({
+      repository: input.repository,
+      intoRepository: input.intoRepository,
+      candidates: input.candidates,
+    });
+
+    const generated = yield* runClaudeJson({
+      operation: "rankPullRequests",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      rankings: clampPullRequestRankings(generated.rankings),
+    } satisfies TextGeneration.PullRequestRankingResult;
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    rankPullRequests,
   } satisfies TextGeneration.TextGeneration["Service"];
 });
