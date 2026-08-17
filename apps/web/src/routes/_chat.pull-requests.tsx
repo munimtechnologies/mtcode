@@ -26,7 +26,6 @@ import {
   LayersIcon,
   PenLineIcon,
   LoaderIcon,
-  RefreshCwIcon,
   SearchIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -1544,8 +1543,6 @@ function PullRequestsRouteView() {
       ) : entries.length === 0 ? (
         <PullRequestListEmptyState
           hasProjects={!projectsKnown || projects.length > 0}
-          refreshing={refreshing}
-          onRefresh={() => void refreshFromHost()}
           query={typedQuery}
           filtered={
             search.state !== "open" ||
@@ -1556,8 +1553,10 @@ function PullRequestsRouteView() {
           searching={typedQuery.length > 0 && (!querySettled || showingCarried)}
           canLoadMore={listData?.truncated === true && (canContinue || pageSize < MAX_PAGE_SIZE)}
           loadingMore={loadingMore}
+          refreshing={refreshing}
           onClearQuery={() => updateSearch({ q: undefined })}
           onLoadMore={loadMore}
+          onRefresh={() => void refreshFromHost()}
         />
       ) : (
         <div className="space-y-3">
@@ -1784,8 +1783,6 @@ function PullRequestsRouteView() {
     />
   );
   const columnProps = {
-    refreshing,
-    onRefresh: () => void refreshFromHost(),
     searchValue: search.q ?? "",
     involvement,
     state: search.state,
@@ -2054,8 +2051,6 @@ function ExpandableSearch({
  * descendant rules.
  */
 function PullRequestsColumn({
-  refreshing,
-  onRefresh,
   searchValue,
   involvement,
   state,
@@ -2070,8 +2065,6 @@ function PullRequestsColumn({
   rightPanelOpen,
   listBody,
 }: {
-  refreshing: boolean;
-  onRefresh: () => void;
   searchValue: string;
   involvement: PullRequestInvolvement;
   state: PullRequestListState;
@@ -2209,14 +2202,6 @@ function PullRequestsColumn({
             }}
           />
         ) : null}
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Refresh pull requests"
-          onClick={onRefresh}
-        >
-          <RefreshCwIcon className={cn("size-4", refreshing && "animate-spin")} />
-        </Button>
         {rightPanelControl}
       </header>
 

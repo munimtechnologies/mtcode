@@ -1,10 +1,11 @@
-import { SparklesIcon } from "lucide-react";
+import { LoaderIcon, SparklesIcon } from "lucide-react";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
@@ -83,10 +84,39 @@ function PullRequestUpstreamCardImpl({
       {reason ? (
         // The agent's own words, kept to one line: it is a hint about what the change does, not
         // a summary to be read instead of the pull request.
-        <p className="line-clamp-1 pl-6 text-xs text-muted-foreground">{reason}</p>
+        <p className="line-clamp-1 text-xs text-muted-foreground">{reason}</p>
       ) : null}
 
-      <div className="flex min-w-0 items-center gap-1.5 pl-6 text-[11px] text-muted-foreground">
+      <div className="mt-auto flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+        {/* Icon alone, at the corner: the card is a shortlist entry, and a labelled control on
+            every one of them read as the card's purpose rather than one thing you can do with it.
+            Stops the click from also opening the row underneath. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="size-5 shrink-0"
+                aria-label={`Implement pull request #${entry.number} in this project`}
+                disabled={implementing}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onImplement(entry);
+                }}
+              >
+                {implementing ? (
+                  <LoaderIcon aria-hidden className="size-3 animate-spin" />
+                ) : (
+                  <SparklesIcon className="size-3" />
+                )}
+              </Button>
+            }
+          />
+          <TooltipPopup>
+            {implementing ? "Opening a thread..." : "Implement in this project"}
+          </TooltipPopup>
+        </Tooltip>
         <span className="shrink-0">#{entry.number}</span>
         {entry.author ? (
           <>
@@ -95,28 +125,6 @@ function PullRequestUpstreamCardImpl({
           </>
         ) : null}
         <span className="ml-auto shrink-0">{formatRelativeTimeLabel(entry.updatedAt)}</span>
-        {/* On the meta line rather than a band across the card: it is one action among the row's
-            details, and given its own full-width row it read as the card's purpose rather than a
-            shortcut. Stops the click from also opening the row underneath it. */}
-        <Button
-          size="xs"
-          variant="ghost"
-          className="h-5 shrink-0 gap-1 px-1.5 text-[11px] font-normal"
-          disabled={implementing}
-          onClick={(event) => {
-            event.stopPropagation();
-            onImplement(entry);
-          }}
-        >
-          {implementing ? (
-            "Opening..."
-          ) : (
-            <>
-              <SparklesIcon className="size-3" />
-              Implement
-            </>
-          )}
-        </Button>
       </div>
     </div>
   );
