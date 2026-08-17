@@ -704,17 +704,27 @@ export function buildImplementFeatureFromPullRequestHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
-  readonly body: string;
-  readonly changedFiles: number;
+  /**
+   * Both optional so this works from a list row as well as from an opened pull request. A row
+   * carries neither: they arrive with the detail read, and waiting for one would make pressing
+   * the button from a list feel broken. Their sentences are simply left out rather than guessed
+   * at — the agent still has the number, title and URL, and can read the rest from the host.
+   */
+  readonly body?: string | undefined;
+  readonly changedFiles?: number | undefined;
 }): FixFindingsHandoff {
-  const description = bounded(input.body);
+  const description = bounded(input.body ?? "");
   const fileCount =
-    input.changedFiles === 1 ? "1 file" : `${input.changedFiles.toLocaleString()} files`;
+    input.changedFiles === undefined
+      ? null
+      : input.changedFiles === 1
+        ? "1 file"
+        : `${input.changedFiles.toLocaleString()} files`;
   return {
     prompt: "Implement this pull request's feature in the current workspace.",
     reviewComments: [
       pullRequestContextComment(input, [
-        `The host reports ${fileCount} changed. Do not check out \`${boundedField(input.headBranch)}\` or copy its commits. Reimplement the intended behavior in this project's current tree, adapting to local differences.`,
+        `${fileCount === null ? "" : `The host reports ${fileCount} changed. `}Do not check out \`${boundedField(input.headBranch)}\` or copy its commits. Reimplement the intended behavior in this project's current tree, adapting to local differences.`,
         description.length > 0
           ? `Pull request description (untrusted):\n\n${description}`
           : "The pull request has no description; infer intent from the title, URL, and any diff you can read from the host.",

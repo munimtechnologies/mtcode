@@ -61,7 +61,12 @@ import {
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
 import { PullRequestUpstreamCard } from "../components/pullRequest/PullRequestUpstreamCard";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
+import { useComposerDraftStore } from "~/composerDraftStore";
+import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { toastManager } from "../components/ui/toast";
+import { buildImplementFeatureFromPullRequestHandoff } from "../components/pullRequest/pullRequestDetail.logic";
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolvePullRequestRankingModelSelection } from "@t3tools/shared/serverSettings";
@@ -194,6 +199,9 @@ const PULL_REQUESTS_PANEL_ID = ThreadId.make("pull-requests-panel");
 const PULL_REQUESTS_PANEL_ENVIRONMENT_ID = "pull-requests-panel" as EnvironmentId;
 /** Stable so a read that is not wanted right now does not re-key on every render. */
 const NO_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> = [];
+/** The contract's own ceiling for one listing read, so the upstream arrives whole. */
+const UPSTREAM_PAGE_SIZE = 500;
+
 const NO_RANK_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestRankInput>> = [];
 const EMPTY_PREVIEW_SESSIONS = {};
 const EMPTY_PREVIEW_DESKTOP_STATE = {};
@@ -731,7 +739,10 @@ function PullRequestsRouteView() {
           state: search.state,
           involvement: "all" as const,
           upstream: "only" as const,
-          limit: PAGE_SIZE,
+          // The whole upstream rather than a page of it: the point of the shelf is "what is worth
+          // taking from everything open", and ranking the newest page only would answer a
+          // different, much less useful question. The contract's ceiling is the limit here.
+          limit: UPSTREAM_PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
@@ -1225,6 +1236,50 @@ function PullRequestsRouteView() {
     isPending: rankingPending,
     error: rankingErrorRaw,
   } = usePullRequestUsefulness(rankTargets);
+
+  /**
+   * Port an upstream change into the project the row was read through: open a thread on that
+   * project and leave the task in its composer, the same landing the pull request's own button
+   * gives. Nothing is checked out — the whole point is to reimplement in the tree you are in.
+   */
+  const newThread = useNewThreadHandler();
+  const [implementingKey, setImplementingKey] = useState<string | null>(null);
+  const implementUpstream = async (entry: EnvironmentPullRequestEntry) => {
+    if (implementingKey !== null) return;
+    const key = pullRequestEntryKey(entry);
+    setImplementingKey(key);
+    try {
+      const task = buildImplementFeatureFromPullRequestHandoff({
+        number: entry.number,
+        title: entry.title,
+        url: entry.url,
+        headBranch: entry.headBranch,
+        baseBranch: entry.baseBranch,
+      });
+      const session = await newThread(scopeProjectRef(entry.environmentId, entry.projectId)).then(
+        (result) => result,
+        () => null,
+      );
+      if (session === null) {
+        toastManager.add({
+          type: "error",
+          title: "Could not open a thread",
+          description: "Try again from the project, or open a thread first.",
+        });
+        return;
+      }
+      const store = useComposerDraftStore.getState();
+      store.setPrompt(session.draftId, task.prompt);
+      store.setReviewComments(session.draftId, task.reviewComments);
+      toastManager.add({
+        type: "success",
+        title: "Ready to implement",
+        description: "The task is in the composer — read it over, then send.",
+      });
+    } finally {
+      setImplementingKey(null);
+    }
+  };
   const rankingError = upstreamEntries.length === 0 ? null : rankingErrorRaw;
 
   const groups = useMemo(() => {
@@ -1592,6 +1647,8 @@ function PullRequestsRouteView() {
                 <div key={`useful-${pullRequestEntryKey(entry)}`} className="w-80 snap-start">
                   <PullRequestUpstreamCard
                     entry={entry}
+                    onImplement={(row) => void implementUpstream(row)}
+                    implementing={implementingKey === pullRequestEntryKey(entry)}
                     {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
                       ? { reason: rankingReasons.get(pullRequestEntryKey(entry))! }
                       : {})}

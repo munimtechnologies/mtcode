@@ -1,8 +1,10 @@
+import { SparklesIcon } from "lucide-react";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
+import { Button } from "../ui/button";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
@@ -17,6 +19,10 @@ interface PullRequestUpstreamCardProps {
   readonly reason?: string | undefined;
   readonly selected: boolean;
   readonly onSelect: (entry: EnvironmentPullRequestEntry) => void;
+  /** Port this change into the project the row was read through. */
+  readonly onImplement: (entry: EnvironmentPullRequestEntry) => void;
+  /** True while a hand-off this card started is still opening its thread. */
+  readonly implementing: boolean;
 }
 
 /**
@@ -31,11 +37,22 @@ function PullRequestUpstreamCardImpl({
   reason,
   selected,
   onSelect,
+  onImplement,
+  implementing,
 }: PullRequestUpstreamCardProps) {
   return (
-    <button
-      type="button"
+    // A div rather than a button: the card carries a button of its own, and a button inside a
+    // button is neither valid nor operable by keyboard. The role and key handling put back what
+    // the element gave for free.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(entry)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onSelect(entry);
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         void showPullRequestLinkContextMenu({
@@ -79,7 +96,30 @@ function PullRequestUpstreamCardImpl({
         ) : null}
         <span className="ml-auto shrink-0">{formatRelativeTimeLabel(entry.updatedAt)}</span>
       </div>
-    </button>
+
+      {/* The whole point of the shelf is picking something to port, so the action is on the card
+          rather than two clicks away inside the pull request. Stops the click from also opening
+          the row underneath it. */}
+      <Button
+        size="xs"
+        variant="outline"
+        className="mt-auto w-full"
+        disabled={implementing}
+        onClick={(event) => {
+          event.stopPropagation();
+          onImplement(entry);
+        }}
+      >
+        {implementing ? (
+          "Opening..."
+        ) : (
+          <>
+            <SparklesIcon className="size-3" />
+            Implement
+          </>
+        )}
+      </Button>
+    </div>
   );
 }
 

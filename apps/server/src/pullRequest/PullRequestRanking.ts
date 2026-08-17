@@ -10,11 +10,13 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 /**
  * How many pull requests are judged in one prompt. The whole set is ranked however long it is —
  * a reader asking what to port does not want the tail silently dropped — so a long backlog is
- * split rather than truncated. Sized so a batch still fits comfortably in context alongside the
- * instructions, and so one slow or refused batch costs a slice of the answer rather than all of
- * it.
+ * split rather than truncated.
+ *
+ * Kept small because the answer has to survive a round trip through an agent CLI as structured
+ * JSON, and the longer the array the more ways that goes wrong — a truncated or reshaped reply
+ * fails the whole batch. A smaller batch also means one bad reply costs less of the answer.
  */
-const RANKING_BATCH_SIZE = 40;
+const RANKING_BATCH_SIZE = 20;
 
 /**
  * Batches run one after another rather than at once: they go to the same agent CLI, and firing a
