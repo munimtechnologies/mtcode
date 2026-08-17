@@ -5051,7 +5051,9 @@ function ChatViewContent(props: ChatViewProps) {
         clearGoalComposer();
         return;
       }
-      if (isServerThread && !supportsGoal) {
+      // Local drafts must pass the same gate: without it the objective would
+      // be sent as a normal message and the later setGoal call would fail.
+      if (!supportsGoal) {
         toastManager.add(
           stackedThreadToast({
             type: "warning",
