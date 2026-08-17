@@ -171,19 +171,13 @@ export const make = Effect.gen(function* BrowserImportMake() {
     );
     // Try each candidate path and use the first one that exists. Chromium 96+
     // moved the cookie database into `Network/Cookies`, so both locations are
-    // checked. The stat is synchronous because it is a fast local-FS probe and
-    // avoids needing to pick an Effect pipe combinator that varies across
-    // beta releases.
-    const nodeFs = require("node:fs") as typeof import("node:fs");
-    const databasePath = (() => {
-      for (const candidate of candidates) {
-        try {
-          nodeFs.statSync(candidate);
-          return candidate;
-        } catch {}
-      }
-      return undefined;
-    })();
+    // checked. The FileSystem service comes from the captured platformServices
+    // context so this method keeps its empty requirements channel.
+    const fileSystem = Context.get(platformServices, FileSystem.FileSystem);
+    const existing = yield* Effect.forEach(candidates, (candidate) =>
+      fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false)),
+    );
+    const databasePath = candidates.find((_, index) => existing[index]);
     if (databasePath === undefined) {
       // A profile we listed moments ago can lose its database before the
       // import runs (browser data cleanup, a profile reset). That is a read
