@@ -510,8 +510,7 @@ function UsageCoverageNotice(props: {
       ))}
       {duplicateSources.length > 0 ? (
         <Text className="text-sm text-foreground-muted">
-          Counted once across environments sharing a transcript directory:{" "}
-          {duplicateSources.join(", ")}
+          Counted once across environments sharing the same source: {duplicateSources.join(", ")}
         </Text>
       ) : null}
     </View>

@@ -26,7 +26,7 @@ export const PROVIDER_PRESENTATION = {
   },
   cursor: {
     label: "Cursor",
-    color: "#8a8a8a",
+    color: "var(--muted-foreground)",
     mark: CursorIcon,
   },
 } satisfies Record<UsageProviderKind, UsageProviderPresentation>;

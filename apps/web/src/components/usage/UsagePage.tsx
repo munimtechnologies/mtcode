@@ -528,8 +528,7 @@ function UsageCoverageNotice({
       ))}
       {duplicateSources.length > 0 ? (
         <span>
-          Counted once across environments sharing a transcript directory:{" "}
-          {duplicateSources.join(", ")}
+          Counted once across environments sharing the same source: {duplicateSources.join(", ")}
         </span>
       ) : null}
     </div>
