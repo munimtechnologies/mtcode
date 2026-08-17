@@ -4,6 +4,7 @@ export type SettingsPath =
   | "/settings/general"
   | "/settings/appearance"
   | "/settings/keybindings"
+  | "/settings/plugins"
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/source-control"
@@ -30,6 +31,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/general": "General",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
+  "/settings/plugins": "Plugins",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
@@ -197,6 +199,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/keybindings",
   },
   {
+    id: "plugin-marketplace",
+    title: "Plugin marketplace",
+    to: "/settings/plugins",
+  },
+  {
     id: "providers",
     title: "Providers",
     to: "/settings/providers",
@@ -204,6 +211,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "agent-browser-access",
     title: "Agent browser access",
+    to: "/settings/integrations",
+    targetId: "browser",
+  },
+  {
+    id: "browser-profiles",
+    title: "Browser profiles",
     to: "/settings/integrations",
     targetId: "browser",
   },

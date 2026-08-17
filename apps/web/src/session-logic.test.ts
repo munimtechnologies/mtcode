@@ -2070,3 +2070,16 @@ describe("rerun workflows", () => {
     expect(spawnRows.map((row) => row.turnId)).toEqual(["turn-1", "turn-2"]);
   });
 });
+
+describe("deriveWorkLogEntries Goal activities", () => {
+  it("labels a Continuation as Continued instead of repeating the Objective", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        kind: "goal.continued",
+        summary: "Reduce p95 below 120ms",
+        tone: "info",
+      }),
+    ]);
+    expect(entry?.label).toBe("Continued");
+  });
+});

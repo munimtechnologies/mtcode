@@ -109,8 +109,10 @@ export function buildLocalDraftThread(
 }
 
 export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
+  // Shell Goal is a compact preview (`objectivePreview`), not OrchestrationThreadGoal.
+  const { goal: _shellGoal, ...shellWithoutGoal } = shell;
   return {
-    ...shell,
+    ...shellWithoutGoal,
     messages: [],
     proposedPlans: [],
     activities: [],
@@ -208,9 +210,6 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") {
-      continue;
-    }
     revokeBlobPreviewUrl(attachment.previewUrl);
   }
 }
@@ -221,7 +220,6 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   }
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") continue;
     if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
     previewUrls.push(attachment.previewUrl);
   }

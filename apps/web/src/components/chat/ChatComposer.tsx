@@ -15,12 +15,21 @@ import {
   isProviderSendTurnSupportedImageMimeType,
   ProviderDriverKind,
   ProviderInstanceId,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
-  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  BUILT_IN_GOAL_SLASH_COMMANDS,
+  composerTextForGoalSlashCommand,
+  isBuiltInGoalSlashCommand,
+  serializeComposerFileLink,
+} from "@t3tools/shared/composerTrigger";
+import {
+  createModelSelection,
+  normalizeModelSlug,
+  resolveReasoningTransition,
+} from "@t3tools/shared/model";
 import {
   memo,
   type ReactNode,
@@ -49,6 +58,7 @@ import {
 } from "./composerMentionDrag";
 import {
   type ComposerImageAttachment,
+  type ComposerPdfAttachment,
   type DraftId,
   type PersistedComposerImageAttachment,
   hydrateImagesFromPersisted,
@@ -62,12 +72,14 @@ import {
   usePromptStashStore,
   type PromptStashEntry,
 } from "../../promptStashStore";
+import { ComposerGoalBadge } from "./ComposerGoalBadge";
 import { ComposerStashBadge } from "./ComposerStashBadge";
+import type { GoalChipAction } from "./GoalChip";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
-import { resolveShortcutCommand } from "../../keybindings";
+import { reasoningCycleDirectionFromCommand, resolveShortcutCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -202,6 +214,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  FileTextIcon,
   PencilRulerIcon,
   type LucideIcon,
   LockIcon,
@@ -211,7 +224,10 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { getProviderInteractionModeToggle } from "../../providerModels";
+import {
+  getProviderInteractionModeToggle,
+  getProviderModelCapabilities,
+} from "../../providerModels";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -480,6 +496,7 @@ export interface ChatComposerHandle {
   getSendContext: () => {
     prompt: string;
     images: ComposerImageAttachment[];
+    pdfs: ComposerPdfAttachment[];
     terminalContexts: TerminalContextDraft[];
     elementContexts: ElementContextDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
@@ -561,6 +578,10 @@ export interface ChatComposerProps {
   // Context window
   activeThreadActivities: Thread["activities"] | undefined;
 
+  // Objective
+  threadGoal: Thread["goal"] | null | undefined;
+  onThreadGoalAction?: ((action: GoalChipAction) => void) | undefined;
+
   // Misc
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -571,6 +592,7 @@ export interface ChatComposerProps {
   // Refs the parent needs kept in sync
   promptRef: React.RefObject<string>;
   composerImagesRef: React.RefObject<ComposerImageAttachment[]>;
+  composerPdfsRef: React.RefObject<ComposerPdfAttachment[]>;
   composerTerminalContextsRef: React.RefObject<TerminalContextDraft[]>;
   composerElementContextsRef: React.RefObject<ElementContextDraft[]>;
   composerRef: React.RefObject<ChatComposerHandle | null>;
@@ -648,6 +670,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeThreadActivities,
+    threadGoal,
+    onThreadGoalAction,
     resolvedTheme,
     settings,
     keybindings,
@@ -656,6 +680,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptRef,
     composerRef,
     composerImagesRef,
+    composerPdfsRef,
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
@@ -684,16 +709,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerDraft = useComposerThreadDraft(composerDraftTarget);
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
+  const composerPdfs = composerDraft.pdfs;
   const composerTerminalContexts = composerDraft.terminalContexts;
   const composerElementContexts = composerDraft.elementContexts;
   const composerPreviewAnnotations = composerDraft.previewAnnotations;
   const composerReviewComments = composerDraft.reviewComments;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
+  const nonPersistedComposerPdfIds = composerDraft.nonPersistedPdfIds;
 
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
+  const addComposerDraftPdfs = useComposerDraftStore((store) => store.addPdfs);
+  const removeComposerDraftPdf = useComposerDraftStore((store) => store.removePdf);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
   );
@@ -1004,7 +1034,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () =>
       deriveComposerSendState({
         prompt,
-        imageCount: composerImages.length,
+        imageCount: composerImages.length + composerPdfs.length,
         terminalContexts: composerTerminalContexts,
         elementContextCount:
           composerElementContexts.length +
@@ -1014,6 +1044,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       composerElementContexts.length,
       composerImages.length,
+      composerPdfs.length,
       composerPreviewAnnotations.length,
       composerReviewComments.length,
       composerTerminalContexts,
@@ -1054,6 +1085,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
+        ...BUILT_IN_GOAL_SLASH_COMMANDS.map((item) => ({
+          id: `slash:${item.command.replaceAll(" ", "-")}`,
+          type: "slash-command" as const,
+          command: item.command,
+          label: item.label,
+          description: item.description,
+        })),
         ...(planModeUiEnabled
           ? ([
               {
@@ -1073,16 +1111,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ] as const)
           : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-      const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
-        (command) => ({
+      const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? [])
+        .filter((command) => command.name.toLowerCase() !== "goal")
+        .map((command) => ({
           id: `provider-slash-command:${selectedProvider}:${command.name}`,
           type: "provider-slash-command" as const,
           provider: selectedProvider,
           command,
           label: `/${command.name}`,
           description: command.description ?? command.input?.hint ?? "Run provider command",
-        }),
-      );
+        }));
       const query = composerTrigger.query.trim().toLowerCase();
       const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
       if (!query) {
@@ -1284,6 +1322,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, removeComposerDraftImage],
   );
 
+  const addComposerPdfsToDraft = useCallback(
+    (pdfs: ComposerPdfAttachment[]) => {
+      addComposerDraftPdfs(composerDraftTarget, pdfs);
+    },
+    [addComposerDraftPdfs, composerDraftTarget],
+  );
+
+  const removeComposerPdfFromDraft = useCallback(
+    (pdfId: string) => {
+      removeComposerDraftPdf(composerDraftTarget, pdfId);
+    },
+    [composerDraftTarget, removeComposerDraftPdf],
+  );
+
   const removeComposerTerminalContextFromDraft = useCallback(
     (contextId: string) => {
       const contextIndex = composerTerminalContexts.findIndex(
@@ -1339,6 +1391,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useEffect(() => {
     composerImagesRef.current = composerImages;
   }, [composerImages, composerImagesRef]);
+
+  useEffect(() => {
+    composerPdfsRef.current = composerPdfs;
+  }, [composerPdfs, composerPdfsRef]);
 
   useEffect(() => {
     composerTerminalContextsRef.current = composerTerminalContexts;
@@ -1486,7 +1542,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (composerImages.length === 0) {
+      const composerAttachments = [...composerImages, ...composerPdfs];
+      if (composerAttachments.length === 0) {
         clearComposerDraftPersistedAttachments(composerDraftTarget);
         return;
       }
@@ -1499,20 +1556,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
         const stagedAttachmentById = new Map<string, PersistedComposerImageAttachment>();
         await Promise.all(
-          composerImages.map(async (image) => {
+          composerAttachments.map(async (attachment) => {
             try {
-              const dataUrl = await readFileAsDataUrl(image.file);
-              stagedAttachmentById.set(image.id, {
-                id: image.id,
-                name: image.name,
-                mimeType: image.mimeType,
-                sizeBytes: image.sizeBytes,
+              const dataUrl = await readFileAsDataUrl(attachment.file);
+              stagedAttachmentById.set(attachment.id, {
+                id: attachment.id,
+                type: attachment.type,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                sizeBytes: attachment.sizeBytes,
                 dataUrl,
               });
             } catch {
-              const existingPersisted = existingPersistedById.get(image.id);
+              const existingPersisted = existingPersistedById.get(attachment.id);
               if (existingPersisted) {
-                stagedAttachmentById.set(image.id, existingPersisted);
+                stagedAttachmentById.set(attachment.id, existingPersisted);
               }
             }
           }),
@@ -1521,11 +1579,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (cancelled) return;
         syncComposerDraftPersistedAttachments(composerDraftTarget, serialized);
       } catch {
-        const currentImageIds = new Set(composerImages.map((image) => image.id));
+        const currentAttachmentIds = new Set(
+          composerAttachments.map((attachment) => attachment.id),
+        );
         const fallbackPersistedAttachments = getPersistedAttachmentsForThread();
         const fallbackPersistedIds: Array<string> = [];
         for (const attachment of fallbackPersistedAttachments) {
-          if (currentImageIds.has(attachment.id)) {
+          if (currentAttachmentIds.has(attachment.id)) {
             fallbackPersistedIds.push(attachment.id);
           }
         }
@@ -1544,6 +1604,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     clearComposerDraftPersistedAttachments,
     composerImages,
+    composerPdfs,
     getComposerDraft,
     syncComposerDraftPersistedAttachments,
   ]);
@@ -1716,6 +1777,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           if (applied) {
             setComposerHighlightedItemId(null);
             setIsComposerModelPickerOpen(true);
+          }
+          return;
+        }
+        if (isBuiltInGoalSlashCommand(item.command)) {
+          const replacement = composerTextForGoalSlashCommand(item.command);
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
           }
           return;
         }
@@ -2110,14 +2189,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [takeStashEntry],
   );
 
-  const stashCurrentPrompt = useCallback(async () => {
+  // Returns true when the composer held nothing or the draft was parked and
+  // cleared; false when the composer still holds an unparked draft.
+  const stashCurrentPrompt = useCallback(async (): Promise<boolean> => {
     // Terminal-context placeholders reference live sessions the stash can't
     // round-trip, so they are stripped from the stashed prompt.
     const prompt = promptRef.current.split(INLINE_TERMINAL_CONTEXT_PLACEHOLDER).join("").trim();
     const images = [...composerImagesRef.current];
+    const pdfs = [...composerPdfsRef.current];
+    if (pdfs.length > 0) {
+      toastManager.add({
+        type: "warning",
+        title: "PDFs cannot be stashed yet",
+        description:
+          "Send the PDF message directly, or remove the PDF before stashing this prompt.",
+      });
+      return;
+    }
     if (prompt.length === 0 && images.length === 0) {
       setIsStashMenuOpen((open) => !open);
-      return;
+      return true;
     }
     // A repeat ⌘S on the *same* still-unencoded snapshot would stash it
     // twice. Guard on the snapshot itself rather than a bare boolean: once
@@ -2127,7 +2218,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const snapshotKey = `${String(composerDraftTarget)} ${prompt} ${images
       .map((image) => image.id)
       .join(",")}`;
-    if (stashInFlightRef.current.has(snapshotKey)) return;
+    if (stashInFlightRef.current.has(snapshotKey)) return false;
     stashInFlightRef.current.add(snapshotKey);
 
     const stashTarget = composerDraftTarget;
@@ -2160,7 +2251,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             "Browser storage rejected the write, so the composer was left as-is. Free up site data and try again.",
           data: { hideCopyButton: true },
         });
-        return;
+        return false;
       }
       // Written but only into the in-memory fallback (localStorage blocked):
       // the entry is visible and restorable this session, so proceed with the
@@ -2252,6 +2343,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data: { hideCopyButton: true },
         });
       }
+      return true;
     } finally {
       // Must clear on every path: a throw that left this set would wedge this
       // snapshot's ⌘S until the composer remounts.
@@ -2292,9 +2384,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           modelPickerOpen: isComposerModelPickerOpen,
         },
       });
-      if (command !== "composer.stash") return;
-      // Always claim the shortcut so the browser save dialog never opens,
-      // even when the composer is in a state that can't stash.
+      const reasoningDirection = reasoningCycleDirectionFromCommand(command);
+      if (command !== "composer.stash" && reasoningDirection === null) return;
+      // Always claim recognized composer shortcuts, including in states where
+      // the requested mutation is unavailable.
       event.preventDefault();
       event.stopPropagation();
       if (
@@ -2306,30 +2399,79 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ) {
         return;
       }
+      if (reasoningDirection !== null) {
+        const currentModelOptions = composerModelOptions?.[selectedInstanceId];
+        const transition = resolveReasoningTransition({
+          capabilities: getProviderModelCapabilities(
+            selectedProviderModels,
+            selectedModel,
+            selectedProvider,
+          ),
+          modelOptions: currentModelOptions,
+          prompt: promptRef.current,
+          action: { type: "cycle", direction: reasoningDirection },
+        });
+        if (transition.status === "changed") {
+          if (transition.prompt !== promptRef.current) {
+            setPromptFromTraits(transition.prompt);
+          }
+          if (transition.modelOptions !== currentModelOptions) {
+            setProviderModelOptions(
+              composerDraftTarget,
+              selectedProvider,
+              transition.modelOptions,
+              {
+                instanceId: selectedInstanceId,
+                model: selectedModel,
+                persistSticky: true,
+              },
+            );
+          }
+        } else if (transition.status === "blocked") {
+          toastManager.add({
+            type: "info",
+            title: "Remove “ultrathink” from the prompt text to change reasoning.",
+          });
+        } else if (transition.status === "unsupported") {
+          toastManager.add({
+            type: "info",
+            title: "This model does not advertise reasoning levels.",
+          });
+        }
+        return;
+      }
       void stashCurrentPrompt();
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     activePendingProgress,
+    composerDraftTarget,
+    composerModelOptions,
     isComposerApprovalState,
     isComposerModelPickerOpen,
     keybindings,
     pendingUserInputs.length,
     projectSelectionRequired,
+    selectedInstanceId,
+    selectedModel,
+    selectedProvider,
+    selectedProviderModels,
+    setPromptFromTraits,
+    setProviderModelOptions,
     stashCurrentPrompt,
     terminalOpen,
   ]);
 
   // ------------------------------------------------------------------
-  // Callbacks: images
+  // Callbacks: attachments
   // ------------------------------------------------------------------
   const addComposerImages = async (files: File[]) => {
     if (!activeThreadId || files.length === 0) return;
     if (pendingUserInputs.length > 0) {
       toastManager.add({
         type: "error",
-        title: "Attach images after answering plan questions.",
+        title: "Attach files after answering plan questions.",
       });
       return;
     }
@@ -2342,12 +2484,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // accepted files reserve their attachment slots (via the pending counter)
     // before the first await, keeping the total under the limit.
     const pendingCount = pendingImageCompressionsRef.current.get(threadId) ?? 0;
-    let reservedCount = composerImagesRef.current.length + pendingCount;
+    let reservedCount =
+      composerImagesRef.current.length + composerPdfsRef.current.length + pendingCount;
     const acceptedFiles: File[] = [];
     let error: string | null = null;
     for (const file of files) {
-      if (!file.type.startsWith("image/")) {
-        error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
+      const mimeType = file.type.toLowerCase();
+      const isPdf = mimeType === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      if (isPdf && selectedProvider === "codex") {
+        error = "Codex does not support PDF attachments. Choose another provider for this file.";
+        continue;
+      }
+      if (!mimeType.startsWith("image/") && !isPdf) {
+        error = `Unsupported file type for '${file.name}'. Please attach image or PDF files only.`;
         continue;
       }
       if (!isProviderSendTurnSupportedImageMimeType(file.type)) {
@@ -2355,7 +2504,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         continue;
       }
       if (reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
         break;
       }
       acceptedFiles.push(file);
@@ -2367,11 +2516,37 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pendingImageCompressionsRef.current.set(threadId, pendingCount + acceptedFiles.length);
     try {
       const nextImages: ComposerImageAttachment[] = [];
+      const nextPdfs: ComposerPdfAttachment[] = [];
       let compressionError: string | null = null;
       for (const file of acceptedFiles) {
+        const isPdf =
+          file.type.toLowerCase() === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+        if (isPdf) {
+          if (file.size <= 0 || file.size > PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES) {
+            compressionError = `'${file.name}' is empty or exceeds the 10 MB PDF attachment limit.`;
+            continue;
+          }
+          const attachmentFile =
+            file.type.toLowerCase() === "application/pdf"
+              ? file
+              : new File([file], file.name, { type: "application/pdf" });
+          nextPdfs.push({
+            type: "pdf",
+            id: randomUUID(),
+            name: attachmentFile.name || "document.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: attachmentFile.size,
+            previewUrl: URL.createObjectURL(attachmentFile),
+            file: attachmentFile,
+          });
+          continue;
+        }
         // Images over the wire cap are downscaled to fit rather than
         // refused; files already within it pass through byte-for-byte.
-        const compressed = await compressImageToByteLimit(file, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+        const compressed = await compressImageToByteLimit(
+          file,
+          PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES,
+        );
         if (!compressed.ok) {
           compressionError =
             compressed.reason === "unreadable"
@@ -2396,6 +2571,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       } else if (nextImages.length > 1) {
         addComposerImagesToDraft(nextImages);
       }
+      if (nextPdfs.length > 0) {
+        addComposerPdfsToDraft(nextPdfs);
+      }
       // Only failures are reported here. Success must not pass `null`: by
       // now other work (a failed send, an overlapping paste) may have set a
       // thread error this call knows nothing about, and clearing it would
@@ -2418,16 +2596,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     removeComposerImageFromDraft(imageId);
   };
 
+  const removeComposerPdf = (pdfId: string) => {
+    removeComposerPdfFromDraft(pdfId);
+  };
+
   // ------------------------------------------------------------------
   // Callbacks: paste / drag
   // ------------------------------------------------------------------
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) return;
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
+    const attachmentFiles = files.filter(
+      (file) =>
+        file.type.toLowerCase().startsWith("image/") ||
+        file.type.toLowerCase() === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf"),
+    );
+    if (attachmentFiles.length === 0) return;
     event.preventDefault();
-    void addComposerImages(imageFiles);
+    void addComposerImages(attachmentFiles);
   };
 
   const insertComposerTextAtEnd = (
@@ -2622,6 +2809,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
+        pdfs: composerPdfsRef.current,
         terminalContexts: composerTerminalContextsRef.current,
         elementContexts: composerElementContextsRef.current,
         previewAnnotations: composerPreviewAnnotations,
@@ -2654,6 +2842,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       insertComposerDraftTerminalContext,
       promptRef,
       composerImagesRef,
+      composerPdfsRef,
       composerTerminalContextsRef,
       composerElementContextsRef,
       composerPreviewAnnotations,
@@ -2882,6 +3071,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               isComposerCollapsedMobile && "hidden",
             )}
           >
+            <ComposerGoalBadge
+              goal={threadGoal}
+              isWorking={threadGoal?.status === "active" && phase === "running"}
+              onAction={onThreadGoalAction}
+              // While a pending question owns the composer text, editing the
+              // Objective would overwrite the custom answer instead.
+              onEdit={
+                activePendingProgress
+                  ? undefined
+                  : (objective) => {
+                      void (async () => {
+                        // Loading the Objective replaces the whole prompt; park
+                        // a typed draft in the stash so the click is recoverable.
+                        // If the stash write was rejected the draft is still
+                        // there, so leave it alone instead of destroying it.
+                        if (promptRef.current.trim().length > 0 && !(await stashCurrentPrompt())) {
+                          return;
+                        }
+                        applyPromptReplacement(0, promptRef.current.length, `/goal ${objective}`);
+                      })();
+                    }
+              }
+            />
             <ComposerStashBadge
               count={stashQueue.length}
               pulseKey={stashPulse.key}
@@ -3042,6 +3254,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 </div>
               )}
 
+            {!isComposerCollapsedMobile &&
+              !isComposerApprovalState &&
+              pendingUserInputs.length === 0 &&
+              composerPdfs.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {composerPdfs.map((pdf) => (
+                    <div
+                      key={pdf.id}
+                      className="relative flex h-16 max-w-56 items-center gap-2 rounded-lg border border-border/80 bg-background px-3 pr-8"
+                    >
+                      <FileTextIcon className="size-5 shrink-0 text-red-500" />
+                      <span className="truncate text-xs" title={pdf.name}>
+                        {pdf.name}
+                      </span>
+                      {nonPersistedComposerPdfIds.includes(pdf.id) && (
+                        <CircleAlertIcon
+                          className="absolute left-1 top-1 size-3 text-amber-600"
+                          aria-label="Draft PDF may not persist"
+                        />
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="absolute right-1 top-1"
+                        onClick={() => removeComposerPdf(pdf.id)}
+                        aria-label={`Remove ${pdf.name}`}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
             <div className="relative">
               <ComposerPromptEditor
                 editorRef={composerEditorRef}
@@ -3076,7 +3322,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           : noProviderAvailable
                             ? "Enable a provider in Settings to send a message"
                             : phase === "disconnected"
-                              ? "Ask for follow-up changes or attach images"
+                              ? "Ask for follow-up changes or attach files"
                               : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}

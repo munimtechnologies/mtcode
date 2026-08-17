@@ -3,6 +3,7 @@
 ## Using T3 Code
 
 - [Install and first run](./user/install.md)
+- [Keep working toward an Objective](./user/goals.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)
@@ -15,6 +16,7 @@
 - [Usage reports](./user/usage.md)
 - [Background service (Linux)](./user/background-service.md)
 - Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
+- [Plugins](./user/plugins.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 

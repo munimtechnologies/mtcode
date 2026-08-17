@@ -8,6 +8,8 @@ import {
   Globe2,
   Plus,
   TerminalSquare,
+  Volume2,
+  VolumeOff,
   X,
 } from "lucide-react";
 import {
@@ -29,7 +31,16 @@ import { readLocalApi } from "~/localApi";
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Kbd } from "~/components/ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "~/components/ui/menu";
+import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
@@ -37,6 +48,7 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
+import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 
 interface RightPanelTabsProps {
@@ -52,6 +64,12 @@ interface RightPanelTabsProps {
   pendingSurfaceIds: ReadonlySet<string>;
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>;
+  /**
+   * Maps a server session tab id to the desktop runtime tab id the Electron
+   * preview manager is keyed by. Session ids are only unique within one server
+   * process, so desktop operations must not be addressed with them.
+   */
+  previewRuntimeTabId?: ((tabId: string) => string) | undefined;
   terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
@@ -60,6 +78,12 @@ interface RightPanelTabsProps {
   onCloseAllSurfaces: () => void;
   onCopyFilePath: (relativePath: string) => void;
   onAddBrowser: () => void;
+  /**
+   * Separate from `onAddBrowser` on purpose: that one is passed directly as a
+   * DOM click handler, and a `(profileId?: string)` signature would silently
+   * accept the MouseEvent as a profile id.
+   */
+  onAddBrowserInProfile: (profileId: string) => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
@@ -116,7 +140,36 @@ const SURFACE_UNAVAILABLE_HINTS = {
   agents: "Available from a thread.",
 } as const;
 
-type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
+type TabContextMenuAction =
+  | "copy-path"
+  | "toggle-mute"
+  | "close"
+  | "close-others"
+  | "close-to-right"
+  | "close-all";
+
+/**
+ * Desktop preview tab backing a surface, or null for non-preview surfaces, the
+ * "new browser tab" placeholder, and the web build where no desktop tab exists.
+ */
+function previewTabIdOf(
+  surface: RightPanelSurface,
+  sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
+): string | null {
+  if (surface.kind !== "preview" || !surface.resourceId) return null;
+  return sessions[surface.resourceId]?.tabId ?? null;
+}
+
+type TabAudioState = "none" | "audible" | "muted";
+
+/**
+ * A muted tab that is not making sound shows nothing: mute is armed silently,
+ * and the indicator only appears once there is audio to speak of.
+ */
+function tabAudioState(overlay: DesktopPreviewOverlay | null): TabAudioState {
+  if (!overlay?.audible) return "none";
+  return overlay.audioMuted ? "muted" : "audible";
+}
 
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
   return (
@@ -516,6 +569,10 @@ function SurfaceIcon({
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
+  const browserProfiles = useBrowserDefaults().profiles;
+  // Controlled so the submenu trigger's own action can dismiss the menu; a
+  // submenu trigger does not close it the way a plain item does.
+  const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
 
@@ -533,6 +590,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       const items: ContextMenuItem<TabContextMenuAction>[] = [];
       if (surface.kind === "file") {
         items.push({ id: "copy-path", label: "Copy path" });
+      }
+      const menuPreviewTabId = previewTabIdOf(surface, props.previewSessions);
+      const menuMuted = menuPreviewTabId
+        ? (props.desktopByTabId[menuPreviewTabId]?.audioMuted ?? false)
+        : false;
+      if (surface.kind === "preview") {
+        // Not gated on audibility: silencing a quiet tab ahead of time is the
+        // point, so the item is always offered once the tab has a guest.
+        items.push({
+          id: "toggle-mute",
+          label: menuMuted ? "Unmute tab" : "Mute tab",
+          disabled: menuPreviewTabId === null || props.previewRuntimeTabId === undefined,
+        });
       }
       items.push(
         { id: "close", label: "Close" },
@@ -558,6 +628,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         case "copy-path":
           if (surface.kind === "file") props.onCopyFilePath(surface.relativePath);
           break;
+        case "toggle-mute": {
+          const runtimeTabId = menuPreviewTabId
+            ? (props.previewRuntimeTabId?.(menuPreviewTabId) ?? null)
+            : null;
+          if (runtimeTabId) {
+            void previewBridge?.setAudioMuted(runtimeTabId, !menuMuted).catch(() => undefined);
+          }
+          break;
+        }
         case "close":
           props.onCloseSurface(surface);
           break;
@@ -626,6 +705,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const previewTabId = previewTabIdOf(surface, props.previewSessions);
+              // Desktop state is keyed by the session id, but desktop actions
+              // must be addressed with the runtime id.
+              const audio = tabAudioState(
+                previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
+              );
+              const audioRuntimeTabId = previewTabId
+                ? (props.previewRuntimeTabId?.(previewTabId) ?? null)
+                : null;
               return (
                 <div
                   key={surface.id}
@@ -663,6 +751,34 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     </span>
                     <X className="hidden size-3 group-hover/tab:block group-focus-visible/close:block" />
                   </button>
+                  {audio === "none" || !audioRuntimeTabId ? null : (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="cursor-pointer flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
+                            aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
+                            onClick={(event) => {
+                              // Sibling of the close button, inside a tab that
+                              // activates on click: keep this to the toggle.
+                              event.stopPropagation();
+                              void previewBridge
+                                ?.setAudioMuted(audioRuntimeTabId, audio !== "muted")
+                                .catch(() => undefined);
+                            }}
+                          >
+                            {audio === "muted" ? (
+                              <VolumeOff className="size-3" />
+                            ) : (
+                              <Volume2 className="size-3" />
+                            )}
+                          </button>
+                        }
+                      />
+                      <TooltipPopup>{audio === "muted" ? "Unmute tab" : "Mute tab"}</TooltipPopup>
+                    </Tooltip>
+                  )}
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -681,7 +797,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               );
             })}
             {props.surfaces.length > 0 ? (
-              <Menu>
+              <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
                 <MenuTrigger
                   render={
                     <Button
@@ -695,14 +811,50 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   <Plus className="size-3.5" />
                 </MenuTrigger>
                 <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                  <SurfaceMenuItem
-                    available={props.browserAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.browser}
-                    onClick={props.onAddBrowser}
-                  >
-                    <Globe2 />
-                    Browser
-                  </SurfaceMenuItem>
+                  {props.browserAvailable ? (
+                    <MenuSub>
+                      {/*
+                        Clicking the trigger opens the default profile, so the
+                        common case stays one click and there is no second row;
+                        hover or arrow reveals the rest. The choice lives at
+                        open time because a tab's profile is fixed then —
+                        Electron only honours a partition before attach.
+                      */}
+                      <MenuSubTrigger
+                        onClick={() => {
+                          setAddSurfaceMenuOpen(false);
+                          props.onAddBrowser();
+                        }}
+                      >
+                        <Globe2 />
+                        Browser
+                      </MenuSubTrigger>
+                      {/*
+                        Capped and truncated: profile names are user-supplied
+                        and run to 48 characters, which would otherwise widen
+                        the popup to fit-content and wrap.
+                      */}
+                      <MenuSubPopup className="min-w-40 max-w-56">
+                        {browserProfiles.map((profile) => (
+                          <MenuItem
+                            key={profile.id}
+                            onClick={() => props.onAddBrowserInProfile(profile.id)}
+                          >
+                            <span className="min-w-0 truncate">{profile.name}</span>
+                          </MenuItem>
+                        ))}
+                      </MenuSubPopup>
+                    </MenuSub>
+                  ) : (
+                    <SurfaceMenuItem
+                      available={false}
+                      disabledReason={SURFACE_DISABLED_REASONS.browser}
+                      onClick={props.onAddBrowser}
+                    >
+                      <Globe2 />
+                      Browser
+                    </SurfaceMenuItem>
+                  )}
                   <SurfaceMenuItem
                     available={props.terminalAvailable}
                     disabledReason={SURFACE_DISABLED_REASONS.terminal}

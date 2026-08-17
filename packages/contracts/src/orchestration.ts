@@ -149,7 +149,9 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
-export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** @deprecated Use PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES. */
+export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES;
 export const PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES = [
   "image/gif",
   "image/jpeg",
@@ -181,24 +183,52 @@ export const ChatImageAttachment = Schema.Struct({
   id: ChatAttachmentId,
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
   mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
-  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  sizeBytes: NonNegativeInt.check(
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES),
+  ),
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
+
+export const ChatPdfAttachment = Schema.Struct({
+  type: Schema.Literal("pdf"),
+  id: ChatAttachmentId,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: Schema.Literal("application/pdf"),
+  sizeBytes: NonNegativeInt.check(
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES),
+  ),
+});
+export type ChatPdfAttachment = typeof ChatPdfAttachment.Type;
 
 const UploadChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
   mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
-  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  sizeBytes: NonNegativeInt.check(
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES),
+  ),
   dataUrl: TrimmedNonEmptyString.check(
     Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS),
   ),
 });
 export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment]);
+const UploadChatPdfAttachment = Schema.Struct({
+  type: Schema.Literal("pdf"),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: Schema.Literal("application/pdf"),
+  sizeBytes: NonNegativeInt.check(
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES),
+  ),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS),
+  ),
+});
+export type UploadChatPdfAttachment = typeof UploadChatPdfAttachment.Type;
+
+export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatPdfAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+const UploadChatAttachment = Schema.Union([UploadChatImageAttachment, UploadChatPdfAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
@@ -381,6 +411,29 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+export const OrchestrationThreadGoalStatus = Schema.Literals([
+  "active",
+  "paused",
+  "blocked",
+  "usageLimited",
+  "complete",
+]);
+export type OrchestrationThreadGoalStatus = typeof OrchestrationThreadGoalStatus.Type;
+
+export const OrchestrationThreadGoal = Schema.Struct({
+  objective: TrimmedNonEmptyString,
+  status: OrchestrationThreadGoalStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadGoal = typeof OrchestrationThreadGoal.Type;
+
+export const OrchestrationThreadGoalShell = Schema.Struct({
+  status: OrchestrationThreadGoalStatus,
+  objectivePreview: TrimmedNonEmptyString,
+});
+export type OrchestrationThreadGoalShell = typeof OrchestrationThreadGoalShell.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -417,6 +470,9 @@ export const OrchestrationThread = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  // Thread-scoped completion contract. Optional so payloads from pre-Goal
+  // servers still decode.
+  goal: Schema.optional(Schema.NullOr(OrchestrationThreadGoal)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -475,6 +531,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  // Compact Goal summary so the inbox can render without Thread detail.
+  // Optional so older clients still decode shells that omit it.
+  goal: Schema.optional(Schema.NullOr(OrchestrationThreadGoalShell)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -741,6 +800,55 @@ const ThreadUnsnoozeCommand = Schema.Struct({
   reason: Schema.Literal("user"),
 });
 
+const ThreadGoalSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  objective: TrimmedNonEmptyString,
+  // When idle-start records the Objective as a user message, the client may
+  // supply the id so optimistic timeline rows match the persisted event.
+  messageId: Schema.optional(MessageId),
+});
+
+const ThreadGoalPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadGoalResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadGoalClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadGoalCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+// Reactor-only: starts a Continuation Turn with no user message. Not a client RPC.
+const ThreadGoalContinueCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.continue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  completedTurnId: TurnId,
+});
+
+// Reactor-only: empty Continuations or a structured blocked signal. Not a client RPC.
+const ThreadGoalBlockCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.block"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 const ThreadPinCommand = Schema.Struct({
   type: Schema.Literal("thread.pin"),
   commandId: CommandId,
@@ -927,6 +1035,11 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnsettleCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
+  ThreadGoalSetCommand,
+  ThreadGoalPauseCommand,
+  ThreadGoalResumeCommand,
+  ThreadGoalClearCommand,
+  ThreadGoalCompleteCommand,
   ThreadPinCommand,
   ThreadUnpinCommand,
   ThreadPinReorderCommand,
@@ -955,6 +1068,11 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnsettleCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
+  ThreadGoalSetCommand,
+  ThreadGoalPauseCommand,
+  ThreadGoalResumeCommand,
+  ThreadGoalClearCommand,
+  ThreadGoalCompleteCommand,
   ThreadPinCommand,
   ThreadUnpinCommand,
   ThreadPinReorderCommand,
@@ -1052,6 +1170,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadGoalContinueCommand,
+  ThreadGoalBlockCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1073,6 +1193,13 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unsettled",
   "thread.snoozed",
   "thread.unsnoozed",
+  "thread.goal-set",
+  "thread.goal-paused",
+  "thread.goal-resumed",
+  "thread.goal-cleared",
+  "thread.goal-completed",
+  "thread.goal-blocked",
+  "thread.goal-usage-limited",
   "thread.pinned",
   "thread.unpinned",
   "thread.pin-reordered",
@@ -1188,6 +1315,44 @@ export const ThreadUnsnoozedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ThreadGoalSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  objective: TrimmedNonEmptyString,
+  status: Schema.Literal("active"),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalPausedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalResumedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalClearedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalCompletedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalBlockedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalUsageLimitedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
 export const ThreadPinnedPayload = Schema.Struct({
   threadId: ThreadId,
   pinnedAt: IsoDateTime,
@@ -1252,7 +1417,8 @@ export const ThreadMessageSentPayload = Schema.Struct({
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
-  messageId: MessageId,
+  // Continuations have no user message; idle Goal set still supplies one.
+  messageId: Schema.optional(MessageId),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
@@ -1401,6 +1567,41 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unsnoozed"),
     payload: ThreadUnsnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-set"),
+    payload: ThreadGoalSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-paused"),
+    payload: ThreadGoalPausedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-resumed"),
+    payload: ThreadGoalResumedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-cleared"),
+    payload: ThreadGoalClearedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-completed"),
+    payload: ThreadGoalCompletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-blocked"),
+    payload: ThreadGoalBlockedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-usage-limited"),
+    payload: ThreadGoalUsageLimitedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

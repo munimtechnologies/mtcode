@@ -199,6 +199,22 @@ export class MacPasskeySigningConfigurationResolutionError extends Schema.Tagged
   }
 }
 
+export class KeyringNativePackageMissingError extends Schema.TaggedErrorClass<KeyringNativePackageMissingError>()(
+  "KeyringNativePackageMissingError",
+  {
+    packageName: Schema.String,
+    binaryFileName: Schema.String,
+    packageEntryPath: Schema.String,
+    platform: BuildPlatform,
+    arch: BuildArch,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Keyring native package is missing: ${this.packageName}`;
+  }
+}
+
 export class ClerkPasskeyNativePackageMissingError extends Schema.TaggedErrorClass<ClerkPasskeyNativePackageMissingError>()(
   "ClerkPasskeyNativePackageMissingError",
   {
@@ -1084,6 +1100,8 @@ ${associatedDomains}
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
   </dict>
 </plist>
 `;
@@ -1142,6 +1160,69 @@ export function resolveClerkPasskeyNativeArtifacts(
 
   return [];
 }
+
+export function resolveKeyringNativeArtifacts(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): readonly ClerkPasskeyNativeArtifact[] {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+
+  if (platform === "mac") {
+    return architectures.map((architecture) => ({
+      packageName: `@napi-rs/keyring-darwin-${architecture}`,
+      binaryFileName: `keyring.darwin-${architecture}.node`,
+    }));
+  }
+
+  if (platform === "win") {
+    return architectures.map((architecture) => ({
+      packageName: `@napi-rs/keyring-win32-${architecture}-msvc`,
+      binaryFileName: `keyring.win32-${architecture}-msvc.node`,
+    }));
+  }
+
+  return architectures.map((architecture) => ({
+    packageName: `@napi-rs/keyring-linux-${architecture}-gnu`,
+    binaryFileName: `keyring.linux-${architecture}-gnu.node`,
+  }));
+}
+
+/**
+ * Same nesting problem as the Clerk passkey binaries: pnpm keeps the platform
+ * package under `@napi-rs/keyring`, electron-builder only retains collected
+ * top-level dependencies, and the generated loader checks for a sibling
+ * `keyring.<platform>.node` before falling back to the package. Staging the
+ * binary beside `index.js` lets that first branch win.
+ */
+const stageKeyringNativeBinaries = Effect.fn("stageKeyringNativeBinaries")(function* (
+  stageAppDir: string,
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const packageEntryPath = yield* fs.realPath(
+    path.join(stageAppDir, "node_modules", "@napi-rs", "keyring", "index.js"),
+  );
+  const packageDir = path.dirname(packageEntryPath);
+  const packageRequire = NodeModule.createRequire(packageEntryPath);
+
+  for (const artifact of resolveKeyringNativeArtifacts(platform, arch)) {
+    const sourcePath = yield* Effect.try({
+      try: () => packageRequire.resolve(`${artifact.packageName}/${artifact.binaryFileName}`),
+      catch: (cause) =>
+        new KeyringNativePackageMissingError({
+          packageName: artifact.packageName,
+          binaryFileName: artifact.binaryFileName,
+          packageEntryPath,
+          platform,
+          arch,
+          cause,
+        }),
+    });
+    yield* fs.copyFile(sourcePath, path.join(packageDir, artifact.binaryFileName));
+  }
+});
 
 // pnpm nests the architecture package under @clerk/electron-passkeys, while electron-builder only
 // retains collected top-level dependencies. The SDK loader checks beside index.js first, so stage
@@ -2284,7 +2365,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // other MCP server we spawn silently fail to drive other apps.
       extendInfo: {
         NSAppleEventsUsageDescription:
-          "This app needs to control other apps to run Computer Use automations you approve.",
+          "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",
       },
       protocols: [
         {
@@ -2467,6 +2548,40 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
 // ELECTRON_RUN_AS_NODE runtime; enabling WSL extracts it to a real directory.
 // Shipping one packed archive instead of thousands of loose files is what
 // makes the NSIS install/update fast.
+function packedAsarPayloadBytes(directory: DirectoryRecord): number {
+  let bytes = 0;
+  for (const entry of Object.values(directory.files)) {
+    if ("files" in entry) {
+      bytes = Math.max(bytes, packedAsarPayloadBytes(entry));
+    } else if (!entry.unpacked) {
+      bytes = Math.max(bytes, Number(entry.offset) + entry.size);
+    }
+  }
+  return bytes;
+}
+
+const waitForAsarWriteCompletion = Effect.fn("waitForAsarWriteCompletion")(function* (
+  asarPath: string,
+) {
+  const { header, headerSize } = yield* Effect.try({
+    try: () => getRawHeader(asarPath),
+    catch: (cause) => new WindowsServerSidecarPackError({ asarPath, cause }),
+  });
+  const expectedBytes = 8 + headerSize + packedAsarPayloadBytes(header);
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const stat = yield* Effect.tryPromise({
+      try: () => NodeFSP.stat(asarPath),
+      catch: (cause) => new WindowsServerSidecarPackError({ asarPath, cause }),
+    });
+    if (stat.size >= expectedBytes) return;
+    yield* Effect.sleep("100 millis");
+  }
+  return yield* new WindowsServerSidecarPackError({
+    asarPath,
+    cause: new Error(`ASAR writer did not flush ${expectedBytes} bytes to ${asarPath}.`),
+  });
+});
+
 export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function* (input: {
   readonly sourceDir: string;
   readonly asarPath: string;
@@ -2481,6 +2596,7 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
       }),
     catch: (cause) => new WindowsServerSidecarPackError({ asarPath: input.asarPath, cause }),
   });
+  yield* waitForAsarWriteCompletion(input.asarPath);
   const unpackedDirPath = `${input.asarPath}.unpacked`;
   if (!(yield* fs.exists(unpackedDirPath))) {
     return yield* new WindowsServerSidecarPackError({
@@ -3186,6 +3302,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { label: "vp install --prod", verbose: options.verbose },
   );
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
+  yield* stageKeyringNativeBinaries(stageAppDir, options.platform, options.arch);
 
   // WSL is Windows-only, so only the Windows artifact carries the server
   // sidecar (which embeds the Linux node-pty prebuild); other platforms

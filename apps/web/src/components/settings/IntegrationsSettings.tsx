@@ -7,7 +7,12 @@
  * @module IntegrationsSettings
  */
 import {
+  BrowserImportFailureReason,
+  BROWSER_PROFILE_MAX_COUNT,
+  type BrowserProfile,
+  BROWSER_PROFILE_NAME_MAX_LENGTH,
   DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
+  DEFAULT_BROWSER_PROFILE_ID,
   DEFAULT_BROWSER_VIEWPORT,
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_UNIFIED_SETTINGS,
@@ -17,17 +22,47 @@ import {
   PREVIEW_VIEWPORT_MAX_DIMENSION,
   PREVIEW_VIEWPORT_MIN_DIMENSION,
   PREVIEW_ZOOM_LEVELS,
+  findBrowserProfile,
+  isBuiltInBrowserProfileId,
+  resolveBrowserProfiles,
+  type BrowserImportSource,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
-import { InfoIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { InfoIcon, MoreVertical, Plus as PlusIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
+import { previewBridge } from "~/components/preview/previewBridge";
+import { cn, randomUUID } from "~/lib/utils";
+import { usePrimaryEnvironment } from "~/state/environments";
 import { isElectron } from "../../env";
 
+import { Badge } from "../ui/badge";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
+import { readLocalApi } from "~/localApi";
+
+import { toastManager } from "../ui/toast";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { DraftInput } from "../ui/draft-input";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
 import {
   Select,
@@ -53,6 +88,8 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
+import type { ImportOutcome } from "./browserImportWizard.logic";
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
@@ -73,6 +110,19 @@ const APPEARANCE_LABELS: Readonly<Record<PreviewAppearancePreference, string>> =
 };
 
 const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
+
+/**
+ * IPC flattens the failure to its message, so the reason token travels inside
+ * it. Anything unrecognised reads as a plain read failure rather than leaking
+ * the raw message into a toast.
+ */
+export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
+  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
+  return (
+    BrowserImportFailureReason.literals.find((reason) => message.includes(`failed: ${reason}.`)) ??
+    "readFailed"
+  );
+};
 
 const viewportSelectValue = (viewport: PreviewViewportSetting): string => {
   if (viewport._tag === "fill") return FILL_VALUE;
@@ -453,11 +503,373 @@ function DesktopOnlyBrowserDefaults({ children }: { readonly children: ReactNode
   );
 }
 
+/**
+ * Profile list, its header menu, and the import flow.
+ *
+ * One menu creates profiles and imports into them, because the two are the
+ * same decision from the user's side: "I want a profile that has my Helium
+ * logins in it". Import targets include "New profile" so that case does not
+ * require creating one first and then finding a second control.
+ *
+ * Built-ins render without a rename field: they are synthesized rather than
+ * stored, so there is nothing to rename and removing them would strand every
+ * tab that opened under them.
+ *
+ * Sources are listed lazily on open: detection touches the other browser's
+ * files, and the answer changes while the app is running (quitting the browser
+ * clears `browserRunning`), so a value cached at mount would go stale.
+ */
+/**
+ * Opens System Settings → Privacy & Security → Full Disk Access. The scheme is
+ * unchanged from the old System Preferences and still resolves on Ventura and
+ * later.
+ */
+const FULL_DISK_ACCESS_SETTINGS_URL =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFilesAccess";
+
+function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
+  const userProfiles = useClientSettings((settings) => settings.browserProfiles);
+  const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
+  const updateSettings = useUpdatePrimarySettings();
+  const environmentId = usePrimaryEnvironment()?.environmentId;
+  const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource> | null>(null);
+  const [importSource, setImportSource] = useState<BrowserImportSource | null>(null);
+  const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
+
+  const profiles = resolveBrowserProfiles(userProfiles);
+  // Incognito is deliberately not a row — it holds nothing to manage — so the
+  // default has to resolve against the list that renders. A stored
+  // `browserDefaultProfileId` of "incognito" would otherwise leave the section
+  // with no Default badge at all.
+  const listedProfiles = profiles.filter((profile) => profile.kind !== "incognito");
+  const resolvedDefaultId =
+    findBrowserProfile(listedProfiles, defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID;
+
+  const uniqueName = (base: string) => {
+    const taken = new Set(profiles.map((profile) => profile.name));
+    if (!taken.has(base)) return base;
+    for (let index = 2; ; index += 1) {
+      const candidate = `${base} ${index}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+  };
+
+  const createProfile = (name: string) => {
+    const profile = {
+      id: `profile-${randomUUID()}`,
+      name: uniqueName(name),
+      kind: "persistent" as const,
+    };
+    updateSettings({ browserProfiles: [...userProfiles, profile] });
+    return profile;
+  };
+
+  const renameProfile = (id: string, next: string) => {
+    const name = next.trim().slice(0, BROWSER_PROFILE_NAME_MAX_LENGTH);
+    if (name === "") return;
+    updateSettings({
+      browserProfiles: userProfiles.map((profile) =>
+        profile.id === id ? { ...profile, name } : profile,
+      ),
+    });
+  };
+
+  const clearProfileData = (id: string, name: string) => {
+    // Reported rather than ignored: the menu item stays enabled in this
+    // window, so bailing silently reads as a dead control. Matches what
+    // `importInto` says for the same precondition.
+    if (!environmentId || !previewBridge) {
+      toastManager.add({
+        type: "error",
+        title: `Could not clear ${name}'s data`,
+        description: "No environment is connected yet.",
+      });
+      return;
+    }
+    void Promise.all([
+      previewBridge.clearCookies(environmentId, id),
+      previewBridge.clearCache(environmentId, id),
+    ])
+      .then(() => {
+        toastManager.add({ type: "success", title: `Cleared ${name}'s cookies and cache` });
+      })
+      .catch(() => {
+        toastManager.add({ type: "error", title: `Could not clear ${name}'s data` });
+      });
+  };
+
+  const removeProfile = (id: string) => {
+    setProfilePendingRemoval(null);
+    // Drop the partition's data too, otherwise a removed profile's cookies
+    // stay on disk with nothing in the UI pointing at them.
+    if (environmentId) {
+      void previewBridge?.clearCookies(environmentId, id).catch(() => undefined);
+      void previewBridge?.clearCache(environmentId, id).catch(() => undefined);
+    }
+    updateSettings({
+      browserProfiles: userProfiles.filter((profile) => profile.id !== id),
+      ...(defaultProfileId === id ? { browserDefaultProfileId: DEFAULT_BROWSER_PROFILE_ID } : {}),
+    });
+  };
+
+  // A browser that is not on this machine is left out rather than listed as a
+  // dead row: there is nothing to act on, and the menu is a list of things you
+  // can import from. Every other unavailable reason stays, since each names a
+  // step the user can take.
+  const importableSources = (sources ?? []).filter(
+    (source) => source.unavailable !== "notInstalled",
+  );
+
+  // Refreshed without blanking the last result: the menu shows the cached list
+  // straight away so it doesn't reflow on open, and the source list is stable
+  // (names only) since choosing what to import happens in the wizard, not here.
+  const loadSources = () => {
+    if (!previewBridge) return;
+    void previewBridge
+      .listBrowserImportSources()
+      .then(setSources)
+      .catch(() => setSources((previous) => previous ?? []));
+  };
+
+  // Loaded once so the first open is instant instead of flashing a spinner.
+  useEffect(() => {
+    loadSources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Runs one import for the wizard. A new profile is registered only once the
+  // import succeeds — the cookies land in its partition first — so a blocked
+  // attempt never leaves an empty profile behind.
+  const runWizardImport = async (
+    source: BrowserImportSource,
+    input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
+  ): Promise<ImportOutcome> => {
+    if (!environmentId || !previewBridge) return { kind: "blocked", reason: "sessionUnavailable" };
+    try {
+      const result = await previewBridge.importBrowserCookies({
+        environmentId,
+        sourceId: source.id,
+        sourceProfileDirectory: input.sourceProfileDirectory,
+        targetProfileId: input.target.profileId,
+      });
+      let targetName: string;
+      if (input.target.kind === "new") {
+        targetName = uniqueName(source.name);
+        // Registered only when something actually came over: an import that
+        // found no cookies should not leave a new, empty profile behind.
+        if (result.imported > 0) {
+          updateSettings({
+            browserProfiles: [
+              ...userProfiles,
+              { id: input.target.profileId, name: targetName, kind: "persistent" as const },
+            ],
+          });
+        }
+      } else {
+        targetName = input.target.name;
+      }
+      return {
+        kind: "imported",
+        imported: result.imported,
+        skipped: result.skipped,
+        skippedDomains: result.skippedDomains,
+        targetName,
+      };
+    } catch (cause) {
+      return { kind: "blocked", reason: importFailureReason(cause) };
+    }
+  };
+
+  // Re-checks a source's availability after the user quits the browser, and
+  // keeps the cached list in step so the menu reflects it too.
+  const refreshImportSource = async (
+    sourceId: BrowserImportSource["id"],
+  ): Promise<BrowserImportSource | undefined> => {
+    if (!previewBridge) return undefined;
+    try {
+      const latest = await previewBridge.listBrowserImportSources();
+      setSources(latest);
+      return latest.find((source) => source.id === sourceId);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const atProfileLimit = userProfiles.length >= BROWSER_PROFILE_MAX_COUNT;
+
+  return (
+    <SettingsRow
+      {...searchableSetting("browser-profiles")}
+      description="Each profile keeps its own cookies and logins, so a tab opened under one can't see another's. Incognito isn't listed here — it keeps nothing, and you pick it when opening a tab."
+      control={
+        <Menu onOpenChange={(open) => open && loadSources()}>
+          <MenuTrigger render={<Button size="sm" variant="outline" disabled={disabled} />}>
+            <PlusIcon />
+            Add profile
+          </MenuTrigger>
+          <MenuPopup align="end" className="min-w-56">
+            <MenuItem disabled={atProfileLimit} onClick={() => createProfile("New profile")}>
+              Blank profile
+            </MenuItem>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuGroupLabel>Import from</MenuGroupLabel>
+              {sources === null ? (
+                <MenuItem disabled>Looking for browsers…</MenuItem>
+              ) : importableSources.length === 0 ? (
+                <MenuItem disabled>No supported browsers found</MenuItem>
+              ) : (
+                // Every source is a plain row — running, needs-permission and
+                // ready all look the same here. The wizard picks up whatever
+                // state the source is in and walks the user forward from there.
+                importableSources.map((source) => (
+                  <MenuItem key={source.id} onClick={() => setImportSource(source)}>
+                    {source.name}
+                  </MenuItem>
+                ))
+              )}
+            </MenuGroup>
+          </MenuPopup>
+        </Menu>
+      }
+    >
+      {/*
+        The bordered container groups rows unambiguously at any width, and
+        carries the bottom spacing `SettingsRow` leaves to its children
+        (`pt-3 pb-1`).
+      */}
+      <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
+        {listedProfiles.map((profile, index) => {
+          const builtIn = isBuiltInBrowserProfileId(profile.id);
+          const isDefault = profile.id === resolvedDefaultId;
+          return (
+            <div
+              key={profile.id}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2",
+                index > 0 && "border-t border-border/60",
+              )}
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                {builtIn ? (
+                  // Dimmed here rather than on the table: a wrapper-level dim
+                  // stacks with the rename field's and the row menu button's
+                  // own, landing them near 0.41 while every other disabled
+                  // control in the block sits at 0.64.
+                  <span
+                    className={cn("truncate text-sm text-foreground", disabled && "opacity-64")}
+                  >
+                    {profile.name}
+                  </span>
+                ) : (
+                  <DraftInput
+                    nativeInput
+                    size="sm"
+                    className="w-full max-w-56"
+                    aria-label={`Rename ${profile.name}`}
+                    disabled={disabled}
+                    maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
+                    value={profile.name}
+                    onCommit={(next) => renameProfile(profile.id, next)}
+                  />
+                )}
+                {/*
+                  Dimmed with the rest of the row: a `Badge` has no disabled
+                  treatment of its own, so a solid `bg-primary` pill would
+                  otherwise sit at full strength beside a name, rename field
+                  and menu button that are all at 0.64.
+                */}
+                {isDefault ? <Badge className={cn(disabled && "opacity-64")}>Default</Badge> : null}
+              </span>
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost-muted"
+                      disabled={disabled}
+                      aria-label={`${profile.name} options`}
+                    />
+                  }
+                >
+                  <MoreVertical />
+                </MenuTrigger>
+                <MenuPopup align="end" className="min-w-44">
+                  <MenuItem
+                    disabled={isDefault}
+                    onClick={() => updateSettings({ browserDefaultProfileId: profile.id })}
+                  >
+                    Set as default
+                  </MenuItem>
+                  <MenuItem onClick={() => clearProfileData(profile.id, profile.name)}>
+                    Clear cookies and cache
+                  </MenuItem>
+                  {builtIn ? null : (
+                    <MenuItem
+                      variant="destructive"
+                      onClick={() => setProfilePendingRemoval(profile)}
+                    >
+                      Remove profile and data
+                    </MenuItem>
+                  )}
+                </MenuPopup>
+              </Menu>
+            </div>
+          );
+        })}
+      </div>
+      <AlertDialog
+        open={profilePendingRemoval !== null}
+        onOpenChange={(open) => {
+          if (!open) setProfilePendingRemoval(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove “{profilePendingRemoval?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its cookies, logins, and cache are deleted with it. Tabs open in this profile move to
+              the default one.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (profilePendingRemoval) removeProfile(profilePendingRemoval.id);
+              }}
+            >
+              Remove profile
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+      {importSource ? (
+        <BrowserImportWizard
+          source={importSource}
+          targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
+          canCreateProfile={!atProfileLimit}
+          onImport={(input) => runWizardImport(importSource, input)}
+          onRefreshSource={() => refreshImportSource(importSource.id)}
+          onOpenFullDiskAccessSettings={() =>
+            void readLocalApi()
+              ?.shell.openExternal(FULL_DISK_ACCESS_SETTINGS_URL)
+              .catch(() => undefined)
+          }
+          onClose={() => setImportSource(null)}
+        />
+      ) : null}
+    </SettingsRow>
+  );
+}
+
 export function IntegrationsSettingsPanel() {
   // Client-local preview defaults are editable only where the preview exists.
   const previewDefaultsDisabled = !isElectron;
   const previewDefaults = (
     <>
+      <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
       <BrowserViewportSetting disabled={previewDefaultsDisabled} />
       <BrowserZoomSetting disabled={previewDefaultsDisabled} />
       <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />

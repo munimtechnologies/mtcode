@@ -1,0 +1,555 @@
+/**
+ * Importable browser sources.
+ *
+ * Two engines are modelled. Chromium-family browsers keep cookies in an
+ * encrypted SQLite database whose key lives in an OS credential store; Firefox
+ * keeps them in plain SQLite with no key at all, so it needs no keychain and
+ * works the same on every platform.
+ *
+ * Each entry pins its own paths and keychain coordinates rather than deriving
+ * them, because the forks do not agree. Helium uses the keychain service
+ * "Helium Storage Key" / account "Helium" where Chrome and its closer
+ * relatives use "<Name> Safe Storage" / "<Name>", and the user-data directory
+ * differs per fork and per platform.
+ *
+ * @module BrowserImportSources
+ */
+import type { BrowserImportSourceId, BrowserImportSourceProfile } from "@t3tools/contracts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+export type BrowserImportEngine = "chromium" | "firefox" | "safari";
+
+/**
+ * Directory roots a definition builds its paths from. Passed in rather than
+ * read from `process`, so source resolution stays testable for platforms the
+ * host is not currently running.
+ */
+export interface BrowserImportPathContext {
+  readonly path: Path.Path;
+  readonly platform: NodeJS.Platform;
+  readonly home: string;
+  /** `%APPDATA%` on Windows; unused elsewhere. */
+  readonly appData: string | undefined;
+  /** `%LOCALAPPDATA%` on Windows; unused elsewhere. */
+  readonly localAppData: string | undefined;
+}
+
+export interface BrowserImportSourceDefinition {
+  readonly id: BrowserImportSourceId;
+  readonly name: string;
+  readonly engine: BrowserImportEngine;
+  /** Platforms the definition has paths for. */
+  readonly platforms: ReadonlyArray<NodeJS.Platform>;
+  readonly userDataDirectory: (context: BrowserImportPathContext) => string | undefined;
+  /** Chromium on macOS only: where the OSCrypt key lives in the keychain. */
+  readonly keychainService?: string;
+  readonly keychainAccount?: string;
+}
+
+const macApplicationSupport = (
+  context: BrowserImportPathContext,
+  ...segments: ReadonlyArray<string>
+) => context.path.join(context.home, "Library", "Application Support", ...segments);
+
+/**
+ * One Chromium fork across the three platforms. The macOS and Linux leaves
+ * differ per fork, and Windows usually nests everything under a `User Data`
+ * directory in local AppData. Omitting a platform's segments marks the fork as
+ * unavailable there.
+ */
+const chromiumSource = (input: {
+  readonly id: BrowserImportSourceId;
+  readonly name: string;
+  readonly keychainService: string;
+  readonly keychainAccount: string;
+  readonly macSegments: ReadonlyArray<string>;
+  readonly linuxSegments?: ReadonlyArray<string>;
+}): BrowserImportSourceDefinition => ({
+  id: input.id,
+  name: input.name,
+  engine: "chromium",
+  platforms: [
+    "darwin" as NodeJS.Platform,
+    ...(input.linuxSegments ? ["linux" as NodeJS.Platform] : []),
+  ],
+  keychainService: input.keychainService,
+  keychainAccount: input.keychainAccount,
+  userDataDirectory: (context) => {
+    if (context.platform === "darwin") return macApplicationSupport(context, ...input.macSegments);
+    return input.linuxSegments
+      ? context.path.join(context.home, ".config", ...input.linuxSegments)
+      : undefined;
+  },
+});
+
+export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition> = [
+  // No Chromium fork is importable on Windows: since Chrome 127 their cookies
+  // are encrypted to the browser's own identity (App-Bound Encryption), so no
+  // other process can read them. macOS and Linux keep working, so only the
+  // Windows segments are omitted.
+  chromiumSource({
+    id: "chrome",
+    name: "Chrome",
+    keychainService: "Chrome Safe Storage",
+    keychainAccount: "Chrome",
+    macSegments: ["Google", "Chrome"],
+    linuxSegments: ["google-chrome"],
+  }),
+  chromiumSource({
+    id: "edge",
+    name: "Microsoft Edge",
+    keychainService: "Microsoft Edge Safe Storage",
+    keychainAccount: "Microsoft Edge",
+    macSegments: ["Microsoft Edge"],
+    linuxSegments: ["microsoft-edge"],
+  }),
+  chromiumSource({
+    id: "brave",
+    name: "Brave",
+    keychainService: "Brave Safe Storage",
+    keychainAccount: "Brave",
+    macSegments: ["BraveSoftware", "Brave-Browser"],
+    linuxSegments: ["BraveSoftware", "Brave-Browser"],
+  }),
+  chromiumSource({
+    id: "vivaldi",
+    name: "Vivaldi",
+    keychainService: "Vivaldi Safe Storage",
+    keychainAccount: "Vivaldi",
+    macSegments: ["Vivaldi"],
+    linuxSegments: ["vivaldi"],
+  }),
+  chromiumSource({
+    id: "opera",
+    name: "Opera",
+    keychainService: "Opera Safe Storage",
+    keychainAccount: "Opera",
+    macSegments: ["com.operasoftware.Opera"],
+    linuxSegments: ["opera"],
+  }),
+  // Arc and Helium ship macOS-only builds.
+  chromiumSource({
+    id: "arc",
+    name: "Arc",
+    keychainService: "Arc Safe Storage",
+    keychainAccount: "Arc",
+    macSegments: ["Arc", "User Data"],
+  }),
+  chromiumSource({
+    id: "helium",
+    name: "Helium",
+    keychainService: "Helium Storage Key",
+    keychainAccount: "Helium",
+    macSegments: ["net.imput.helium"],
+  }),
+  {
+    // Safari keeps one cookie jar for the whole app rather than per-profile,
+    // and it sits inside the app container that Full Disk Access gates.
+    id: "safari",
+    name: "Safari",
+    engine: "safari",
+    platforms: ["darwin"],
+    userDataDirectory: (context) =>
+      context.platform === "darwin"
+        ? context.path.join(
+            context.home,
+            "Library",
+            "Containers",
+            "com.apple.Safari",
+            "Data",
+            "Library",
+            "Cookies",
+          )
+        : undefined,
+  },
+  {
+    id: "firefox",
+    name: "Firefox",
+    engine: "firefox",
+    platforms: ["darwin", "win32", "linux"],
+    userDataDirectory: (context) => {
+      if (context.platform === "darwin") return macApplicationSupport(context, "Firefox");
+      if (context.platform === "win32") {
+        return context.appData
+          ? context.path.join(context.appData, "Mozilla", "Firefox")
+          : undefined;
+      }
+      return context.path.join(context.home, ".mozilla", "firefox");
+    },
+  },
+];
+
+/**
+ * Chromium stores the database as `Cookies` under the profile directory;
+ * Firefox uses `cookies.sqlite`, and its profile paths from `profiles.ini`
+ * may already be absolute.
+ *
+ * Chrome 96+ moved network-related files (including Cookies) into a `Network`
+ * subdirectory for sandboxing. The candidate list includes both locations so
+ * callers tolerate fresh and legacy installs alike.
+ */
+export const cookieDatabaseCandidatePaths = (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+  profileDirectory: string,
+): ReadonlyArray<string> => {
+  const root = definition.userDataDirectory(context);
+  if (root === undefined) return [];
+  const profilePath = context.path.isAbsolute(profileDirectory)
+    ? profileDirectory
+    : context.path.join(root, profileDirectory);
+  if (definition.engine === "firefox") {
+    return [context.path.join(profilePath, "cookies.sqlite")];
+  }
+  if (definition.engine === "safari") {
+    return [context.path.join(profilePath, "Cookies.binarycookies")];
+  }
+  // Chromium: pre-96 uses `Cookies`, 96+ use `Network/Cookies`. An upgrade
+  // leaves the legacy file behind, so prefer the current one and fall back.
+  return [
+    context.path.join(profilePath, "Network", "Cookies"),
+    context.path.join(profilePath, "Cookies"),
+  ];
+};
+
+/** Chromium keeps the DPAPI-wrapped Windows key in `Local State`. */
+export const localStatePath = (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+): string | undefined => {
+  const root = definition.userDataDirectory(context);
+  return root === undefined ? undefined : context.path.join(root, "Local State");
+};
+
+/**
+ * Firefox records its profiles in `profiles.ini`. `Install*` sections point at
+ * a default profile but do not describe one, so only `[ProfileN]` blocks
+ * count.
+ */
+export function parseFirefoxProfiles(ini: string): ReadonlyArray<BrowserImportSourceProfile> {
+  const profiles: BrowserImportSourceProfile[] = [];
+  let current: { name?: string; path?: string } | null = null;
+
+  const flush = () => {
+    if (current?.path) {
+      profiles.push({ directory: current.path, name: current.name?.trim() || current.path });
+    }
+    current = null;
+  };
+
+  for (const rawLine of ini.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("[")) {
+      flush();
+      current = /^\[Profile\d+\]$/i.test(line) ? {} : null;
+      continue;
+    }
+    if (!current) continue;
+    const separator = line.indexOf("=");
+    if (separator === -1) continue;
+    const key = line.slice(0, separator).trim().toLowerCase();
+    const value = line.slice(separator + 1).trim();
+    if (key === "name") current.name = value;
+    if (key === "path") current.path = value;
+  }
+  flush();
+  return profiles;
+}
+
+/**
+ * Resolves the roots the registry builds its paths from, from the ambient
+ * process. Tests build a context directly instead.
+ */
+export const sourcePathContext = Effect.gen(function* () {
+  const path = yield* Path.Path;
+  const platform = yield* HostProcessPlatform;
+  const environment = yield* HostProcessEnvironment;
+  return {
+    path,
+    platform,
+    home: environment.HOME ?? environment.USERPROFILE ?? "",
+    appData: environment.APPDATA,
+    localAppData: environment.LOCALAPPDATA,
+  } satisfies BrowserImportPathContext;
+});
+
+/**
+ * Whether a directory entry exists, without following it or opening it.
+ *
+ * Both `stat` and `exists` resolve symlinks, and the locks below deliberately
+ * dangle — Chromium points `SingletonLock` at `<host>-<pid>` and Firefox
+ * points `lock` at `<ip>:+<pid>`, neither of which exists on disk. Following
+ * them reports every running browser as closed, which would let an import read
+ * a live, mid-write database. `readLink` is the probe that answers for the
+ * entry itself.
+ *
+ * Not opening the file is what lets Safari be detected: TCC permits `stat` on
+ * the jar inside its container but refuses a read.
+ */
+const entryExists = Effect.fnUntraced(function* (path: string) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.stat(path).pipe(
+    Effect.catchCause(() => fileSystem.readLink(path)),
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  );
+});
+
+/**
+ * Whether a lock file is actually held by a running process. On macOS and
+ * Linux Firefox lock files are dangling symlinks that disappear when the
+ * process exits, so `entryExists` is sufficient. On Windows the lock file
+ * (`parent.lock`) is a regular file opened with no sharing, so it persists on
+ * disk after the process exits; `stat` always succeeds, and the probe must try
+ * to open the file with write access to detect the active lock.
+ */
+const isLockHeld = Effect.fnUntraced(function* (lockPath: string, platform: NodeJS.Platform) {
+  if (platform !== "win32") return yield* entryExists(lockPath);
+  // A lock held with no sharing denies the write access we need, surfacing as
+  // `Busy` or `PermissionDenied`; anything else (missing file, permissions we
+  // cannot read) just means no active browser holds it.
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.open(lockPath, { flag: "r+" }).pipe(
+    Effect.as(false),
+    Effect.catchIf(
+      (error) => error.reason._tag === "Busy" || error.reason._tag === "PermissionDenied",
+      () => Effect.succeed(true),
+    ),
+    Effect.orElseSucceed(() => false),
+    Effect.scoped,
+  );
+});
+
+/** Shape of the slice of Chromium's `Local State` that names its profiles. */
+const LocalState = Schema.Struct({
+  profile: Schema.optional(
+    Schema.Struct({
+      info_cache: Schema.optional(
+        Schema.Record(Schema.String, Schema.Struct({ name: Schema.optional(Schema.String) })),
+      ),
+    }),
+  ),
+});
+const decodeLocalState = Schema.decodeUnknownEffect(Schema.fromJsonString(LocalState));
+
+/** A single plain path segment: no separators, no `.`/`..`, not empty. */
+const isSafeProfileDirectory = (directory: string): boolean =>
+  directory.length > 0 &&
+  directory !== "." &&
+  directory !== ".." &&
+  !/[\\/]/.test(directory) &&
+  !directory.includes("\u0000");
+
+const CookieCountRow = Schema.Struct({ count: Schema.Number });
+const decodeCookieCount = Schema.decodeUnknownEffect(Schema.Array(CookieCountRow));
+
+/**
+ * How many cookies a profile holds, counted without decrypting anything — a
+ * bare `COUNT(*)` needs no key. Best effort: a locked, missing or non-Chromium
+ * database (Firefox's table is named differently, Safari's is not SQL) yields
+ * `undefined` rather than failing the listing.
+ */
+const countProfileCookies = Effect.fnUntraced(function* (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+  directory: string,
+): Effect.fn.Return<number | undefined, never, FileSystem.FileSystem> {
+  const candidates = cookieDatabaseCandidatePaths(definition, context, directory);
+  const databasePath = yield* Effect.forEach(candidates, (candidate) =>
+    entryExists(candidate).pipe(Effect.map((exists) => (exists ? candidate : undefined))),
+  ).pipe(Effect.map((results) => results.find((p) => p !== undefined)));
+  if (databasePath === undefined) return undefined;
+  return yield* Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql`select count(*) as count from cookies`;
+    const [row] = yield* decodeCookieCount(rows);
+    return row?.count;
+  }).pipe(
+    Effect.provide(NodeSqliteClient.layer({ filename: databasePath, readonly: true })),
+    Effect.orElseSucceed(() => undefined),
+  );
+});
+
+const withCookieCounts = (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+  profiles: ReadonlyArray<BrowserImportSourceProfile>,
+) =>
+  Effect.forEach(profiles, (profile) =>
+    countProfileCookies(definition, context, profile.directory).pipe(
+      Effect.map((cookieCount) =>
+        cookieCount === undefined ? profile : { ...profile, cookieCount },
+      ),
+    ),
+  );
+
+/**
+ * Profiles the source browser knows about.
+ *
+ * Firefox declares them in `profiles.ini`; Chromium in `Local State`. When
+ * that metadata is missing, unreadable or malformed, the directories that
+ * actually hold a cookie database are scanned instead. Assuming a single
+ * `Default` would report a browser whose cookies live in `Profile 1` as having
+ * nothing to import — and it is then left out of the menu entirely.
+ */
+export const listSourceProfiles = Effect.fn("BrowserImportSources.listSourceProfiles")(function* (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+): Effect.fn.Return<ReadonlyArray<BrowserImportSourceProfile>, never, FileSystem.FileSystem> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const root = definition.userDataDirectory(context);
+  if (root === undefined) return [];
+
+  if (definition.engine === "safari") {
+    // One jar, no profiles: the directory is the profile.
+    return [{ directory: ".", name: "Safari" }];
+  }
+
+  if (definition.engine === "firefox") {
+    const declared = yield* fileSystem.readFileString(context.path.join(root, "profiles.ini")).pipe(
+      Effect.map(parseFirefoxProfiles),
+      Effect.orElseSucceed(() => [] as ReadonlyArray<BrowserImportSourceProfile>),
+    );
+    // `profiles.ini` also lists profiles the installer created but the user
+    // never launched, which hold no cookie database and nothing to import.
+    // Only keep the ones a database proves exist, like the directory scans
+    // below do.
+    if (declared.length > 0) {
+      const found = yield* Effect.forEach(declared, (profile) =>
+        Effect.forEach(
+          cookieDatabaseCandidatePaths(definition, context, profile.directory),
+          (candidate) => entryExists(candidate),
+        ).pipe(Effect.map((results) => (results.some(Boolean) ? profile : undefined))),
+      );
+      return found.filter((profile) => profile !== undefined);
+    }
+
+    // No readable `profiles.ini`, so fall back to scanning the directory the
+    // profiles actually live in, keeping only the ones a cookie database
+    // proves were launched.
+    const scanned = yield* fileSystem
+      .readDirectory(context.path.join(root, "Profiles"))
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+    const found = yield* Effect.forEach(scanned, (entry) =>
+      Effect.forEach(
+        cookieDatabaseCandidatePaths(definition, context, context.path.join("Profiles", entry)),
+        (candidate) => entryExists(candidate),
+      ).pipe(
+        Effect.map((results) =>
+          results.some(Boolean)
+            ? { directory: context.path.join("Profiles", entry), name: entry }
+            : undefined,
+        ),
+      ),
+    );
+    return found.filter((profile) => profile !== undefined);
+  }
+
+  const declared = yield* fileSystem.readFileString(context.path.join(root, "Local State")).pipe(
+    Effect.flatMap(decodeLocalState),
+    Effect.map((state) => Object.entries(state.profile?.info_cache ?? {})),
+    // The keys are directory names from the browser's own metadata file, which
+    // anything running as the user can write. Anything but a single plain
+    // segment is dropped: `..` or a path separator would otherwise be handed
+    // to `cookieDatabasePath` and read a database outside the user-data
+    // directory.
+    Effect.map((entries) => entries.filter(([directory]) => isSafeProfileDirectory(directory))),
+    Effect.map((entries) =>
+      entries.map(([directory, info]) => ({ directory, name: info.name?.trim() || directory })),
+    ),
+    Effect.orElseSucceed(() => [] as ReadonlyArray<BrowserImportSourceProfile>),
+  );
+  if (declared.length > 0) return yield* withCookieCounts(definition, context, declared);
+
+  // `Local State` is missing, unreadable or malformed. Scanning for directories
+  // that hold a cookie database finds the profiles anyway.
+  const entries = yield* fileSystem
+    .readDirectory(root)
+    .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+  const found = yield* Effect.forEach(entries.filter(isSafeProfileDirectory), (directory) =>
+    Effect.forEach(cookieDatabaseCandidatePaths(definition, context, directory), (candidate) =>
+      entryExists(candidate),
+    ).pipe(
+      Effect.map((results) => (results.some(Boolean) ? { directory, name: directory } : undefined)),
+    ),
+  );
+  return yield* withCookieCounts(
+    definition,
+    context,
+    found.filter((profile) => profile !== undefined),
+  );
+});
+
+const FIREFOX_LOCK_NAMES = ["lock", ".parentlock", "parent.lock"] as const;
+
+/** Whether the browser is running, which leaves its cookie DB mid-write. */
+export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")(function* (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+): Effect.fn.Return<boolean, never, FileSystem.FileSystem> {
+  const root = definition.userDataDirectory(context);
+  if (root === undefined) return false;
+  // Both engines that hold a lock leave one for as long as an instance holds a
+  // profile, which is far cheaper and more targeted than scanning the process
+  // table. Safari keeps none, and unlike the others writes its jar atomically,
+  // so a running instance is not a hazard there.
+  //
+  // Chromium and Firefox differ in where: Chromium keeps one lock for the
+  // whole user-data directory, Firefox keeps its locks inside each profile,
+  // under three names across platforms (`lock` on macOS and Linux,
+  // `.parentlock` beside it, `parent.lock` on Windows). Looking for Firefox's
+  // at the root finds nothing and reports a running browser as importable.
+  if (definition.engine === "safari") return false;
+  if (definition.engine !== "firefox") {
+    // Chromium leaves a dangling `SingletonLock` symlink for as long as an
+    // instance holds the user-data directory. No Chromium fork is importable
+    // on Windows, so the macOS/Linux symlink is the only shape to answer for.
+    return yield* entryExists(context.path.join(root, "SingletonLock"));
+  }
+
+  const profiles = yield* listSourceProfiles(definition, context);
+  const found = yield* Effect.forEach(profiles, (profile) => {
+    const directory = context.path.isAbsolute(profile.directory)
+      ? profile.directory
+      : context.path.join(root, profile.directory);
+    return Effect.forEach(FIREFOX_LOCK_NAMES, (lock) =>
+      isLockHeld(context.path.join(directory, lock), context.platform),
+    ).pipe(Effect.map((results) => results.some(Boolean)));
+  });
+  return found.some(Boolean);
+});
+
+/**
+ * Whether the source has cookies to import.
+ *
+ * Keyed off the cookie database rather than the user-data directory, because
+ * that directory is not evidence the browser exists: installers for native
+ * messaging hosts create an empty one for every Chromium fork they know about,
+ * so a machine with only Chrome reports Edge, Brave, Vivaldi, Opera and Arc as
+ * present. The database is the thing an import actually needs, so its absence
+ * is the honest answer either way.
+ *
+ * Existence is checked without opening the file, which matters for Safari: TCC
+ * permits `stat` on the jar inside its container but refuses a read, so this
+ * still sees it and the user gets the Full Disk Access prompt rather than
+ * having Safari disappear.
+ */
+export const isSourceInstalled = Effect.fn("BrowserImportSources.isSourceInstalled")(function* (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+): Effect.fn.Return<boolean, never, FileSystem.FileSystem> {
+  const profiles = yield* listSourceProfiles(definition, context);
+  const found = yield* Effect.forEach(profiles, (profile) =>
+    Effect.forEach(
+      cookieDatabaseCandidatePaths(definition, context, profile.directory),
+      (candidate) => entryExists(candidate),
+    ).pipe(Effect.map((results) => results.some(Boolean))),
+  );
+  return found.some(Boolean);
+});

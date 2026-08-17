@@ -175,6 +175,10 @@
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
     },
+    "./goalContinuation": {
+      "types": "./src/goalContinuation.ts",
+      "import": "./src/goalContinuation.ts"
+    },
     "./composerInlineTokens": {
       "types": "./src/composerInlineTokens.ts",
       "import": "./src/composerInlineTokens.ts"
@@ -234,6 +238,10 @@
     "./limitsFormat": {
       "types": "./src/limitsFormat.ts",
       "import": "./src/limitsFormat.ts"
+    },
+    "./nodeSqliteClient": {
+      "types": "./src/nodeSqliteClient.ts",
+      "import": "./src/nodeSqliteClient.ts"
     }
   },
   "scripts": {

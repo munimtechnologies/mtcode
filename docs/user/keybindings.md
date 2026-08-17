@@ -52,6 +52,24 @@ successful pick; its hover glow and badge preview the element and color family t
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
 
+`recentThreads.next` and `recentThreads.previous` cycle through the threads you opened this
+session, most recent first, defaulting to `ctrl+tab` and `ctrl+shift+tab`. Keep the modifier held
+to preview the list in a small switcher: repeated presses move through it, releasing the modifier
+opens the highlighted thread, `Enter` confirms, and `Escape` cancels. The list starts fresh each
+time the app loads. Browsers reserve `ctrl+tab` for their own tab switching, so these defaults
+work in the desktop app; when running in a browser, bind keys the browser does not claim.
+
+`reasoning.decrease` and `reasoning.increase` cycle through the selected model's available
+reasoning levels, wrapping at either end. They default to `alt+,` and `alt+.` and follow the order
+advertised by the model. If an agent is running, the change applies to the next message; it does
+not alter work already in progress. Models and providers that do not advertise ordered reasoning
+levels are left unchanged.
+
+For Claude models that offer Ultrathink, selecting it adds a leading `Ultrathink:` control prefix
+to the draft, and selecting another level removes that prefix while preserving the rest of the
+draft. If `ultrathink` appears elsewhere in the draft text, remove it before changing levels so T3
+Code does not rewrite text it does not own.
+
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
 keeping the thread's project, branch, and machine context visible. Message search begins after two

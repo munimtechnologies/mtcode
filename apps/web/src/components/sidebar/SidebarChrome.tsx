@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  BlocksIcon,
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
   SettingsIcon,
@@ -188,6 +189,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/settings" });
   }, [closeMobileSidebar, navigate]);
 
+  const handlePluginsClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/settings/plugins" });
+  }, [closeMobileSidebar, navigate]);
+
   const handleUsageClick = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -219,6 +225,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<SettingsIcon />}
             label="Settings"
             onClick={handleSettingsClick}
+          />
+          <SidebarUtilityItem
+            icon={<BlocksIcon />}
+            label="Plugins"
+            onClick={handlePluginsClick}
           />
           {pullRequestsSupported ? (
             <SidebarUtilityItem
