@@ -83,5 +83,9 @@ scp -o BatchMode=yes "$REPO/scripts/personal-refresh-dell.ps1" dell:dev/personal
 ssh -o BatchMode=yes dell powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
   C:/Users/busin/dev/personal-refresh-dell.ps1
 
+# After both Windows installs, push Mac preference files to Blade + Dell.
+echo "-- syncing settings Mac → Blade/Dell --"
+/bin/bash "$REPO/scripts/personal-sync-settings.sh"
+
 echo "$NEW" > "$STATE"
 echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) orchestrate done ===="
