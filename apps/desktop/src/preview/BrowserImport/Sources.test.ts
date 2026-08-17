@@ -12,7 +12,7 @@ import * as NodeSqlite from "node:sqlite";
 import type { BrowserImportPathContext } from "./Sources.ts";
 import {
   BROWSER_IMPORT_SOURCES,
-  cookieDatabasePath,
+  cookieDatabaseCandidatePaths,
   isSourceInstalled,
   isSourceRunning,
   listSourceProfiles,
@@ -105,6 +105,20 @@ describe("isSourceInstalled", () => {
       }),
     ),
   );
+
+  it.effect("detects a Chromium 127+ install with cookies under Network/", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = userDataDirectory(context);
+
+        yield* fileSystem.makeDirectory(`${root}/Default/Network`, { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/Default/Network/Cookies`, "db");
+        assert.isTrue(yield* isSourceInstalled(helium, context));
+      }),
+    ),
+  );
 });
 
 describe("listSourceProfiles", () => {
@@ -173,6 +187,79 @@ describe("listSourceProfiles", () => {
     ),
   );
 
+  it.effect("drops Firefox profiles that hold no cookie database", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = firefox.userDataDirectory(context)!;
+        yield* fileSystem.makeDirectory(root, { recursive: true });
+        yield* fileSystem.writeFileString(
+          `${root}/profiles.ini`,
+          `[Profile0]
+Name=original
+IsRelative=1
+Path=Profiles/abcd.default-release
+Default=1
+
+[Profile1]
+Name=empty
+IsRelative=1
+Path=Profiles/wxyz.empty
+`,
+        );
+        yield* fileSystem.makeDirectory(`${root}/Profiles/abcd.default-release`, {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(
+          `${root}/Profiles/abcd.default-release/cookies.sqlite`,
+          "db",
+        );
+        yield* fileSystem.makeDirectory(`${root}/Profiles/wxyz.empty`, { recursive: true });
+
+        assert.deepEqual(yield* listSourceProfiles(firefox, context), [
+          { directory: "Profiles/abcd.default-release", name: "original" },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("drops empty profiles when falling back to the Profiles/ scan", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = firefox.userDataDirectory(context)!;
+        yield* fileSystem.makeDirectory(`${root}/Profiles/filled.default`, { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/Profiles/filled.default/cookies.sqlite`, "db");
+        yield* fileSystem.makeDirectory(`${root}/Profiles/empty.default`, { recursive: true });
+
+        assert.deepEqual(yield* listSourceProfiles(firefox, context), [
+          {
+            directory: context.path.join("Profiles", "filled.default"),
+            name: "filled.default",
+          },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("discovers profiles with cookies under Network/ (Chromium 127+)", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = userDataDirectory(context);
+        yield* fileSystem.makeDirectory(`${root}/Default/Network`, { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/Default/Network/Cookies`, "db");
+
+        assert.deepEqual(yield* listSourceProfiles(helium, context), [
+          { directory: "Default", name: "Default" },
+        ]);
+      }),
+    ),
+  );
+
   it.effect("counts a profile's cookies without decrypting them", () =>
     run(
       Effect.gen(function* () {
@@ -189,22 +276,45 @@ describe("listSourceProfiles", () => {
   );
 });
 
-describe("cookieDatabasePath", () => {
-  it.effect("places the database under the requested source profile", () =>
+describe("cookieDatabaseCandidatePaths", () => {
+  it.effect("prefers Network/Cookies and falls back to legacy Cookies", () =>
     run(
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const context = yield* withSourceHome();
-        assert.equal(
-          cookieDatabasePath(helium, context, "Profile 1"),
-          `${context.home}/Library/Application Support/net.imput.helium/Profile 1/Cookies`,
+        const candidates = cookieDatabaseCandidatePaths(helium, context, "Default");
+        assert.deepEqual(candidates, [
+          path.join(
+            context.home,
+            "Library/Application Support/net.imput.helium/Default/Network/Cookies",
+          ),
+          path.join(context.home, "Library/Application Support/net.imput.helium/Default/Cookies"),
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("returns only cookies.sqlite for Firefox", () =>
+    run(
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const context = yield* sourcePathContext.pipe(
+          Effect.provideService(HostProcessEnvironment, { HOME: "/tmp/test" }),
+          Effect.provideService(HostProcessPlatform, "darwin"),
         );
+        const candidates = cookieDatabaseCandidatePaths(firefox, context, "Profiles/abc.default");
+        assert.deepEqual(candidates, [
+          path.join(
+            "/tmp/test",
+            "Library/Application Support/Firefox/Profiles/abc.default/cookies.sqlite",
+          ),
+        ]);
       }),
     ),
   );
 });
 
 const firefox = BROWSER_IMPORT_SOURCES.find((source) => source.id === "firefox")!;
-const opera = BROWSER_IMPORT_SOURCES.find((source) => source.id === "opera")!;
 
 describe("isSourceRunning for Firefox", () => {
   it.effect("finds the lock inside the profile, not at the root", () =>
@@ -219,6 +329,7 @@ describe("isSourceRunning for Firefox", () => {
         const root = firefox.userDataDirectory(context)!;
         const profile = `${root}/Profiles/abcd.default-release`;
         yield* fileSystem.makeDirectory(profile, { recursive: true });
+        yield* fileSystem.writeFileString(`${profile}/cookies.sqlite`, "db");
 
         assert.isFalse(yield* isSourceRunning(firefox, context));
 
@@ -232,32 +343,44 @@ describe("isSourceRunning for Firefox", () => {
       }),
     ),
   );
+
+  it.effect("does not treat a stale parent.lock file as a running browser", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-firefox-" });
+        const context = yield* sourcePathContext.pipe(
+          Effect.provideService(HostProcessEnvironment, { HOME: home }),
+          Effect.provideService(HostProcessPlatform, "win32"),
+        );
+        const root = firefox.userDataDirectory(context)!;
+        const profile = `${root}/Profiles/gx7x7fqx.default-release`;
+        yield* fileSystem.makeDirectory(profile, { recursive: true });
+        yield* fileSystem.writeFileString(`${profile}/cookies.sqlite`, "db");
+
+        // On Windows, Firefox creates parent.lock as a regular file that
+        // persists after the process exits. The file is only locked while
+        // Firefox is running; the old stat-based check always found it.
+        yield* fileSystem.writeFileString(`${profile}/parent.lock`, "");
+        assert.isFalse(yield* isSourceRunning(firefox, context));
+      }),
+    ),
+  );
 });
 
 describe("Windows user-data directories", () => {
-  it.effect("puts Opera under roaming AppData without a User Data level", () =>
-    run(
-      Effect.gen(function* () {
-        const context = yield* sourcePathContext.pipe(
-          Effect.provideService(HostProcessEnvironment, {
-            USERPROFILE: "C:\\Users\\u",
-            APPDATA: "C:\\Users\\u\\AppData\\Roaming",
-            LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local",
-          }),
-          Effect.provideService(HostProcessPlatform, "win32"),
-        );
-
-        // Opera does not follow the local-AppData `User Data` convention its
-        // Chromium relatives use, so deriving it that way never found it.
-        assert.include(opera.userDataDirectory(context) ?? "", "Roaming");
-        assert.include(opera.userDataDirectory(context) ?? "", "Opera Stable");
-        assert.notInclude(opera.userDataDirectory(context) ?? "", "User Data");
-
-        const chrome = BROWSER_IMPORT_SOURCES.find((source) => source.id === "chrome")!;
-        assert.include(chrome.userDataDirectory(context) ?? "", "Local");
-        assert.include(chrome.userDataDirectory(context) ?? "", "User Data");
-      }),
-    ),
+  it.effect("does not support any Chromium fork on win32", () =>
+    Effect.gen(function* () {
+      // No Chromium fork lists win32 anymore: since Chrome 127 their cookies
+      // are App-Bound Encrypted, so nothing can import them. Omitting the
+      // platform is what makes `unavailableReason` report `unsupportedPlatform`,
+      // hiding these sources like Arc and Helium.
+      for (const source of BROWSER_IMPORT_SOURCES) {
+        if (source.engine === "chromium") {
+          assert.notInclude(source.platforms, "win32");
+        }
+      }
+    }),
   );
 });
 
