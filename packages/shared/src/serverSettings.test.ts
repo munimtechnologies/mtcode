@@ -14,6 +14,7 @@ import {
   isModelSelectionProviderEnabled,
   normalizePersistedServerSettingString,
   parsePersistedServerObservabilitySettings,
+  resolvePullRequestRankingModelSelection,
   resolveSourceControlWriterModelSelection,
 } from "./serverSettings.ts";
 
@@ -511,5 +512,48 @@ describe("serverSettings helpers", () => {
     });
 
     expect(resolved.pauseWhenOnBattery).toBe(false);
+  });
+});
+
+describe("resolvePullRequestRankingModelSelection", () => {
+  it("follows the text generation model when nothing is chosen", () => {
+    const settings = { ...DEFAULT_SERVER_SETTINGS, pullRequestRankingModelSelection: null };
+
+    expect(resolvePullRequestRankingModelSelection(settings)).toBe(
+      settings.textGenerationModelSelection,
+    );
+  });
+
+  it("uses the model the reader chose", () => {
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    const pullRequestRankingModelSelection = createModelSelection(instanceId, "claude-haiku-4-5");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [instanceId]: { driver: ProviderDriverKind.make("claude"), enabled: true, config: {} },
+      },
+      pullRequestRankingModelSelection,
+    };
+
+    expect(resolvePullRequestRankingModelSelection(settings)).toBe(
+      pullRequestRankingModelSelection,
+    );
+  });
+
+  it("falls back where the chosen provider is turned off", () => {
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    const pullRequestRankingModelSelection = createModelSelection(instanceId, "claude-haiku-4-5");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [instanceId]: { driver: ProviderDriverKind.make("claude"), enabled: false, config: {} },
+      },
+      pullRequestRankingModelSelection,
+    };
+
+    // A provider being off must not leave the section silently unranked with no explanation.
+    expect(resolvePullRequestRankingModelSelection(settings)).toBe(
+      settings.textGenerationModelSelection,
+    );
   });
 });

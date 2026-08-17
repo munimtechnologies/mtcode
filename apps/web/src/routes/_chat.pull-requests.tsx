@@ -62,8 +62,16 @@ import {
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
 import { PullRequestUpstreamCard } from "../components/pullRequest/PullRequestUpstreamCard";
 import { useAtomValue } from "@effect/atom-react";
-import { usePrimarySettings } from "~/hooks/useSettings";
-import { resolveAppModelSelectionState } from "~/modelSelection";
+import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
+import { createModelSelection } from "@t3tools/shared/model";
+import { resolvePullRequestRankingModelSelection } from "@t3tools/shared/serverSettings";
+import { getCustomModelOptionsByInstance, resolveAppModelSelectionState } from "~/modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+} from "~/providerInstances";
+import { ProviderModelPicker } from "../components/chat/ProviderModelPicker";
 import { primaryServerProvidersAtom } from "~/state/server";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
@@ -459,10 +467,39 @@ function PullRequestsRouteView() {
   // chosen for writing code and is the reader's scarcest quota; ranking is bulk classification
   // over titles, and it is configurable in Settings for anyone who wants it to be something else.
   const rankingSettings = usePrimarySettings();
+  const updateRankingSettings = useUpdatePrimarySettings();
   const rankingProviders = useAtomValue(primaryServerProvidersAtom);
-  const rankingModel = useMemo(
-    () => resolveAppModelSelectionState(rankingSettings, rankingProviders),
-    [rankingSettings, rankingProviders],
+  const rankingModel = useMemo(() => {
+    // The reader's own choice where they have made one; otherwise the model the rest of the app
+    // generates text with, which is a better default than whatever writes their code.
+    const withResolvedDefault = {
+      ...rankingSettings,
+      textGenerationModelSelection: resolveAppModelSelectionState(
+        rankingSettings,
+        rankingProviders,
+      ),
+    };
+    return resolvePullRequestRankingModelSelection(withResolvedDefault, rankingProviders);
+  }, [rankingSettings, rankingProviders]);
+  const rankingInstanceEntries = useMemo(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(rankingProviders),
+          rankingSettings,
+        ),
+      ),
+    [rankingProviders, rankingSettings],
+  );
+  const rankingModelOptions = useMemo(
+    () =>
+      getCustomModelOptionsByInstance(
+        rankingSettings,
+        rankingProviders,
+        rankingModel.instanceId,
+        rankingModel.model,
+      ),
+    [rankingSettings, rankingProviders, rankingModel],
   );
 
   const updateListScope = (patch: {
@@ -1526,6 +1563,26 @@ function PullRequestsRouteView() {
               <SparklesIcon className="size-3.5" />
               Most useful
               {rankingPending ? <LoaderIcon aria-hidden className="size-3 animate-spin" /> : null}
+              {/* Beside what it produces rather than buried in Settings: which agent did the
+                  judging is part of reading the answer, and the reader changes it exactly when
+                  they disagree with the order or run that model out of quota. */}
+              <span className="ml-auto">
+                <ProviderModelPicker
+                  activeInstanceId={rankingModel.instanceId}
+                  model={rankingModel.model}
+                  lockedProvider={null}
+                  instanceEntries={rankingInstanceEntries}
+                  modelOptionsByInstance={rankingModelOptions}
+                  triggerVariant="ghost"
+                  triggerClassName="h-6 min-w-0 max-w-none shrink-0 text-xs font-normal"
+                  triggerAriaLabel="Model that ranks upstream pull requests"
+                  onInstanceModelChange={(instanceId, model) => {
+                    updateRankingSettings({
+                      pullRequestRankingModelSelection: createModelSelection(instanceId, model),
+                    });
+                  }}
+                />
+              </span>
             </h2>
             {/* Across rather than down: the pick is a shortlist to browse, and stacking it
                 vertically buried the list below under a second full-length copy of it. */}

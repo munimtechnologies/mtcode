@@ -45,6 +45,28 @@ export function isModelSelectionProviderEnabled(
   );
 }
 
+/**
+ * Which agent ranks upstream pull requests. Same shape as the source control writer's override:
+ * an unset, disabled or unavailable choice falls back to the text generation model rather than
+ * failing, so a provider being turned off never leaves the section unranked with no explanation.
+ */
+export function resolvePullRequestRankingModelSelection(
+  settings: ServerSettings,
+  providers?: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const selection = settings.pullRequestRankingModelSelection;
+  if (!selection || !isModelSelectionProviderEnabled(settings, selection)) {
+    return settings.textGenerationModelSelection;
+  }
+  if (providers === undefined) {
+    return selection;
+  }
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  return provider?.enabled === true && isProviderAvailable(provider)
+    ? selection
+    : settings.textGenerationModelSelection;
+}
+
 export function resolveSourceControlWriterModelSelection(
   settings: ServerSettings,
   providers?: ReadonlyArray<ServerProvider>,
