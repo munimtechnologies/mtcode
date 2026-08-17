@@ -6,7 +6,7 @@ import * as Scope from "effect/Scope";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
-import { GoalReactor } from "../Services/GoalReactor.ts";
+import * as GoalReactor from "../GoalReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
@@ -57,7 +57,7 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
-          Layer.succeed(GoalReactor, {
+          Layer.succeed(GoalReactor.GoalReactor, {
             start: () => {
               started.push("goal-reactor");
               return Effect.void;

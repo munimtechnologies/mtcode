@@ -13,22 +13,48 @@ import {
 } from "@t3tools/shared/goalContinuation";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import { hasOpenBlockingRequest, isThreadIdleForGoal } from "../decider.ts";
-import { forkParked, ServerActivation } from "../../serverActivation.ts";
-import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
-import { GoalReactor, type GoalReactorShape } from "../Services/GoalReactor.ts";
-import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { hasOpenBlockingRequest, isThreadIdleForGoal } from "./decider.ts";
+import { forkParked, ServerActivation } from "../serverActivation.ts";
+import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+
+/**
+ * GoalReactor - Continuation reaction service.
+ *
+ * Owns a background worker that reacts to Session-ready domain events and
+ * requests a Continuation when a Goal is Active.
+ */
+export class GoalReactor extends Context.Service<
+  GoalReactor,
+  {
+    /**
+     * Start reacting to Session-ready orchestration domain events.
+     *
+     * The returned effect must be run in a scope so all worker fibers can be
+     * finalized on shutdown.
+     */
+    readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+
+    /**
+     * Resolves when the internal processing queue is empty and idle.
+     * Intended for test use to replace timing-sensitive sleeps.
+     */
+    readonly drain: Effect.Effect<void>;
+  }
+>()("t3/orchestration/GoalReactor") {}
 
 type SessionSetEvent = Extract<OrchestrationEvent, { type: "thread.session-set" }>;
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   // Layer construction happens at process boot, so a Session last touched
@@ -270,7 +296,7 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  const start: GoalReactorShape["start"] = Effect.fn("start")(function* () {
+  const start: GoalReactor["Service"]["start"] = Effect.fn("start")(function* () {
     yield* forkParked(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
         if (event.type !== "thread.session-set") {
@@ -290,7 +316,7 @@ const make = Effect.gen(function* () {
   return {
     start,
     drain: worker.drain,
-  } satisfies GoalReactorShape;
+  } satisfies GoalReactor["Service"];
 });
 
-export const GoalReactorLive = Layer.effect(GoalReactor, make);
+export const layer = Layer.effect(GoalReactor, make);

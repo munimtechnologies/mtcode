@@ -57,7 +57,7 @@ import { OrchestrationReactorLive } from "../src/orchestration/Layers/Orchestrat
 import { ProviderCommandReactorLive } from "../src/orchestration/Layers/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionLive } from "../src/orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { CheckpointReactor } from "../src/orchestration/Services/CheckpointReactor.ts";
-import { GoalReactor } from "../src/orchestration/Services/GoalReactor.ts";
+import * as GoalReactor from "../src/orchestration/GoalReactor.ts";
 import { ProviderRuntimeIngestionService } from "../src/orchestration/Services/ProviderRuntimeIngestion.ts";
 import {
   OrchestrationEngineService,
@@ -371,7 +371,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
       Layer.provideMerge(
-        Layer.succeed(GoalReactor, {
+        Layer.succeed(GoalReactor.GoalReactor, {
           start: () => Effect.void,
           drain: Effect.void,
         }),

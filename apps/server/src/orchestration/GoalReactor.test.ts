@@ -21,16 +21,15 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { describe, vi } from "vite-plus/test";
 
-import { GoalReactorLive } from "./GoalReactor.ts";
+import * as GoalReactor from "./GoalReactor.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
-} from "../Services/OrchestrationEngine.ts";
-import { GoalReactor } from "../Services/GoalReactor.ts";
+} from "./Services/OrchestrationEngine.ts";
 import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
-} from "../Services/ProjectionSnapshotQuery.ts";
+} from "./Services/ProjectionSnapshotQuery.ts";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 const THREAD_ID = ThreadId.make("thread-1");
@@ -212,12 +211,12 @@ const createHarness = (threads: ReadonlyArray<OrchestrationThread>) =>
     } as unknown as ProjectionSnapshotQueryShape;
 
     const context = yield* Layer.build(
-      GoalReactorLive.pipe(
+      GoalReactor.layer.pipe(
         Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
         Layer.provide(Layer.succeed(ProjectionSnapshotQuery, snapshotQuery)),
       ),
     );
-    const reactor = Context.get(context, GoalReactor);
+    const reactor = Context.get(context, GoalReactor.GoalReactor);
     yield* reactor.start();
 
     return {
