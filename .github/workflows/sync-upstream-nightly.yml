@@ -1,0 +1,100 @@
+name: Sync upstream nightly
+
+on:
+  schedule:
+    # 08:00 UTC ≈ 04:00 ET
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout personal branch
+        uses: actions/checkout@v4
+        with:
+          ref: personal
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch upstream main
+          git fetch origin personal main
+
+      - name: Merge upstream/main into personal
+        id: merge
+        run: |
+          set -euo pipefail
+          BEFORE=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          echo "upstream=$UPSTREAM" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "already_up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "personal already contains upstream/main ($UPSTREAM)"
+            exit 0
+          fi
+
+          echo "already_up_to_date=false" >> "$GITHUB_OUTPUT"
+          if git merge --no-ff upstream/main -m "chore: nightly sync from pingdotgg/t3code@$(git rev-parse --short upstream/main)"; then
+            echo "merge_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge_ok=false" >> "$GITHUB_OUTPUT"
+            git merge --abort || true
+            exit 1
+          fi
+
+      - name: Push personal and update main
+        if: steps.merge.outputs.already_up_to_date != 'true'
+        run: |
+          git push origin HEAD:personal
+          git push origin HEAD:main
+
+      - name: Open issue on merge conflict
+        if: failure() && steps.merge.outputs.merge_ok == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="Nightly upstream sync failed — conflict on $(date -u +%Y-%m-%d)"
+          BODY=$(cat <<'MD'
+          Automatic merge of `pingdotgg/t3code` `main` into `personal` failed due to conflicts.
+
+          Resolve locally:
+
+          ```bash
+          cd /path/to/t3code
+          git fetch origin
+          git fetch upstream  # or: git fetch origin (if upstream not set)
+          git checkout personal
+          git merge upstream/main   # or: git merge origin/main if tracking pingdotgg
+          # resolve conflicts, then:
+          git push origin personal
+          git push origin personal:main
+          ```
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MD
+          )
+          # Avoid duplicate open issues for the same day
+          EXISTING=$(gh issue list --state open --search "Nightly upstream sync failed" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Sync failed again. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
