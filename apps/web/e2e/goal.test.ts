@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - e2e suite: reads fixtures and harness state from disk.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
@@ -96,7 +97,7 @@ describe.sequential("Goal", () => {
 
     const chip = goalChip(page);
     await chip.waitFor({ state: "visible" });
-    expect(await chip.getAttribute("aria-label")).toBe(`Goal: ${OBJECTIVE} (Active)`);
+    await expectChipActiveLabel(page, OBJECTIVE);
     await goalActiveMarker(page).waitFor({ state: "visible" });
     expect(await page.getByText(`/goal ${OBJECTIVE}`).count()).toBe(0);
 
@@ -125,7 +126,7 @@ describe.sequential("Goal", () => {
     const pausedGoal = JSON.parse(String(pausedRows[0]?.goal)) as { status: string };
     expect(pausedGoal.status).toBe("paused");
 
-    await expectChipLabel(page, `Goal: ${OBJECTIVE} (Paused)`);
+    await expectChipLabel(page, `Goal paused: ${OBJECTIVE}`);
 
     await submitGoalSlashCommand(page, "/goal resume");
     await expectChipActiveLabel(page, OBJECTIVE);
@@ -151,7 +152,7 @@ describe.sequential("Goal", () => {
     await submitComposer(page);
     await expectChipActiveLabel(page, OBJECTIVE);
     await page.locator("[data-goal-chip-action='pause']").click();
-    await expectChipLabel(page, `Goal: ${OBJECTIVE} (Paused)`);
+    await expectChipLabel(page, `Goal paused: ${OBJECTIVE}`);
 
     await page.locator("[data-goal-chip-action='resume']").click();
     await expectChipActiveLabel(page, OBJECTIVE);
@@ -215,12 +216,12 @@ async function expectChipLabel(page: IsolatedWebApp["page"], label: string): Pro
     .toBe(label);
 }
 
-/** A live Goal reports "(Running)" while a turn is in flight, "(Active)" once idle. */
+/** A live Goal reads "Goal: …", with a "(Running)" suffix while a turn is in flight. */
 async function expectChipActiveLabel(
   page: IsolatedWebApp["page"],
   objective: string,
 ): Promise<void> {
   await expect
     .poll(async () => await goalChip(page).getAttribute("aria-label"), { timeout: 30_000 })
-    .toMatch(new RegExp(`^Goal: ${objective} \\((Active|Running)\\)$`));
+    .toMatch(new RegExp(`^Goal: ${objective}( \\(Running\\))?$`));
 }

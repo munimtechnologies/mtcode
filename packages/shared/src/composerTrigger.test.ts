@@ -4,6 +4,7 @@ import {
   BUILT_IN_GOAL_SLASH_COMMANDS,
   formatGoalActivityLabel,
   formatGoalChipAriaLabel,
+  formatGoalChipPrefix,
   formatGoalStatusLabel,
   formatGoalStatusMessage,
   GOAL_OBJECTIVE_PREVIEW_MAX_CHARS,
@@ -167,17 +168,27 @@ describe("formatGoalStatusLabel", () => {
   });
 });
 
+describe("formatGoalChipPrefix", () => {
+  it("keeps Active bare and folds other statuses into the prefix", () => {
+    expect(formatGoalChipPrefix("active")).toBe("Goal");
+    expect(formatGoalChipPrefix("paused")).toBe("Goal paused");
+    expect(formatGoalChipPrefix("complete")).toBe("Goal complete");
+    expect(formatGoalChipPrefix("blocked")).toBe("Goal blocked");
+    expect(formatGoalChipPrefix("usageLimited")).toBe("Goal usage-limited");
+  });
+});
+
 describe("formatGoalChipAriaLabel", () => {
-  it("prefixes the objective and notes status in parentheses", () => {
+  it("matches the visible chip text", () => {
     expect(formatGoalChipAriaLabel({ status: "active", objective: "Reduce p95 below 120ms" })).toBe(
-      "Goal: Reduce p95 below 120ms (Active)",
+      "Goal: Reduce p95 below 120ms",
     );
     expect(formatGoalChipAriaLabel({ status: "paused", objective: "Reduce p95 below 120ms" })).toBe(
-      "Goal: Reduce p95 below 120ms (Paused)",
+      "Goal paused: Reduce p95 below 120ms",
     );
   });
 
-  it("uses Running when an active Goal has a live turn", () => {
+  it("notes Running when an active Goal has a live turn", () => {
     expect(
       formatGoalChipAriaLabel(
         { status: "active", objective: "Reduce p95 below 120ms" },

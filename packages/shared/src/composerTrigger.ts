@@ -111,14 +111,22 @@ export function formatGoalStatusMessage(
   return `${formatGoalStatusLabel(goal.status)}: ${goal.objective}`;
 }
 
-/** Accessible label for the composer Goal chip (status in parentheses). */
+/** Chip prefix: bare "Goal" while Active, otherwise carries the status. */
+export function formatGoalChipPrefix(status: string): string {
+  if (status === "active") {
+    return "Goal";
+  }
+  return `Goal ${formatGoalStatusLabel(status).toLowerCase()}`;
+}
+
+/** Accessible label for the composer Goal chip. Matches the visible text. */
 export function formatGoalChipAriaLabel(
   goal: { readonly status: string; readonly objective: string },
   options?: { readonly isWorking?: boolean },
 ): string {
   const isWorking = options?.isWorking === true && goal.status === "active";
-  const statusNote = isWorking ? "Running" : formatGoalStatusLabel(goal.status);
-  return `Goal: ${goal.objective} (${statusNote})`;
+  const label = `${formatGoalChipPrefix(goal.status)}: ${goal.objective}`;
+  return isWorking ? `${label} (Running)` : label;
 }
 
 // User-facing actions: pause/resume/clear only. Complete belongs to the model

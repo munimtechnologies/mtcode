@@ -1,6 +1,7 @@
 import type { OrchestrationThreadGoal } from "@t3tools/contracts";
 import {
   formatGoalChipAriaLabel,
+  formatGoalChipPrefix,
   formatGoalStatusLabel,
   goalChipActions,
   threadHasActiveGoal,
@@ -141,12 +142,12 @@ export const GoalChip = memo(function GoalChip({
             onEdit(goal.objective);
           }}
         >
-          <span className="shrink-0 font-medium">Goal:</span>
+          <span className="shrink-0 font-medium">{formatGoalChipPrefix(goal.status)}:</span>
           <span className="truncate">{goal.objective}</span>
         </button>
       ) : (
         <span className="inline-flex min-w-0 items-baseline gap-1">
-          <span className="shrink-0 font-medium">Goal:</span>
+          <span className="shrink-0 font-medium">{formatGoalChipPrefix(goal.status)}:</span>
           <span className="truncate">{goal.objective}</span>
         </span>
       )}

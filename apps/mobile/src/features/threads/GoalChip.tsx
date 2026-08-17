@@ -1,6 +1,6 @@
 import type { OrchestrationThreadGoalShell } from "@t3tools/contracts";
 import {
-  formatGoalStatusLabel,
+  formatGoalChipPrefix,
   GOAL_PAUSE_HINT,
   goalChipActionLabel,
   goalChipActions,
@@ -33,15 +33,15 @@ export function GoalChip({
     return null;
   }
 
-  const statusLabel = formatGoalStatusLabel(goal.status);
+  const chipPrefix = formatGoalChipPrefix(goal.status);
   const actions = onAction == null ? [] : goalChipActions(goal.status);
 
   return (
-    <View className="px-4 pb-2" accessibilityLabel={`${statusLabel}: ${goal.objectivePreview}`}>
+    <View className="px-4 pb-2" accessibilityLabel={`${chipPrefix}: ${goal.objectivePreview}`}>
       <View className="self-start max-w-[80%] rounded-md border border-border bg-card px-2 py-1">
         <Text className="text-xs text-foreground-muted" numberOfLines={1}>
           <Text className={`text-xs font-t3-medium ${goalStatusClass(goal.status)}`}>
-            {statusLabel}
+            {chipPrefix}:
           </Text>
           {`  ${goal.objectivePreview}`}
         </Text>
