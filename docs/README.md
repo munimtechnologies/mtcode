@@ -15,6 +15,7 @@
 - [Usage reports](./user/usage.md)
 - [Background service (Linux)](./user/background-service.md)
 - Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
+- [Plugins](./user/plugins.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 
