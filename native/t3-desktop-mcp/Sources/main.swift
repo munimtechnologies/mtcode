@@ -1375,6 +1375,11 @@ enum Chrome {
     private static var cachedChromePid: pid_t?
     /// Process start time for `cachedChromePid` — PIDs alone are reusable after relaunch.
     private static var cachedChromeLaunch: TimeInterval?
+    /// CGWindowID from `_AXUIElementGetWindow`. Scripting ids and AX elements share
+    /// no handle; frame matching alone fails when Chrome stacks maximized windows
+    /// on the same display (identical origins and sizes → tied). This id is how
+    /// the agent window is reattached unambiguously after create.
+    private static var cachedAXWindowID: UInt32?
     private static var didLoadState = false
 
     private static func chromePid() -> pid_t? {
@@ -1410,11 +1415,17 @@ enum Chrome {
             cachedWindowID = nil
             cachedChromePid = nil
             cachedChromeLaunch = nil
+            cachedAXWindowID = nil
             return
         }
         cachedWindowID = windowId
         cachedChromePid = pid_t(chromePid)
         cachedChromeLaunch = object["chromeLaunch"] as? TimeInterval
+        if let axId = object["axWindowId"] as? Int, axId > 0, axId <= Int(UInt32.max) {
+            cachedAXWindowID = UInt32(axId)
+        } else {
+            cachedAXWindowID = nil
+        }
     }
 
     private static func persistState() {
@@ -1425,6 +1436,9 @@ enum Chrome {
         var payload: [String: Any] = ["windowId": windowId, "chromePid": Int(chromePid)]
         if let launch = cachedChromeLaunch {
             payload["chromeLaunch"] = launch
+        }
+        if let axWindowId = cachedAXWindowID {
+            payload["axWindowId"] = Int(axWindowId)
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         try? data.write(to: stateURL, options: .atomic)
@@ -1444,8 +1458,9 @@ enum Chrome {
                 if let id = newValue {
                     // Prefer the Chrome process that owns this window, not the first
                     // com.google.Chrome in the process list (multi-instance safe).
-                    if let frame = boundsOf(id), let match = axWindow(matching: frame) {
+                    if let match = resolveAXWindow(scriptingID: id) {
                         cachedChromePid = match.pid
+                        cachedAXWindowID = match.cgWindowID
                         if let app = chromeApp(pid: match.pid) {
                             cachedChromeLaunch = launchInterval(for: app)
                         } else {
@@ -1454,10 +1469,12 @@ enum Chrome {
                     } else {
                         cachedChromePid = nil
                         cachedChromeLaunch = nil
+                        cachedAXWindowID = nil
                     }
                 } else {
                     cachedChromePid = nil
                     cachedChromeLaunch = nil
+                    cachedAXWindowID = nil
                 }
                 persistState()
             }
@@ -1468,6 +1485,7 @@ enum Chrome {
         cachedWindowID = nil
         cachedChromePid = nil
         cachedChromeLaunch = nil
+        cachedAXWindowID = nil
         try? FileManager.default.removeItem(at: stateURL)
     }
 
@@ -1491,10 +1509,9 @@ enum Chrome {
             clearAgentWindowState()
             return nil
         }
-        if let frame = boundsOf(id),
-           let match = axWindow(matching: frame, pid: expectedPid)
-        {
+        if let match = resolveAXWindow(scriptingID: id, pid: expectedPid) {
             cachedChromePid = match.pid
+            cachedAXWindowID = match.cgWindowID
             cachedChromeLaunch = launchInterval(for: app)
             return id
         }
@@ -1550,7 +1567,7 @@ enum Chrome {
     /// the user's window is brought back to the front with the accessibility
     /// raise action instead. That reorders within Chrome without activating it.
     static func raiseWindow(_ id: Int) {
-        guard let frame = boundsOf(id), let match = axWindow(matching: frame) else { return }
+        guard let match = resolveAXWindow(scriptingID: id) else { return }
         AXUIElementPerformAction(match.element, kAXRaiseAction as CFString)
     }
 
@@ -1593,6 +1610,11 @@ enum Chrome {
             didLoadState = false
             if let id = liveAgentWindowIDLocked() { return .success(id) }
 
+            // Snapshot CGWindowIDs before create so the new AX window can be
+            // identified even when it shares a frame with an existing maximized
+            // window (frame matching alone returns a tie and used to fail here).
+            let beforeIDs = Set(chromeAXWindows().map(\.cgWindowID))
+
             let created = run("""
             tell application "Google Chrome"
                 set w to make new window
@@ -1607,8 +1629,9 @@ enum Chrome {
                 }
                 didLoadState = true
                 cachedWindowID = id
-                if let frame = boundsOf(id), let match = axWindow(matching: frame) {
+                if let match = pairCreatedWindow(scriptingID: id, beforeIDs: beforeIDs) {
                     cachedChromePid = match.pid
+                    cachedAXWindowID = match.cgWindowID
                     if let app = chromeApp(pid: match.pid) {
                         cachedChromeLaunch = launchInterval(for: app)
                     } else {
@@ -1649,19 +1672,120 @@ enum Chrome {
 
     /// The AX window for the agent's Chrome window.
     ///
-    /// Chrome's scripting ids and accessibility elements are separate worlds with
-    /// no shared handle, so they are paired by screen position — the closest
-    /// origin wins, which is unambiguous unless two windows are exactly stacked.
+    /// Prefer the persisted CGWindowID — scripting ids and accessibility elements
+    /// are separate worlds, and frame matching is ambiguous when Chrome stacks
+    /// maximized windows on the same display.
     static func agentAXWindow() -> (element: AXUIElement, pid: pid_t)? {
-        guard let frame = agentWindowFrame() else { return nil }
         loadState()
-        return axWindow(matching: frame, pid: cachedChromePid)
+        if let axID = cachedAXWindowID,
+           let match = axWindow(cgWindowID: axID, pid: cachedChromePid)
+        {
+            return (match.element, match.pid)
+        }
+        guard let id = liveAgentWindowID() ?? cachedWindowID else { return nil }
+        guard let match = resolveAXWindow(scriptingID: id, pid: cachedChromePid) else { return nil }
+        cachedAXWindowID = match.cgWindowID
+        cachedChromePid = match.pid
+        return (match.element, match.pid)
+    }
+
+    /// Every on-screen Chrome AX window with its CGWindowID (when resolvable).
+    static func chromeAXWindows(pid: pid_t? = nil) -> [(
+        element: AXUIElement, pid: pid_t, cgWindowID: UInt32
+    )] {
+        var result: [(AXUIElement, pid_t, UInt32)] = []
+        for app in NSWorkspace.shared.runningApplications
+        where app.bundleIdentifier == "com.google.Chrome" {
+            if let pid, app.processIdentifier != pid { continue }
+            let ax = AXUIElementCreateApplication(app.processIdentifier)
+            for window in (axCopy(ax, kAXWindowsAttribute as String) as? [AXUIElement]) ?? [] {
+                guard let wid = SkyLight.windowID(window) else { continue }
+                result.append((window, app.processIdentifier, wid))
+            }
+        }
+        return result
+    }
+
+    static func axWindow(cgWindowID: UInt32, pid: pid_t? = nil) -> (
+        element: AXUIElement, pid: pid_t
+    )? {
+        for entry in chromeAXWindows(pid: pid) where entry.cgWindowID == cgWindowID {
+            return (entry.element, entry.pid)
+        }
+        return nil
+    }
+
+    /// Pair a just-created scripting window with its AX element.
+    ///
+    /// The AX window that appeared after `beforeIDs` was snapshotted is preferred
+    /// — frame matching alone fails when Chrome stacks maximized windows on the
+    /// same display (identical origins and sizes → tied).
+    static func pairCreatedWindow(scriptingID: Int, beforeIDs: Set<UInt32>) -> (
+        element: AXUIElement, pid: pid_t, cgWindowID: UInt32
+    )? {
+        for _ in 0..<12 {
+            let windows = chromeAXWindows()
+            let newcomers = windows.filter { !beforeIDs.contains($0.cgWindowID) }
+            if newcomers.count == 1 {
+                let n = newcomers[0]
+                return (n.element, n.pid, n.cgWindowID)
+            }
+            if newcomers.count > 1, let frame = boundsOf(scriptingID) {
+                var best: (AXUIElement, pid_t, UInt32, CGFloat)?
+                for n in newcomers {
+                    guard let origin = axPoint(n.element, kAXPositionAttribute as String),
+                          let size = axSize(n.element, kAXSizeAttribute as String)
+                    else { continue }
+                    let distance = hypot(origin.x - frame.origin.x, origin.y - frame.origin.y)
+                        + hypot(size.width - frame.width, size.height - frame.height)
+                    if best == nil || distance < best!.3 {
+                        best = (n.element, n.pid, n.cgWindowID, distance)
+                    }
+                }
+                if let best, best.3 < 12 {
+                    return (best.0, best.1, best.2)
+                }
+            }
+            // Unambiguous frame match (only one window at that rect) — covers
+            // the case where CGWindowID was not yet published for the newcomer.
+            if let frame = boundsOf(scriptingID),
+               let match = axWindow(matching: frame),
+               let wid = SkyLight.windowID(match.element)
+            {
+                return (match.element, match.pid, wid)
+            }
+            usleep(50_000)
+        }
+        return nil
+    }
+
+    /// Resolve a Chrome scripting window to its AX element.
+    /// Prefers the persisted CGWindowID when this is the agent window.
+    static func resolveAXWindow(scriptingID: Int, pid: pid_t? = nil) -> (
+        element: AXUIElement, pid: pid_t, cgWindowID: UInt32
+    )? {
+        if scriptingID == cachedWindowID,
+           let axID = cachedAXWindowID,
+           let match = axWindow(cgWindowID: axID, pid: pid ?? cachedChromePid)
+        {
+            return (match.element, match.pid, axID)
+        }
+        guard let frame = boundsOf(scriptingID),
+              let match = axWindow(matching: frame, pid: pid)
+        else { return nil }
+        guard let wid = SkyLight.windowID(match.element) else {
+            return nil
+        }
+        return (match.element, match.pid, wid)
     }
 
     /// Pair a scripting window with its accessibility element by screen frame.
     /// Chrome cascades new windows only ~28px apart, so origin alone is not
     /// enough to tell them apart — size is folded into the distance and the
     /// tolerance is tight. When `pid` is set, only that Chrome process is searched.
+    ///
+    /// Returns nil when two windows sit at the same frame (maximized stack) —
+    /// callers that just created a window should use `pairCreatedWindow` instead.
     static func axWindow(matching frame: CGRect, pid: pid_t? = nil) -> (element: AXUIElement, pid: pid_t)? {
         var best: (AXUIElement, pid_t, CGFloat)?
         var tied = false
