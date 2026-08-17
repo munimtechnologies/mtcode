@@ -4,6 +4,9 @@ import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
+// Swift 6: Result's Failure must be Error. Keep stringly failures for MCP replies.
+extension String: @retroactive Error {}
+
 // t3-desktop-mcp — a macOS computer-use MCP server built on the Accessibility API.
 //
 // Design notes:
