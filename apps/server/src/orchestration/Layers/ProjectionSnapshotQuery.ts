@@ -11,7 +11,6 @@ import {
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
-  OrchestrationThreadGoal,
   ProjectScript,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -22,13 +21,11 @@ import {
   type OrchestrationProject,
   type OrchestrationSession,
   type OrchestrationThreadActivity,
-  type OrchestrationThreadGoalShell,
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import { truncateGoalObjectivePreview } from "@t3tools/shared/composerTrigger";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -38,8 +35,6 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-
-import { THREAD_DETAIL_STREAM_EVENT_TYPES } from "../../ws.ts";
 
 import {
   isPersistenceError,
@@ -84,19 +79,18 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
-const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
-  Struct.assign({
-    isStreaming: Schema.Number,
-    attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
-  }),
-);
+const ProjectionThreadMessageDbRowSchema = Schema.Struct({
+  ...ProjectionThreadMessage.fields,
+  isStreaming: Schema.Number,
+  attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+  deliveryState: Schema.NullOr(Schema.Literal("queued")),
+});
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
-  Struct.assign({
-    modelSelection: Schema.fromJsonString(ModelSelection),
-    goal: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadGoal)),
-  }),
-);
+const ProjectionThreadDbRowSchema = Schema.Struct({
+  ...ProjectionThread.fields,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  hasQueuedTurns: Schema.optional(Schema.Number),
+});
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -205,6 +199,7 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+  ORCHESTRATION_PROJECTOR_NAMES.queuedTurns,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
 ] as const;
 
@@ -299,23 +294,6 @@ function mapTitleRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbR
         startedAt: row.titleRegenerationStartedAt,
       }
     : null;
-}
-
-function mapThreadGoal(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
-  return row.goal ?? null;
-}
-
-function mapThreadGoalShell(
-  row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>,
-): OrchestrationThreadGoalShell | null {
-  const goal = mapThreadGoal(row);
-  if (goal == null) {
-    return null;
-  }
-  return {
-    status: goal.status,
-    objectivePreview: truncateGoalObjectivePreview(goal.objective),
-  };
 }
 
 function mapSessionRow(
@@ -457,11 +435,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
-          goal_json AS "goal",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -494,11 +477,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
-          goal_json AS "goal",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -533,11 +521,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
-          goal_json AS "goal",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -559,9 +552,35 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
+        ORDER BY thread_id ASC, created_at ASC, message_id ASC
+      `,
+  });
+
+  // Commands normally avoid hydrating message history. Durable queued turns
+  // are the exception: cancellation, dispatch, and settle invariants must see
+  // them even when the ordinary detail window no longer does.
+  const listQueuedThreadMessageRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          role,
+          text,
+          attachments_json AS "attachments",
+          is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_messages
+        WHERE delivery_state = 'queued'
         ORDER BY thread_id ASC, created_at ASC, message_id ASC
       `,
   });
@@ -976,11 +995,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
-          goal_json AS "goal",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (
+            SELECT 1
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.thread_id = projection_threads.thread_id
+              AND queued_turn.status = 'queued'
+          ) AS "hasQueuedTurns",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -1003,6 +1027,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1157,10 +1182,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   // transaction). This is the thread-scoped watermark a windowed page carries
   // so clients can defer merging until their live subscription has caught up;
   // the global sequence is not waitable per-thread. The event_type filter
-  // must match ws.ts THREAD_DETAIL_STREAM_EVENT_TYPES exactly: the
-  // subscription only delivers these types, so a watermark counting any other
-  // event could never be reached by the client and would park the page forever.
-  // Served by the event store's (aggregate_kind, stream_id, sequence) index.
+  // must match ws.ts's isThreadDetailEvent exactly: the subscription only
+  // delivers these types, so a watermark counting any other event could
+  // never be reached by the client and would park the page forever. Served
+  // by the event store's (aggregate_kind, stream_id, sequence) index.
   const getThreadEventWatermarkRow = SqlSchema.findOneOption({
     Request: Schema.Struct({ threadId: ThreadId, maxSequence: Schema.Number }),
     Result: Schema.Struct({ threadSequence: Schema.NullOr(Schema.Number) }),
@@ -1171,7 +1196,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE aggregate_kind = 'thread'
           AND stream_id = ${threadId}
           AND sequence <= ${maxSequence}
-          AND ${sql.in("event_type", THREAD_DETAIL_STREAM_EVENT_TYPES)}
+          AND event_type IN (
+            'thread.message-sent',
+            'thread.proposed-plan-upserted',
+            'thread.activity-appended',
+            'thread.turn-diff-completed',
+            'thread.reverted',
+            'thread.session-set'
+          )
       `,
   });
 
@@ -1239,6 +1271,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          delivery_state AS "deliveryState",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1584,6 +1617,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   streaming: row.isStreaming === 1,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
+                  ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
                 });
                 messagesByThread.set(row.threadId, threadMessages);
               }
@@ -1725,7 +1759,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 pinnedAt: row.pinnedAt,
                 pinOrderKey: row.pinOrderKey ?? null,
                 titleRegeneration: mapTitleRegeneration(row),
-                goal: mapThreadGoal(row),
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1776,6 +1809,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listQueuedThreadMessageRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listQueuedThreadMessages:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listQueuedThreadMessages:decodeRows",
+              ),
+            ),
+          ),
           listThreadProposedPlanRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1812,11 +1853,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            queuedMessageRows,
+            proposedPlanRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
               const threads: OrchestrationThread[] = [];
+              const queuedMessagesByThread = new Map<string, Array<OrchestrationMessage>>();
 
               for (let index = 0; index < projectRows.length; index += 1) {
                 const row = projectRows[index];
@@ -1850,6 +1900,26 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   continue;
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (let index = 0; index < queuedMessageRows.length; index += 1) {
+                const row = queuedMessageRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const messages = queuedMessagesByThread.get(row.threadId) ?? [];
+                messages.push({
+                  id: row.messageId,
+                  role: row.role,
+                  text: row.text,
+                  ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+                  turnId: row.turnId,
+                  streaming: row.isStreaming === 1,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  deliveryState: "queued",
+                });
+                queuedMessagesByThread.set(row.threadId, messages);
               }
               for (let index = 0; index < sessionRows.length; index += 1) {
                 const row = sessionRows[index];
@@ -1933,9 +2003,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   pinnedAt: row.pinnedAt,
                   pinOrderKey: row.pinOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
-                  goal: mapThreadGoal(row),
                   deletedAt: row.deletedAt,
-                  messages: [],
+                  messages: queuedMessagesByThread.get(row.threadId) ?? [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
                   activities: [],
                   checkpoints: [],
@@ -2070,9 +2139,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       pinnedAt: row.pinnedAt,
                       pinOrderKey: row.pinOrderKey ?? null,
                       titleRegeneration: mapTitleRegeneration(row),
-                      goal: mapThreadGoalShell(row),
                       session: sessionByThread.get(row.threadId) ?? null,
                       latestUserMessageAt: row.latestUserMessageAt,
+                      hasQueuedTurns: row.hasQueuedTurns === 1,
                       hasPendingApprovals: row.pendingApprovalCount > 0,
                       hasPendingUserInput: row.pendingUserInputCount > 0,
                       hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
@@ -2216,9 +2285,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   pinnedAt: row.pinnedAt,
                   pinOrderKey: row.pinOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
-                  goal: mapThreadGoalShell(row),
                   session: sessionByThread.get(row.threadId) ?? null,
                   latestUserMessageAt: row.latestUserMessageAt,
+                  hasQueuedTurns: row.hasQueuedTurns === 1,
                   hasPendingApprovals: row.pendingApprovalCount > 0,
                   hasPendingUserInput: row.pendingUserInputCount > 0,
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
@@ -2496,9 +2565,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         pinnedAt: threadRow.value.pinnedAt,
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
-        goal: mapThreadGoalShell(threadRow.value),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
+        hasQueuedTurns: threadRow.value.hasQueuedTurns === 1,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
@@ -2638,7 +2707,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         pinnedAt: threadRow.value.pinnedAt,
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
-        goal: mapThreadGoal(threadRow.value),
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {
@@ -2649,6 +2717,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             streaming: row.isStreaming === 1,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
+            ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
           };
           if (row.attachments !== null) {
             return Object.assign(message, { attachments: row.attachments });

@@ -12,10 +12,6 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
-  buildGoalContinuationPrompt,
-  goalContinuationCommandId,
-} from "@t3tools/shared/goalContinuation";
-import {
   ApprovalRequestId,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -154,6 +150,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly queuedTurnHandoffBeforeStart?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -419,6 +416,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provide(SqlitePersistenceMemory),
     );
     runtime = ManagedRuntime.make(layer);
 
@@ -488,6 +486,39 @@ describe("ProviderCommandReactor", () => {
         }),
       );
     }
+    if (input?.queuedTurnHandoffBeforeStart === true) {
+      const queuedAt = "2026-08-16T10:00:00.000Z";
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-queued-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("message-queued-before-reactor-start"),
+            role: "user",
+            text: "Recover me",
+            attachments: [],
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          modelSelection,
+          deliveryMode: "after-current",
+          createdAt: queuedAt,
+        }),
+      );
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.queued-turn.dispatch",
+          commandId: CommandId.make("cmd-mark-queued-handoff-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: asMessageId("message-queued-before-reactor-start"),
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          queuedAt,
+          createdAt: "2026-08-16T10:00:01.000Z",
+        }),
+      );
+    }
 
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
@@ -554,108 +585,6 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
-  });
-
-  it("uses a relinked project cwd for new Claude sessions without restarting existing sessions", async () => {
-    const modelSelection = {
-      instanceId: ProviderInstanceId.make("claudeAgent"),
-      model: "claude-sonnet-4-5",
-    } satisfies ModelSelection;
-    const harness = await createHarness({ threadModelSelection: modelSelection });
-    const now = "2026-01-01T00:00:00.000Z";
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-existing-claude-thread"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-existing-claude-thread"),
-          role: "user",
-          text: "start the existing Claude thread",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-    await harness.drain();
-
-    expect(harness.startSession).toHaveBeenCalledTimes(1);
-    expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.make("thread-1"));
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      cwd: "/tmp/provider-project",
-      provider: "claudeAgent",
-    });
-    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "project.meta.update",
-        commandId: CommandId.make("cmd-project-relink-claude"),
-        projectId: asProjectId("project-1"),
-        workspaceRoot: "/tmp/provider-project-relocated",
-      }),
-    );
-    await harness.drain();
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make("cmd-thread-create-new-claude-thread"),
-        threadId: ThreadId.make("thread-2"),
-        projectId: asProjectId("project-1"),
-        title: "New Claude thread",
-        modelSelection,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        branch: null,
-        worktreePath: null,
-        createdAt: "2026-01-01T00:00:01.000Z",
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-new-claude-thread"),
-        threadId: ThreadId.make("thread-2"),
-        message: {
-          messageId: asMessageId("user-message-new-claude-thread"),
-          role: "user",
-          text: "start a new Claude thread after relinking",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:01.000Z",
-      }),
-    );
-    await harness.drain();
-
-    expect(harness.startSession).toHaveBeenCalledTimes(2);
-    expect(harness.startSession.mock.calls[1]?.[0]).toEqual(ThreadId.make("thread-2"));
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      cwd: "/tmp/provider-project-relocated",
-      provider: "claudeAgent",
-    });
-    expect(
-      harness.startSession.mock.calls.filter(
-        ([threadId]) => threadId === ThreadId.make("thread-1"),
-      ),
-    ).toHaveLength(1);
-    expect(harness.sendTurn).toHaveBeenCalledTimes(2);
-    expect(
-      harness.runtimeSessions.find((session) => session.threadId === ThreadId.make("thread-1")),
-    ).toMatchObject({ cwd: "/tmp/provider-project" });
-
-    const readModel = await harness.readModel();
-    for (const threadId of [ThreadId.make("thread-1"), ThreadId.make("thread-2")]) {
-      const thread = readModel.threads.find((entry) => entry.id === threadId);
-      expect(
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed"),
-      ).toBe(false);
-    }
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>
@@ -2817,7 +2746,7 @@ describe("ProviderCommandReactor", () => {
       ),
     );
 
-    await harness.runEffect(
+    await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-set-for-approval-error"),
@@ -3050,161 +2979,179 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.activeTurnId).toBeNull();
   });
 
-  it("sends a Continuation turn with no user message and can start a fresh Session", async () => {
+  it("holds after-current messages on the server until the active turn settles", async () => {
     const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-    const objective = "Reduce p95 below 120ms";
-    const completedTurnId = asTurnId("turn-goal-1");
+    const now = "2026-08-16T12:00:00.000Z";
 
     await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-running-for-goal"),
+        commandId: CommandId.make("cmd-queue-session-running"),
         threadId: ThreadId.make("thread-1"),
-        createdAt: now,
         session: {
           threadId: ThreadId.make("thread-1"),
           status: "running",
           providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
           runtimeMode: "approval-required",
-          activeTurnId: completedTurnId,
+          activeTurnId: asTurnId("active-turn"),
           lastError: null,
           updatedAt: now,
         },
+        createdAt: now,
       }),
     );
+    await harness.drain();
+
     await harness.runEffect(
       harness.engine.dispatch({
-        type: "thread.goal.set",
-        commandId: CommandId.make("cmd-goal-attach"),
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-queue-after-current"),
         threadId: ThreadId.make("thread-1"),
-        objective,
+        message: {
+          messageId: asMessageId("queued-message"),
+          role: "user",
+          text: "Run after the current turn",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        deliveryMode: "after-current",
+        createdAt: now,
       }),
     );
+    await harness.drain();
+
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const queuedThread = (await harness.readModel()).threads[0];
+    expect(
+      queuedThread?.messages.find((message) => message.id === "queued-message")?.deliveryState,
+    ).toBe("queued");
+
+    const settledAt = "2026-08-16T12:01:00.000Z";
     await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-ready-for-goal"),
+        commandId: CommandId.make("cmd-queue-session-ready"),
         threadId: ThreadId.make("thread-1"),
-        createdAt: now,
         session: {
           threadId: ThreadId.make("thread-1"),
           status: "ready",
           providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
           runtimeMode: "approval-required",
           activeTurnId: null,
           lastError: null,
-          updatedAt: now,
+          updatedAt: settledAt,
         },
+        createdAt: settledAt,
       }),
     );
-    const readModelBeforeContinue = await harness.readModel();
-    const threadBeforeContinue = readModelBeforeContinue.threads.find(
-      (entry) => entry.id === ThreadId.make("thread-1"),
-    );
-    const goalUpdatedAt = threadBeforeContinue?.goal?.updatedAt ?? now;
-    await harness.runEffect(
-      harness.engine.dispatch({
-        type: "thread.goal.continue",
-        commandId: CommandId.make(
-          goalContinuationCommandId({
-            threadId: "thread-1",
-            goalUpdatedAt,
-            completedTurnId,
-          }),
-        ),
-        threadId: ThreadId.make("thread-1"),
-        completedTurnId,
-      }),
-    );
+    await harness.drain();
 
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    const sendTurnInput = (harness.sendTurn.mock.calls[0]?.[0] as { input?: string }).input ?? "";
-    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
-      threadId: ThreadId.make("thread-1"),
-      input: buildGoalContinuationPrompt(objective),
-    });
-    expect(sendTurnInput).toContain(objective);
-    expect(sendTurnInput).toContain("<objective_complete>");
-    expect(sendTurnInput).toContain("<objective_blocked>");
-    expect(sendTurnInput).not.toMatch(/\bgoal\b/i);
-    expect(sendTurnInput.toLowerCase()).not.toContain("/goal");
-    expect(sendTurnInput.toLowerCase()).not.toContain("slash goal");
-    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
-    expect(harness.startSession.mock.calls.length).toBeGreaterThanOrEqual(1);
-
-    const readModel = await harness.readModel();
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.messages.filter((message) => message.role === "user")).toHaveLength(0);
-    expect(thread?.activities.some((activity) => activity.kind === "goal.continued")).toBe(true);
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    const deliveredThread = (await harness.readModel()).threads[0];
+    expect(
+      deliveredThread?.messages.find((message) => message.id === "queued-message")?.deliveryState,
+    ).toBeUndefined();
   });
 
-  it("does not send a Continuation when the Goal is paused", async () => {
+  it("does not replay an ambiguous provider handoff after reactor startup", async () => {
+    const harness = await createHarness({ queuedTurnHandoffBeforeStart: true });
+    await harness.drain();
+
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const thread = (await harness.readModel()).threads[0];
+    expect(thread?.session?.status).toBe("error");
+    expect(thread?.session?.lastError).toContain("may already have received it");
+    expect(
+      thread?.activities.some(
+        (activity) =>
+          activity.kind === "provider.turn.start.failed" &&
+          activity.summary === "Queued turn handoff interrupted",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not dispatch a queued message after it is cancelled", async () => {
     const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-    const completedTurnId = asTurnId("turn-paused-1");
+    const now = "2026-08-16T13:00:00.000Z";
 
     await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-running-paused-goal"),
+        commandId: CommandId.make("cmd-cancel-queue-session-running"),
         threadId: ThreadId.make("thread-1"),
-        createdAt: now,
         session: {
           threadId: ThreadId.make("thread-1"),
           status: "running",
           providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
           runtimeMode: "approval-required",
-          activeTurnId: completedTurnId,
+          activeTurnId: asTurnId("active-turn"),
           lastError: null,
           updatedAt: now,
         },
+        createdAt: now,
       }),
     );
     await harness.runEffect(
       harness.engine.dispatch({
-        type: "thread.goal.set",
-        commandId: CommandId.make("cmd-goal-attach-paused"),
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-cancel-queue-start"),
         threadId: ThreadId.make("thread-1"),
-        objective: "Reduce p95 below 120ms",
+        message: {
+          messageId: asMessageId("cancelled-queued-message"),
+          role: "user",
+          text: "Do not run this",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        deliveryMode: "after-current",
+        createdAt: now,
       }),
     );
+    await harness.drain();
+
     await harness.runEffect(
       harness.engine.dispatch({
-        type: "thread.goal.pause",
-        commandId: CommandId.make("cmd-goal-pause-before-ready"),
+        type: "thread.queued-turn.cancel",
+        commandId: CommandId.make("cmd-cancel-queued-message"),
         threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("cancelled-queued-message"),
+        createdAt: "2026-08-16T13:00:01.000Z",
       }),
     );
     await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-ready-paused-goal"),
+        commandId: CommandId.make("cmd-cancel-queue-session-ready"),
         threadId: ThreadId.make("thread-1"),
-        createdAt: now,
         session: {
           threadId: ThreadId.make("thread-1"),
           status: "ready",
           providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
           runtimeMode: "approval-required",
           activeTurnId: null,
           lastError: null,
-          updatedAt: now,
+          updatedAt: "2026-08-16T13:01:00.000Z",
         },
+        createdAt: "2026-08-16T13:01:00.000Z",
       }),
     );
-    const error = await harness.runEffect(
-      harness.engine
-        .dispatch({
-          type: "thread.goal.continue",
-          commandId: CommandId.make("cmd-continue-paused"),
-          threadId: ThreadId.make("thread-1"),
-          completedTurnId,
-        })
-        .pipe(Effect.flip),
-    );
-    expect(error._tag).toBe("OrchestrationCommandInvariantError");
     await harness.drain();
+
     expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(
+      (await harness.readModel()).threads[0]?.messages.some(
+        (message) => message.id === "cancelled-queued-message",
+      ),
+    ).toBe(false);
   });
 });
