@@ -83,7 +83,7 @@ interface RightPanelTabsProps {
    * DOM click handler, and a `(profileId?: string)` signature would silently
    * accept the MouseEvent as a profile id.
    */
-  onAddBrowserInProfile: (profileId: string) => void;
+  onAddBrowserInProfile?: (profileId: string) => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
@@ -514,7 +514,7 @@ function sameOrigin(left: string, right: string): boolean {
 function SurfaceIcon({
   surface,
   sessions,
-  desktopByTabId,
+  desktopByTabId = {},
   theme,
   pullRequestStatuses,
 }: {
@@ -838,7 +838,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         {browserProfiles.map((profile) => (
                           <MenuItem
                             key={profile.id}
-                            onClick={() => props.onAddBrowserInProfile(profile.id)}
+                            onClick={() => props.onAddBrowserInProfile?.(profile.id)}
                           >
                             <span className="min-w-0 truncate">{profile.name}</span>
                           </MenuItem>

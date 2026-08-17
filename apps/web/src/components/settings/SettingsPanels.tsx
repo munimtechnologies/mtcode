@@ -33,6 +33,7 @@ import {
   MIN_PROMPT_FONT_SIZE,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_TERMINAL_FONT_SIZE,
+  type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -1651,7 +1652,7 @@ function VoiceDictationSettingsRows({
   settings,
   updateSettings,
 }: {
-  settings: ReturnType<typeof usePrimarySettings>;
+  settings: UnifiedSettings;
   updateSettings: ReturnType<typeof useUpdatePrimarySettings>;
 }) {
   const [environmentApiKeys, setEnvironmentApiKeys] = useState<
@@ -1703,7 +1704,7 @@ function VoiceDictationSettingsRows({
         })
           .then((models) => {
             if (cancelled) return;
-            setTranscriptionModels(models);
+            setTranscriptionModels([...models]);
             setTranscriptionModelsLoading(false);
           })
           .catch((error: unknown) => {

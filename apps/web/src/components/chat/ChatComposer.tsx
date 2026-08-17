@@ -1,3 +1,5 @@
+import { ComposerGoalBadge } from "./ComposerGoalBadge";
+import type { GoalChipAction } from "./GoalChip";
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -575,6 +577,10 @@ export interface ChatComposerProps {
   // Context window
   activeThreadActivities: Thread["activities"] | undefined;
 
+  // Objective
+  threadGoal: Thread["goal"] | null | undefined;
+  onThreadGoalAction?: ((action: GoalChipAction) => void) | undefined;
+
   // Misc
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -662,6 +668,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeThreadActivities,
+    threadGoal,
+    onThreadGoalAction,
     resolvedTheme,
     settings,
     keybindings,
@@ -2034,7 +2042,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // unique image into the overflow list for nothing.
         const existingDedupKeys = new Set(
           composerImagesRef.current.map(
-            (image) => `${image.mimeType} ${image.sizeBytes} ${image.name}`,
+            (image) => `${image.mimeType}${image.sizeBytes}${image.name}`,
           ),
         );
         const capacity = Math.max(
@@ -2045,7 +2053,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (attachment) =>
             !existingIds.has(attachment.id) &&
             !existingDedupKeys.has(
-              `${attachment.mimeType} ${attachment.sizeBytes} ${attachment.name}`,
+              `${attachment.mimeType}${attachment.sizeBytes}${attachment.name}`,
             ),
         );
         // Anything past the attachment limit cannot be restored. The entry is
@@ -2123,24 +2131,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [takeStashEntry],
   );
 
-  const stashCurrentPrompt = useCallback(async () => {
+  const stashCurrentPrompt = useCallback(async (): Promise<boolean> => {
     // Terminal-context placeholders reference live sessions the stash can't
     // round-trip, so they are stripped from the stashed prompt.
     const prompt = promptRef.current.split(INLINE_TERMINAL_CONTEXT_PLACEHOLDER).join("").trim();
     const images = [...composerImagesRef.current];
     if (prompt.length === 0 && images.length === 0) {
       setIsStashMenuOpen((open) => !open);
-      return;
+      return true;
     }
     // A repeat ⌘S on the *same* still-unencoded snapshot would stash it
     // twice. Guard on the snapshot itself rather than a bare boolean: once
     // the composer has been cleared the user can type something genuinely
     // new (or switch threads) while encoding continues, and that deserves its
     // own entry.
-    const snapshotKey = `${String(composerDraftTarget)} ${prompt} ${images
+    const snapshotKey = `${String(composerDraftTarget)}${prompt}${images
       .map((image) => image.id)
       .join(",")}`;
-    if (stashInFlightRef.current.has(snapshotKey)) return;
+    if (stashInFlightRef.current.has(snapshotKey)) return false;
     stashInFlightRef.current.add(snapshotKey);
 
     const stashTarget = composerDraftTarget;
@@ -2173,7 +2181,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             "Browser storage rejected the write, so the composer was left as-is. Free up site data and try again.",
           data: { hideCopyButton: true },
         });
-        return;
+        return false;
       }
       // Written but only into the in-memory fallback (localStorage blocked):
       // the entry is visible and restorable this session, so proceed with the
@@ -2265,6 +2273,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data: { hideCopyButton: true },
         });
       }
+      return true;
     } finally {
       // Must clear on every path: a throw that left this set would wedge this
       // snapshot's ⌘S until the composer remounts.
@@ -2919,13 +2928,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 onEdit={
                   activePendingProgress
                     ? undefined
-                    : (objective) => {
+                    : (objective: string) => {
                         void (async () => {
                           // Loading the Objective replaces the whole prompt; park
                           // a typed draft in the stash so the click is recoverable.
                           // If the stash write was rejected the draft is still
                           // there, so leave it alone instead of destroying it.
-                          if (promptRef.current.trim().length > 0 && !(await stashCurrentPrompt())) {
+                          if (
+                            promptRef.current.trim().length > 0 &&
+                            !(await stashCurrentPrompt())
+                          ) {
                             return;
                           }
                           applyPromptReplacement(0, promptRef.current.length, `/goal ${objective}`);

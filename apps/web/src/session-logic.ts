@@ -1,3 +1,5 @@
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";

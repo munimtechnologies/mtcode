@@ -284,6 +284,7 @@ export function UsagePage() {
                   environments={environments}
                   duplicateSources={merged.duplicateSources}
                   staleEnvironments={merged.staleEnvironments}
+                  pricingStatus={merged.pricingStatus}
                   isPartial={isPartial}
                 />
                 <UsageEmptyState>

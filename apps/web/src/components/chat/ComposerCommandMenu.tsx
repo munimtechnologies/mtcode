@@ -4,12 +4,19 @@ import {
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import { memo, useLayoutEffect, useRef } from "react";
+import { memo, useLayoutEffect, useMemo, useRef } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { formatProviderSkillInstallSource } from "~/providerSkillPresentation";
 import { cn } from "~/lib/utils";
-import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import {
+  Command,
+  CommandGroup,
+  CommandGroupLabel,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 
 export type ComposerCommandItem =
@@ -45,17 +52,54 @@ export type ComposerCommandItem =
       description: string;
     };
 
+type ComposerCommandGroup = {
+  id: string;
+  label: string | null;
+  items: ComposerCommandItem[];
+};
+
+function groupCommandItems(
+  items: ComposerCommandItem[],
+  triggerKind: ComposerTriggerKind | null,
+  groupSlashCommandSections: boolean,
+): ComposerCommandGroup[] {
+  if (triggerKind === "skill") {
+    return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
+  }
+  if (triggerKind !== "slash-command" || !groupSlashCommandSections) {
+    return [{ id: "default", label: null, items }];
+  }
+
+  const builtInItems = items.filter((item) => item.type === "slash-command");
+  const providerItems = items.filter((item) => item.type === "provider-slash-command");
+
+  const groups: ComposerCommandGroup[] = [];
+  if (builtInItems.length > 0) {
+    groups.push({ id: "built-in", label: "Built-in", items: builtInItems });
+  }
+  if (providerItems.length > 0) {
+    groups.push({ id: "provider", label: "Provider", items: providerItems });
+  }
+  return groups;
+}
+
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   items: ComposerCommandItem[];
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
+  groupSlashCommandSections?: boolean;
   emptyStateText?: string;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const groups = useMemo(
+    () =>
+      groupCommandItems(props.items, props.triggerKind, props.groupSlashCommandSections ?? true),
+    [props.groupSlashCommandSections, props.items, props.triggerKind],
+  );
 
   useLayoutEffect(() => {
     if (!props.activeItemId || !listRef.current) return;
@@ -82,18 +126,28 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       >
         {props.items.length > 0 ? (
           <CommandList className="max-h-72 scroll-pb-6">
-            <CommandGroup>
-              {props.items.map((item) => (
-                <ComposerCommandMenuItem
-                  key={item.id}
-                  item={item}
-                  resolvedTheme={props.resolvedTheme}
-                  isActive={props.activeItemId === item.id}
-                  onHighlight={props.onHighlightedItemChange}
-                  onSelect={props.onSelect}
-                />
-              ))}
-            </CommandGroup>
+            {groups.map((group, groupIndex) => (
+              <div key={group.id}>
+                {groupIndex > 0 ? <CommandSeparator className="my-0.5" /> : null}
+                <CommandGroup>
+                  {group.label ? (
+                    <CommandGroupLabel className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-secondary-label">
+                      {group.label}
+                    </CommandGroupLabel>
+                  ) : null}
+                  {group.items.map((item) => (
+                    <ComposerCommandMenuItem
+                      key={item.id}
+                      item={item}
+                      resolvedTheme={props.resolvedTheme}
+                      isActive={props.activeItemId === item.id}
+                      onHighlight={props.onHighlightedItemChange}
+                      onSelect={props.onSelect}
+                    />
+                  ))}
+                </CommandGroup>
+              </div>
+            ))}
           </CommandList>
         ) : (
           <div className="px-5 pt-3.5 pb-7">

@@ -154,7 +154,10 @@ interface TimelineRowSharedState {
 interface TimelineRowActivityState {
   isWorking: boolean;
   isRevertingCheckpoint: boolean;
+  activeTurnInProgress: boolean;
   latestTurnId: TurnId | null;
+  /** Current plan step label for the working row, when the turn has a plan. */
+  workingStepLabel: string | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -207,6 +210,8 @@ interface MessagesTimelineProps {
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
   isWorking: boolean;
+  workingStepLabel?: string | null;
+  activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
@@ -250,6 +255,8 @@ interface MessagesTimelineProps {
 
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
+  workingStepLabel = null,
+  activeTurnInProgress,
   activeTurnStartedAt,
   agentPanelModel = EMPTY_AGENT_PANEL_MODEL,
   onOpenAgents = NOOP_OPEN_AGENTS,
@@ -541,9 +548,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       isWorking,
       isRevertingCheckpoint,
+      activeTurnInProgress,
       latestTurnId: latestTurn?.turnId ?? null,
+      workingStepLabel,
     }),
-    [isRevertingCheckpoint, isWorking, latestTurn?.turnId],
+    [activeTurnInProgress, isRevertingCheckpoint, isWorking, latestTurn?.turnId, workingStepLabel],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -1368,6 +1377,7 @@ const TurnPlanTimelineRow = memo(function TurnPlanTimelineRow({
 });
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
+  const { workingStepLabel } = use(TimelineRowActivityCtx);
   return (
     <div>
       <div className="border-b border-border/60 pb-2 pt-1">
@@ -1379,6 +1389,9 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
           ) : (
             "Working..."
           )}
+          {workingStepLabel ? (
+            <span className="min-w-0 truncate text-muted-foreground/55">· {workingStepLabel}</span>
+          ) : null}
         </div>
       </div>
       {row.showThinking ? (

@@ -123,7 +123,6 @@ describe("hourly chart columns", () => {
       ["2026-08-01T11:00:00.000Z", "2026-08-01T12:00:00.000Z"],
       byHour,
       "cost",
-      "hour",
     );
 
     expect(columns.map((column) => column.total)).toEqual([0, 12]);

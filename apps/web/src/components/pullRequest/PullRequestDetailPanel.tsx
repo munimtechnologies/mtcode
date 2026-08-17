@@ -89,7 +89,7 @@ import { PullRequestDetailGhost, PullRequestTimelineGhost } from "./PullRequestG
 import { PullRequestActivityUnavailableState } from "./PullRequestActivityUnavailableState";
 import { DiffPanelLoadingState } from "../DiffPanelShell";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
-import type { PullRequestAskSelectionInput } from "./PullRequestCodeTab";
+import type { PullRequestAgentSelectionInput } from "./PullRequestCodeTab";
 import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import { PullRequestSummaryTab } from "./PullRequestSummaryTab";
 import { PullRequestStackPicker } from "./PullRequestStackPicker";
@@ -998,7 +998,7 @@ export function PullRequestDetailPanel({
   };
 
   /** Lines the reader marked in the diff, asked about rather than commented on. */
-  const askAboutSelection = (selection: PullRequestAskSelectionInput) => {
+  const askAboutSelection = (selection: PullRequestAgentSelectionInput) => {
     if (!detail) return;
     void startAsk(`ask:${selection.comment.id}`, {
       ...buildAskAboutLinesHandoff({
@@ -1008,7 +1008,7 @@ export function PullRequestDetailPanel({
         headBranch: detail.headBranch,
         baseBranch: detail.baseBranch,
         comment: selection.comment,
-        question: selection.question,
+        question: selection.request,
       }),
     });
   };
@@ -1930,7 +1930,7 @@ export function PullRequestDetailPanel({
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
                 <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
                   <PullRequestCodeTab
-                    onAskAboutSelection={askAboutSelection}
+                    onAddToAgentSelection={askAboutSelection}
                     environmentId={environmentId}
                     reference={reference}
                     detail={detail}
