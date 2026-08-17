@@ -2,10 +2,22 @@
 # Sync T3 Code preference files from this Mac to Blade + Dell.
 # Source of truth: ~/.t3/userdata on the Mac.
 #
-# Syncs: client-settings, keybindings, connection-catalog, clerk-tokens,
-#        sanitized settings.json, and durable secrets (signing key + cloud config).
+# Syncs: client-settings, keybindings, sanitized settings.json, and the
+#        durable asset-access signing key.
 # Skips: state.sqlite, logs, attachments, computer-history, window bounds,
 #        ephemeral cloud-health nonce/jti blobs, Chromium localStorage themes.
+#
+# Never sync clerk-tokens.json or connection-catalog.json. Both are encrypted
+# with Electron safeStorage, which is backed by the macOS Keychain here and
+# DPAPI on Windows, so a copy from this Mac cannot be decrypted on Blade or
+# Dell. clerk-tokens fails soft (silently signed out, rewritten on next
+# sign-in); connection-catalog fails hard on read. Each machine owns its own.
+#
+# Never sync cloud-endpoint-runtime-config.bin. It holds this machine's T3
+# Connect tunnel token, and copying it makes every machine register as a
+# replica of the same Cloudflare tunnel — the relay then round-robins Connect
+# traffic between them, and any one machine's shutdown releases the shared
+# tunnel out from under the others. Each machine provisions its own on start.
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:$PATH"
@@ -39,8 +51,6 @@ copy_if_present() {
 
 copy_if_present client-settings.json
 copy_if_present keybindings.json
-copy_if_present connection-catalog.json
-copy_if_present clerk-tokens.json
 
 if [[ -f "$SRC/settings.json" ]]; then
   node --input-type=module -e '
@@ -67,7 +77,7 @@ fs.writeFileSync(dest, `${JSON.stringify(data, null, 2)}\n`);
   echo "staged sanitized settings.json"
 fi
 
-for name in asset-access-signing-key.bin cloud-endpoint-runtime-config.bin; do
+for name in asset-access-signing-key.bin; do
   if [[ -f "$SRC/secrets/$name" ]]; then
     cp -p "$SRC/secrets/$name" "$STAGE/secrets/$name"
     echo "staged secrets/$name"
@@ -111,14 +121,14 @@ push_host() {
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
     "C:/Users/${win_user}/dev/prepare-settings.ps1"
 
-  for name in client-settings.json keybindings.json connection-catalog.json clerk-tokens.json settings.json; do
+  for name in client-settings.json keybindings.json settings.json; do
     if [[ -f "$STAGE/$name" ]]; then
       scp -o BatchMode=yes "$STAGE/$name" "${host}:.t3/userdata/${name}"
       echo "pushed $host $name"
     fi
   done
 
-  for name in asset-access-signing-key.bin cloud-endpoint-runtime-config.bin; do
+  for name in asset-access-signing-key.bin; do
     if [[ -f "$STAGE/secrets/$name" ]]; then
       scp -o BatchMode=yes "$STAGE/secrets/$name" "${host}:.t3/userdata/secrets/${name}"
       echo "pushed $host secrets/$name"
