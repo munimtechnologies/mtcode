@@ -24,6 +24,8 @@ return only aggregated usage totals. When a provider records a cost, T3 Code use
 it. Otherwise, it estimates cost from the available model rate table and marks
 models it cannot price.
 
+Results appear as each environment responds. An environment that cannot report within 30 seconds is marked unavailable without hiding results from other environments; use **Refresh** to retry.
+
 Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period.
 The **7 days**, **30 days**, and **90 days** ranges use daily resolution.
 **All** scans local provider history from 2020-01-01 onward. Cost and token

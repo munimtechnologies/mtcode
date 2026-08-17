@@ -14,6 +14,8 @@
 import * as NodeOS from "node:os";
 
 import {
+  ClaudeSettings,
+  CodexSettings,
   USAGE_CONTRACT_VERSION,
   type UsageSource,
   type UsageSummary,
@@ -38,6 +40,7 @@ import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
+import { listProviderHomeCandidates, scanHomePath } from "./usageHomes.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { projectUsageSummaryForClient } from "./usageClientCompat.ts";
 import { loadCursorUsageRecords, type CursorExportLoadResult } from "./usageCursorExport.ts";
@@ -127,6 +130,9 @@ export function readGrokHomeOverride(environment: NodeJS.ProcessEnv): string | u
   const value = environment["GROK_HOME"]?.trim();
   return value === "" ? undefined : value;
 }
+
+const decodeClaudeSettings = Schema.decodeUnknownEffect(ClaudeSettings);
+const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
 
 export class UsageService extends Context.Service<
   UsageService,
@@ -246,7 +252,11 @@ export const make = Effect.gen(function* () {
       return nestedExists ? nested : path.join(homePath, "projects");
     });
 
-  /** Resolves the transcript directory for each provider. */
+  /**
+   * Resolves the transcript directories for each provider, one per configured
+   * provider instance. Instances that share a home (shadow homes symlink
+   * `sessions` back into the shared home) collapse to a single directory.
+   */
   const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* () {
     // A settings failure must surface as an error: swallowing it here would
     // present "zero usage from every provider" as a valid answer.
@@ -264,9 +274,71 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-    const claudeHome = yield* resolveClaudeHomePath(settings.providers.claudeAgent);
-    const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
-    const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
+    type JsonlSource = {
+      readonly provider: TranscriptProviderKind;
+      readonly dir: string;
+      readonly kind: "jsonl";
+    };
+    type OpenCodeSource = {
+      readonly provider: "opencode";
+      readonly dir: string;
+      readonly databasePaths: readonly string[];
+      readonly kind: "opencodeSqlite";
+      readonly resolvedHomePath: string;
+    };
+
+    const dirs: Array<JsonlSource | OpenCodeSource> = [];
+    const seen = new Set<string>();
+    // Two instances can point at one physical directory through symlinks
+    // (or macOS's /tmp → /private/tmp). Canonicalising before de-duplication
+    // stops the same transcripts being counted once per alias. A directory
+    // that does not resolve (typically: does not exist) keeps its configured
+    // path and is reported as missing further down.
+    const pushJsonl = (provider: TranscriptProviderKind, dir: string) =>
+      Effect.gen(function* () {
+        const canonical = yield* fileSystem
+          .realPath(dir)
+          .pipe(Effect.catchCause(() => Effect.succeed(dir)));
+        const key = `${provider}\0${canonical}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        dirs.push({ provider, dir: canonical, kind: "jsonl" });
+      });
+
+    for (const candidate of listProviderHomeCandidates(settings, "claude")) {
+      // A blob that fails to decode belongs to an instance the registry
+      // already reports as unavailable; the scan skips it.
+      const config = yield* decodeClaudeSettings(candidate.config).pipe(
+        Effect.catchCause(() => Effect.succeed(null)),
+      );
+      if (config === null) continue;
+      const claudeHome = yield* resolveClaudeHomePath({
+        homePath: scanHomePath(config.homePath, candidate.homeEnvValue, false),
+      });
+      yield* pushJsonl("claude", yield* resolveClaudeTranscriptDir(claudeHome));
+    }
+
+    for (const candidate of listProviderHomeCandidates(settings, "codex")) {
+      const config = yield* decodeCodexSettings(candidate.config).pipe(
+        Effect.catchCause(() => Effect.succeed(null)),
+      );
+      if (config === null) continue;
+      const layout = yield* resolveCodexHomeLayout({
+        ...config,
+        homePath: scanHomePath(
+          config.homePath,
+          candidate.homeEnvValue,
+          config.shadowHomePath.trim().length > 0,
+        ),
+      });
+      yield* pushJsonl("codex", path.join(layout.sharedHomePath, "sessions"));
+    }
+
+    const grokHome = path.resolve(
+      expandHomePath(readGrokHomeOverride(hostEnvironment) ?? path.join(NodeOS.homedir(), ".grok")),
+    );
+    yield* pushJsonl("grok", path.join(grokHome, "sessions"));
+
     const openCodeDataDir = path.join(
       process.env.XDG_DATA_HOME?.trim() || path.join(NodeOS.homedir(), ".local", "share"),
       "opencode",
@@ -295,34 +367,15 @@ export const make = Effect.gen(function* () {
     const openCodeVolumeDir = openCodeDatabasePaths[0]
       ? path.dirname(openCodeDatabasePaths[0])
       : openCodeDataDir;
-    const grokHome = path.resolve(
-      expandHomePath(readGrokHomeOverride(hostEnvironment) ?? path.join(NodeOS.homedir(), ".grok")),
-    );
+    dirs.push({
+      provider: "opencode",
+      dir: openCodeVolumeDir,
+      databasePaths: openCodeDatabasePaths,
+      kind: "opencodeSqlite",
+      resolvedHomePath: openCodeResolvedHomePath,
+    });
 
-    return [
-      {
-        provider: "claude" as const satisfies TranscriptProviderKind,
-        dir: claudeDir,
-        kind: "jsonl" as const,
-      },
-      {
-        provider: "codex" as const satisfies TranscriptProviderKind,
-        dir: path.join(codexLayout.sharedHomePath, "sessions"),
-        kind: "jsonl" as const,
-      },
-      {
-        provider: "grok" as const satisfies TranscriptProviderKind,
-        dir: path.join(grokHome, "sessions"),
-        kind: "jsonl" as const,
-      },
-      {
-        provider: "opencode" as const,
-        dir: openCodeVolumeDir,
-        databasePaths: openCodeDatabasePaths,
-        kind: "opencodeSqlite" as const,
-        resolvedHomePath: openCodeResolvedHomePath,
-      },
-    ];
+    return dirs;
   });
 
   /**

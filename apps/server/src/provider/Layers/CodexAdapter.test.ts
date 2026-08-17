@@ -15,6 +15,7 @@ import {
   type ProviderSession,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
+  type RuntimeTaskUsage,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -59,8 +60,37 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value);
 
+class TestQueue<A> {
+  private readonly values: Array<A> = [];
+  private readonly waiters: Array<(value: A) => void> = [];
+
+  offer(value: A): void {
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter(value);
+      return;
+    }
+    this.values.push(value);
+  }
+
+  take(): Effect.Effect<A> {
+    return Effect.promise(
+      () =>
+        new Promise<A>((resolve) => {
+          const value = this.values.shift();
+          if (value !== undefined) {
+            resolve(value);
+            return;
+          }
+          this.waiters.push(resolve);
+        }),
+    );
+  }
+}
+
 class FakeCodexRuntime implements CodexSessionRuntimeShape {
-  private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>());
+  public readonly closed = new TestQueue<true>();
+  public readonly sentTurns = new TestQueue<CodexSessionRuntimeSendTurnInput>();
   private readonly now = "2026-01-01T00:00:00.000Z";
 
   public readonly startImpl = vi.fn(() =>
@@ -71,6 +101,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       threadId: this.options.threadId,
       cwd: this.options.cwd,
       ...(this.options.model ? { model: this.options.model } : {}),
+      resumeCursor: this.options.resumeCursor ?? { threadId: "provider-thread-1" },
       createdAt: this.now,
       updatedAt: this.now,
     } satisfies ProviderSession),
@@ -114,12 +145,17 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       Promise.resolve(undefined),
   );
 
-  public readonly closeImpl = vi.fn(() => Promise.resolve(undefined));
+  public readonly closeImpl = vi.fn(() => {
+    this.closed.offer(true);
+    return Promise.resolve(undefined);
+  });
 
   readonly options: CodexSessionRuntimeOptions;
+  private readonly eventQueue: Queue.Queue<ProviderEvent>;
 
-  constructor(options: CodexSessionRuntimeOptions) {
+  constructor(options: CodexSessionRuntimeOptions, eventQueue: Queue.Queue<ProviderEvent>) {
     this.options = options;
+    this.eventQueue = eventQueue;
   }
 
   start() {
@@ -129,6 +165,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   getSession = Effect.promise(() => this.startImpl());
 
   sendTurn(input: CodexSessionRuntimeSendTurnInput) {
+    this.sentTurns.offer(input);
     return Effect.promise(() => this.sendTurnImpl(input));
   }
 
@@ -161,16 +198,26 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   }
 }
 
-function makeRuntimeFactory() {
+function makeRuntimeFactory(configure?: (runtime: FakeCodexRuntime, index: number) => void) {
   const runtimes: Array<FakeCodexRuntime> = [];
-  const factory = vi.fn((options: CodexSessionRuntimeOptions) => {
-    const runtime = new FakeCodexRuntime(options);
-    runtimes.push(runtime);
-    return Effect.succeed(runtime);
-  });
+  const created = new TestQueue<FakeCodexRuntime>();
+  const factory = vi.fn((options: CodexSessionRuntimeOptions) =>
+    Effect.gen(function* () {
+      const eventQueue = yield* Queue.unbounded<ProviderEvent>();
+      const runtime = new FakeCodexRuntime(options, eventQueue);
+      runtimes.push(runtime);
+      configure?.(runtime, runtimes.length - 1);
+      created.offer(runtime);
+      return runtime;
+    }),
+  );
 
   return {
     factory,
+    created,
+    get runtimes(): ReadonlyArray<FakeCodexRuntime> {
+      return runtimes;
+    },
     get lastRuntime(): FakeCodexRuntime | undefined {
       return runtimes.at(-1);
     },
@@ -197,7 +244,8 @@ function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolea
         });
       }
 
-      const runtime = new FakeCodexRuntime(runtimeOptions);
+      const eventQueue = yield* Queue.unbounded<ProviderEvent>();
+      const runtime = new FakeCodexRuntime(runtimeOptions, eventQueue);
       runtimes.push(runtime);
       return runtime;
     }),
@@ -514,6 +562,268 @@ function startLifecycleRuntime() {
     return { adapter, runtime };
   });
 }
+
+function usageLimitCompletionEvent(input?: {
+  readonly turnId?: string;
+  readonly items?: ReadonlyArray<unknown>;
+}): ProviderEvent {
+  const turnId = input?.turnId ?? "turn-1";
+  return {
+    id: asEventId(`evt-usage-limit-${turnId}`),
+    kind: "notification",
+    provider: ProviderDriverKind.make("codex"),
+    createdAt: "2026-01-01T00:00:00.000Z",
+    method: "turn/completed",
+    threadId: asThreadId("thread-1"),
+    turnId: asTurnId(turnId),
+    payload: {
+      threadId: "provider-thread-1",
+      turn: {
+        id: turnId,
+        status: "failed",
+        items: input?.items ?? [],
+        itemsView: "notLoaded",
+        error: {
+          message: "Usage limit exceeded",
+          codexErrorInfo: "usageLimitExceeded",
+        },
+      },
+    },
+  } satisfies ProviderEvent;
+}
+
+function itemLifecycleEvent(
+  method: "item/started" | "item/completed",
+  item: { readonly id: string; readonly type: string; readonly [key: string]: unknown },
+): ProviderEvent {
+  return {
+    id: asEventId(`evt-${method}-${item.id}`),
+    kind: "notification",
+    provider: ProviderDriverKind.make("codex"),
+    createdAt: "2026-01-01T00:00:00.000Z",
+    method,
+    threadId: asThreadId("thread-1"),
+    turnId: asTurnId("turn-1"),
+    itemId: asItemId(item.id),
+    payload: {
+      threadId: "provider-thread-1",
+      turnId: "turn-1",
+      item,
+      ...(method === "item/started" ? { startedAtMs: 1 } : { completedAtMs: 2 }),
+    },
+  } satisfies ProviderEvent;
+}
+
+function makeRecoveryTestLayer(runtimeFactory: ReturnType<typeof makeRuntimeFactory>) {
+  return Layer.effect(
+    CodexAdapter,
+    Effect.gen(function* () {
+      const codexConfig = decodeCodexSettings({ binaryPath: "codex-balanced" });
+      return yield* makeCodexAdapter(codexConfig, {
+        makeRuntime: runtimeFactory.factory,
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+}
+
+function startRecoveryTurn(
+  adapter: CodexAdapterShape,
+  runtimeFactory: ReturnType<typeof makeRuntimeFactory>,
+) {
+  return Effect.gen(function* () {
+    yield* adapter.startSession({
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex"),
+      runtimeMode: "full-access",
+    });
+    const runtime = yield* runtimeFactory.created.take();
+    yield* adapter.sendTurn({
+      threadId: asThreadId("thread-1"),
+      input: "continue this exact conversation",
+      attachments: [],
+      modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex"),
+    });
+    yield* runtime.sentTurns.take();
+    return runtime;
+  });
+}
+
+it.effect("restarts, resumes, and retries an empty Codex usage-limit turn once", () => {
+  const runtimeFactory = makeRuntimeFactory((runtime, index) => {
+    if (index !== 1) return;
+    runtime.readThreadImpl.mockResolvedValue({
+      threadId: "provider-thread-1",
+      turns: [
+        {
+          id: asTurnId("turn-1"),
+          items: [
+            {
+              id: "user-message-1",
+              type: "userMessage",
+              content: [{ type: "text", text: "continue this exact conversation" }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  const layer = makeRecoveryTestLayer(runtimeFactory);
+
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    const firstRuntime = yield* startRecoveryTurn(adapter, runtimeFactory);
+    const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
+      Effect.forkChild,
+    );
+
+    const userMessage = {
+      id: "user-message-1",
+      type: "userMessage",
+      content: [{ type: "text", text: "continue this exact conversation" }],
+    };
+    yield* firstRuntime.emit(itemLifecycleEvent("item/started", userMessage));
+    yield* firstRuntime.emit(itemLifecycleEvent("item/completed", userMessage));
+    yield* firstRuntime.emit(usageLimitCompletionEvent());
+    yield* Fiber.join(eventsFiber);
+
+    const recoveredRuntime = yield* runtimeFactory.created.take();
+    const retriedInput = yield* recoveredRuntime.sentTurns.take();
+
+    NodeAssert.equal(firstRuntime.closeImpl.mock.calls.length, 1);
+    NodeAssert.equal(recoveredRuntime.options.binaryPath, "codex-balanced");
+    NodeAssert.equal(recoveredRuntime.options.requireResume, true);
+    NodeAssert.deepStrictEqual(recoveredRuntime.options.resumeCursor, {
+      threadId: "provider-thread-1",
+    });
+    NodeAssert.equal(recoveredRuntime.rollbackThreadImpl.mock.calls.length, 1);
+    NodeAssert.deepStrictEqual(retriedInput, {
+      input: "continue this exact conversation",
+      model: "gpt-5.3-codex",
+    });
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("does not replace a session started while usage-limit recovery is opening", () => {
+  let releaseRecoveryStart: (() => void) | undefined;
+  const recoveryStartGate = new Promise<void>((resolve) => {
+    releaseRecoveryStart = resolve;
+  });
+  const runtimeFactory = makeRuntimeFactory((runtime, index) => {
+    if (index !== 1) return;
+    const start = runtime.startImpl.getMockImplementation();
+    if (!start) throw new Error("Expected the fake runtime start implementation");
+    runtime.startImpl.mockImplementation(async () => {
+      await recoveryStartGate;
+      return start();
+    });
+  });
+  const layer = makeRecoveryTestLayer(runtimeFactory);
+
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    const firstRuntime = yield* startRecoveryTurn(adapter, runtimeFactory);
+    const completedFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+    yield* firstRuntime.emit(usageLimitCompletionEvent());
+    yield* Fiber.join(completedFiber);
+
+    const recoveringRuntime = yield* runtimeFactory.created.take();
+    yield* adapter.startSession({
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex"),
+      runtimeMode: "full-access",
+    });
+    const userStartedRuntime = yield* runtimeFactory.created.take();
+
+    releaseRecoveryStart?.();
+    yield* recoveringRuntime.closed.take();
+
+    yield* adapter.sendTurn({
+      threadId: asThreadId("thread-1"),
+      input: "use the session I started",
+      attachments: [],
+      modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex"),
+    });
+    const sentInput = yield* userStartedRuntime.sentTurns.take();
+    NodeAssert.equal(sentInput.input, "use the session I started");
+    NodeAssert.equal(userStartedRuntime.closeImpl.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("does not retry a usage-limit turn that emits provider activity", () => {
+  const runtimeFactory = makeRuntimeFactory();
+  const layer = makeRecoveryTestLayer(runtimeFactory);
+
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    const runtime = yield* startRecoveryTurn(adapter, runtimeFactory);
+    const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+      Effect.forkChild,
+    );
+
+    yield* runtime.emit(
+      itemLifecycleEvent("item/started", {
+        id: "msg-1",
+        type: "agentMessage",
+        text: "partial output",
+      }),
+    );
+    yield* runtime.emit(usageLimitCompletionEvent());
+    yield* Fiber.join(eventsFiber);
+
+    NodeAssert.equal(runtimeFactory.factory.mock.calls.length, 1);
+    NodeAssert.equal(runtime.closeImpl.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("does not retry provider output reported only by turn completion", () => {
+  const runtimeFactory = makeRuntimeFactory();
+  const layer = makeRecoveryTestLayer(runtimeFactory);
+
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    const runtime = yield* startRecoveryTurn(adapter, runtimeFactory);
+    const completedFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+    yield* runtime.emit(
+      usageLimitCompletionEvent({
+        items: [{ id: "msg-1", type: "agentMessage", text: "partial output" }],
+      }),
+    );
+    yield* Fiber.join(completedFiber);
+
+    NodeAssert.equal(runtimeFactory.factory.mock.calls.length, 1);
+    NodeAssert.equal(runtime.closeImpl.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("does not restart again when the retried turn also exhausts usage", () => {
+  const runtimeFactory = makeRuntimeFactory();
+  const layer = makeRecoveryTestLayer(runtimeFactory);
+
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    const firstRuntime = yield* startRecoveryTurn(adapter, runtimeFactory);
+    const firstCompletedFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+    yield* firstRuntime.emit(usageLimitCompletionEvent());
+    yield* Fiber.join(firstCompletedFiber);
+
+    const recoveredRuntime = yield* runtimeFactory.created.take();
+    yield* recoveredRuntime.sentTurns.take();
+    const secondCompletedFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+    yield* recoveredRuntime.emit(usageLimitCompletionEvent());
+    yield* Fiber.join(secondCompletedFiber);
+
+    NodeAssert.equal(runtimeFactory.factory.mock.calls.length, 2);
+    NodeAssert.equal(recoveredRuntime.closeImpl.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer));
+});
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
   it.effect("maps completed agent message items to canonical item.completed events", () =>
@@ -1275,6 +1585,238 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
       });
+    }),
+  );
+
+  it.effect("reports only child-generated usage for Codex collab agents", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) => event.type === "thread.token-usage.updated" || event.type === "task.progress",
+        ),
+        Stream.take(7),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const parentBaseline = 5_800_000_000;
+      yield* runtime.emit({
+        id: asEventId("evt-parent-usage-baseline"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/tokenUsage/updated",
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              inputTokens: parentBaseline - 100,
+              cachedInputTokens: 0,
+              outputTokens: 100,
+              reasoningOutputTokens: 0,
+              totalTokens: parentBaseline,
+            },
+            last: {
+              inputTokens: 20,
+              cachedInputTokens: 0,
+              outputTokens: 5,
+              reasoningOutputTokens: 0,
+              totalTokens: 25,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const emitChildUsage = (
+        eventId: string,
+        agentThreadId: string,
+        total: RuntimeTaskUsage,
+        last: RuntimeTaskUsage,
+      ) =>
+        runtime.emit({
+          id: asEventId(eventId),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          createdAt: "2026-01-01T00:00:01.000Z",
+          method: "collabAgent/tokenUsage",
+          payload: {
+            agentThreadId,
+            tokenUsage: {
+              total,
+              last,
+              modelContextWindow: 258_400,
+            },
+          },
+        } satisfies ProviderEvent);
+
+      // Reasoning first appears on the resume frame. Its baseline must initialize then.
+      const childAFirstTotal = {
+        totalTokens: 5_800_000_100,
+        inputTokens: 5_000_000_070,
+        cachedInputTokens: 3_000_000_040,
+        outputTokens: 800_000_030,
+      } satisfies RuntimeTaskUsage;
+      const childAFirstLast = {
+        totalTokens: 100,
+        inputTokens: 70,
+        cachedInputTokens: 40,
+        outputTokens: 30,
+      } satisfies RuntimeTaskUsage;
+      const childBZeroTotal = {
+        totalTokens: 5_800_050_000,
+        inputTokens: 5_000_040_000,
+        cachedInputTokens: 3_000_030_000,
+        outputTokens: 800_010_000,
+        reasoningOutputTokens: 0,
+      } satisfies RuntimeTaskUsage;
+      const childBZeroLast = {
+        totalTokens: 0,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningOutputTokens: 0,
+      } satisfies RuntimeTaskUsage;
+      const childBWorkTotal = {
+        totalTokens: 5_800_050_050,
+        inputTokens: 5_000_040_035,
+        cachedInputTokens: 3_000_030_020,
+        outputTokens: 800_010_015,
+        reasoningOutputTokens: 5,
+      } satisfies RuntimeTaskUsage;
+      const childBWorkLast = {
+        totalTokens: 50,
+        inputTokens: 35,
+        cachedInputTokens: 20,
+        outputTokens: 15,
+        reasoningOutputTokens: 5,
+      } satisfies RuntimeTaskUsage;
+      const childAResumeTotal = {
+        totalTokens: 5_800_000_130,
+        inputTokens: 5_000_000_090,
+        cachedInputTokens: 3_000_000_050,
+        outputTokens: 800_000_040,
+        reasoningOutputTokens: 10,
+      } satisfies RuntimeTaskUsage;
+      const childAResumeLast = {
+        totalTokens: 30,
+        inputTokens: 20,
+        cachedInputTokens: 10,
+        outputTokens: 10,
+        reasoningOutputTokens: 5,
+      } satisfies RuntimeTaskUsage;
+      const childARetryTotal = {
+        totalTokens: 5_800_000_150,
+        inputTokens: 5_000_000_100,
+        cachedInputTokens: 3_000_000_055,
+        outputTokens: 800_000_050,
+        reasoningOutputTokens: 15,
+      } satisfies RuntimeTaskUsage;
+      const childARetryLast = {
+        totalTokens: 20,
+        inputTokens: 10,
+        cachedInputTokens: 5,
+        outputTokens: 10,
+        reasoningOutputTokens: 5,
+      } satisfies RuntimeTaskUsage;
+
+      yield* emitChildUsage("evt-child-a-first", "child-a", childAFirstTotal, childAFirstLast);
+      yield* emitChildUsage("evt-child-b-zero", "child-b", childBZeroTotal, childBZeroLast);
+      yield* emitChildUsage("evt-child-b-work", "child-b", childBWorkTotal, childBWorkLast);
+      yield* emitChildUsage("evt-child-a-resume", "child-a", childAResumeTotal, childAResumeLast);
+      yield* emitChildUsage("evt-child-a-retry", "child-a", childARetryTotal, childARetryLast);
+      yield* emitChildUsage("evt-child-a-duplicate", "child-a", childARetryTotal, childARetryLast);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const parentEvents = events.filter((event) => event.type === "thread.token-usage.updated");
+      NodeAssert.equal(parentEvents.length, 1);
+      NodeAssert.equal(parentEvents[0]?.payload.usage.totalProcessedTokens, parentBaseline);
+
+      const childUsage = events.flatMap((event) => {
+        if (event.type !== "task.progress") return [];
+        return [
+          {
+            taskId: event.payload.taskId,
+            usage: event.payload.typedUsage,
+          },
+        ];
+      });
+      NodeAssert.deepEqual(childUsage, [
+        {
+          taskId: "child-a",
+          usage: {
+            totalTokens: 100,
+            inputTokens: 70,
+            cachedInputTokens: 40,
+            outputTokens: 30,
+          },
+        },
+        {
+          taskId: "child-b",
+          usage: {
+            totalTokens: 0,
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            reasoningOutputTokens: 0,
+          },
+        },
+        {
+          taskId: "child-b",
+          usage: {
+            totalTokens: 50,
+            inputTokens: 35,
+            cachedInputTokens: 20,
+            outputTokens: 15,
+            reasoningOutputTokens: 5,
+          },
+        },
+        {
+          taskId: "child-a",
+          usage: {
+            totalTokens: 130,
+            inputTokens: 90,
+            cachedInputTokens: 50,
+            outputTokens: 40,
+            reasoningOutputTokens: 5,
+          },
+        },
+        {
+          taskId: "child-a",
+          usage: {
+            totalTokens: 150,
+            inputTokens: 100,
+            cachedInputTokens: 55,
+            outputTokens: 50,
+            reasoningOutputTokens: 10,
+          },
+        },
+        {
+          taskId: "child-a",
+          usage: {
+            totalTokens: 150,
+            inputTokens: 100,
+            cachedInputTokens: 55,
+            outputTokens: 50,
+            reasoningOutputTokens: 10,
+          },
+        },
+      ]);
+
+      const latestByChild = new Map<string, RuntimeTaskUsage>();
+      for (const child of childUsage) {
+        if (child.usage) latestByChild.set(child.taskId, child.usage);
+      }
+      NodeAssert.equal(
+        Array.from(latestByChild.values()).reduce((sum, usage) => sum + usage.totalTokens, 0),
+        200,
+      );
     }),
   );
 

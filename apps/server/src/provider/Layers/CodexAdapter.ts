@@ -16,6 +16,8 @@ import {
   ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderRequestKind,
+  type ProviderSession,
+  type ProviderTurnStartResult,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
@@ -24,6 +26,7 @@ import {
   type RuntimeTaskUsage,
   ProviderApprovalDecision,
   ThreadId,
+  type TurnId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -39,7 +42,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { getModelSelectionStringOptionValue, normalizeModelSlug } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { makeResolveEnabledDesktopMcp } from "../../desktopControl/desktopMcpLaunch.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -63,7 +66,9 @@ import {
   makeCodexSessionRuntime,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
+  type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
+  type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
@@ -90,12 +95,88 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
+interface CodexPendingTurn {
+  readonly input: CodexSessionRuntimeSendTurnInput;
+  readonly restartInput: Parameters<CodexAdapterShape["startSession"]>[0];
+  readonly retryCount: number;
+}
+
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  readonly startInput: Parameters<CodexAdapterShape["startSession"]>[0];
+  readonly providerSession: ProviderSession;
+  readonly pendingTurns: Map<TurnId, CodexPendingTurn>;
+  readonly deferredTurnCompletions: Map<TurnId, ProviderEvent>;
+  readonly unsafeTurnIds: Set<TurnId>;
+  readonly recoveryToken?: symbol;
+  recovering: boolean;
   stopped: boolean;
+}
+
+interface CodexCollabUsageState {
+  readonly baseline: RuntimeTaskUsage;
+  readonly latest: RuntimeTaskUsage;
+}
+
+function isRetryableUsageLimitCompletion(event: ProviderEvent): boolean {
+  if (event.method !== "turn/completed") {
+    return false;
+  }
+  const payload = readPayload(EffectCodexSchema.V2TurnCompletedNotification, event.payload);
+  return (
+    payload?.turn.status === "failed" &&
+    payload.turn.error?.codexErrorInfo === "usageLimitExceeded" &&
+    payload.turn.items.every((item) => item.type === "userMessage")
+  );
+}
+
+function isUnsafeUsageLimitRetryEvent(event: ProviderEvent): boolean {
+  if (event.turnId === undefined) {
+    return false;
+  }
+  if (event.method === "item/started") {
+    const payload = readPayload(EffectCodexSchema.V2ItemStartedNotification, event.payload);
+    return payload?.item.type !== "userMessage";
+  }
+  if (event.method === "item/completed") {
+    const payload = readPayload(EffectCodexSchema.V2ItemCompletedNotification, event.payload);
+    return payload?.item.type !== "userMessage";
+  }
+  return (
+    event.itemId !== undefined ||
+    event.requestId !== undefined ||
+    event.method.startsWith("item/") ||
+    event.method.startsWith("rawResponseItem/") ||
+    event.method.startsWith("hook/") ||
+    event.method.startsWith("turn/diff/") ||
+    event.method.startsWith("turn/plan/") ||
+    event.method.startsWith("collabAgent/")
+  );
+}
+
+function requiresFailedTurnRollback(
+  snapshot: CodexThreadSnapshot,
+  failedTurnId: TurnId,
+): boolean | undefined {
+  const lastTurn = snapshot.turns.at(-1);
+  if (!lastTurn || lastTurn.id !== failedTurnId) {
+    return false;
+  }
+  return lastTurn.items.every((item) => item.type === "userMessage") ? true : undefined;
+}
+
+function resumedRequestedModel(
+  requestedModel: string | undefined,
+  resumedModel: string | undefined,
+): boolean {
+  const requested = normalizeModelSlug(requestedModel);
+  if (!requested) {
+    return true;
+  }
+  return requested === normalizeModelSlug(resumedModel);
 }
 
 function mapCodexRuntimeError(
@@ -516,6 +597,7 @@ function mapItemLifecycle(
 function mapCollabAgentEvent(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
+  usageByAgent: Map<string, CodexCollabUsageState>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   const payload =
     typeof event.payload === "object" && event.payload !== null
@@ -676,8 +758,8 @@ function mapCollabAgentEvent(
       return [];
     }
     case "collabAgent/tokenUsage": {
-      // Cumulative per child thread: always the `total` breakdown, never
-      // `last` (which shrinks on follow-ups). Client folds max-merge.
+      // Calibrate the first cumulative `total` with `last` to remove copied
+      // history. Later snapshots stay based on `total`; `last` resets per turn.
       const tokenUsage =
         typeof payload.tokenUsage === "object" && payload.tokenUsage !== null
           ? (payload.tokenUsage as Record<string, unknown>)
@@ -686,29 +768,113 @@ function mapCollabAgentEvent(
         typeof tokenUsage?.total === "object" && tokenUsage.total !== null
           ? (tokenUsage.total as Record<string, unknown>)
           : undefined;
+      const last =
+        typeof tokenUsage?.last === "object" && tokenUsage.last !== null
+          ? (tokenUsage.last as Record<string, unknown>)
+          : undefined;
       const count = (value: unknown): number | undefined =>
         typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
       // Same validation as every other field: RuntimeTaskUsage.totalTokens
       // is NonNegativeInt, so NaN/Infinity/negative wire values must miss.
       const totalTokens = count(total?.totalTokens);
-      if (totalTokens === undefined) {
+      const lastTotalTokens = count(last?.totalTokens);
+      if (totalTokens === undefined || lastTotalTokens === undefined) {
         return [];
       }
+
+      const inputTokens = count(total?.inputTokens);
+      const cachedInputTokens = count(total?.cachedInputTokens);
+      const outputTokens = count(total?.outputTokens);
+      const reasoningOutputTokens = count(total?.reasoningOutputTokens);
+      const lastInputTokens = count(last?.inputTokens);
+      const lastCachedInputTokens = count(last?.cachedInputTokens);
+      const lastOutputTokens = count(last?.outputTokens);
+      const lastReasoningOutputTokens = count(last?.reasoningOutputTokens);
+      const existing = usageByAgent.get(agentThreadId);
+      const baselineCount = (
+        offset: number | undefined,
+        cumulative: number | undefined,
+        currentTurn: number | undefined,
+      ): number | undefined =>
+        offset ??
+        (cumulative !== undefined && currentTurn !== undefined
+          ? Math.max(cumulative - currentTurn, 0)
+          : undefined);
+      const baselineInputTokens = baselineCount(
+        existing?.baseline.inputTokens,
+        inputTokens,
+        lastInputTokens,
+      );
+      const baselineCachedInputTokens = baselineCount(
+        existing?.baseline.cachedInputTokens,
+        cachedInputTokens,
+        lastCachedInputTokens,
+      );
+      const baselineOutputTokens = baselineCount(
+        existing?.baseline.outputTokens,
+        outputTokens,
+        lastOutputTokens,
+      );
+      const baselineReasoningOutputTokens = baselineCount(
+        existing?.baseline.reasoningOutputTokens,
+        reasoningOutputTokens,
+        lastReasoningOutputTokens,
+      );
+      const baseline = {
+        totalTokens: existing?.baseline.totalTokens ?? Math.max(totalTokens - lastTotalTokens, 0),
+        ...(baselineInputTokens !== undefined ? { inputTokens: baselineInputTokens } : {}),
+        ...(baselineCachedInputTokens !== undefined
+          ? { cachedInputTokens: baselineCachedInputTokens }
+          : {}),
+        ...(baselineOutputTokens !== undefined ? { outputTokens: baselineOutputTokens } : {}),
+        ...(baselineReasoningOutputTokens !== undefined
+          ? { reasoningOutputTokens: baselineReasoningOutputTokens }
+          : {}),
+      } satisfies RuntimeTaskUsage;
+      const normalizedCount = (
+        cumulative: number | undefined,
+        offset: number | undefined,
+        latest: number | undefined,
+      ): number | undefined =>
+        cumulative !== undefined && offset !== undefined
+          ? Math.max(cumulative - offset, latest ?? 0, 0)
+          : undefined;
+      const normalizedInputTokens = normalizedCount(
+        inputTokens,
+        baseline.inputTokens,
+        existing?.latest.inputTokens,
+      );
+      const normalizedCachedInputTokens = normalizedCount(
+        cachedInputTokens,
+        baseline.cachedInputTokens,
+        existing?.latest.cachedInputTokens,
+      );
+      const normalizedOutputTokens = normalizedCount(
+        outputTokens,
+        baseline.outputTokens,
+        existing?.latest.outputTokens,
+      );
+      const normalizedReasoningOutputTokens = normalizedCount(
+        reasoningOutputTokens,
+        baseline.reasoningOutputTokens,
+        existing?.latest.reasoningOutputTokens,
+      );
       const typedUsage: RuntimeTaskUsage = {
-        totalTokens,
-        ...(count(total?.inputTokens) !== undefined
-          ? { inputTokens: count(total?.inputTokens) }
+        totalTokens: Math.max(
+          totalTokens - baseline.totalTokens,
+          existing?.latest.totalTokens ?? 0,
+          0,
+        ),
+        ...(normalizedInputTokens !== undefined ? { inputTokens: normalizedInputTokens } : {}),
+        ...(normalizedCachedInputTokens !== undefined
+          ? { cachedInputTokens: normalizedCachedInputTokens }
           : {}),
-        ...(count(total?.cachedInputTokens) !== undefined
-          ? { cachedInputTokens: count(total?.cachedInputTokens) }
-          : {}),
-        ...(count(total?.outputTokens) !== undefined
-          ? { outputTokens: count(total?.outputTokens) }
-          : {}),
-        ...(count(total?.reasoningOutputTokens) !== undefined
-          ? { reasoningOutputTokens: count(total?.reasoningOutputTokens) }
+        ...(normalizedOutputTokens !== undefined ? { outputTokens: normalizedOutputTokens } : {}),
+        ...(normalizedReasoningOutputTokens !== undefined
+          ? { reasoningOutputTokens: normalizedReasoningOutputTokens }
           : {}),
       };
+      usageByAgent.set(agentThreadId, { baseline, latest: typedUsage });
       return [
         {
           ...base,
@@ -771,9 +937,10 @@ function mapCollabAgentEvent(
 function mapToRuntimeEvents(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
+  collabUsageByAgent: Map<string, CodexCollabUsageState>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (event.kind === "notification" && event.method.startsWith("collabAgent/")) {
-    return mapCollabAgentEvent(event, canonicalThreadId);
+    return mapCollabAgentEvent(event, canonicalThreadId, collabUsageByAgent);
   }
   if (event.kind === "error") {
     if (!event.message) {
@@ -1666,10 +1833,18 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       : undefined);
   const managedNativeEventLogger =
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
+  const adapterScope = yield* Scope.Scope;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
+  const recoveryTokens = new Map<ThreadId, symbol>();
 
-  const startSession: CodexAdapterShape["startSession"] = (input) =>
+  const startSessionInternal: (
+    input: Parameters<CodexAdapterShape["startSession"]>[0],
+    internalOptions?: {
+      readonly requireResume?: boolean;
+      readonly recoveryToken?: symbol;
+    },
+  ) => Effect.Effect<ProviderSession, ProviderAdapterError> = (input, internalOptions) =>
     Effect.scoped(
       Effect.gen(function* () {
         if (input.provider !== undefined && input.provider !== PROVIDER) {
@@ -1735,6 +1910,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
+          ...(internalOptions?.requireResume === true ? { requireResume: true } : {}),
           runtimeMode: input.runtimeMode,
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
@@ -1763,6 +1939,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
+        const pendingTurns = new Map<TurnId, CodexPendingTurn>();
+        const deferredTurnCompletions = new Map<TurnId, ProviderEvent>();
+        const unsafeTurnIds = new Set<TurnId>();
+        let sessionContext: CodexAdapterSessionContext | undefined;
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
@@ -1782,10 +1962,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // this a child of `startSession`, and Effect interrupts a fiber's
         // children when it completes, so the consumer died on return and every
         // runtime event the session emitted afterwards was dropped.
+        const collabUsageByAgent = new Map<string, CodexCollabUsageState>();
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            if (event.turnId !== undefined && isUnsafeUsageLimitRetryEvent(event)) {
+              unsafeTurnIds.add(event.turnId);
+            }
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId, collabUsageByAgent);
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -1793,9 +1977,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 turnId: event.turnId,
                 itemId: event.itemId,
               });
-              return;
+            } else {
+              yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
             }
-            yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
+            if (sessionContext !== undefined) {
+              yield* scheduleUsageLimitRecovery(sessionContext, event);
+            }
           }),
         ).pipe(Effect.forkIn(sessionScope));
 
@@ -1818,17 +2005,46 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
         );
 
-        sessions.set(input.threadId, {
+        if (
+          internalOptions?.recoveryToken !== undefined &&
+          recoveryTokens.get(input.threadId) !== internalOptions.recoveryToken
+        ) {
+          sessionScopeTransferred = true;
+          yield* runtime.close.pipe(
+            Effect.andThen(Effect.ignore(Scope.close(sessionScope, Exit.void))),
+            Effect.andThen(Fiber.interrupt(eventFiber)),
+            Effect.ignore,
+          );
+          return started;
+        }
+
+        const context: CodexAdapterSessionContext = {
           threadId: input.threadId,
           scope: sessionScope,
           runtime,
           eventFiber,
+          startInput: input,
+          providerSession: started,
+          pendingTurns,
+          deferredTurnCompletions,
+          unsafeTurnIds,
+          ...(internalOptions?.recoveryToken !== undefined
+            ? { recoveryToken: internalOptions.recoveryToken }
+            : {}),
+          recovering: false,
           stopped: false,
-        });
+        };
+        sessionContext = context;
+        sessions.set(input.threadId, context);
         sessionScopeTransferred = true;
 
         return started;
       }),
+    );
+
+  const startSession: CodexAdapterShape["startSession"] = (input) =>
+    Effect.sync(() => recoveryTokens.delete(input.threadId)).pipe(
+      Effect.andThen(startSessionInternal(input)),
     );
 
   const resolveAttachment = Effect.fn("resolveAttachment")(function* (
@@ -1863,6 +2079,188 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     };
   });
 
+  const sendMappedTurn = Effect.fn("CodexAdapter.sendMappedTurn")(function* (
+    session: CodexAdapterSessionContext,
+    input: CodexSessionRuntimeSendTurnInput,
+    restartInput: Parameters<CodexAdapterShape["startSession"]>[0],
+    retryCount: number,
+  ): Effect.fn.Return<ProviderTurnStartResult, ProviderAdapterError> {
+    const result = yield* session.runtime
+      .sendTurn(input)
+      .pipe(
+        Effect.mapError((cause) => mapCodexRuntimeError(session.threadId, "turn/start", cause)),
+      );
+    session.pendingTurns.set(result.turnId, {
+      input,
+      restartInput,
+      retryCount,
+    });
+    const deferredCompletion = session.deferredTurnCompletions.get(result.turnId);
+    if (deferredCompletion !== undefined) {
+      yield* scheduleUsageLimitRecovery(session, deferredCompletion);
+    }
+    return result;
+  });
+
+  const recoverUsageLimitTurn = Effect.fn("CodexAdapter.recoverUsageLimitTurn")(function* (input: {
+    readonly sourceSession: CodexAdapterSessionContext;
+    readonly failedTurnId: TurnId;
+    readonly pendingTurn: CodexPendingTurn;
+    readonly token: symbol;
+  }): Effect.fn.Return<void, ProviderAdapterError | CodexSessionRuntimeError> {
+    const resumeCursor = input.sourceSession.providerSession.resumeCursor;
+    if (!isCodexResumeCursorSchema(resumeCursor)) {
+      yield* Effect.logWarning("codex usage-limit recovery skipped without a resume cursor", {
+        threadId: input.sourceSession.threadId,
+        failedTurnId: input.failedTurnId,
+      });
+      return;
+    }
+
+    const resumedSession = yield* startSessionInternal(
+      {
+        ...input.pendingTurn.restartInput,
+        resumeCursor,
+      },
+      { requireResume: true, recoveryToken: input.token },
+    );
+    const recoveredContext = sessions.get(input.sourceSession.threadId);
+    if (
+      recoveryTokens.get(input.sourceSession.threadId) !== input.token ||
+      recoveredContext === undefined ||
+      recoveredContext.stopped
+    ) {
+      if (
+        recoveredContext?.recoveryToken === input.token &&
+        !recoveredContext.stopped &&
+        sessions.get(input.sourceSession.threadId) === recoveredContext
+      ) {
+        yield* stopSessionInternal(recoveredContext);
+      }
+      return;
+    }
+
+    if (
+      !isCodexResumeCursorSchema(resumedSession.resumeCursor) ||
+      resumedSession.resumeCursor.threadId !== resumeCursor.threadId
+    ) {
+      yield* Effect.logWarning("codex usage-limit recovery resumed a different thread", {
+        threadId: input.sourceSession.threadId,
+        expectedProviderThreadId: resumeCursor.threadId,
+      });
+      yield* stopSessionInternal(recoveredContext);
+      return;
+    }
+
+    if (!resumedRequestedModel(input.pendingTurn.input.model, resumedSession.model)) {
+      yield* Effect.logWarning("codex usage-limit recovery resumed with a different model", {
+        threadId: input.sourceSession.threadId,
+        requestedModel: input.pendingTurn.input.model,
+        resumedModel: resumedSession.model,
+      });
+      yield* stopSessionInternal(recoveredContext);
+      return;
+    }
+
+    const snapshot = yield* recoveredContext.runtime.readThread;
+    const rollbackFailedTurn = requiresFailedTurnRollback(snapshot, input.failedTurnId);
+    if (rollbackFailedTurn === undefined) {
+      yield* Effect.logWarning(
+        "codex usage-limit recovery found provider activity in failed turn",
+        {
+          threadId: input.sourceSession.threadId,
+          failedTurnId: input.failedTurnId,
+        },
+      );
+      return;
+    }
+    if (rollbackFailedTurn) {
+      yield* recoveredContext.runtime.rollbackThread(1);
+    }
+
+    if (recoveryTokens.get(input.sourceSession.threadId) !== input.token) {
+      yield* stopSessionInternal(recoveredContext);
+      return;
+    }
+
+    yield* sendMappedTurn(
+      recoveredContext,
+      input.pendingTurn.input,
+      input.pendingTurn.restartInput,
+      input.pendingTurn.retryCount + 1,
+    );
+  });
+
+  const scheduleUsageLimitRecovery = Effect.fn("CodexAdapter.scheduleUsageLimitRecovery")(
+    function* (session: CodexAdapterSessionContext, event: ProviderEvent): Effect.fn.Return<void> {
+      if (event.method !== "turn/completed" || event.turnId === undefined) {
+        return;
+      }
+
+      const failedTurnId = event.turnId;
+      const pendingTurn = session.pendingTurns.get(failedTurnId);
+      if (pendingTurn === undefined) {
+        session.deferredTurnCompletions.set(failedTurnId, event);
+        return;
+      }
+
+      if (!isRetryableUsageLimitCompletion(event)) {
+        session.pendingTurns.delete(failedTurnId);
+        session.deferredTurnCompletions.delete(failedTurnId);
+        session.unsafeTurnIds.delete(failedTurnId);
+        return;
+      }
+
+      const hadQueuedTurns = session.pendingTurns.size !== 1;
+      const safeToRetry =
+        pendingTurn.retryCount === 0 &&
+        !hadQueuedTurns &&
+        !session.unsafeTurnIds.has(failedTurnId) &&
+        !session.recovering &&
+        !session.stopped &&
+        sessions.get(session.threadId) === session;
+      session.pendingTurns.delete(failedTurnId);
+      session.deferredTurnCompletions.delete(failedTurnId);
+      session.unsafeTurnIds.delete(failedTurnId);
+      if (hadQueuedTurns) {
+        for (const queuedTurnId of session.pendingTurns.keys()) {
+          session.unsafeTurnIds.add(queuedTurnId);
+        }
+      }
+      if (!safeToRetry) {
+        return;
+      }
+
+      const token = Symbol("codex-usage-limit-recovery");
+      recoveryTokens.set(session.threadId, token);
+      session.recovering = true;
+      yield* recoverUsageLimitTurn({
+        sourceSession: session,
+        failedTurnId,
+        pendingTurn,
+        token,
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("codex usage-limit recovery failed", {
+            threadId: session.threadId,
+            failedTurnId,
+            cause,
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (recoveryTokens.get(session.threadId) === token) {
+              recoveryTokens.delete(session.threadId);
+            }
+            session.recovering = false;
+          }),
+        ),
+        Effect.forkIn(adapterScope),
+        Effect.asVoid,
+      );
+    },
+  );
+
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const codexAttachments = yield* Effect.forEach(
       input.attachments ?? [],
@@ -1871,6 +2269,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
     const session = yield* requireSession(input.threadId);
+    if (session.recovering || recoveryTokens.has(input.threadId)) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: "Codex is recovering this conversation after reaching its usage limit.",
+      });
+    }
     const reasoningEffort =
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
@@ -1883,23 +2288,26 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       serverConfig,
       serverSettings,
     );
-    return yield* session.runtime
-      .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
-        ...(input.modelSelection?.instanceId === boundInstanceId
-          ? { model: input.modelSelection.model }
-          : {}),
-        ...(reasoningEffort
-          ? {
-              effort: reasoningEffort as EffectCodexSchema.V2TurnStartParams__ReasoningEffort,
-            }
-          : {}),
-        ...(serviceTier ? { serviceTier } : {}),
-        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
-        ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
-        ...(computerHistoryContext ? { computerHistoryContext } : {}),
-      })
-      .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
+    const mappedInput: CodexSessionRuntimeSendTurnInput = {
+      ...(input.input !== undefined ? { input: input.input } : {}),
+      ...(input.modelSelection?.instanceId === boundInstanceId
+        ? { model: input.modelSelection.model }
+        : {}),
+      ...(reasoningEffort
+        ? {
+            effort: reasoningEffort as EffectCodexSchema.V2TurnStartParams__ReasoningEffort,
+          }
+        : {}),
+      ...(serviceTier ? { serviceTier } : {}),
+      ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
+      ...(computerHistoryContext ? { computerHistoryContext } : {}),
+    };
+    const restartInput = {
+      ...session.startInput,
+      ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+    };
+    return yield* sendMappedTurn(session, mappedInput, restartInput, 0);
   });
 
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
@@ -1914,7 +2322,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
-    requireSession(threadId).pipe(
+    Effect.sync(() => recoveryTokens.delete(threadId)).pipe(
+      Effect.andThen(requireSession(threadId)),
       Effect.flatMap((session) => session.runtime.interruptTurn(turnId)),
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
@@ -2000,7 +2409,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     session.stopped = true;
-    sessions.delete(session.threadId);
+    if (sessions.get(session.threadId) === session) {
+      sessions.delete(session.threadId);
+    }
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
@@ -2008,6 +2419,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const stopSession: CodexAdapterShape["stopSession"] = (threadId) =>
     Effect.gen(function* () {
+      recoveryTokens.delete(threadId);
       const session = sessions.get(threadId);
       if (!session) {
         return;
@@ -2026,10 +2438,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
 
   const stopAll: CodexAdapterShape["stopAll"] = () =>
-    Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
-      concurrency: 1,
-      discard: true,
-    }).pipe(Effect.asVoid);
+    Effect.sync(() => recoveryTokens.clear()).pipe(
+      Effect.andThen(
+        Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
+          concurrency: 1,
+          discard: true,
+        }),
+      ),
+      Effect.asVoid,
+    );
 
   yield* Effect.acquireRelease(Effect.void, () =>
     stopAll().pipe(
