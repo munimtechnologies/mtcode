@@ -246,16 +246,6 @@ export function SettingResetButton({
   );
 }
 
-/** Shared micro icon control used by settings reset/remove actions. */
-export function SettingIconAction({
-  className,
-  ...props
-}: ComponentPropsWithoutRef<typeof Button>) {
-  return (
-    <Button size="icon-micro" variant="ghost-muted" className={className} {...props} />
-  );
-}
-
 export function SettingsPageContainer({
   children,
   className,
