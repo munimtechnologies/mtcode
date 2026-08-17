@@ -3,7 +3,9 @@
 The Usage page combines Claude Code, Codex, Cursor, Grok, and OpenCode activity
 from your connected environments. It shows API-equivalent token cost, processed
 tokens, cache savings, provider shares, and model breakdowns. Subscription
-billing is separate from the raw token cost shown here.
+billing is separate from the raw token cost shown here. If the model rate table
+cannot be loaded, the page says cost is unavailable instead of $0.00. Token
+counts are still valid.
 
 | Provider    | Source                                                                                |
 | ----------- | ------------------------------------------------------------------------------------- |
