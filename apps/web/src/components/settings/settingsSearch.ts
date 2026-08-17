@@ -40,7 +40,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/connections": "Connections",
   "/settings/computer-use": "Computer Use",
   "/settings/computer-history": "Computer History",
-  "/settings/beta": "Beta",
   "/settings/archived": "Archive",
 };
 
