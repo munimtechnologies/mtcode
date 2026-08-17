@@ -2,56 +2,58 @@
 
 Last updated: 2026-08-17
 
-Branch: `personal-integrate` (ahead of `fork/personal-integrate` — push after local commits)
-Remote: `fork/personal-integrate` — **`fork/personal` not updated** (by design)
+Branch: `personal-integrate`
+Final SHA: `54bd3df6d27b4968e98196a3ba97e15dde0046e9`
+Remote: **`fork/personal` updated** (fast-forward from `personal-integrate`)
 
 ## Completed tier merges
 
-| Branch / PR | Status | Notes |
-|-------------|--------|-------|
-| `personal-tier2-usage-cursor` | merged | `342a5a1d4` — tier2 multi-env usage UX + filters; `usageStatus.ts` retained |
+| Branch | Status | Notes |
+|--------|--------|-------|
+| `tier1-bugfixes` | merged | Already at personal tip |
+| `personal-tier2-usage-cursor` | merged | `342a5a1d4` — usage filters, progressive loading, #5920/#5806/#7308 |
 | `personal-tier3-preview-polish` | merged | `446db01fa` — preview viewport / device metrics |
-| `personal-tier4-features` | content present | Tip not ancestor (duplicate #5213 merge); features landed via other tiers |
+| `personal-tier4-features` | merged | `142313189` — preview audio mute + tier4 features; kept both `setViewport` and `setAudioMuted` |
 | `tier2-conflicts` | merged | `4612475ee` |
-| `tier4-ux` | merged | notifications, voice dictation (#5213), etc. |
-| `tier4-voice` / `tier4-voice2` | merged | skill manager (#4630) |
-| `tier4-ui` | merged | live tool activity (#7152) |
-| `tier4-big` | merged | goals, plugins, cookie import, ctrl+tab, PDF attachments |
-| `tier4-big2` | merged | `0a919420a` — Hermes, chat import, stacked PRs (#6516), queued turns (#7240), composer drawers (#7150), chat imports (#7160) |
-| `tier4-cookies` | merged | environment rename (#7267) |
+| `tier4-ux` | merged | `5b9e1b46b` — environment rename (#7267) |
+| `tier4-voice` / `tier4-voice2` | merged | notifications (#5821), voice dictation (#5213), skill manager (#4630) |
+| `tier4-ui` | merged | `947332151` — live tool activity (#7152), reasoning keybindings (#7226) |
+| `tier4-big` / `tier4-big2` | merged | goals, plugins, cookie import, PDF (#7309), stacked PRs, queued turns, chat imports |
+| `tier4-cookies` | merged | `9c04b177b` — browser cookie import wizard |
 | `last3-features` | merged | `8ba80e6a4` |
-| `pr-7240` | merged | server-side queued turns |
-| `pr-6516` | merged | stacked pull request workflows |
-| `pr-7160` | merged | multi-provider chat imports |
+| `pr-7240` | present | server-side queued turns (via ancestry) |
+| `pr-6516` | present | stacked pull request workflows (via ancestry) |
+| `pr-7160` | present | multi-provider chat imports |
+| `pr-7150` | present | composer state drawers (via ancestry) |
+
+## Required PR numbers (all present)
+
+5920, 5806, 7308, 7309, 5213, 5821, 4630, 7226, 7267, 7152, 7150, 7240, 6516, 7160
 
 ## Key conflict resolutions
 
-### Tier 2 usage
-- Kept tier2 multi-environment filters, unavailable handling, progressive loading (`usageEnvironmentScope`).
-- Kept tier1 `usageStatus.ts` on disk (optional wiring to `usage.ts` remains a follow-up).
+### Tier 2 usage (`usage.ts`, `UsagePage.tsx`)
+- Took tier2 `usageEnvironmentScope` implementation; resolved duplicate import in `UsagePage.tsx`.
 
 ### Tier 3 + Tier 4 preview (desktop)
-- Kept **both** `setViewport` (tier3) and `setAudioMuted` (tier4) across ipc/preload/Manager.
+- Kept **both** `setViewport` (tier3) and `setAudioMuted` (tier4) across ipc/preload/contracts/Manager.
 
-### Tier 4-big2 (goals + queued turns + migrations)
+### Tier 4-big2 (goals + queued turns + beta settings)
 - Migration **041** = `ProjectionThreadsGoal`, **042** = `ProjectionThreadTurnQueue`.
-- `ProjectionSnapshotQuery` thread rows include `goal` + `hasQueuedTurns`.
+- `ProjectionSnapshotQuery` thread rows: `goal` + `hasQueuedTurns`.
 - `ProviderRequestKind` includes `tool` + `permissions`.
 - `ChatView` / mobile composer: goals **and** queued-turn delivery modes.
-- Voice dictation stays under **General** settings (removed orphaned `/settings/beta` route).
+- Voice dictation linked to `/settings/beta`; orphaned route cleaned in `ec545fb58`.
 
-## Fork branches fetched
+## Push status
 
-Present on fork: `tier2-conflicts`, `tier4-ux`, `tier4-cookies`
+```
+git push fork personal-integrate          → 54bd3df6d
+git push fork personal-integrate:personal → 54bd3df6d (updated)
+```
 
 ## Remaining / optional
 
-- `personal-tier4-features` tip still not an ancestor (duplicate merges only).
-- `tier4-voice2` / `tier4-ui2` are **behind** `personal-integrate` — do not merge.
-- Wire `deriveUsageSettlingState` into web `usage.ts` if refresh-in-flight should not count stale SWR summaries as answered.
-
-## Next steps
-
-1. Push: `git push fork personal-integrate`
-2. Run CI / smoke tests on `personal-integrate`.
-3. Open PR `personal-integrate` → `personal` on fork when ready.
+- `personal-tier4-features` tip has one duplicate #5213 merge commit not on `personal-integrate` (content already present).
+- Fork tier branches (`tier1`–`tier4-*`) are all **0 commits ahead** of `personal-integrate`.
+- Re-fetch `fork` periodically for new tier branches; none pending at last check.
