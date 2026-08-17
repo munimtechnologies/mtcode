@@ -278,7 +278,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     [dispatchGoalAction],
   );
   const selectedThreadDetail = useSelectedThreadDetail();
-  const threadGoal = selectedThreadDetail?.goal ?? props.selectedThread.goal ?? null;
+  // Only fall back to the shell Goal while the detail is unavailable: once it
+  // has loaded, an explicit null (cleared Objective) must win over the
+  // possibly-stale shell projection.
+  const threadGoal = selectedThreadDetail
+    ? selectedThreadDetail.goal
+    : (props.selectedThread.goal ?? null);
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
   const liveKeyboardHeight = useKeyboardState((state) => state.height);
   // Android can swallow the IME hide callbacks when the app is backgrounded
