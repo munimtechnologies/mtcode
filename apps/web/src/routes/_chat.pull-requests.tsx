@@ -1,5 +1,4 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { pullRequestHostOf, ThreadId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
@@ -11,14 +10,11 @@ import type {
   PullRequestListResult,
   PullRequestListState,
   SourceControlProviderKind,
-  PullRequestRankInput,
 } from "@t3tools/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
-  ClockIcon,
   EyeIcon,
-  GitForkIcon,
   MonitorIcon,
   ServerIcon,
   GitMergeIcon,
@@ -29,7 +25,6 @@ import {
   LoaderIcon,
   RefreshCwIcon,
   SearchIcon,
-  SparklesIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -37,7 +32,6 @@ import {
   filterPullRequestsByInvolvement,
   findScopedProject,
   groupPullRequestsByInvolvement,
-  sortPullRequestEntries,
   matchesPullRequestFilters,
   matchesPullRequestQuery,
   parsePullRequestQuery,
@@ -61,30 +55,6 @@ import {
   type PullRequestPartitionsSnapshot,
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
-import { PullRequestUpstreamCard } from "../components/pullRequest/PullRequestUpstreamCard";
-import { PullRequestUpstreamReleaseBanner } from "../components/pullRequest/PullRequestUpstreamReleaseBanner";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { useAtomValue } from "@effect/atom-react";
-import { useComposerDraftStore } from "~/composerDraftStore";
-import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
-import { toastManager } from "../components/ui/toast";
-import {
-  buildCherryPickPullRequestHandoff,
-  buildMergeUpstreamReleaseHandoff,
-  buildImplementFeatureFromPullRequestHandoff,
-  readableFailure,
-} from "../components/pullRequest/pullRequestDetail.logic";
-import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
-import { createModelSelection } from "@t3tools/shared/model";
-import { resolvePullRequestRankingModelSelection } from "@t3tools/shared/serverSettings";
-import { getCustomModelOptionsByInstance, resolveAppModelSelectionState } from "~/modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "~/providerInstances";
-import { ProviderModelPicker } from "../components/chat/ProviderModelPicker";
-import { primaryServerProvidersAtom } from "~/state/server";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
   PullRequestFiltersMenu,
@@ -104,6 +74,8 @@ import {
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
 } from "../components/WorkspaceBreadcrumb";
+import { WorkspacePageContainer, WorkspacePageHeader } from "../components/WorkspacePageContainer";
+import { isElectron } from "../env";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../components/ui/menu";
@@ -119,7 +91,6 @@ import {
   type PullRequestSurface,
 } from "../rightPanelStore";
 import { useDebouncedValue } from "../state/queries";
-import { useEnvironmentQuery } from "../state/query";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import {
@@ -127,12 +98,10 @@ import {
   usePullRequestList,
   usePullRequestListStats,
   type EnvironmentQueryTarget,
-  usePullRequestUsefulness,
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cn } from "~/lib/utils";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 export interface PullRequestsSearch {
   readonly involvement: PullRequestInvolvement;
@@ -207,10 +176,6 @@ const PULL_REQUESTS_PANEL_ID = ThreadId.make("pull-requests-panel");
 const PULL_REQUESTS_PANEL_ENVIRONMENT_ID = "pull-requests-panel" as EnvironmentId;
 /** Stable so a read that is not wanted right now does not re-key on every render. */
 const NO_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> = [];
-/** The contract's own ceiling for one listing read, so the upstream arrives whole. */
-const UPSTREAM_PAGE_SIZE = 500;
-
-const NO_RANK_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestRankInput>> = [];
 const EMPTY_PREVIEW_SESSIONS = {};
 const EMPTY_PREVIEW_DESKTOP_STATE = {};
 const EMPTY_TERMINAL_LABELS = new Map<string, string>();
@@ -478,46 +443,6 @@ function PullRequestsRouteView() {
     selectedProjectId: undefined,
     selectedEnvironmentId: undefined,
   };
-  // The same model the rest of the app generates text with — commit messages, change request
-  // titles — rather than whatever happens to sit first in the composer's favourites. That one is
-  // chosen for writing code and is the reader's scarcest quota; ranking is bulk classification
-  // over titles, and it is configurable in Settings for anyone who wants it to be something else.
-  const rankingSettings = usePrimarySettings();
-  const updateRankingSettings = useUpdatePrimarySettings();
-  const rankingProviders = useAtomValue(primaryServerProvidersAtom);
-  const rankingModel = useMemo(() => {
-    // The reader's own choice where they have made one; otherwise the model the rest of the app
-    // generates text with, which is a better default than whatever writes their code.
-    const withResolvedDefault = {
-      ...rankingSettings,
-      textGenerationModelSelection: resolveAppModelSelectionState(
-        rankingSettings,
-        rankingProviders,
-      ),
-    };
-    return resolvePullRequestRankingModelSelection(withResolvedDefault, rankingProviders);
-  }, [rankingSettings, rankingProviders]);
-  const rankingInstanceEntries = useMemo(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(rankingProviders),
-          rankingSettings,
-        ),
-      ),
-    [rankingProviders, rankingSettings],
-  );
-  const rankingModelOptions = useMemo(
-    () =>
-      getCustomModelOptionsByInstance(
-        rankingSettings,
-        rankingProviders,
-        rankingModel.instanceId,
-        rankingModel.model,
-      ),
-    [rankingSettings, rankingProviders, rankingModel],
-  );
-
   const updateListScope = (patch: {
     [Key in keyof PullRequestsSearch]?: PullRequestsSearch[Key] | undefined;
   }) => {
@@ -531,8 +456,6 @@ function PullRequestsRouteView() {
   // Searching asks the hosts, which takes a round trip, so the text is held for a moment before
   // it is sent. Until it lands, the rows already on screen are narrowed locally: the answer is
   // late but the page is not.
-  const involvement: PullRequestInvolvement = search.involvement;
-
   const typedQuery = (search.q ?? "").trim();
   const sentQuery = useDebouncedValue(typedQuery, SEARCH_DEBOUNCE_MS);
   const querySettled = typedQuery === sentQuery;
@@ -673,7 +596,7 @@ function PullRequestsRouteView() {
               // The hosts narrow by involvement themselves — GitHub by author and review
               // request, and so on — so asking them is the difference between a page of results
               // and a page of everything with the answer somewhere further down it.
-              involvement,
+              involvement: search.involvement,
               limit: pageSize,
               ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
               ...(projectIds ? { projectIds } : {}),
@@ -717,7 +640,7 @@ function PullRequestsRouteView() {
         environmentId,
         input: {
           state: search.state,
-          involvement,
+          involvement: search.involvement,
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
@@ -731,42 +654,11 @@ function PullRequestsRouteView() {
       environmentQueries,
       scopedProjectId,
       search.host,
-      involvement,
+      search.involvement,
       search.state,
     ],
   );
   const baselineQuery = usePullRequestList(baselineTargets);
-  // The upstream reads on its own rather than as part of the feed. Sharing one slice is how a
-  // busy upstream crowds out the reader's own work — it is a different question with a different
-  // answer, so it gets a request and a budget of its own.
-  const upstreamTargets = useMemo(
-    () =>
-      environmentQueries.map(({ environmentId, projectIds }) => ({
-        environmentId,
-        input: {
-          state: search.state,
-          involvement: "all" as const,
-          upstream: "only" as const,
-          // The whole upstream rather than a page of it: the point of the shelf is "what is worth
-          // taking from everything open", and ranking the newest page only would answer a
-          // different, much less useful question. The contract's ceiling is the limit here.
-          limit: UPSTREAM_PAGE_SIZE,
-          ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
-          ...(projectIds ? { projectIds } : {}),
-          ...(search.host ? { host: search.host } : {}),
-          ...(menuFiltered ? { filters: menuFilters } : {}),
-        } satisfies PullRequestListInput,
-      })),
-    [environmentQueries, menuFiltered, menuFilters, scopedProjectId, search.host, search.state],
-  );
-  const upstreamQuery = usePullRequestList(upstreamTargets);
-  const upstreamEntries = useMemo(() => {
-    const rows = upstreamQuery.data?.entries ?? [];
-    // The search box narrows these the way it narrows everything else on the page.
-    return typedParsed.text.length === 0
-      ? rows
-      : rows.filter((row) => matchesPullRequestQuery(row, typedParsed.text));
-  }, [upstreamQuery.data?.entries, typedParsed.text]);
   // The priority groups' own reads. The feed below is paginated by recency, so an older authored
   // or review-requested row can be missing from its first page; partitioned from these
   // server-filtered reads instead, the priority view is complete up front and a continuation can
@@ -1103,7 +995,7 @@ function PullRequestsRouteView() {
 
   const entries = useMemo(() => {
     const known = ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []);
-    const involvementEntries = filterPullRequestsByInvolvement(known, viewers, involvement);
+    const involvementEntries = filterPullRequestsByInvolvement(known, viewers, search.involvement);
     // The hosts search more than the row shows — a body, a review, a commit message — so once
     // their answer is in, narrowing it again here would throw away matches the reader asked for.
     // The local pass stands in for the answer that has not arrived yet, and for the hosts that
@@ -1200,347 +1092,6 @@ function PullRequestsRouteView() {
    * listing leaves them out and they arrive a moment later, into rows that already draw without
    * them. Keyed by the rows being shown, so scrolling further asks only about what is new.
    */
-  // One ranking call per repository being judged, carrying the rows the page already holds so the
-  // agent needs no reads of its own. Every candidate goes in — the server splits a long set across
-  // prompts rather than taking the first few — so a section reordered by this is reordered whole.
-  const rankTargets = useMemo(() => {
-    if (upstreamEntries.length === 0) return NO_RANK_TARGETS;
-    const byRepository = new Map<
-      string,
-      {
-        environmentId: EnvironmentId;
-        input: PullRequestRankInput & {
-          candidates: Array<PullRequestRankInput["candidates"][number]>;
-        };
-      }
-    >();
-    for (const entry of upstreamEntries) {
-      const key = `${entry.environmentId} ${entry.projectId} ${entry.repository}`;
-      const held = byRepository.get(key);
-      const candidate = {
-        number: entry.number,
-        title: entry.title,
-        ...(entry.labels.length > 0 ? { labels: entry.labels.map((label) => label.name) } : {}),
-      };
-      if (held === undefined) {
-        byRepository.set(key, {
-          environmentId: entry.environmentId,
-          input: {
-            projectId: entry.projectId,
-            repository: entry.repository,
-            candidates: [candidate],
-            modelSelection: rankingModel,
-          },
-        });
-        continue;
-      }
-      held.input.candidates.push(candidate);
-    }
-    return [...byRepository.values()];
-  }, [upstreamEntries, rankingModel]);
-  const {
-    usefulness,
-    reasons: rankingReasons,
-    isPending: rankingPending,
-    error: rankingErrorRaw,
-  } = usePullRequestUsefulness(rankTargets);
-
-  /**
-   * Port an upstream change into the project the row was read through: open a thread on that
-   * project and leave the task in its composer, the same landing the pull request's own button
-   * gives. Nothing is checked out — the whole point is to reimplement in the tree you are in.
-   */
-  const newThread = useNewThreadHandler();
-  const [implementingKey, setImplementingKey] = useState<string | null>(null);
-  const implementUpstream = async (entry: EnvironmentPullRequestEntry) => {
-    if (implementingKey !== null) return;
-    const key = pullRequestEntryKey(entry);
-    setImplementingKey(key);
-    try {
-      const task = buildImplementFeatureFromPullRequestHandoff({
-        number: entry.number,
-        title: entry.title,
-        url: entry.url,
-        headBranch: entry.headBranch,
-        baseBranch: entry.baseBranch,
-      });
-      const session = await newThread(scopeProjectRef(entry.environmentId, entry.projectId)).then(
-        (result) => result,
-        () => null,
-      );
-      if (session === null) {
-        toastManager.add({
-          type: "error",
-          title: "Could not open a thread",
-          description: "Try again from the project, or open a thread first.",
-        });
-        return;
-      }
-      const store = useComposerDraftStore.getState();
-      store.setPrompt(session.draftId, task.prompt);
-      store.setReviewComments(session.draftId, task.reviewComments);
-      toastManager.add({
-        type: "success",
-        title: "Ready to implement",
-        description: "The task is in the composer — read it over, then send.",
-      });
-    } finally {
-      setImplementingKey(null);
-    }
-  };
-
-  /**
-   * Take an upstream change's own commits rather than rewriting them: onto a branch of its own,
-   * in a worktree of its own, with a thread standing in it.
-   *
-   * Never the project's own checkout. A pick that stops on a conflict stops wherever it is run,
-   * and the tree somebody is working in is the one place that must not happen.
-   *
-   * The thread is opened before the pick, as the pull request's own checkout button does it: the
-   * project's setup script only runs for a worktree that knows which thread it is for, and a
-   * worktree with no dependencies installed is not one anybody can finish a conflict in.
-   */
-  const cherryPickCommand = useAtomCommand(pullRequestEnvironment.cherryPick, {
-    reportFailure: false,
-  });
-  const [pickingKey, setPickingKey] = useState<string | null>(null);
-  const cherryPickUpstream = async (entry: EnvironmentPullRequestEntry) => {
-    if (pickingKey !== null) return;
-    const key = pullRequestEntryKey(entry);
-    setPickingKey(key);
-    const projectRef = scopeProjectRef(entry.environmentId, entry.projectId);
-    // No timeout: fetching and applying somebody else's branch takes as long as it takes, and a
-    // toast that expires halfway through reads as a pick that finished.
-    const toastId = toastManager.add({
-      type: "loading",
-      title: `Cherry-picking #${entry.number}...`,
-    });
-    try {
-      const opened = await newThread(projectRef).then(
-        (result) => result,
-        () => null,
-      );
-      if (opened === null) {
-        toastManager.update(toastId, {
-          type: "error",
-          title: "Could not open a thread for the pick",
-          description: "Try again from the project, or open a thread first.",
-        });
-        return;
-      }
-      const picked = await cherryPickCommand({
-        environmentId: entry.environmentId,
-        input: {
-          projectId: entry.projectId,
-          repository: entry.repository,
-          number: entry.number,
-          threadId: opened.threadId,
-        },
-      });
-      if (picked._tag === "Failure") {
-        toastManager.update(toastId, {
-          type: "error",
-          title: `Could not cherry-pick #${entry.number}`,
-          // The server's own sentence — which base branch went missing, which host publishes no
-          // commits to fetch — is the only thing that says what to do about it.
-          description: readableFailure(
-            squashAtomCommandFailure(picked),
-            "The commits could not be fetched or applied. Open the pull request to see what it touches.",
-          ),
-        });
-        return;
-      }
-      const result = picked.value;
-      // Nothing was taken because there was nothing to take, and no branch was left behind to
-      // point a thread at. Success, not failure — this is the answer to "do I already have it".
-      if (result.status === "empty" || result.branch === null || result.worktreePath === null) {
-        toastManager.update(toastId, {
-          type: "success",
-          title: `Nothing to pick from #${entry.number}`,
-          description: "Every commit on it is already in this project.",
-        });
-        return;
-      }
-      const task = buildCherryPickPullRequestHandoff({
-        number: entry.number,
-        title: entry.title,
-        url: entry.url,
-        headBranch: entry.headBranch,
-        baseBranch: entry.baseBranch,
-        status: result.status,
-        branch: result.branch,
-        commits: result.commits,
-        conflictedPaths: result.conflictedPaths,
-        conflictedPathCount: result.conflictedPathCount,
-      });
-      const pointed = await newThread(projectRef, {
-        branch: result.branch,
-        worktreePath: result.worktreePath,
-        envMode: "worktree",
-      }).then(
-        (session) => session,
-        () => null,
-      );
-      if (pointed === null) {
-        // The branch is on disk either way; only the thread failed to move onto it. Saying so
-        // beats a success message that sends somebody to a composer pointed somewhere else.
-        toastManager.update(toastId, {
-          type: "warning",
-          title: "Picked, but the thread stayed where it was",
-          description: `The commits are on \`${result.branch}\`. Point a thread at it from the branch picker.`,
-        });
-        return;
-      }
-      const store = useComposerDraftStore.getState();
-      store.setPrompt(pointed.draftId, task.prompt);
-      store.setReviewComments(pointed.draftId, task.reviewComments);
-      toastManager.update(
-        toastId,
-        result.status === "applied"
-          ? {
-              type: "success",
-              title: `Picked onto ${result.branch}`,
-              description:
-                "It applied cleanly. The task is in the composer — read it over, then send.",
-            }
-          : {
-              type: "warning",
-              title: `Picked onto ${result.branch}, with conflicts`,
-              description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer — read it over, then send.`,
-            },
-      );
-    } finally {
-      setPickingKey(null);
-    }
-  };
-  /**
-   * What the upstream has shipped, asked of the project the upstream rows are read through — one
-   * read, because a workspace watching an upstream is watching one, and the answer is the same
-   * whichever of its rows asked.
-   */
-  const releaseTarget = upstreamEntries[0] ?? null;
-  const { data: upstreamReleaseData } = useEnvironmentQuery(
-    releaseTarget === null
-      ? null
-      : pullRequestEnvironment.upstreamRelease({
-          environmentId: releaseTarget.environmentId,
-          input: { projectId: releaseTarget.projectId },
-        }),
-  );
-  const upstreamRelease = upstreamReleaseData?.release ?? null;
-
-  /**
-   * Take that release: merge its tag onto a branch of its own, in a worktree of its own, with a
-   * thread standing in it. The same landing a cherry-pick gives, for the same reason — a fork
-   * with its own work on top cannot take a release without deciding what survives.
-   */
-  const mergeReleaseCommand = useAtomCommand(pullRequestEnvironment.mergeUpstreamRelease, {
-    reportFailure: false,
-  });
-  const [takingRelease, setTakingRelease] = useState(false);
-  const takeUpstreamRelease = async () => {
-    if (takingRelease || releaseTarget === null || upstreamRelease === null) return;
-    setTakingRelease(true);
-    const projectRef = scopeProjectRef(releaseTarget.environmentId, releaseTarget.projectId);
-    const toastId = toastManager.add({
-      type: "loading",
-      title: `Taking ${upstreamRelease.tagName}...`,
-    });
-    try {
-      const opened = await newThread(projectRef).then(
-        (result) => result,
-        () => null,
-      );
-      if (opened === null) {
-        toastManager.update(toastId, {
-          type: "error",
-          title: "Could not open a thread for the merge",
-          description: "Try again from the project, or open a thread first.",
-        });
-        return;
-      }
-      const taken = await mergeReleaseCommand({
-        environmentId: releaseTarget.environmentId,
-        input: {
-          projectId: releaseTarget.projectId,
-          tagName: upstreamRelease.tagName,
-          threadId: opened.threadId,
-        },
-      });
-      if (taken._tag === "Failure") {
-        toastManager.update(toastId, {
-          type: "error",
-          title: `Could not take ${upstreamRelease.tagName}`,
-          description: readableFailure(
-            squashAtomCommandFailure(taken),
-            "The release could not be fetched or merged.",
-          ),
-        });
-        return;
-      }
-      const result = taken.value;
-      if (
-        result.status === "up-to-date" ||
-        result.branch === null ||
-        result.worktreePath === null
-      ) {
-        toastManager.update(toastId, {
-          type: "success",
-          title: `Already on ${result.tagName}`,
-          description: "This project's history already contains the release.",
-        });
-        return;
-      }
-      const task = buildMergeUpstreamReleaseHandoff({
-        repository: upstreamRelease.repository,
-        tagName: result.tagName,
-        url: upstreamRelease.url,
-        status: result.status,
-        branch: result.branch,
-        ...(result.behindBy === undefined ? {} : { behindBy: result.behindBy }),
-        conflictedPaths: result.conflictedPaths,
-        conflictedPathCount: result.conflictedPathCount,
-      });
-      const pointed = await newThread(projectRef, {
-        branch: result.branch,
-        worktreePath: result.worktreePath,
-        envMode: "worktree",
-      }).then(
-        (session) => session,
-        () => null,
-      );
-      if (pointed === null) {
-        toastManager.update(toastId, {
-          type: "warning",
-          title: "Merged, but the thread stayed where it was",
-          description: `The release is on \`${result.branch}\`. Point a thread at it from the branch picker.`,
-        });
-        return;
-      }
-      const store = useComposerDraftStore.getState();
-      store.setPrompt(pointed.draftId, task.prompt);
-      store.setReviewComments(pointed.draftId, task.reviewComments);
-      toastManager.update(
-        toastId,
-        result.status === "merged"
-          ? {
-              type: "success",
-              title: `Merged onto ${result.branch}`,
-              description:
-                "It merged cleanly. The task is in the composer — read it over, then send.",
-            }
-          : {
-              type: "warning",
-              title: `Merged onto ${result.branch}, with conflicts`,
-              description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer — read it over, then send.`,
-            },
-      );
-    } finally {
-      setTakingRelease(false);
-    }
-  };
-  const rankingError = upstreamEntries.length === 0 ? null : rankingErrorRaw;
-
   const groups = useMemo(() => {
     if (search.involvement !== "all") return [{ key: "others" as const, label: "", entries }];
     // Until both partitions have answered, the snapshot's stand in — they are yesterday's
@@ -1583,20 +1134,6 @@ function PullRequestsRouteView() {
     search.involvement,
     viewers,
   ]);
-
-  /**
-   * The upstream, in the two orders worth having at once: what an agent thinks is worth porting,
-   * and what simply landed most recently. Both hold every row — the same pull request appearing
-   * in each is the point, since "useful" and "recent" are different questions about it.
-   */
-  const upstreamSections = useMemo(() => {
-    if (upstreamEntries.length === 0) return null;
-    return {
-      repository: upstreamEntries[0]!.repository,
-      mostUseful: sortPullRequestEntries(upstreamEntries, "useful", usefulness),
-      latest: sortPullRequestEntries(upstreamEntries, "updated"),
-    };
-  }, [upstreamEntries, usefulness]);
 
   // Keyed by every row being shown — the partitions can hold rows the feed has not paged to —
   // so scrolling further asks only about what is new. One read per environment, each asking only
@@ -1645,6 +1182,7 @@ function PullRequestsRouteView() {
         : null,
     [search.number, search.repository, selectedProject],
   );
+  const rightPanelAvailable = selectedPullRequestSurface !== null;
   useEffect(() => {
     if (!pullRequestsSupported || rightPanelRef === null || linkedSelection === null) return;
     useRightPanelStore.getState().openPullRequest(rightPanelRef, linkedSelection);
@@ -1758,9 +1296,10 @@ function PullRequestsRouteView() {
       terminalAvailable={false}
       terminalOpen={false}
       terminalShortcutLabel={null}
-      rightPanelAvailable={rightPanelState.surfaces.length > 0}
+      rightPanelAvailable={rightPanelAvailable}
       rightPanelOpen={rightPanelState.isOpen}
       rightPanelShortcutLabel={null}
+      rightPanelUnavailableLabel="Select a pull request first"
       liveAgentCount={0}
       onToggleTerminal={() => undefined}
       onToggleRightPanel={toggleRightPanel}
@@ -1803,6 +1342,8 @@ function PullRequestsRouteView() {
       ) : entries.length === 0 ? (
         <PullRequestListEmptyState
           hasProjects={!projectsKnown || projects.length > 0}
+          refreshing={refreshing}
+          onRefresh={() => void refreshFromHost()}
           query={typedQuery}
           filtered={
             search.state !== "open" ||
@@ -1813,10 +1354,8 @@ function PullRequestsRouteView() {
           searching={typedQuery.length > 0 && (!querySettled || showingCarried)}
           canLoadMore={listData?.truncated === true && (canContinue || pageSize < MAX_PAGE_SIZE)}
           loadingMore={loadingMore}
-          refreshing={refreshing}
           onClearQuery={() => updateSearch({ q: undefined })}
           onLoadMore={loadMore}
-          onRefresh={() => void refreshFromHost()}
         />
       ) : (
         <div className="space-y-3">
@@ -1859,122 +1398,6 @@ function PullRequestsRouteView() {
         </div>
       )}
 
-      {upstreamSections !== null ? (
-        <div className="space-y-4 pt-2">
-          {/* A rule with the repository sitting in it: the work below is somebody else's, and the
-              break has to be obvious enough that nobody reads it as more of their own queue. */}
-          <div className="flex items-center gap-3 pt-2">
-            <span className="h-px flex-1 bg-border" />
-            <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <GitForkIcon className="size-3.5" />
-              {upstreamSections.repository}
-            </span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          {/* Above the change requests, because it is the one thing here that is already
-              finished: what the upstream has shipped, and a way to take it. */}
-          {upstreamRelease !== null ? (
-            <PullRequestUpstreamReleaseBanner
-              repository={upstreamRelease.repository}
-              tagName={upstreamRelease.tagName}
-              name={upstreamRelease.name}
-              url={upstreamRelease.url}
-              publishedAt={upstreamRelease.publishedAt}
-              isPrerelease={upstreamRelease.isPrerelease}
-              onTake={() => void takeUpstreamRelease()}
-              taking={takingRelease}
-            />
-          ) : null}
-
-          <div className="space-y-2">
-            <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">
-              <SparklesIcon className="size-3.5" />
-              Most useful
-              {rankingPending ? <LoaderIcon aria-hidden className="size-3 animate-spin" /> : null}
-              {/* Beside what it produces rather than buried in Settings: which agent did the
-                  judging is part of reading the answer, and the reader changes it exactly when
-                  they disagree with the order or run that model out of quota. */}
-              <span className="ml-auto">
-                <ProviderModelPicker
-                  activeInstanceId={rankingModel.instanceId}
-                  model={rankingModel.model}
-                  lockedProvider={null}
-                  instanceEntries={rankingInstanceEntries}
-                  modelOptionsByInstance={rankingModelOptions}
-                  triggerVariant="ghost"
-                  triggerClassName="h-6 min-w-0 max-w-none shrink-0 text-xs font-normal"
-                  triggerAriaLabel="Model that ranks upstream pull requests"
-                  onInstanceModelChange={(instanceId, model) => {
-                    updateRankingSettings({
-                      pullRequestRankingModelSelection: createModelSelection(instanceId, model),
-                    });
-                  }}
-                />
-              </span>
-            </h2>
-            {/* Across rather than down: the pick is a shortlist to browse, and stacking it
-                vertically buried the list below under a second full-length copy of it. Two rows
-                deep, so one scroll of it carries twice as much without taking more height. */}
-            <div className="-mx-5 grid snap-x snap-mandatory grid-flow-col grid-rows-2 gap-2 overflow-x-auto px-5 pb-1">
-              {upstreamSections.mostUseful.map((entry) => (
-                <div key={`useful-${pullRequestEntryKey(entry)}`} className="w-80 snap-start">
-                  <PullRequestUpstreamCard
-                    entry={entry}
-                    onImplement={(row) => void implementUpstream(row)}
-                    onCherryPick={(row) => void cherryPickUpstream(row)}
-                    implementing={implementingKey === pullRequestEntryKey(entry)}
-                    picking={pickingKey === pullRequestEntryKey(entry)}
-                    {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
-                      ? { reason: rankingReasons.get(pullRequestEntryKey(entry))! }
-                      : {})}
-                    selected={
-                      selected?.environmentId === entry.environmentId &&
-                      selected.repository === entry.repository &&
-                      selected.number === entry.number
-                    }
-                    onSelect={selectEntry}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">
-              <ClockIcon className="size-3.5" />
-              Latest
-            </h2>
-            {/* The same rows the rest of the page uses: this is the whole upstream in order, so
-                it reads as a list to scan rather than a shortlist to consider. */}
-            <div className="space-y-0.5">
-              {upstreamSections.latest.map((entry) => (
-                <PullRequestRow
-                  key={`latest-${pullRequestEntryKey(entry)}`}
-                  entry={withDiffStat(entry, statsByRow)}
-                  showProjectTitle={false}
-                  showProvider={showProvider}
-                  selected={
-                    selected?.environmentId === entry.environmentId &&
-                    selected.repository === entry.repository &&
-                    selected.number === entry.number
-                  }
-                  onSelect={selectEntry}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {rankingError !== null ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-          {/* Named rather than swallowed: ranking is a model call, and the usual reason it does
-              not answer is a limit on the model doing the judging — which the reader can only act
-              on if they are told. The rows are still shown, in the order they came in. */}
-          <span>Could not rank these pull requests. {rankingError}</span>
-        </div>
-      ) : null}
       {listQuery.error && listData !== null ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
           <span>The latest request failed. Showing the last pull requests loaded.</span>
@@ -2030,11 +1453,9 @@ function PullRequestsRouteView() {
       state={search.state}
       stateOptions={STATE_TABS}
       onState={(state) => updateListScope({ state })}
-      involvement={involvement}
+      involvement={search.involvement}
       involvementOptions={INVOLVEMENT_TABS}
-      onInvolvement={(involvement) =>
-        updateListScope({ involvement: involvement as PullRequestInvolvement })
-      }
+      onInvolvement={(involvement) => updateListScope({ involvement })}
       filters={menuFilters}
       onFilters={(next) =>
         updateListScope({ draft: next.draft, review: next.review, checks: next.checks })
@@ -2060,19 +1481,18 @@ function PullRequestsRouteView() {
     />
   );
   const columnProps = {
+    refreshing,
+    onRefresh: () => void refreshFromHost(),
     searchValue: search.q ?? "",
-    involvement,
+    involvement: search.involvement,
     state: search.state,
     host: search.host,
     hostMenuOptions,
-    onInvolvement: (involvement: string) =>
-      updateListScope({ involvement: involvement as PullRequestInvolvement }),
+    onInvolvement: (involvement: PullRequestInvolvement) => updateListScope({ involvement }),
     onState: (state: PullRequestListState) => updateListScope({ state }),
     onHost: (host: string | undefined) => updateListScope({ host }),
     searchInput,
     filtersMenu,
-    refreshing,
-    onRefresh: () => void refreshFromHost(),
     rightPanelControl:
       // Footprint reserve while the panel is closed: the toggle itself stays
       // mounted at the fixed titlebar inset in both states so it cannot move
@@ -2154,7 +1574,6 @@ function PullRequestsRouteView() {
             onCloseAllSurfaces={closeAllSurfaces}
             onCopyFilePath={() => undefined}
             onAddBrowser={() => undefined}
-            onAddBrowserInProfile={() => undefined}
             onAddTerminal={() => undefined}
             onAddDiff={() => undefined}
             onAddFiles={() => undefined}
@@ -2187,7 +1606,6 @@ function PullRequestsRouteView() {
                 reviewingQuery.refresh();
               }}
               onStateChange={handlePullRequestTabStatusChange}
-              chromeVariant="collapse"
             />
           </RightPanelTabs>
         ) : null}
@@ -2196,10 +1614,7 @@ function PullRequestsRouteView() {
   );
 }
 
-/**
- * A compact stand-in for one pill group: the trigger wears the current choice, the choices
- * live in a menu. Same options, same handler — only the footprint changes.
- */
+/** A compact stand-in for one pill group when the header is narrow. */
 function CompactFilterMenu<Value extends string>({
   label,
   value,
@@ -2211,7 +1626,8 @@ function CompactFilterMenu<Value extends string>({
   options: ReadonlyArray<PullRequestFilterOption<Value>>;
   onChange: (value: Value) => void;
 }) {
-  const current = options.find((option) => option.value === value) ?? options[0]!;
+  const current = options.find((option) => option.value === value) ?? options[0];
+  if (!current) return null;
   return (
     <Menu>
       <MenuTrigger
@@ -2224,15 +1640,12 @@ function CompactFilterMenu<Value extends string>({
       <MenuPopup align="start" side="bottom" className="min-w-40">
         <MenuRadioGroup value={value} onValueChange={(next) => onChange(next as Value)}>
           {options.map((option) => {
-            // A host the server has already said it cannot read is not a choice here either.
-            // The pills disable it; a menu that offers it would answer the press by replacing
-            // a working list with the same failure the pill row exists to explain.
             const item = (
               <MenuRadioItem
                 key={option.value}
                 value={option.value}
-                className={option.unavailable ? "data-disabled:pointer-events-auto" : undefined}
                 disabled={option.unavailable !== undefined}
+                className="data-disabled:pointer-events-auto"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <option.Icon aria-hidden className="size-3.5" />
@@ -2240,11 +1653,12 @@ function CompactFilterMenu<Value extends string>({
                 </span>
               </MenuRadioItem>
             );
-            if (!option.unavailable) return item;
-            return (
+            return option.unavailable === undefined ? (
+              item
+            ) : (
               <Tooltip key={option.value}>
                 <TooltipTrigger render={item} />
-                <TooltipPopup side="top" className="max-w-80">
+                <TooltipPopup side="right" className="max-w-64 break-words">
                   {option.unavailable}
                 </TooltipPopup>
               </Tooltip>
@@ -2331,6 +1745,8 @@ function ExpandableSearch({
  * descendant rules.
  */
 function PullRequestsColumn({
+  refreshing,
+  onRefresh,
   searchValue,
   involvement,
   state,
@@ -2341,24 +1757,22 @@ function PullRequestsColumn({
   onHost,
   searchInput,
   filtersMenu,
-  refreshing,
-  onRefresh,
   rightPanelControl,
   rightPanelOpen,
   listBody,
 }: {
+  refreshing: boolean;
+  onRefresh: () => void;
   searchValue: string;
   involvement: PullRequestInvolvement;
   state: PullRequestListState;
   host: string | undefined;
   hostMenuOptions: ReadonlyArray<PullRequestFilterOption<string>>;
-  onInvolvement: (involvement: string) => void;
+  onInvolvement: (involvement: PullRequestInvolvement) => void;
   onState: (state: PullRequestListState) => void;
   onHost: (host: string | undefined) => void;
   searchInput: ReactNode;
   filtersMenu: ReactNode;
-  refreshing: boolean;
-  onRefresh: () => void;
   rightPanelControl: ReactNode;
   rightPanelOpen: boolean;
   listBody: ReactNode;
@@ -2422,18 +1836,10 @@ function PullRequestsColumn({
     // Painted flat like the chat column: the inset underneath carries the chrome grain, and a
     // content surface that lets it show reads as a different background than every thread.
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <header
-        className={cn(
-          "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1.5 px-3 sm:px-5",
-          // A closed right panel leaves this column full-width, so its header runs
-          // underneath the native window controls on Windows; reserve the inset the
-          // way Settings and the chat view do. While the panel is open the column
-          // ends at the panel's left edge and the absolute controls strip (already
-          // WCO-aware) owns the top-right corner.
-          !rightPanelOpen && "wco:pr-[var(--workspace-native-controls-inset)]",
-          COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-        )}
-      >
+      {/* A closed right panel leaves this column full-width, so the shared header
+          reserves native window controls. While the panel is open, the column ends
+          at the panel and the absolute controls strip owns the top-right corner. */}
+      <WorkspacePageHeader electron={isElectron} reserveNativeControls={!rightPanelOpen}>
         {condensed ? (
           <WorkspaceBreadcrumb ariaLabel="Pull request scope">
             {/* The page name remains the foreground anchor in both states; the live filters are
@@ -2475,30 +1881,22 @@ function PullRequestsColumn({
         )}
         <div className="min-w-0 flex-1" />
         {condensed ? (
-          <ExpandableSearch
-            searchInput={searchInput}
-            searchValue={searchValue}
-            open={searchOpen}
-            onOpenChange={setSearchOpen}
-            focusToken={searchFocusToken}
-            onFocusWithin={(focused) => {
-              topbarSearchFocusedRef.current = focused;
-            }}
-          />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <ExpandableSearch
+              searchInput={searchInput}
+              searchValue={searchValue}
+              open={searchOpen}
+              onOpenChange={setSearchOpen}
+              focusToken={searchFocusToken}
+              onFocusWithin={(focused) => {
+                topbarSearchFocusedRef.current = focused;
+              }}
+            />
+            <PullRequestRefreshControl compact refreshing={refreshing} onRefresh={onRefresh} />
+          </div>
         ) : null}
-        {/* Kept deliberately: the automatic re-read goes through the server's cache, so this is
-            the only way to force a fresh look at the host — which is what pulling in the latest
-            upstream nightly work needs. */}
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Refresh pull requests"
-          onClick={onRefresh}
-        >
-          <RefreshCwIcon className={cn("size-4", refreshing && "animate-spin")} />
-        </Button>
         {rightPanelControl}
-      </header>
+      </WorkspacePageHeader>
 
       <div
         ref={scrollRef}
@@ -2507,19 +1905,44 @@ function PullRequestsColumn({
         {/* The top padding is the fade band's own height (1.5rem here), the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
             content actually passing under the chrome fades. */}
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-5 pt-6 pb-12">
+        <WorkspacePageContainer className="gap-4">
           <div className="flex flex-col gap-3">
             <div ref={inFlowSearchRef} className="flex items-center gap-2">
               {searchInput}
               {filtersMenu}
+              {!condensed ? (
+                <PullRequestRefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+              ) : null}
             </div>
             {/* Scrolled past this marker, the controls are gone and the title takes over. */}
             <div ref={markerRef} aria-hidden className="-mt-3 h-px w-full" />
           </div>
 
           {listBody}
-        </div>
+        </WorkspacePageContainer>
       </div>
     </div>
+  );
+}
+
+function PullRequestRefreshControl({
+  compact = false,
+  refreshing,
+  onRefresh,
+}: {
+  compact?: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <Button
+      size={compact ? "icon-sm" : "icon"}
+      variant={compact ? "ghost" : "outline"}
+      aria-label="Refresh pull requests"
+      onClick={onRefresh}
+      disabled={refreshing}
+    >
+      <RefreshCwIcon className={cn("size-4", refreshing && "animate-spin")} />
+    </Button>
   );
 }
