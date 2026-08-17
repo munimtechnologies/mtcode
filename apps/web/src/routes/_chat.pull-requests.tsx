@@ -26,6 +26,7 @@ import {
   LayersIcon,
   PenLineIcon,
   LoaderIcon,
+  RefreshCwIcon,
   SearchIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -1794,6 +1795,8 @@ function PullRequestsRouteView() {
     onHost: (host: string | undefined) => updateListScope({ host }),
     searchInput,
     filtersMenu,
+    refreshing,
+    onRefresh: () => void refreshFromHost(),
     rightPanelControl:
       // Footprint reserve while the panel is closed: the toggle itself stays
       // mounted at the fixed titlebar inset in both states so it cannot move
@@ -2061,6 +2064,8 @@ function PullRequestsColumn({
   onHost,
   searchInput,
   filtersMenu,
+  refreshing,
+  onRefresh,
   rightPanelControl,
   rightPanelOpen,
   listBody,
@@ -2075,6 +2080,8 @@ function PullRequestsColumn({
   onHost: (host: string | undefined) => void;
   searchInput: ReactNode;
   filtersMenu: ReactNode;
+  refreshing: boolean;
+  onRefresh: () => void;
   rightPanelControl: ReactNode;
   rightPanelOpen: boolean;
   listBody: ReactNode;
@@ -2202,6 +2209,17 @@ function PullRequestsColumn({
             }}
           />
         ) : null}
+        {/* Kept deliberately: the automatic re-read goes through the server's cache, so this is
+            the only way to force a fresh look at the host — which is what pulling in the latest
+            upstream nightly work needs. */}
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Refresh pull requests"
+          onClick={onRefresh}
+        >
+          <RefreshCwIcon className={cn("size-4", refreshing && "animate-spin")} />
+        </Button>
         {rightPanelControl}
       </header>
 
