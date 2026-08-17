@@ -8,7 +8,10 @@
 # T3_FORCE_REBUILD=1) rebuilds Mac, builds Windows on Blade, installs on Dell.
 set -euo pipefail
 
-export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:$PATH"
+# /usr/local/bin carries the corepack shims — pnpm among them. launchd starts this job with a
+# bare PATH, so leaving it out meant every scheduled rebuild died at "pnpm: command not found"
+# and only hand-run rebuilds ever reached the build step.
+export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
 # Mac checkout uses "fork" → github.com/sheehanmunim/t3code (not origin/pingdotgg).
 PERSONAL_REMOTE="${T3_PERSONAL_REMOTE:-fork}"
