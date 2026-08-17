@@ -61,6 +61,7 @@ import {
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
 import { useAtomValue } from "@effect/atom-react";
+import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { usePrimarySettings } from "~/hooks/useSettings";
 import { resolveAppModelSelectionState } from "~/modelSelection";
 import { primaryServerProvidersAtom } from "~/state/server";
@@ -168,8 +169,7 @@ const INVOLVEMENT_TABS = [
   { value: "all", label: "All", Icon: LayersIcon },
   { value: "reviewing", label: "Reviewing", Icon: EyeIcon },
   { value: "authored", label: "Authored", Icon: PenLineIcon },
-  { value: UPSTREAM_FEED, label: "Upstream", Icon: GitForkIcon },
-] as const satisfies ReadonlyArray<PullRequestFilterOption<PullRequestFeed>>;
+] as const satisfies ReadonlyArray<PullRequestFilterOption<PullRequestInvolvement>>;
 
 const STATE_TABS = [
   { value: "all", label: "All", Icon: LayersIcon },
@@ -1559,12 +1559,52 @@ function PullRequestsRouteView() {
       Icon: environment.displayUrl === null ? MonitorIcon : ServerIcon,
     })),
   ];
+  // On the page rather than in the filters menu: this is which body of work is being looked at,
+  // not a narrowing of one, and it is the switch the page exists to offer. Involvement stays in
+  // the menu, and it applies within whichever of these is showing.
+  // Named after the repository once the page has seen one, so the switch says which upstream it
+  // means rather than making the reader remember.
+  const upstreamRepository = entries.find((entry) => entry.isUpstream === true)?.repository;
+  const upstreamLabel = upstreamRepository ?? "Upstream";
+
+  const feedTabs = (
+    <ToggleGroup
+      className="gap-1"
+      size="sm"
+      value={[upstreamFeed ? UPSTREAM_FEED : "workspace"]}
+      onValueChange={(value) => {
+        const next = value[0];
+        if (next === UPSTREAM_FEED) {
+          updateListScope({ involvement: UPSTREAM_FEED });
+          return;
+        }
+        if (next === "workspace" && upstreamFeed) {
+          // Back to the reader's own work, at the involvement the menu is still set to.
+          updateListScope({ involvement: "all", sort: "updated" });
+        }
+      }}
+    >
+      <Toggle aria-label="Pull requests in this workspace" value="workspace" variant="ghost">
+        <LayersIcon className="size-3.5" />
+        Workspace
+      </Toggle>
+      <Toggle
+        aria-label="Pull requests from the upstream repository"
+        value={UPSTREAM_FEED}
+        variant="ghost"
+      >
+        <GitForkIcon className="size-3.5" />
+        {upstreamLabel}
+      </Toggle>
+    </ToggleGroup>
+  );
+
   const filtersMenu = (
     <PullRequestFiltersMenu
       state={search.state}
       stateOptions={STATE_TABS}
       onState={(state) => updateListScope({ state })}
-      involvement={search.involvement}
+      involvement={involvement}
       involvementOptions={INVOLVEMENT_TABS}
       onInvolvement={(involvement) =>
         updateListScope({ involvement: involvement as PullRequestFeed })
@@ -1600,7 +1640,7 @@ function PullRequestsRouteView() {
     refreshing,
     onRefresh: () => void refreshFromHost(),
     searchValue: search.q ?? "",
-    involvement: search.involvement,
+    involvement,
     state: search.state,
     host: search.host,
     hostMenuOptions,
@@ -1610,6 +1650,7 @@ function PullRequestsRouteView() {
     onHost: (host: string | undefined) => updateListScope({ host }),
     searchInput,
     filtersMenu,
+    feedTabs,
     rightPanelControl:
       // Footprint reserve while the panel is closed: the toggle itself stays
       // mounted at the fixed titlebar inset in both states so it cannot move
@@ -1879,6 +1920,7 @@ function PullRequestsColumn({
   onHost,
   searchInput,
   filtersMenu,
+  feedTabs,
   rightPanelControl,
   rightPanelOpen,
   listBody,
@@ -1895,6 +1937,7 @@ function PullRequestsColumn({
   onHost: (host: string | undefined) => void;
   searchInput: ReactNode;
   filtersMenu: ReactNode;
+  feedTabs: ReactNode;
   rightPanelControl: ReactNode;
   rightPanelOpen: boolean;
   listBody: ReactNode;
@@ -2046,6 +2089,7 @@ function PullRequestsColumn({
               {searchInput}
               {filtersMenu}
             </div>
+            <div className="flex items-center">{feedTabs}</div>
             {/* Scrolled past this marker, the controls are gone and the title takes over. */}
             <div ref={markerRef} aria-hidden className="-mt-3 h-px w-full" />
           </div>
