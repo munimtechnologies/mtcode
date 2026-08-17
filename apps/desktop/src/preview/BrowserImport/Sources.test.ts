@@ -13,7 +13,6 @@ import type { BrowserImportPathContext } from "./Sources.ts";
 import {
   BROWSER_IMPORT_SOURCES,
   cookieDatabaseCandidatePaths,
-  cookieDatabasePath,
   isSourceInstalled,
   isSourceRunning,
   listSourceProfiles,
@@ -257,34 +256,19 @@ Path=Profiles/wxyz.empty
   );
 });
 
-describe("cookieDatabasePath", () => {
-  it.effect("places the database under the requested source profile", () =>
-    run(
-      Effect.gen(function* () {
-        const path = yield* Path.Path;
-        const context = yield* withSourceHome();
-        assert.equal(
-          cookieDatabasePath(helium, context, "Profile 1"),
-          path.join(context.home, "Library/Application Support/net.imput.helium/Profile 1/Cookies"),
-        );
-      }),
-    ),
-  );
-});
-
 describe("cookieDatabaseCandidatePaths", () => {
-  it.effect("returns both Cookies and Network/Cookies for Chromium engines", () =>
+  it.effect("prefers Network/Cookies and falls back to legacy Cookies", () =>
     run(
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const context = yield* withSourceHome();
         const candidates = cookieDatabaseCandidatePaths(helium, context, "Default");
         assert.deepEqual(candidates, [
-          path.join(context.home, "Library/Application Support/net.imput.helium/Default/Cookies"),
           path.join(
             context.home,
             "Library/Application Support/net.imput.helium/Default/Network/Cookies",
           ),
+          path.join(context.home, "Library/Application Support/net.imput.helium/Default/Cookies"),
         ]);
       }),
     ),

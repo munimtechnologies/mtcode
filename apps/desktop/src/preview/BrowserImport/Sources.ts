@@ -210,22 +210,13 @@ export const cookieDatabaseCandidatePaths = (
   if (definition.engine === "safari") {
     return [context.path.join(profilePath, "Cookies.binarycookies")];
   }
-  // Chromium: pre-96 uses `Cookies`, 96+ use `Network/Cookies`.
+  // Chromium: pre-96 uses `Cookies`, 96+ use `Network/Cookies`. An upgrade
+  // leaves the legacy file behind, so prefer the current one and fall back.
   return [
-    context.path.join(profilePath, "Cookies"),
     context.path.join(profilePath, "Network", "Cookies"),
+    context.path.join(profilePath, "Cookies"),
   ];
 };
-
-/**
- * Legacy single-path helper that returns the first candidate. Prefer
- * `cookieDatabaseCandidatePaths` when checking for existence.
- */
-export const cookieDatabasePath = (
-  definition: BrowserImportSourceDefinition,
-  context: BrowserImportPathContext,
-  profileDirectory: string,
-): string | undefined => cookieDatabaseCandidatePaths(definition, context, profileDirectory)[0];
 
 /** Chromium keeps the DPAPI-wrapped Windows key in `Local State`. */
 export const localStatePath = (
@@ -314,26 +305,25 @@ const entryExists = Effect.fnUntraced(function* (path: string) {
  * Whether a lock file is actually held by a running process. On macOS and
  * Linux Firefox lock files are dangling symlinks that disappear when the
  * process exits, so `entryExists` is sufficient. On Windows the lock file
- * (`parent.lock`) is a regular file locked via `LockFileEx` that persists on
- * disk after the process exits; `stat` always succeeds, so we must try to
- * open the file with write access to detect the active lock.
+ * (`parent.lock`) is a regular file opened with no sharing, so it persists on
+ * disk after the process exits; `stat` always succeeds, and the probe must try
+ * to open the file with write access to detect the active lock.
  */
 const isLockHeld = Effect.fnUntraced(function* (lockPath: string, platform: NodeJS.Platform) {
   if (platform !== "win32") return yield* entryExists(lockPath);
-  return yield* Effect.tryPromise({
-    try: () =>
-      new Promise<boolean>((resolve) => {
-        const fs = require("node:fs") as typeof import("node:fs");
-        fs.open(lockPath, "r+", (openErr: NodeJS.ErrnoException | null, fd: number) => {
-          if (openErr) {
-            resolve(openErr.code === "EBUSY" || openErr.code === "EPERM");
-            return;
-          }
-          fs.close(fd, () => resolve(false));
-        });
-      }),
-    catch: () => false,
-  }).pipe(Effect.catchCause(() => Effect.succeed(false)));
+  // A lock held with no sharing denies the write access we need, surfacing as
+  // `Busy` or `PermissionDenied`; anything else (missing file, permissions we
+  // cannot read) just means no active browser holds it.
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.open(lockPath, { flag: "r+" }).pipe(
+    Effect.as(false),
+    Effect.catchIf(
+      (error) => error.reason._tag === "Busy" || error.reason._tag === "PermissionDenied",
+      () => Effect.succeed(true),
+    ),
+    Effect.orElseSucceed(() => false),
+    Effect.scoped,
+  );
 });
 
 /** Shape of the slice of Chromium's `Local State` that names its profiles. */
