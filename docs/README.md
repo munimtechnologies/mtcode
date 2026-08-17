@@ -3,21 +3,17 @@
 ## Using T3 Code
 
 - [Install and first run](./user/install.md)
-- [Keep working toward an Objective](./user/goals.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)
+- [Import existing chats](./user/importing-chats.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)
-- [Mobile appearance](./user/mobile-appearance.md)
-- [Voice dictation](./user/voice-dictation.md)
 - [Remote access](./user/remote-access.md)
 - [Keeping app and server in sync](./user/updating.md)
 - [Source control integrations](./user/source-control.md)
-- [Usage reports](./user/usage.md)
 - [Background service (Linux)](./user/background-service.md)
-- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
-- [Plugins](./user/plugins.md)
+- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [Hermes](./user/providers-hermes.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 
@@ -38,7 +34,6 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Server updates](./internals/server-updates.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
 - [Environment auth](./internals/environment-auth.md)
-- [Stacked pull requests](./internals/stacked-pull-requests.md)
 - [T3 Connect](./internals/t3-connect.md)
 - [CI gates](./internals/ci.md)
 
