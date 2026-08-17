@@ -2919,10 +2919,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             if (element.tagName !== "TR" && element.tagName !== "TD" && element.tagName !== "DIV") return false;
             const style = getComputedStyle(element);
             if (style.cursor !== "pointer") return false;
-            // cursor is inherited. Keep the outermost pointer container so
-            // nested layout nodes do not fill the interactive-element cap.
-            const parent = element.parentElement;
-            return !parent || getComputedStyle(parent).cursor !== "pointer";
+            // Cursor inherits. Keep the outermost harvested layout node
+            // (div/td/tr) so nested boxes do not fill the cap, but still
+            // list this node when the pointer owner is an unharvested
+            // wrapper such as li, section, label, or table.
+            let ancestor = element.parentElement;
+            while (ancestor) {
+              const harvested =
+                ancestor.tagName === "TR" || ancestor.tagName === "TD" || ancestor.tagName === "DIV";
+              if (harvested && getComputedStyle(ancestor).cursor === "pointer") return false;
+              ancestor = ancestor.parentElement;
+            }
+            return true;
           };
           const seen = new Set();
           const elements = Array.from(document.querySelectorAll(
