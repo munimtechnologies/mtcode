@@ -28,7 +28,7 @@ function readPackagedDistro(appPath: string | undefined): DesktopDistroId | null
 
 export function resolveRuntimeDesktopDistroId(input: {
   readonly env: NodeJS.ProcessEnv;
-  readonly appPath?: string;
+  readonly appPath?: string | undefined;
   readonly isDevelopment: boolean;
 }): DesktopDistroId {
   if (input.env.T3CODE_DESKTOP_DISTRO?.trim() === "munim") return "munim";
@@ -41,7 +41,7 @@ export function resolveRuntimeDesktopDistroId(input: {
 
 export function resolveRuntimeDesktopDistro(input: {
   readonly env: NodeJS.ProcessEnv;
-  readonly appPath?: string;
+  readonly appPath?: string | undefined;
   readonly isDevelopment: boolean;
 }): RuntimeDesktopDistro {
   const id = resolveRuntimeDesktopDistroId(input);

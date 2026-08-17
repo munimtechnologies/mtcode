@@ -312,7 +312,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "voice-dictation",
     title: "Voice dictation",
-    to: "/settings/beta",
+    to: "/settings/general",
   },
   {
     id: "archive",
