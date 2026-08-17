@@ -1,10 +1,10 @@
 /**
  * Usage reporting contract.
  *
- * Claude and Codex are scanned from the provider CLIs' on-disk session
- * transcripts (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`)
- * so usage stays complete even for turns never driven through T3 Code. This
- * mirrors the approach `ccusage` takes.
+ * Claude, Codex, and OpenCode are scanned from on-disk session data
+ * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`, and
+ * OpenCode SQLite databases) so usage stays complete even for turns never
+ * driven through T3 Code. This mirrors the approach `ccusage` takes.
  *
  * Cursor has no local token ledger in its transcripts; environments instead
  * export usage from Cursor's dashboard CSV API when Cursor desktop is signed
@@ -24,9 +24,9 @@ import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
  * client renders partial coverage when an environment reports an older version
  * rather than failing the whole page.
  */
-export const USAGE_CONTRACT_VERSION = 4 as const;
+export const USAGE_CONTRACT_VERSION = 5 as const;
 
-export const UsageProviderKind = Schema.Literals(["claude", "codex", "cursor"]);
+export const UsageProviderKind = Schema.Literals(["claude", "codex", "cursor", "opencode"]);
 export type UsageProviderKind = typeof UsageProviderKind.Type;
 
 /**

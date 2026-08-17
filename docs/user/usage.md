@@ -1,19 +1,25 @@
 # Review usage
 
-The Usage page combines Claude Code, Codex, and Cursor activity from your
+The Usage page combines Claude Code, Codex, Cursor, and OpenCode activity from your
 connected environments. It shows API-equivalent token cost, processed tokens,
 cache savings, provider shares, and model breakdowns. Subscription billing is
 separate from the raw token cost shown here.
 
-| Provider     | Source |
-| ------------ | ------ |
-| Claude Code  | Local Claude session transcripts under the Claude home |
-| Codex        | Local Codex session transcripts under the Codex home |
-| Cursor       | Cursor dashboard usage export (requires Cursor desktop signed in on that environment) |
+| Provider    | Source                                                                                |
+| ----------- | ------------------------------------------------------------------------------------- |
+| Claude Code | Local Claude session transcripts under the Claude home                                |
+| Codex       | Local Codex session transcripts under the Codex home                                  |
+| Cursor      | Cursor dashboard usage export (requires Cursor desktop signed in on that environment) |
+| OpenCode    | Local OpenCode SQLite databases under the OpenCode data directory                     |
 
 Totals include work done outside T3 Code when the provider writes its own
-session history (Claude and Codex) or when Cursor reports usage for the signed-in
-desktop account.
+session history (Claude, Codex, and OpenCode) or when Cursor reports usage for
+the signed-in desktop account.
+
+Prompt text, responses, and tool output are not sent to the client; environments
+return only aggregated usage totals. When a provider records a cost, T3 Code uses
+it. Otherwise, it estimates cost from the available model rate table and marks
+models it cannot price.
 
 Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period.
 The **7 days**, **30 days**, and **90 days** ranges use daily resolution. Cost
@@ -29,6 +35,9 @@ third-party Cursor export names (effort and thinking suffixes stripped). Auto
 Balance / Intelligence may differ from Auto Cost when Cursor routed to another
 model — the export does not say which Auto mode ran.
 
+When multiple connected environments point to the same provider data on one
+machine, T3 Code counts that source once to avoid duplicate totals.
+
 ## Cursor coverage
 
 Cursor agent transcripts on disk do not include token counts. T3 Code reads
@@ -37,4 +46,10 @@ installed and signed in. That uses the desktop session on the machine running
 the T3 Code server — the same host-trust model as scanning Claude or Codex
 homes. Any client paired to that environment can see the resulting usage.
 Environments without that desktop login show Cursor as uncovered and still
-report Claude and Codex normally.
+report Claude, Codex, and OpenCode normally.
+
+## OpenCode coverage
+
+For OpenCode, T3 Code honors `OPENCODE_DB` and discovers databases created by
+channel installs in OpenCode's data directory. In-memory OpenCode databases
+cannot be inspected by another process.
