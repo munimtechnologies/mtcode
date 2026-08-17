@@ -21,6 +21,7 @@ import {
 } from "./Sources.ts";
 
 const helium = BROWSER_IMPORT_SOURCES.find((source) => source.id === "helium")!;
+const chrome = BROWSER_IMPORT_SOURCES.find((source) => source.id === "chrome")!;
 
 /** A scratch home with the source's user-data directory already created. */
 const withSourceHome = Effect.fnUntraced(function* () {
@@ -71,6 +72,30 @@ describe("isSourceRunning", () => {
         );
 
         assert.isTrue(yield* isSourceRunning(helium, context));
+      }),
+    ),
+  );
+
+  it.effect("does not treat a stale Chromium lockfile as a running browser", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-chrome-" });
+        const context = yield* sourcePathContext.pipe(
+          Effect.provideService(HostProcessEnvironment, {
+            HOME: home,
+            USERPROFILE: home,
+            LOCALAPPDATA: `${home}\\AppData\\Local`,
+          }),
+          Effect.provideService(HostProcessPlatform, "win32"),
+        );
+        const root = chrome.userDataDirectory(context)!;
+        yield* fileSystem.makeDirectory(root, { recursive: true });
+
+        // On Windows Chromium locks `lockfile` via LockFileEx; the file itself
+        // persists after the browser exits, so mere existence is not running.
+        yield* fileSystem.writeFileString(`${root}\\lockfile`, "");
+        assert.isFalse(yield* isSourceRunning(chrome, context));
       }),
     ),
   );

@@ -518,14 +518,19 @@ export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")
   // table. Safari keeps none, and unlike the others writes its jar atomically,
   // so a running instance is not a hazard there.
   //
-  // Chromium and Firefox differ in where: Chromium keeps one `SingletonLock`
-  // for the whole user-data directory, Firefox keeps its locks inside each
-  // profile, under three names across platforms (`lock` on macOS and Linux,
+  // Chromium and Firefox differ in where: Chromium keeps one lock for the
+  // whole user-data directory, Firefox keeps its locks inside each profile,
+  // under three names across platforms (`lock` on macOS and Linux,
   // `.parentlock` beside it, `parent.lock` on Windows). Looking for Firefox's
   // at the root finds nothing and reports a running browser as importable.
   if (definition.engine === "safari") return false;
   if (definition.engine !== "firefox") {
-    return yield* entryExists(context.path.join(root, "SingletonLock"));
+    // Chromium names its single lock differently per platform: a dangling
+    // `SingletonLock` symlink on macOS and Linux, a `lockfile` held via
+    // LockFileEx on Windows. `isLockHeld` answers for both — existence on
+    // the former, an actual lock probe on the latter.
+    const lock = context.platform === "win32" ? "lockfile" : "SingletonLock";
+    return yield* isLockHeld(context.path.join(root, lock), context.platform);
   }
 
   const profiles = yield* listSourceProfiles(definition, context);
