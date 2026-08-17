@@ -722,6 +722,52 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
     }),
   );
 
+  it.effect("Stop targeting the running Turn Pauses the Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("cmd-interrupt-running-turn"),
+          threadId: ThreadId.make("thread-1"),
+          turnId: TurnId.make("turn-running"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          latestTurn: runningTurn(),
+          session: runningSession(),
+          goal: existingGoal(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.turn-interrupt-requested",
+        "thread.goal-paused",
+        "thread.activity-appended",
+      ]);
+    }),
+  );
+
+  it.effect("a delayed Stop for a finished Turn does not Pause the Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("cmd-interrupt-stale-turn"),
+          threadId: ThreadId.make("thread-1"),
+          turnId: TurnId.make("turn-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          latestTurn: completedTurn("turn-1"),
+          session: readySession(),
+          goal: existingGoal(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.turn-interrupt-requested"]);
+    }),
+  );
+
   it.effect("resume does not double-start after a Continuation was already requested", () =>
     Effect.gen(function* () {
       const decided = yield* decideOrchestrationCommand({
@@ -888,6 +934,100 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
       });
       const events = Array.isArray(decided) ? decided : [decided];
       expect(events.map((event) => event.type)).toEqual(["thread.message-sent"]);
+    }),
+  );
+
+  it.effect(
+    "a signal from a Turn that predates a Goal replacement does not finalize the new Goal",
+    () =>
+      Effect.gen(function* () {
+        const decided = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.message.assistant.complete",
+            commandId: CommandId.make("cmd-assistant-stale-signal"),
+            threadId: ThreadId.make("thread-1"),
+            messageId: MessageId.make("assistant-1"),
+            createdAt: NOW,
+          },
+          readModel: makeReadModel({
+            goal: activeGoal(),
+            latestTurn: completedTurn(),
+            session: readySession(),
+            activities: [
+              {
+                id: EventId.make("activity-goal-replaced"),
+                tone: "info",
+                kind: "goal.set",
+                summary: "Ship the migration instead",
+                payload: {},
+                turnId: null,
+                // The Goal was replaced after the completing Turn's message was
+                // already streaming, so its signal belongs to the old Objective.
+                createdAt: "2026-01-01T01:00:00.000Z",
+              },
+            ],
+            messages: [
+              {
+                id: MessageId.make("assistant-1"),
+                role: "assistant",
+                text: "<objective_complete>p95 is 90ms</objective_complete>",
+                turnId: TurnId.make("turn-1"),
+                streaming: false,
+                createdAt: NOW,
+                updatedAt: NOW,
+              },
+            ],
+          }),
+        });
+        const events = Array.isArray(decided) ? decided : [decided];
+        expect(events.map((event) => event.type)).toEqual(["thread.message-sent"]);
+      }),
+  );
+
+  it.effect("a signal from a Turn started after the Goal was set still applies", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make("cmd-assistant-fresh-signal"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-1"),
+          createdAt: NOW,
+        },
+        readModel: makeReadModel({
+          goal: activeGoal(),
+          latestTurn: completedTurn(),
+          session: readySession(),
+          activities: [
+            {
+              id: EventId.make("activity-goal-set"),
+              tone: "info",
+              kind: "goal.set",
+              summary: "Reduce p95 below 120ms",
+              payload: {},
+              turnId: null,
+              createdAt: "2025-12-31T23:00:00.000Z",
+            },
+          ],
+          messages: [
+            {
+              id: MessageId.make("assistant-1"),
+              role: "assistant",
+              text: "<objective_complete>p95 is 90ms</objective_complete>",
+              turnId: TurnId.make("turn-1"),
+              streaming: false,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          ],
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.message-sent",
+        "thread.goal-completed",
+        "thread.activity-appended",
+      ]);
     }),
   );
 

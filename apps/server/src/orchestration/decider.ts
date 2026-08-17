@@ -1631,7 +1631,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
-      if (thread.goal?.status !== "active") {
+      // A Stop that arrives after its Turn already finished must not pause
+      // the Goal: the interruption targeted the stale Turn, not the current
+      // run. Commands without a turnId ("stop whatever is current") keep
+      // pausing as before.
+      const interruptTargetsActiveTurn =
+        command.turnId === undefined ||
+        (thread.latestTurn?.state === "running" && thread.latestTurn.turnId === command.turnId);
+      if (thread.goal?.status !== "active" || !interruptTargetsActiveTurn) {
         return interruptEvent;
       }
       const activeGoal = thread.goal;
@@ -1913,7 +1920,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (thread.goal?.status === "active") {
         const message = thread.messages.find((entry) => entry.id === command.messageId);
         const signal = parseObjectiveSignal(message?.text ?? "");
-        if (signal === "complete") {
+        // A signal only finalizes the Goal the Turn was pursuing. When the
+        // user replaces the Goal mid-run, the old Turn's message predates the
+        // latest goal.set activity and its signal must not touch the new Goal;
+        // the GoalReactor starts a fresh Continuation for it once the Session
+        // reports ready.
+        const latestGoalSetAtMs = thread.activities.reduce<number | null>((latest, activity) => {
+          if (activity.kind !== "goal.set") {
+            return latest;
+          }
+          const createdAtMs = Date.parse(activity.createdAt);
+          return latest === null || createdAtMs > latest ? createdAtMs : latest;
+        }, null);
+        const signalPredatesGoal =
+          message !== undefined &&
+          latestGoalSetAtMs !== null &&
+          Date.parse(message.createdAt) < latestGoalSetAtMs;
+        if (signal === "complete" && !signalPredatesGoal) {
           events.push(
             {
               ...(yield* withEventBase({
@@ -1936,7 +1959,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               summary: thread.goal.objective,
             }),
           );
-        } else if (signal === "blocked") {
+        } else if (signal === "blocked" && !signalPredatesGoal) {
           events.push(
             {
               ...(yield* withEventBase({
