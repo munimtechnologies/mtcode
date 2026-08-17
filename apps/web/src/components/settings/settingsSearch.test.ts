@@ -97,4 +97,11 @@ describe("searchSettings", () => {
       to: "/settings/plugins",
     });
   });
+
+  it("routes skill settings to the skill manager", () => {
+    expect(searchSettings("skills")[0]).toMatchObject({
+      id: "skills",
+      to: "/settings/skills",
+    });
+  });
 });

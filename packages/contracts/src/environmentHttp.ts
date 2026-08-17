@@ -26,6 +26,7 @@ import {
 } from "./auth.ts";
 import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import { SkillInventory } from "./skillInventory.ts";
 import {
   ClientOrchestrationCommand,
   DispatchResult,
@@ -666,6 +667,14 @@ export class EnvironmentPluginMarketplaceHttpApi extends HttpApiGroup.make("plug
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+export class EnvironmentSkillsHttpApi extends HttpApiGroup.make("skills").add(
+  HttpApiEndpoint.get("inventory", "/api/skills", {
+    headers: OptionalBearerHeaders,
+    success: SkillInventory,
+    error: EnvironmentOrchestrationSnapshotErrors,
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -733,4 +742,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentPluginMarketplaceHttpApi)
+  .add(EnvironmentSkillsHttpApi)
   .add(EnvironmentConnectHttpApi) {}
