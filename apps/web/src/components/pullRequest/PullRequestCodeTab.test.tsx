@@ -6,8 +6,13 @@ vi.mock("../DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
-import { PullRequestCodeBootstrapBody, shouldRefreshAppliedCommitDiff } from "./PullRequestCodeTab";
+import {
+  PullRequestCodeBootstrapBody,
+  PullRequestCodeRefreshFailure,
+  shouldRefreshAppliedCommitDiff,
+} from "./PullRequestCodeTab";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
+import { Button } from "../ui/button";
 
 describe("PullRequestCodeBootstrapBody", () => {
   it("keeps initial aggregate loading in the diff body", () => {
@@ -36,6 +41,25 @@ describe("PullRequestCodeBootstrapBody", () => {
     const markup = renderToStaticMarkup(body);
     expect(markup).toContain("Could not load pull request diff");
     expect(markup).toContain("GitHub did not answer.");
+    expect(markup).toContain("Retry");
+  });
+});
+
+describe("PullRequestCodeRefreshFailure", () => {
+  it("marks a retained diff as stale and offers retry", () => {
+    const onRetry = vi.fn();
+    const failure = PullRequestCodeRefreshFailure({ error: "GitHub did not answer.", onRetry });
+    const children = failure.props.children as ReactNode[];
+    const retry = children[2] as ReactElement<ComponentProps<typeof Button>, typeof Button>;
+
+    expect(retry.type).toBe(Button);
+    expect(retry.props.onClick).toBe(onRetry);
+
+    const markup = renderToStaticMarkup(failure);
+
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Could not refresh pull request diff");
+    expect(markup).toContain("Showing the last loaded version. GitHub did not answer.");
     expect(markup).toContain("Retry");
   });
 });

@@ -707,6 +707,16 @@ export function PullRequestDetailPanel({
       runDiffQuery,
     ],
   );
+  // Observation reacts to already-read detail, but its aggregate diff cache can outlive that
+  // detail. Evict only that aggregate here; a reader-initiated refresh (including Update branch)
+  // still clears every cached resource for this pull request before rereading it.
+  const observeWork = useMemo(
+    () => ({
+      ...refreshWork,
+      invalidate: () => invalidate({ environmentId, input: { reference, resource: "diff" } }),
+    }),
+    [environmentId, invalidate, reference, refreshWork],
+  );
   const refreshFromHost = useCallback(async () => {
     if (!codeMounted) {
       await refreshWork.invalidate();
@@ -725,14 +735,12 @@ export function PullRequestDetailPanel({
   ]);
   useEffect(() => {
     if (!codeMounted || observedSnapshot === null) return;
-    void coordinator.observe(diffScope, observedSnapshot, refreshWork);
-  }, [codeMounted, coordinator, diffScope, observedSnapshot, refreshWork]);
+    void coordinator.observe(diffScope, observedSnapshot, observeWork);
+  }, [codeMounted, coordinator, diffScope, observedSnapshot, observeWork]);
   const codeBootstrapError =
-    currentAppliedSnapshot === null
-      ? (detailQuery.error ??
-        activityQuery.error ??
-        (diffBootstrapFailure?.scope === diffScope ? diffBootstrapFailure.error : null))
-      : null;
+    detailQuery.error ??
+    activityQuery.error ??
+    (diffBootstrapFailure?.scope === diffScope ? diffBootstrapFailure.error : null);
   // A refresh asked for by the page joins the same causally ordered detail-and-diff lane.
   const appliedForcedToken = useRef(forcedRefreshToken);
   useEffect(() => {

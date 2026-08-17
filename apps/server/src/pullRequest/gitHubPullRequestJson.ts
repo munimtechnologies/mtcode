@@ -359,6 +359,8 @@ const RawCommitSchema = Schema.Struct({
 
 const RawDetailSchema = Schema.Struct({
   ...RawListItemSchema.fields,
+  baseRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
   /** Names the fork a pull request came from, which is what qualifies its head ref. */
   headRepositoryOwner: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
   body: Schema.optional(Schema.String),
@@ -599,7 +601,7 @@ export function decodeActorAvatarsJson(
 export const PULL_REQUEST_LIST_JSON_FIELDS =
   "number,title,url,author,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,createdAt,updatedAt,mergedAt,reviewRequests,labels,statusCheckRollup";
 
-export const PULL_REQUEST_DETAIL_JSON_FIELDS = `${PULL_REQUEST_LIST_JSON_FIELDS},body,changedFiles,closedAt,headRepositoryOwner,autoMergeRequest`;
+export const PULL_REQUEST_DETAIL_JSON_FIELDS = `${PULL_REQUEST_LIST_JSON_FIELDS},body,changedFiles,closedAt,headRepositoryOwner,baseRefOid,headRefOid,autoMergeRequest`;
 export const PULL_REQUEST_ACTIVITY_JSON_FIELDS = "author,comments,reviews,commits";
 
 /** GitHub's own ceiling on a connection page, which is what both thread reads ask for. */
@@ -1023,6 +1025,7 @@ export interface GitHubPullRequestDetail extends GitHubPullRequestListItem {
   readonly mergedAt: string | null;
   readonly closedAt: string | null;
   readonly checks: ReadonlyArray<PullRequestCheck>;
+  readonly diffRevision?: { readonly baseOid: string; readonly headOid: string };
   /** Absent where `gh` did not answer for auto-merge at all, which is not the same as off. */
   readonly autoMergeEnabled?: boolean;
 }
@@ -1361,6 +1364,8 @@ function toListItem(raw: Schema.Schema.Type<typeof RawListItemSchema>): GitHubPu
 }
 
 function toDetail(raw: Schema.Schema.Type<typeof RawDetailSchema>): GitHubPullRequestDetail {
+  const baseOid = trimmed(raw.baseRefOid);
+  const headOid = trimmed(raw.headRefOid);
   return {
     ...toListItem(raw),
     headRepositoryOwner: trimmed(raw.headRepositoryOwner?.login),
@@ -1369,6 +1374,7 @@ function toDetail(raw: Schema.Schema.Type<typeof RawDetailSchema>): GitHubPullRe
     mergedAt: trimmed(raw.mergedAt),
     closedAt: trimmed(raw.closedAt),
     checks: toChecks(raw.statusCheckRollup),
+    ...(baseOid === null || headOid === null ? {} : { diffRevision: { baseOid, headOid } }),
     // A JSON null is GitHub saying "nobody armed this"; a missing key is GitHub not saying, and
     // the difference survives here rather than being flattened into false.
     ...(raw.autoMergeRequest === undefined

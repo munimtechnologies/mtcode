@@ -142,6 +142,7 @@ describe("pull request diff freshness", () => {
     additions: 12,
     deletions: 4,
     changedFiles: 3,
+    diffRevision: { baseOid: "base-oid", headOid: "head-oid" },
     commits: [{ oid: "base" }, { oid: "head" }],
   };
 
@@ -159,6 +160,25 @@ describe("pull request diff freshness", () => {
     expect(pullRequestCodeRevision({ ...codeSource, additions: 13 })).not.toBe(revision);
     expect(pullRequestCodeRevision({ ...codeSource, behindBy: 1 })).not.toBe(revision);
     expect(pullRequestCodeRevision({ ...codeSource, baseBranch: "release" })).not.toBe(revision);
+    expect(
+      pullRequestCodeRevision({
+        ...codeSource,
+        diffRevision: { ...codeSource.diffRevision, baseOid: "advanced-base" },
+      }),
+    ).not.toBe(revision);
+    expect(
+      pullRequestCodeRevision({
+        ...codeSource,
+        diffRevision: { ...codeSource.diffRevision, headOid: "pushed-head" },
+      }),
+    ).not.toBe(revision);
+  });
+
+  it("falls back to host-agnostic signals when immutable diff endpoints are unavailable", () => {
+    const withoutDiffRevision = { ...codeSource, diffRevision: undefined };
+    const revision = pullRequestCodeRevision(withoutDiffRevision);
+
+    expect(pullRequestCodeRevision({ ...withoutDiffRevision, additions: 13 })).not.toBe(revision);
   });
 
   it("overlays same-code conversation detail but retains applied detail across code changes", () => {

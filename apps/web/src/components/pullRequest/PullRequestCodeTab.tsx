@@ -19,6 +19,7 @@ import {
   Columns2Icon,
   MessageSquareIcon,
   MessageSquareOffIcon,
+  RefreshCwIcon,
   Rows3Icon,
   TextWrapIcon,
   TriangleAlertIcon,
@@ -231,6 +232,35 @@ export function PullRequestCodeBootstrapBody({
       error={error}
       onRetry={onRetry}
     />
+  );
+}
+
+/** Keeps an applied diff readable while making a failed attempt to replace it explicit. */
+export function PullRequestCodeRefreshFailure({
+  error,
+  onRetry,
+}: {
+  error: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex shrink-0 items-start gap-2 border-b border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs"
+    >
+      <TriangleAlertIcon
+        aria-hidden
+        className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-500"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">Could not refresh pull request diff</p>
+        <p className="mt-0.5 text-muted-foreground">Showing the last loaded version. {error}</p>
+      </div>
+      <Button size="xs" variant="outline" className="shrink-0" onClick={onRetry}>
+        <RefreshCwIcon aria-hidden className="size-3" />
+        Retry
+      </Button>
+    </div>
   );
 }
 
@@ -1351,6 +1381,9 @@ export function PullRequestCodeTab({
   const withReviewBar = (body: ReactNode) => (
     <div className="flex h-full min-h-0 flex-col">
       {toolbar}
+      {hasSnapshot && bootstrapError !== null ? (
+        <PullRequestCodeRefreshFailure error={bootstrapError} onRetry={onBootstrapRetry} />
+      ) : null}
       {/* The overlay is anchored to this wrapper, not the scroller: absolute positioning
           inside an overflowing element tracks the content's bottom edge, which would carry
           the trigger away with the first scroll. */}

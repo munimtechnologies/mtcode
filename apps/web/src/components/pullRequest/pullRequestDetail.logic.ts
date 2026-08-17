@@ -45,21 +45,26 @@ export function editPullRequestThreadComment<
 }
 
 /**
- * The code inputs exposed by the current contract: ordered head commits plus the base comparison's
- * branch, status, distance, and diff totals. The contract has no base SHA, so these are the
- * narrowest available signals for a base advance; conversation timestamps and review activity
- * deliberately stay out.
+ * Immutable diff endpoints where the host exposes them, plus the existing fallback signals for a
+ * host without them. Conversation timestamps and review activity deliberately stay out.
  */
 export function pullRequestCodeRevision(
   detail: Pick<
     PullRequestDetailView,
-    "additions" | "baseBranch" | "baseComparison" | "behindBy" | "changedFiles" | "deletions"
+    | "additions"
+    | "baseBranch"
+    | "baseComparison"
+    | "behindBy"
+    | "changedFiles"
+    | "deletions"
+    | "diffRevision"
   > & {
     readonly commits: ReadonlyArray<Pick<PullRequestCommit, "oid">>;
   },
 ): string {
   return JSON.stringify([
     detail.baseBranch,
+    detail.diffRevision ?? null,
     detail.baseComparison ?? null,
     detail.behindBy ?? null,
     detail.additions,
