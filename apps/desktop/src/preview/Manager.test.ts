@@ -87,6 +87,14 @@ vi.mock("electron", () => ({
   },
   nativeImage: {
     createFromPath,
+    createFromBuffer: (buffer: Buffer) => ({
+      getSize: () => ({ width: buffer.length > 0 ? 1 : 0, height: buffer.length > 0 ? 1 : 0 }),
+      toPNG: () => buffer,
+      resize: () => ({
+        getSize: () => ({ width: 1, height: 1 }),
+        toPNG: () => buffer,
+      }),
+    }),
   },
   shell: {
     showItemInFolder,
@@ -168,6 +176,7 @@ const makeTestPreviewWebContents = (
     getURL: () => "https://example.com",
     getTitle: () => "Example",
     isLoading: () => false,
+    isDevToolsOpened: () => false,
     getZoomFactor: () => 1,
     setZoomFactor: vi.fn(),
     on: vi.fn(),
@@ -2839,4 +2848,135 @@ describe("Preview automation diagnostics", () => {
     expect(JSON.stringify(error)).not.toContain(selector);
     expect("locator" in error).toBe(false);
   });
+});
+
+describe("Preview automation snapshots", () => {
+  const pageValue = {
+    url: "https://example.com",
+    title: "Example",
+    loading: false,
+    visibleText: "Dashboard",
+    interactiveElements: [],
+  };
+
+  const snapshotImage = {
+    getSize: () => ({ width: 100, height: 80 }),
+    toPNG: () => Buffer.from("png"),
+    resize: () => ({
+      getSize: () => ({ width: 100, height: 80 }),
+      toPNG: () => Buffer.from("png"),
+    }),
+  };
+
+  effectIt.effect("omits ax, console, and network unless include asks", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method === "Runtime.evaluate") {
+            return { result: { value: pageValue } };
+          }
+          if (method === "Accessibility.getFullAXTree") {
+            return { nodes: [{ role: "main" }] };
+          }
+          return undefined;
+        });
+        fromId.mockReturnValue({
+          ...makeTestPreviewWebContents(vi.fn(async () => snapshotImage)),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand,
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+
+        yield* manager.createTab("tab_snapshot");
+        yield* manager.registerWebview("tab_snapshot", 42);
+        const slim = yield* manager.automationSnapshot("tab_snapshot");
+        expect(slim.accessibilityTree).toBeUndefined();
+        expect(slim.consoleEntries).toEqual([]);
+        expect(slim.networkEntries).toEqual([]);
+        const slimMethods = sendCommand.mock.calls.map(([method]) => method);
+        expect(slimMethods).not.toContain("Accessibility.getFullAXTree");
+
+        sendCommand.mockClear();
+        const withAx = yield* manager.automationSnapshot("tab_snapshot", ["ax"]);
+        expect(withAx.accessibilityTree).toEqual({ nodes: [{ role: "main" }] });
+        expect(sendCommand.mock.calls.map(([method]) => method)).toContain(
+          "Accessibility.getFullAXTree",
+        );
+      }),
+    ),
+  );
+
+  effectIt.effect("fails the snapshot when capturePage and CDP screenshot both miss", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method === "Runtime.evaluate") {
+            return { result: { value: pageValue } };
+          }
+          if (method === "Page.captureScreenshot") {
+            return {};
+          }
+          return undefined;
+        });
+        fromId.mockReturnValue({
+          ...makeTestPreviewWebContents(
+            vi.fn(async () => {
+              throw new Error("capturePage failed");
+            }),
+          ),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand,
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+
+        yield* manager.createTab("tab_snapshot_fail");
+        yield* manager.registerWebview("tab_snapshot_fail", 42);
+        const exit = yield* Effect.exit(manager.automationSnapshot("tab_snapshot_fail"));
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isSuccess(exit)) return;
+        expect(Option.getOrThrow(Cause.findErrorOption(exit.cause))).toMatchObject({
+          _tag: "PreviewOperationError",
+          operation: "automationSnapshot.capturePage",
+        });
+      }),
+    ),
+  );
+
+  effectIt.effect("defaults waitFor text search to the main landmark", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const expressions: string[] = [];
+        const sendCommand = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+          if (method === "Runtime.evaluate") {
+            expressions.push(String(params?.expression ?? ""));
+            return { result: { value: { matched: true } } };
+          }
+          return undefined;
+        });
+        fromId.mockReturnValue({
+          ...makeTestPreviewWebContents(vi.fn(async () => snapshotImage)),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand,
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+
+        yield* manager.createTab("tab_wait");
+        yield* manager.registerWebview("tab_wait", 42);
+        yield* manager.automationWaitFor("tab_wait", { text: "Dashboard" });
+        expect(expressions.some((expression) => expression.includes('"main"'))).toBe(true);
+      }),
+    ),
+  );
 });
