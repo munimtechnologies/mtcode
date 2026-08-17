@@ -1247,19 +1247,6 @@ export function PullRequestDetailPanel({
                       </span>
                     </span>
                   </MenuItem>
-                  <MenuItem disabled={handoff !== null} onClick={implementFeatureFromPullRequest}>
-                    <SparklesIcon className="mt-0.5 size-3.5 shrink-0 self-start" />
-                    <span className="flex min-w-0 flex-col">
-                      <span>
-                        {handoff === "implement" ? "Opening..." : handoffLabels.implementFeature}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {attachTarget !== null
-                          ? "Adds a task to port this PR's behavior into this thread."
-                          : "Opens a thread to port this PR's behavior into this project."}
-                      </span>
-                    </span>
-                  </MenuItem>
                   <MenuItem disabled={handoff !== null} onClick={startFixFindings}>
                     <HammerIcon className="size-3.5" />
                     {handoff === "findings" ? "Preparing..." : handoffLabels.fixFindings}
@@ -1394,6 +1381,35 @@ export function PullRequestDetailPanel({
                   ) : null}
                 </MenuPopup>
               </Menu>
+              {/* Porting a change into your own tree is a reason to open somebody else's pull
+                  request, not an afterthought of reading it — so it is a button beside the other
+                  one rather than the fourth line of a menu nobody opens. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={handoff !== null}
+                      onClick={implementFeatureFromPullRequest}
+                    >
+                      {handoff === "implement" ? (
+                        "Opening..."
+                      ) : (
+                        <>
+                          <SparklesIcon className="size-3" />
+                          {handoffLabels.implementFeature}
+                        </>
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipPopup>
+                  {attachTarget !== null
+                    ? "Adds a task to port this PR's behavior into this thread."
+                    : "Opens a thread to port this PR's behavior into this project."}
+                </TooltipPopup>
+              </Tooltip>
               {/* Checking a pull request out is the reason to open one here at all, so it is a
                   button of its own rather than a side effect of asking an agent for something.
                   It asks where, because the two answers are not interchangeable: one leaves your
