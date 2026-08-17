@@ -1498,7 +1498,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
               <GoalActiveMarker goal={thread.goal} />
               {isRegeneratingTitle ? (

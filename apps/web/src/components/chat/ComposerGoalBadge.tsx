@@ -19,7 +19,12 @@ export const ComposerGoalBadge = memo(function ComposerGoalBadge(props: {
   }
 
   return (
-    <div className="absolute -top-3 left-4 z-10" data-composer-goal-badge="true">
+    // The stash pill owns the right shoulder at the same -top-3 line; reserve
+    // it here so a long Objective truncates instead of sliding underneath.
+    <div
+      className="absolute -top-3 left-4 z-10 max-w-[calc(100%-9rem)]"
+      data-composer-goal-badge="true"
+    >
       <GoalChip
         goal={props.goal}
         isWorking={props.isWorking === true}

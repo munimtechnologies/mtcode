@@ -21,6 +21,8 @@ import {
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import {
   BUILT_IN_GOAL_SLASH_COMMANDS,
+  composerTextForGoalSlashCommand,
+  isBuiltInGoalSlashCommand,
   serializeComposerFileLink,
 } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
@@ -1736,8 +1738,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        if (item.command === "goal" || item.command.startsWith("goal ")) {
-          const replacement = item.command === "goal" ? "/goal " : `/${item.command}`;
+        if (isBuiltInGoalSlashCommand(item.command)) {
+          const replacement = composerTextForGoalSlashCommand(item.command);
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,
