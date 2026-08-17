@@ -2147,14 +2147,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [takeStashEntry],
   );
 
-  const stashCurrentPrompt = useCallback(async () => {
+  // Returns true when the composer held nothing or the draft was parked and
+  // cleared; false when the composer still holds an unparked draft.
+  const stashCurrentPrompt = useCallback(async (): Promise<boolean> => {
     // Terminal-context placeholders reference live sessions the stash can't
     // round-trip, so they are stripped from the stashed prompt.
     const prompt = promptRef.current.split(INLINE_TERMINAL_CONTEXT_PLACEHOLDER).join("").trim();
     const images = [...composerImagesRef.current];
     if (prompt.length === 0 && images.length === 0) {
       setIsStashMenuOpen((open) => !open);
-      return;
+      return true;
     }
     // A repeat ⌘S on the *same* still-unencoded snapshot would stash it
     // twice. Guard on the snapshot itself rather than a bare boolean: once
@@ -2164,7 +2166,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const snapshotKey = `${String(composerDraftTarget)} ${prompt} ${images
       .map((image) => image.id)
       .join(",")}`;
-    if (stashInFlightRef.current.has(snapshotKey)) return;
+    if (stashInFlightRef.current.has(snapshotKey)) return false;
     stashInFlightRef.current.add(snapshotKey);
 
     const stashTarget = composerDraftTarget;
@@ -2197,7 +2199,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             "Browser storage rejected the write, so the composer was left as-is. Free up site data and try again.",
           data: { hideCopyButton: true },
         });
-        return;
+        return false;
       }
       // Written but only into the in-memory fallback (localStorage blocked):
       // the entry is visible and restorable this session, so proceed with the
@@ -2289,6 +2291,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data: { hideCopyButton: true },
         });
       }
+      return true;
     } finally {
       // Must clear on every path: a throw that left this set would wedge this
       // snapshot's ⌘S until the composer remounts.
@@ -2929,7 +2932,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 activePendingProgress
                   ? undefined
                   : (objective) => {
-                      applyPromptReplacement(0, promptRef.current.length, `/goal ${objective}`);
+                      void (async () => {
+                        // Loading the Objective replaces the whole prompt; park
+                        // a typed draft in the stash so the click is recoverable.
+                        // If the stash write was rejected the draft is still
+                        // there, so leave it alone instead of destroying it.
+                        if (promptRef.current.trim().length > 0 && !(await stashCurrentPrompt())) {
+                          return;
+                        }
+                        applyPromptReplacement(0, promptRef.current.length, `/goal ${objective}`);
+                      })();
                     }
               }
             />
