@@ -150,16 +150,8 @@ const readTargetLookupKind = (
   if (cause._tag === "PreviewAutomationTargetHiddenError") return "hidden";
   if (cause._tag === "PreviewAutomationTargetDisabledError") return "disabled";
   if (cause._tag === "PreviewAutomationTargetAmbiguousError") return "ambiguous";
-  if (cause._tag !== "PreviewAutomationTargetNotFoundError") return null;
-  if (
-    "failureKind" in cause &&
-    (cause.failureKind === "hidden" ||
-      cause.failureKind === "disabled" ||
-      cause.failureKind === "ambiguous")
-  ) {
-    return cause.failureKind;
-  }
-  return "missing";
+  if (cause._tag === "PreviewAutomationTargetNotFoundError") return "missing";
+  return null;
 };
 
 const readAmbiguousMatchCount = (cause: unknown): number => {

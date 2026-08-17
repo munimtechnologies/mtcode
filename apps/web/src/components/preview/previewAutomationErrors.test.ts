@@ -25,17 +25,14 @@ describe("PreviewAutomationOperationError", () => {
       ...context,
       cause: { _tag: "PreviewAutomationTargetAmbiguousError", matchCount: 3 },
     });
-    const legacyHidden = PreviewAutomationOperationError.fromCause({
+    const missing = PreviewAutomationOperationError.fromCause({
       ...context,
-      cause: {
-        _tag: "PreviewAutomationTargetNotFoundError",
-        failureKind: "hidden",
-      },
+      cause: { _tag: "PreviewAutomationTargetNotFoundError" },
     });
     expect(hidden.message).toContain("not visible");
     expect(disabled.message).toContain("disabled");
     expect(ambiguous.message).toContain("matched 3 elements");
-    expect(legacyHidden.message).toContain("not visible");
+    expect(missing.message).toContain("could not find a target");
     expect(hidden.message).not.toContain("secret");
     expect(disabled.message).not.toContain("secret");
     expect(ambiguous.message).not.toContain("secret");

@@ -322,8 +322,7 @@ describe("previewAutomationRequestConsumer", () => {
       JSON.stringify(
         serializePreviewAutomationError(
           {
-            _tag: "PreviewAutomationTargetNotFoundError",
-            failureKind: "hidden",
+            _tag: "PreviewAutomationTargetHiddenError",
             selector: "role=button[name='target-secret']",
           },
           {
