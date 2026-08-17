@@ -356,6 +356,23 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
     }),
   );
 
+  it.effect("does not interrupt a running Turn when clearing an already-removed Goal", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.clear",
+          commandId: CommandId.make("cmd-goal-clear-stale"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          latestTurn: runningTurn(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual(["thread.goal-cleared"]);
+    }),
+  );
+
   it.effect("pauses an existing Goal without interrupting the Turn", () =>
     Effect.gen(function* () {
       const decided = yield* decideOrchestrationCommand({
@@ -922,6 +939,57 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
         .filter((event) => event.type === "thread.activity-appended")
         .map((event) => event.payload.activity.kind);
       expect(kinds).toEqual(["goal.resumed", "goal.continued"]);
+    }),
+  );
+
+  it.effect("refuses to pause a Complete Goal", () =>
+    Effect.gen(function* () {
+      const error = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.pause",
+          commandId: CommandId.make("cmd-goal-pause-complete"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: activeGoal("complete"),
+          latestTurn: completedTurn(),
+          session: readySession(),
+        }),
+      }).pipe(Effect.flip);
+      expect(error._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("attaches a Goal while an approval is open without starting the Turn", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.set",
+          commandId: CommandId.make("cmd-goal-set-open-approval"),
+          threadId: ThreadId.make("thread-1"),
+          objective: "Reduce p95 below 120ms",
+        },
+        readModel: makeReadModel({
+          latestTurn: completedTurn(),
+          session: readySession(),
+          activities: [
+            {
+              id: EventId.make("activity-approval-open"),
+              tone: "approval",
+              kind: "approval.requested",
+              summary: "approval.requested",
+              payload: { requestId: "req-open" },
+              turnId: null,
+              createdAt: NOW,
+            },
+          ],
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.goal-set",
+        "thread.activity-appended",
+      ]);
     }),
   );
 

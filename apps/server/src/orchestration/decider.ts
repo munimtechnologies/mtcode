@@ -853,7 +853,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           summary: command.objective,
         }),
       );
-      if (!isThreadIdleForGoal(thread, occurredAt)) {
+      // An open approval or user-input request owns the thread right now; the
+      // Goal attaches and the first Turn starts when the Session reports ready
+      // and the GoalReactor requests a Continuation.
+      if (hasOpenBlockingRequest(thread) || !isThreadIdleForGoal(thread, occurredAt)) {
         return events;
       }
       if (thread.settledOverride !== null) {
@@ -942,6 +945,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Thread '${command.threadId}' has no Goal to pause.`,
+        });
+      }
+      // Terminal statuses (complete/blocked/usageLimited) must win over a
+      // stale pause; resuming from them is the explicit recovery path.
+      if (thread.goal.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' Goal is '${thread.goal.status}' and cannot be paused.`,
         });
       }
       const occurredAt = yield* nowIso;
@@ -1052,7 +1063,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Deleting the Objective also stops the active run: the turn only exists
       // to serve the Goal, and leaving it running would surprise users who
       // deleted from another device (matches thread.turn.interrupt's reactor).
-      if (thread.latestTurn?.state === "running") {
+      // A stale clear arriving after the Goal was removed must not interrupt
+      // unrelated new work, so the stop is gated on the Goal still existing.
+      if (thread.goal != null && thread.latestTurn?.state === "running") {
         events.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
