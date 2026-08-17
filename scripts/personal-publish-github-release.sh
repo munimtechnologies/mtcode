@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Publish public Munim desktop installers to GitHub Releases on sheehanmunim/t3code.
+#
+# Builds with T3CODE_DESKTOP_DISTRO=munim so appId=com.munim.t3code and the
+# updater feed points at this fork. Then uploads assets for munimtech.com.
+#
+# Mac: Developer ID sign when available. Windows: unsigned in v1.
+set -euo pipefail
+
+export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
+LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
+RELEASE_REPO="${T3_MUNIM_RELEASE_REPO:-sheehanmunim/t3code}"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/publish-munim-$(date +%Y%m%d).log"
+
+exec >>"$LOG" 2>&1
+echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) munim publish start ===="
+
+cd "$REPO"
+
+NIGHTLY_TAG=$(gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
+if [[ -z "$NIGHTLY_TAG" ]]; then
+  echo "could not resolve latest upstream nightly tag" >&2
+  exit 1
+fi
+
+# Keep the upstream nightly version string so icons/artwork stay Nightly and the
+# updater channel stays "nightly". GitHub release tag is prefixed with munim-.
+export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
+TAG="munim-v${T3CODE_DESKTOP_VERSION}"
+
+export T3CODE_DESKTOP_DISTRO=munim
+export T3CODE_DESKTOP_UPDATE_REPOSITORY="$RELEASE_REPO"
+export GITHUB_REPOSITORY="$RELEASE_REPO"
+
+SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  export CSC_IDENTITY_AUTO_DISCOVERY=true
+  export T3CODE_DESKTOP_SIGNED=true
+  echo "signing with $SIGN_IDENTITY"
+else
+  echo "no Developer ID found — building unsigned Mac artifact"
+fi
+
+echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
+echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
+echo "UPDATE_REPO=$T3CODE_DESKTOP_UPDATE_REPOSITORY"
+
+# --- Mac arm64 ---
+echo "-- building Munim Mac arm64 --"
+pnpm dist:desktop:dmg:arm64
+
+MAC_DMG=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.dmg 2>/dev/null | head -1)
+MAC_ZIP=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.zip 2>/dev/null | head -1)
+MAC_YML=$(ls -t "$REPO"/release/*-mac.yml "$REPO"/release/latest-mac.yml 2>/dev/null | head -1)
+if [[ -z "$MAC_DMG" ]]; then
+  echo "Mac DMG not found in release/" >&2
+  ls -la "$REPO"/release | head -40 >&2
+  exit 1
+fi
+
+# Optional local codesign of the .app inside DMG is handled by electron-builder when CSC is set.
+# Clear quarantine on the DMG we ship.
+xattr -cr "$MAC_DMG" 2>/dev/null || true
+
+# --- Windows x64 via Blade (reuse fleet host) ---
+echo "-- building Munim Windows x64 on Blade --"
+ssh -o BatchMode=yes blade "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"
+  \$ErrorActionPreference='Stop'
+  \$repo='C:/Users/muhha/dev/t3code-personal'
+  if (-not (Test-Path \$repo)) { git clone https://github.com/sheehanmunim/t3code.git \$repo }
+  Set-Location \$repo
+  git fetch origin personal
+  git checkout personal
+  git reset --hard origin/personal
+  \$env:T3CODE_DESKTOP_DISTRO='munim'
+  \$env:T3CODE_DESKTOP_UPDATE_REPOSITORY='$RELEASE_REPO'
+  \$env:GITHUB_REPOSITORY='$RELEASE_REPO'
+  \$env:T3CODE_DESKTOP_VERSION='$T3CODE_DESKTOP_VERSION'
+  \$env:Path = 'C:\\Program Files\\nodejs;' + \$env:Path
+  pnpm install
+  pnpm dist:desktop:win:x64
+\""
+
+WIN_REMOTE=$(ssh -o BatchMode=yes blade 'powershell.exe -NoProfile -Command "Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/T3-Code-Munim-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName"')
+WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1)
+if [[ -z "$WIN_REMOTE" ]]; then
+  echo "Windows exe not found on Blade" >&2
+  exit 1
+fi
+WIN_LOCAL="$REPO/release/$(basename "$WIN_REMOTE")"
+scp -o BatchMode=yes "blade:$WIN_REMOTE" "$WIN_LOCAL"
+# Also pull yml/blockmap if present
+ssh -o BatchMode=yes blade "powershell.exe -NoProfile -Command \"Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/*Munim* | Select-Object -ExpandProperty Name\"" | tr -d '\r' | while read -r name; do
+  [[ -z "$name" ]] && continue
+  [[ "$name" == *.exe ]] && continue
+  scp -o BatchMode=yes "blade:C:/Users/muhha/dev/t3code-personal/release/$name" "$REPO/release/$name" || true
+done
+
+ASSETS=("$MAC_DMG")
+[[ -n "$MAC_ZIP" && -f "$MAC_ZIP" ]] && ASSETS+=("$MAC_ZIP")
+[[ -f "${MAC_DMG}.blockmap" ]] && ASSETS+=("${MAC_DMG}.blockmap")
+[[ -n "$MAC_ZIP" && -f "${MAC_ZIP}.blockmap" ]] && ASSETS+=("${MAC_ZIP}.blockmap")
+[[ -n "$MAC_YML" && -f "$MAC_YML" ]] && ASSETS+=("$MAC_YML")
+ASSETS+=("$WIN_LOCAL")
+[[ -f "${WIN_LOCAL}.blockmap" ]] && ASSETS+=("${WIN_LOCAL}.blockmap")
+for y in "$REPO"/release/latest.yml "$REPO"/release/*Munim*.yml; do
+  [[ -f "$y" ]] && ASSETS+=("$y")
+done
+
+# Deduplicate
+UNIQUE_ASSETS=()
+declare -A SEEN=()
+for a in "${ASSETS[@]}"; do
+  [[ -f "$a" ]] || continue
+  key=$(basename "$a")
+  if [[ -z "${SEEN[$key]:-}" ]]; then
+    SEEN[$key]=1
+    UNIQUE_ASSETS+=("$a")
+  fi
+done
+
+NOTES=$(cat <<EOF
+T3 Code Munim — public build from \`sheehanmunim/t3code@personal\`.
+
+- App ID: \`com.munim.t3code\`
+- Downloads: https://munimtech.com/t3-code
+- Updates come from this repository (not pingdotgg/t3code)
+
+Commit: \`$(git rev-parse --short HEAD)\`
+EOF
+)
+
+echo "-- publishing $TAG to $RELEASE_REPO --"
+
+if gh release view "$TAG" -R "$RELEASE_REPO" >/dev/null 2>&1; then
+  gh release upload "$TAG" "${UNIQUE_ASSETS[@]}" -R "$RELEASE_REPO" --clobber
+else
+  gh release create "$TAG" "${UNIQUE_ASSETS[@]}" \
+    -R "$RELEASE_REPO" \
+    --title "T3 Code Munim ${T3CODE_DESKTOP_VERSION}" \
+    --notes "$NOTES" \
+    --prerelease
+fi
+
+echo "PUBLISHED $TAG"
+echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) munim publish done ===="

@@ -20,7 +20,15 @@ Never leave Mac install at "copied to /Applications" without relaunch. Do not us
 
 That install script **must** be used (not a hand `cp` into `/Applications` while T3 is open). It detaches a worker that: force-quits every T3 Code process, swaps the bundle only after they are gone, then opens a fresh app and waits for `MAC_GUI_VISIBLE`. Copying over a live app is what leaves a white window that never relaunches.
 
-Electron GitHub auto-update is not the personal fleet path. This SSH refresh pipeline is.
+Electron GitHub auto-update is not the private fleet path. This SSH refresh pipeline is.
+
+For **public** downloads (munimtech.com), also publish Munim-identity installers:
+
+```bash
+bash scripts/personal-publish-github-release.sh
+```
+
+`personal-ship-desktop.sh` runs that after the fleet refresh unless `T3_SKIP_MUNIM_PUBLISH=1`. Munim builds use `T3CODE_DESKTOP_DISTRO=munim` → appId `com.munim.t3code`, product name "T3 Code Munim", updater repo `sheehanmunim/t3code`.
 
 ## app.t3.codes + ahead fork
 

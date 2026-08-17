@@ -29,4 +29,11 @@ if [[ "$local_sha" != "$remote_sha" ]]; then
 fi
 
 export T3_FORCE_REBUILD=1
-exec /bin/bash "$REPO/scripts/personal-refresh-all.sh"
+/bin/bash "$REPO/scripts/personal-refresh-all.sh"
+
+# After the private fleet is current, also refresh the public Munim GitHub
+# release that munimtech.com / downloaders use (appId com.munim.t3code).
+if [[ "${T3_SKIP_MUNIM_PUBLISH:-}" != "1" ]]; then
+  echo "publishing Munim public release to GitHub"
+  /bin/bash "$REPO/scripts/personal-publish-github-release.sh"
+fi

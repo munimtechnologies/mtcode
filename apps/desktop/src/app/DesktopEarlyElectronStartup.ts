@@ -14,12 +14,14 @@ import {
   resolveDesktopStateDir,
   type JoinPath,
 } from "./DesktopStatePaths.ts";
+import { resolveRuntimeDesktopDistro } from "./desktopDistro.ts";
 
 interface EarlyDesktopSettingsInput {
   readonly env: NodeJS.ProcessEnv;
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly readFileString: (path: string) => string;
+  readonly appPath?: string;
 }
 
 type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
@@ -48,16 +50,24 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
+  readonly appPath?: string;
 }): string {
+  const isDevelopment = isDevelopmentEnvironment(input.env);
+  const distro = resolveRuntimeDesktopDistro({
+    env: input.env,
+    appPath: input.appPath,
+    isDevelopment,
+  });
   const t3Home = Option.fromUndefinedOr(input.env.T3CODE_HOME);
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
     t3Home,
+    defaultHomeDirName: distro.defaultHomeDirName,
   });
   const stateDir = resolveDesktopStateDir({
     baseDir,
-    isDevelopment: isDevelopmentEnvironment(input.env),
+    isDevelopment,
     joinPath: input.joinPath,
     t3Home,
   });
@@ -80,8 +90,13 @@ export function resolveEarlyLinuxElectronOptions(
   input: EarlyLinuxElectronOptionsInput,
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
+  const distro = resolveRuntimeDesktopDistro({
+    env: input.env,
+    appPath: input.appPath,
+    isDevelopment: isDevelopmentEnvironment(input.env),
+  });
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "t3code-dev" : "t3code",
+    linuxWmClass: distro.linuxWmClass,
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

@@ -50,8 +50,9 @@ import * as Stream from "effect/Stream";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { resolveDesktopDistroIdentity, type DesktopDistroIdentity } from "./lib/desktop-distro.ts";
+
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -812,6 +813,7 @@ interface StagePackageJson {
   readonly version: string;
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
+  readonly t3DesktopDistro?: "munim";
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -1059,7 +1061,7 @@ export function resolveMacPasskeySigningConfiguration(
   }
 
   return {
-    appId: DESKTOP_APP_ID,
+    appId: resolveDesktopDistroIdentity().appId,
     teamId,
     rpDomains: uniqueRpDomains,
     provisioningProfilePath,
@@ -2239,6 +2241,7 @@ export function resolveDesktopRuntimeDependencies(
 
 export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig")(function* (
   updateChannel: "latest" | "nightly",
+  distro: DesktopDistroIdentity = resolveDesktopDistroIdentity(),
 ) {
   const env = yield* Config.all({
     updateRepository: Config.string("T3CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
@@ -2246,6 +2249,7 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   });
   const rawRepo = (
     Option.getOrUndefined(env.updateRepository)?.trim() ||
+    distro.updateRepository ||
     Option.getOrUndefined(env.githubRepository)?.trim() ||
     ""
   ).trim();
@@ -2305,8 +2309,12 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(_version: string): string {
-  // Personal fork: ship as plain "T3 Code" while still using nightly icons/artwork
-  // when the version string is a nightly (see resolveDesktopUpdateChannel).
+  // Munim public distro uses its own product name; otherwise keep plain "T3 Code"
+  // (personal fleet still uses nightly icons/artwork via the version string).
+  const distro = resolveDesktopDistroIdentity();
+  if (distro.id === "munim") {
+    return distro.productName;
+  }
   return desktopPackageJson.productName ?? "T3 Code";
 }
 
@@ -2323,11 +2331,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         readonly provisioningProfilePath: string;
       }
     | undefined,
+  distro: DesktopDistroIdentity = resolveDesktopDistroIdentity(),
 ) {
+  const productName = resolveDesktopProductName(version);
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
-    productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    appId: distro.appId,
+    productName,
+    artifactName: distro.artifactName,
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS],
     directories: {
@@ -2343,7 +2353,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
+  const publishConfig = yield* resolveGitHubPublishConfig(updateChannel, distro);
   if (publishConfig) {
     buildConfig.publish = [publishConfig];
   } else if (mockUpdates) {
@@ -2364,14 +2374,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // (-1743) and never shows the Automation prompt, so Codex Computer Use and any
       // other MCP server we spawn silently fail to drive other apps.
       extendInfo: {
-        NSAppleEventsUsageDescription:
-          "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",
-        NSMicrophoneUsageDescription: "T3 Code uses the microphone for voice dictation.",
+        NSAppleEventsUsageDescription: `${productName} uses Automation to let installed Computer Use plugins control the Mac apps you choose.`,
+        NSMicrophoneUsageDescription: `${productName} uses the microphone for voice dictation.`,
       },
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: distro.protocolName,
+          schemes: [...distro.protocolSchemes],
         },
       ],
       ...(macPasskeySigning
@@ -2409,21 +2418,21 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: distro.linuxExecutableName,
       icon: "icons",
       category: "Development",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
-      // t3code:// OAuth callbacks to the app.
+      // scheme OAuth callbacks to the app.
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: distro.protocolName,
+          schemes: [...distro.protocolSchemes],
         },
       ],
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: distro.linuxStartupWmClass,
         },
       },
     };
@@ -2434,7 +2443,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // Keep blockmap-based differential downloads enabled while changing the
     // installed file topology. The optimization is in the payload shape, not
     // in trading update bandwidth for install speed.
-    buildConfig.nsis = { differentialPackage: true };
+    buildConfig.nsis = {
+      differentialPackage: true,
+      shortcutName: distro.nsisShortcutName,
+      uninstallDisplayName: distro.productName,
+    };
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: "icon.ico",
@@ -3244,15 +3257,17 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     options.platform === "win"
       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
       : undefined;
+  const distro = resolveDesktopDistroIdentity();
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: distro.packageName,
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
+    ...(distro.id === "munim" ? { t3DesktopDistro: "munim" as const } : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: distro.description,
+    author: distro.author,
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,
@@ -3267,6 +3282,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
             provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
           }
         : undefined,
+      distro,
     ),
     dependencies: stageDependencies,
     devDependencies: {
