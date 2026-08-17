@@ -199,6 +199,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     hardReload: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_HARD_RELOAD_CHANNEL, { tabId }),
     setColorScheme: (tabId, colorScheme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_COLOR_SCHEME_CHANNEL, { tabId, colorScheme }),
+    setViewport: (tabId, input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_SET_VIEWPORT_CHANNEL, {
+        tabId,
+        ...input,
+      }),
     openDevTools: (tabId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_OPEN_DEVTOOLS_CHANNEL, { tabId }),
     clearCookies: () => ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_COOKIES_CHANNEL),
@@ -246,8 +251,16 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     automation: {
       status: (tabId) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_STATUS_CHANNEL, { tabId }),
-      snapshot: (tabId) =>
-        ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL, { tabId }),
+      snapshot: (tabId, include) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL, {
+          tabId,
+          ...(include === undefined ? {} : { include }),
+        }),
+      setViewport: (tabId, input) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_SET_VIEWPORT_CHANNEL, {
+          tabId,
+          ...input,
+        }),
       click: (tabId, input) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL, { tabId, input }),
       type: (tabId, input) =>

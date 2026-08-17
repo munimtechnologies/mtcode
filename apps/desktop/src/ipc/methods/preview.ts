@@ -2,6 +2,8 @@ import {
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,
   DesktopPreviewAutomationClickInputSchema,
+  DesktopPreviewAutomationSetViewportInputSchema,
+  DesktopPreviewAutomationSnapshotInputSchema,
   DesktopPreviewAutomationEvaluateInputSchema,
   DesktopPreviewAutomationPressInputSchema,
   DesktopPreviewAutomationScrollInputSchema,
@@ -153,6 +155,18 @@ export const setColorScheme = DesktopIpc.makeIpcMethod({
     yield* manager.setColorScheme(tabId, colorScheme);
   }),
 });
+export const setViewport = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_SET_VIEWPORT_CHANNEL,
+  payload: DesktopPreviewAutomationSetViewportInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.setViewport")(function* (input) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.setViewport(
+      input.tabId,
+      "clear" in input ? { clear: true } : { width: input.width, height: input.height },
+    );
+  }),
+});
 export const openDevTools = tabMethod(
   IpcChannels.PREVIEW_OPEN_DEVTOOLS_CHANNEL,
   "desktop.ipc.preview.openDevTools",
@@ -281,11 +295,24 @@ export const automationStatus = DesktopIpc.makeIpcMethod({
 
 export const automationSnapshot = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL,
-  payload: DesktopPreviewTabInputSchema,
+  payload: DesktopPreviewAutomationSnapshotInputSchema,
   result: PreviewAutomationSnapshot,
-  handler: Effect.fn("desktop.ipc.preview.automationSnapshot")(function* ({ tabId }) {
+  handler: Effect.fn("desktop.ipc.preview.automationSnapshot")(function* ({ tabId, include }) {
     const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.automationSnapshot(tabId);
+    return yield* manager.automationSnapshot(tabId, include ?? []);
+  }),
+});
+
+export const automationSetViewport = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_AUTOMATION_SET_VIEWPORT_CHANNEL,
+  payload: DesktopPreviewAutomationSetViewportInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.automationSetViewport")(function* (input) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.automationSetViewport(
+      input.tabId,
+      "clear" in input ? { clear: true } : { width: input.width, height: input.height },
+    );
   }),
 });
 
@@ -372,6 +399,7 @@ export const methods = [
   resetZoom,
   hardReload,
   setColorScheme,
+  setViewport,
   openDevTools,
   clearCookies,
   clearCache,
@@ -386,6 +414,7 @@ export const methods = [
   closePictureInPicture,
   automationStatus,
   automationSnapshot,
+  automationSetViewport,
   automationClick,
   automationType,
   automationPress,

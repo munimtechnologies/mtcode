@@ -28,3 +28,9 @@ No PRs skipped. All Tier 2 PRs were merged (some required manual conflict resolu
 - Usage UI/state PRs (#5828, #5920): preserved personal fork usage providers (Cursor/OpenCode/Grok), account limits UI, pricing status, and environment filtering; integrated upstream unavailable-env handling, progressive loading, and query timeouts.
 - #5806: merged multi-instance Claude/Codex home discovery while keeping Grok, OpenCode, and Cursor export scanning.
 - #7308: merged Codex usage-limit turn recovery while keeping computer-history context on turn start and collab-agent usage tracking.
+
+---
+
+# Skipped Tier 3 PRs
+
+- (none)
