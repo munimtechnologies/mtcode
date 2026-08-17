@@ -2,7 +2,15 @@
 # Clone remote "origin" here is github.com/sheehanmunim/t3code (personal branch).
 # Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork while
 # product name stays "T3 Code".
+param(
+  [string]$DesktopVersion = "",
+  [string]$ForceRebuild = ""
+)
+
 $ErrorActionPreference = "Stop"
+if ($DesktopVersion) { $env:T3CODE_DESKTOP_VERSION = $DesktopVersion }
+if ($ForceRebuild) { $env:T3_FORCE_REBUILD = $ForceRebuild }
+
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
   [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" +
   "$env:USERPROFILE\.vite-plus\bin;" +
@@ -20,6 +28,7 @@ function Log($msg) {
 }
 
 Log "refresh start"
+Log ("args DesktopVersion=$DesktopVersion ForceRebuild=$ForceRebuild envVersion=$($env:T3CODE_DESKTOP_VERSION) envForce=$($env:T3_FORCE_REBUILD)")
 
 if (-not (Test-Path $repo)) {
   git clone --branch personal --single-branch https://github.com/sheehanmunim/t3code.git $repo
@@ -47,14 +56,14 @@ git checkout personal
 git reset --hard origin/personal
 
 if (-not $env:T3CODE_DESKTOP_VERSION) {
-  # Avoid jq regex on Windows (gojq "function not defined"); filter in PowerShell.
-  $releasesJson = gh api repos/pingdotgg/t3code/releases
-  $tag = ($releasesJson | ConvertFrom-Json |
+  # Avoid jq regex on Windows; parse JSON in PowerShell.
+  $releases = ConvertFrom-Json -InputObject (gh api "repos/pingdotgg/t3code/releases" --paginate)
+  $nightly = $releases |
     Where-Object { $_.prerelease -eq $true -and $_.tag_name -match "nightly" } |
-    Sort-Object published_at -Descending |
-    Select-Object -First 1 -ExpandProperty tag_name)
-  if (-not $tag) { throw "could not resolve latest nightly tag" }
-  $env:T3CODE_DESKTOP_VERSION = $tag.TrimStart("v")
+    Sort-Object { [datetime]$_.published_at } -Descending |
+    Select-Object -First 1
+  if (-not $nightly -or -not $nightly.tag_name) { throw "could not resolve latest nightly tag" }
+  $env:T3CODE_DESKTOP_VERSION = ([string]$nightly.tag_name).TrimStart("v")
 }
 Log "T3CODE_DESKTOP_VERSION=$($env:T3CODE_DESKTOP_VERSION)"
 

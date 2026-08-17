@@ -61,9 +61,11 @@ echo "Mac name: $(defaults read "$INSTALLED_APP/Contents/Info" CFBundleName 2>/d
 # --- Blade (build + install) ---
 echo "-- refreshing Blade --"
 scp -o BatchMode=yes "$REPO/scripts/personal-refresh-win.ps1" blade:dev/personal-refresh-win.ps1
-# cmd.exe + forward slashes so bash/ssh do not eat Windows path backslashes.
-ssh -o BatchMode=yes blade cmd.exe /c \
-  "set T3CODE_DESKTOP_VERSION=${T3CODE_DESKTOP_VERSION}&& set T3_FORCE_REBUILD=1&& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:/Users/muhha/dev/personal-refresh-win.ps1"
+# Pass version/force as -File args (cmd env inheritance to PowerShell is unreliable over SSH).
+ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+  C:/Users/muhha/dev/personal-refresh-win.ps1 \
+  -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
+  -ForceRebuild 1
 
 # --- Dell (install only from Blade-staged installer via this Mac) ---
 echo "-- refreshing Dell --"
