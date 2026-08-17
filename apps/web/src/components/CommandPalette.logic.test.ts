@@ -142,7 +142,12 @@ describe("enumerateCommandPaletteItems", () => {
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const PROJECT_ID = ProjectId.make("project-1");
 
-function makeThread(overrides: Partial<Thread> = {}): Thread {
+function makeThread(overrides: Partial<Thread> = {}): Omit<Thread, "goal"> & {
+  readonly goal: {
+    readonly status: NonNullable<Thread["goal"]>["status"];
+    readonly objectivePreview: string;
+  } | null;
+} {
   return {
     id: ThreadId.make("thread-1"),
     environmentId: LOCAL_ENVIRONMENT_ID,
@@ -166,6 +171,11 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     checkpoints: [],
     activities: [],
     ...overrides,
+    // Palette items read the compact Goal shell, not the full detail Goal.
+    goal:
+      overrides.goal != null
+        ? { status: overrides.goal.status, objectivePreview: overrides.goal.objective }
+        : null,
   };
 }
 

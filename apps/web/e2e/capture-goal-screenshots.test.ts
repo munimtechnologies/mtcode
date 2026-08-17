@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - manual capture script: writes screenshot PNGs from disk paths.
 /**
  * Manual PR asset capture — not part of CI.
  *
@@ -5,16 +6,16 @@
  *
  * Requires the dev-only /dev/goal-chips route. Writes PNGs to e2e/goal-state-screenshots/.
  */
-import * as NodeFs from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeURL from "node:url";
 
 import { afterAll, beforeAll, describe, it } from "vite-plus/test";
 
 import { startIsolatedWebApp, type IsolatedWebApp } from "./harness.ts";
 
 const SCREENSHOT_DIR = NodePath.join(
-  NodePath.dirname(fileURLToPath(import.meta.url)),
+  NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
   "goal-state-screenshots",
 );
 
@@ -34,7 +35,7 @@ async function shotState(id: (typeof STATE_IDS)[number]): Promise<void> {
   const section = page.locator(`[data-goal-screenshot="${id}"]`);
   await section.scrollIntoViewIfNeeded();
   await section.waitFor({ state: "visible" });
-  await NodeFs.mkdir(SCREENSHOT_DIR, { recursive: true });
+  await NodeFSP.mkdir(SCREENSHOT_DIR, { recursive: true });
   await section.screenshot({
     path: NodePath.join(SCREENSHOT_DIR, `${id}.png`),
   });

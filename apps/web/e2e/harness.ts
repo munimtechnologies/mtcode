@@ -1,9 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off - e2e harness: spawns and drives the dev server as a child process.
 import * as NodeChildProcess from "node:child_process";
-import * as NodeFs from "node:fs/promises";
-import * as NodeOs from "node:os";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { fileURLToPath } from "node:url";
-import { setTimeout as delay } from "node:timers/promises";
+import * as NodeURL from "node:url";
+import * as NodeTimersPromises from "node:timers/promises";
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 
@@ -16,10 +17,13 @@ import {
 } from "./devOutput.ts";
 import { addProjectFromEmptyState, waitForAppReady } from "./session.ts";
 
-const REPO_ROOT = NodePath.resolve(fileURLToPath(new URL(".", import.meta.url)), "../../..");
+const REPO_ROOT = NodePath.resolve(
+  NodeURL.fileURLToPath(new URL(".", import.meta.url)),
+  "../../..",
+);
 const WEB_ROOT = NodePath.join(REPO_ROOT, "apps/web");
 const SQLITE_STATE_SCRIPT = NodePath.join(REPO_ROOT, "apps/server/scripts/t3-sqlite-state.ts");
-const SHARED_T3_HOME = NodePath.join(NodeOs.homedir(), ".t3");
+const SHARED_T3_HOME = NodePath.join(NodeOS.homedir(), ".t3");
 const READY_TIMEOUT_MS = 180_000;
 const PLAYWRIGHT_OUTPUT_DIR = NodePath.join(WEB_ROOT, ".playwright");
 
@@ -79,9 +83,9 @@ async function startIsolatedWebAppUnsafe(
   options: IsolatedWebAppOptions,
   resources: MutableResources,
 ): Promise<IsolatedWebApp> {
-  const homeDir = await NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "t3code-e2e-home-"));
-  const fixtureProjectDir = await NodeFs.mkdtemp(
-    NodePath.join(NodeOs.tmpdir(), "t3code-e2e-project-"),
+  const homeDir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3code-e2e-home-"));
+  const fixtureProjectDir = await NodeFSP.mkdtemp(
+    NodePath.join(NodeOS.tmpdir(), "t3code-e2e-project-"),
   );
   resources.homeDir = homeDir;
   resources.fixtureProjectDir = fixtureProjectDir;
@@ -191,7 +195,7 @@ function assertIsolatedHome(homeDir: string): void {
 }
 
 async function initFixtureProject(dir: string): Promise<void> {
-  await NodeFs.writeFile(NodePath.join(dir, "README.md"), "# e2e fixture\n");
+  await NodeFSP.writeFile(NodePath.join(dir, "README.md"), "# e2e fixture\n");
   NodeChildProcess.execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
   NodeChildProcess.execFileSync("git", ["add", "README.md"], { cwd: dir, stdio: "ignore" });
   NodeChildProcess.execFileSync(
@@ -234,7 +238,7 @@ async function waitForHttp(origin: string, timeoutMs: number): Promise<void> {
       return;
     } catch (error) {
       lastError = error;
-      await delay(250);
+      await NodeTimersPromises.setTimeout(250);
     }
   }
   throw new Error(
@@ -259,7 +263,7 @@ async function launchChromium(headed: boolean): Promise<Browser> {
 
 function playwrightCliPath(): string {
   return NodePath.join(
-    NodePath.dirname(fileURLToPath(import.meta.resolve("playwright/package.json"))),
+    NodePath.dirname(NodeURL.fileURLToPath(import.meta.resolve("playwright/package.json"))),
     "cli.js",
   );
 }
@@ -315,16 +319,16 @@ async function dumpHarnessFailure(resources: MutableResources, error: unknown): 
     return;
   }
   try {
-    await NodeFs.mkdir(PLAYWRIGHT_OUTPUT_DIR, { recursive: true });
+    await NodeFSP.mkdir(PLAYWRIGHT_OUTPUT_DIR, { recursive: true });
     await page.screenshot({
       path: NodePath.join(PLAYWRIGHT_OUTPUT_DIR, "harness-failed.png"),
       fullPage: true,
     });
     const bodyText = (await page.locator("body").innerText()).slice(0, 2_000);
     const message = error instanceof Error ? error.message : String(error);
-    error instanceof Error
-      ? (error.message = redactSecrets(`${message}\nurl=${page.url()}\n${bodyText}`))
-      : undefined;
+    if (error instanceof Error) {
+      error.message = redactSecrets(`${message}\nurl=${page.url()}\n${bodyText}`);
+    }
   } catch {
     // Best-effort evidence; the original error is more important.
   }
@@ -341,10 +345,10 @@ async function disposeResources(resources: MutableResources): Promise<void> {
     return;
   }
   if (resources.homeDir !== null) {
-    await NodeFs.rm(resources.homeDir, { recursive: true, force: true }).catch(() => undefined);
+    await NodeFSP.rm(resources.homeDir, { recursive: true, force: true }).catch(() => undefined);
   }
   if (resources.fixtureProjectDir !== null) {
-    await NodeFs.rm(resources.fixtureProjectDir, { recursive: true, force: true }).catch(
+    await NodeFSP.rm(resources.fixtureProjectDir, { recursive: true, force: true }).catch(
       () => undefined,
     );
   }
@@ -361,10 +365,13 @@ async function stopDevProcess(child: NodeChildProcess.ChildProcess | null): Prom
     });
   });
   killProcessGroup(pid, "SIGTERM");
-  const timedOut = await Promise.race([exited.then(() => false), delay(8_000).then(() => true)]);
+  const timedOut = await Promise.race([
+    exited.then(() => false),
+    NodeTimersPromises.setTimeout(8_000).then(() => true),
+  ]);
   if (timedOut) {
     killProcessGroup(pid, "SIGKILL");
-    await Promise.race([exited, delay(2_000)]);
+    await Promise.race([exited, NodeTimersPromises.setTimeout(2_000)]);
   }
 }
 
@@ -409,7 +416,7 @@ function timeoutError(
   output: { text: string },
   startup: { timedOut: boolean },
 ): Promise<DevRunnerPorts> {
-  return delay(timeoutMs).then(() => {
+  return NodeTimersPromises.setTimeout(timeoutMs).then(() => {
     if (!startup.timedOut) {
       return undefined as unknown as DevRunnerPorts;
     }
