@@ -62,6 +62,7 @@ import {
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
 import { PullRequestUpstreamCard } from "../components/pullRequest/PullRequestUpstreamCard";
+import { PullRequestUpstreamReleaseBanner } from "../components/pullRequest/PullRequestUpstreamReleaseBanner";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { useComposerDraftStore } from "~/composerDraftStore";
@@ -69,6 +70,7 @@ import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { toastManager } from "../components/ui/toast";
 import {
   buildCherryPickPullRequestHandoff,
+  buildMergeUpstreamReleaseHandoff,
   buildImplementFeatureFromPullRequestHandoff,
   readableFailure,
 } from "../components/pullRequest/pullRequestDetail.logic";
@@ -117,6 +119,7 @@ import {
   type PullRequestSurface,
 } from "../rightPanelStore";
 import { useDebouncedValue } from "../state/queries";
+import { useEnvironmentQuery } from "../state/query";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import {
@@ -1410,6 +1413,132 @@ function PullRequestsRouteView() {
       setPickingKey(null);
     }
   };
+  /**
+   * What the upstream has shipped, asked of the project the upstream rows are read through — one
+   * read, because a workspace watching an upstream is watching one, and the answer is the same
+   * whichever of its rows asked.
+   */
+  const releaseTarget = upstreamEntries[0] ?? null;
+  const { data: upstreamReleaseData } = useEnvironmentQuery(
+    releaseTarget === null
+      ? null
+      : pullRequestEnvironment.upstreamRelease({
+          environmentId: releaseTarget.environmentId,
+          input: { projectId: releaseTarget.projectId },
+        }),
+  );
+  const upstreamRelease = upstreamReleaseData?.release ?? null;
+
+  /**
+   * Take that release: merge its tag onto a branch of its own, in a worktree of its own, with a
+   * thread standing in it. The same landing a cherry-pick gives, for the same reason — a fork
+   * with its own work on top cannot take a release without deciding what survives.
+   */
+  const mergeReleaseCommand = useAtomCommand(pullRequestEnvironment.mergeUpstreamRelease, {
+    reportFailure: false,
+  });
+  const [takingRelease, setTakingRelease] = useState(false);
+  const takeUpstreamRelease = async () => {
+    if (takingRelease || releaseTarget === null || upstreamRelease === null) return;
+    setTakingRelease(true);
+    const projectRef = scopeProjectRef(releaseTarget.environmentId, releaseTarget.projectId);
+    const toastId = toastManager.add({
+      type: "loading",
+      title: `Taking ${upstreamRelease.tagName}...`,
+    });
+    try {
+      const opened = await newThread(projectRef).then(
+        (result) => result,
+        () => null,
+      );
+      if (opened === null) {
+        toastManager.update(toastId, {
+          type: "error",
+          title: "Could not open a thread for the merge",
+          description: "Try again from the project, or open a thread first.",
+        });
+        return;
+      }
+      const taken = await mergeReleaseCommand({
+        environmentId: releaseTarget.environmentId,
+        input: {
+          projectId: releaseTarget.projectId,
+          tagName: upstreamRelease.tagName,
+          threadId: opened.threadId,
+        },
+      });
+      if (taken._tag === "Failure") {
+        toastManager.update(toastId, {
+          type: "error",
+          title: `Could not take ${upstreamRelease.tagName}`,
+          description: readableFailure(
+            squashAtomCommandFailure(taken),
+            "The release could not be fetched or merged.",
+          ),
+        });
+        return;
+      }
+      const result = taken.value;
+      if (
+        result.status === "up-to-date" ||
+        result.branch === null ||
+        result.worktreePath === null
+      ) {
+        toastManager.update(toastId, {
+          type: "success",
+          title: `Already on ${result.tagName}`,
+          description: "This project's history already contains the release.",
+        });
+        return;
+      }
+      const task = buildMergeUpstreamReleaseHandoff({
+        repository: upstreamRelease.repository,
+        tagName: result.tagName,
+        url: upstreamRelease.url,
+        status: result.status,
+        branch: result.branch,
+        ...(result.behindBy === undefined ? {} : { behindBy: result.behindBy }),
+        conflictedPaths: result.conflictedPaths,
+        conflictedPathCount: result.conflictedPathCount,
+      });
+      const pointed = await newThread(projectRef, {
+        branch: result.branch,
+        worktreePath: result.worktreePath,
+        envMode: "worktree",
+      }).then(
+        (session) => session,
+        () => null,
+      );
+      if (pointed === null) {
+        toastManager.update(toastId, {
+          type: "warning",
+          title: "Merged, but the thread stayed where it was",
+          description: `The release is on \`${result.branch}\`. Point a thread at it from the branch picker.`,
+        });
+        return;
+      }
+      const store = useComposerDraftStore.getState();
+      store.setPrompt(pointed.draftId, task.prompt);
+      store.setReviewComments(pointed.draftId, task.reviewComments);
+      toastManager.update(
+        toastId,
+        result.status === "merged"
+          ? {
+              type: "success",
+              title: `Merged onto ${result.branch}`,
+              description:
+                "It merged cleanly. The task is in the composer — read it over, then send.",
+            }
+          : {
+              type: "warning",
+              title: `Merged onto ${result.branch}, with conflicts`,
+              description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer — read it over, then send.`,
+            },
+      );
+    } finally {
+      setTakingRelease(false);
+    }
+  };
   const rankingError = upstreamEntries.length === 0 ? null : rankingErrorRaw;
 
   const groups = useMemo(() => {
@@ -1742,6 +1871,21 @@ function PullRequestsRouteView() {
             </span>
             <span className="h-px flex-1 bg-border" />
           </div>
+
+          {/* Above the change requests, because it is the one thing here that is already
+              finished: what the upstream has shipped, and a way to take it. */}
+          {upstreamRelease !== null ? (
+            <PullRequestUpstreamReleaseBanner
+              repository={upstreamRelease.repository}
+              tagName={upstreamRelease.tagName}
+              name={upstreamRelease.name}
+              url={upstreamRelease.url}
+              publishedAt={upstreamRelease.publishedAt}
+              isPrerelease={upstreamRelease.isPrerelease}
+              onTake={() => void takeUpstreamRelease()}
+              taking={takingRelease}
+            />
+          ) : null}
 
           <div className="space-y-2">
             <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">

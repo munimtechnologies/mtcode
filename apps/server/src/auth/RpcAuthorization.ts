@@ -57,6 +57,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.pullRequestsRank]: AuthOrchestrationReadScope,
   // Operate rather than read: it fetches, branches, and leaves a worktree behind.
   [WS_METHODS.pullRequestsCherryPick]: AuthOrchestrationOperateScope,
+  [WS_METHODS.pullRequestsUpstreamRelease]: AuthOrchestrationReadScope,
+  [WS_METHODS.pullRequestsMergeUpstreamRelease]: AuthOrchestrationOperateScope,
   [WS_METHODS.pullRequestsDetail]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsThreadComments]: AuthOrchestrationReadScope,

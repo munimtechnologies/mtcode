@@ -201,6 +201,15 @@ export interface ProviderDiffFileContents {
   readonly newContents: string;
 }
 
+/** One published release, as every host that has them describes one. */
+export interface ProviderRelease {
+  readonly tagName: string;
+  readonly name: string | null;
+  readonly url: string;
+  readonly publishedAt: string;
+  readonly isPrerelease: boolean;
+}
+
 export interface ProviderRepositoryRef {
   readonly cwd: string;
   /** Provider-native repository identity, e.g. `owner/repo` or `group/subgroup/project`. */
@@ -290,6 +299,14 @@ export interface PullRequestProviderApi {
   readonly getUpstreamRepository?: (
     input: ProviderRepositoryRef,
   ) => Effect.Effect<string | null, PullRequestProviderError>;
+
+  /**
+   * What a repository has published, newest first. Optional in the same way the fork parent is:
+   * a host with no releases to report leaves it out, and the section simply does not appear.
+   */
+  readonly listReleases?: (
+    input: ProviderRepositoryRef & { readonly limit: number },
+  ) => Effect.Effect<ReadonlyArray<ProviderRelease>, PullRequestProviderError>;
 
   /**
    * The line counts for rows a listing has already handed over. Only implemented by a provider

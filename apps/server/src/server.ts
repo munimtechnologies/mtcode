@@ -77,7 +77,7 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
-import * as PullRequestCherryPick from "./pullRequest/PullRequestCherryPick.ts";
+import * as UpstreamTake from "./pullRequest/UpstreamTake.ts";
 import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
@@ -314,7 +314,7 @@ const PullRequestRankingLayerLive = PullRequestRanking.layer.pipe(
  * Cherry-picking is git and nothing else — it reads a change request through nobody's API. The
  * setup script rides along because the worktree it makes is one somebody is about to build in.
  */
-const PullRequestCherryPickLayerLive = PullRequestCherryPick.layer.pipe(
+const UpstreamTakeLayerLive = UpstreamTake.layer.pipe(
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(ProjectSetupScriptRunner.layer),
 );
@@ -400,7 +400,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Merged with Git rather than added beside it: both want text generation, and this pipe is at
   // the composition limit.
   Layer.provideMerge(
-    Layer.mergeAll(GitLayerLive, PullRequestRankingLayerLive, PullRequestCherryPickLayerLive),
+    Layer.mergeAll(GitLayerLive, PullRequestRankingLayerLive, UpstreamTakeLayerLive),
   ),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),

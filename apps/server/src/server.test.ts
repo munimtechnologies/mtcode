@@ -101,7 +101,7 @@ const collectQueueUntil = Effect.fn("TransferBudget.collectQueueUntil")(function
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
-import * as PullRequestCherryPick from "./pullRequest/PullRequestCherryPick.ts";
+import * as UpstreamTake from "./pullRequest/UpstreamTake.ts";
 import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { isThreadDetailEvent, resolveAvailableEditorsForConfig } from "./ws.ts";
@@ -842,7 +842,7 @@ const buildAppUnderTest = (options?: {
       // Cherry-picking fetches from a host and writes worktrees, neither of which belongs in a
       // route test.
       Layer.provide(
-        Layer.mock(PullRequestCherryPick.PullRequestCherryPickService)({
+        Layer.mock(UpstreamTake.UpstreamTakeService)({
           cherryPick: () =>
             Effect.succeed({
               status: "empty" as const,

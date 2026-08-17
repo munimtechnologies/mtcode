@@ -570,6 +570,75 @@ export const PullRequestCherryPickResult = Schema.Struct({
 });
 export type PullRequestCherryPickResult = typeof PullRequestCherryPickResult.Type;
 
+/**
+ * A release published by the repository a project's own was forked from. Tracked because a fork
+ * lives off the upstream's work: what its author wants to know is what the upstream has shipped
+ * since they last took anything, and taking it is one action rather than a merge typed by hand.
+ */
+export const PullRequestUpstreamRelease = Schema.Struct({
+  /** `owner/name` of the upstream, echoed so a page can say where the release came from. */
+  repository: TrimmedNonEmptyString,
+  tagName: TrimmedNonEmptyString,
+  /** The release's own title, absent where it was published without one. */
+  name: Schema.optional(TrimmedNonEmptyString),
+  url: Schema.String,
+  publishedAt: IsoDateTime,
+  /** True for a nightly or any other pre-release; false for a stable one. */
+  isPrerelease: Schema.Boolean,
+});
+export type PullRequestUpstreamRelease = typeof PullRequestUpstreamRelease.Type;
+
+export const PullRequestUpstreamReleaseInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type PullRequestUpstreamReleaseInput = typeof PullRequestUpstreamReleaseInput.Type;
+
+export const PullRequestUpstreamReleaseResult = Schema.Struct({
+  /** Null where the project is nobody's fork, or its upstream has published nothing. */
+  release: Schema.NullOr(PullRequestUpstreamRelease),
+});
+export type PullRequestUpstreamReleaseResult = typeof PullRequestUpstreamReleaseResult.Type;
+
+export const PullRequestMergeUpstreamReleaseInput = Schema.Struct({
+  projectId: ProjectId,
+  /**
+   * Which release to take. Checked against what the upstream has actually published before it
+   * reaches a refspec — it arrives from a page, and a page can be out of date or lying.
+   */
+  tagName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  /** As for a cherry-pick: only the project's setup script needs to know. */
+  threadId: Schema.optional(ThreadId),
+});
+export type PullRequestMergeUpstreamReleaseInput = typeof PullRequestMergeUpstreamReleaseInput.Type;
+
+/**
+ * How taking a release ended. `up-to-date` is the answer to "do I need this", and the reason
+ * nothing is created for it: the release is already in this branch's history.
+ */
+export const PullRequestMergeUpstreamReleaseStatus = Schema.Literals([
+  "merged",
+  "conflicted",
+  "up-to-date",
+]);
+export type PullRequestMergeUpstreamReleaseStatus =
+  typeof PullRequestMergeUpstreamReleaseStatus.Type;
+
+export const PullRequestMergeUpstreamReleaseResult = Schema.Struct({
+  status: PullRequestMergeUpstreamReleaseStatus,
+  tagName: TrimmedNonEmptyString,
+  /** Null for `up-to-date`, where nothing was created to carry on in. */
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  /** How many commits the release is ahead of this branch, where git could work it out. */
+  behindBy: Schema.optional(NonNegativeInt),
+  conflictedPaths: Schema.Array(TrimmedNonEmptyString).check(
+    Schema.isMaxLength(CHERRY_PICK_CONFLICT_PATH_LIMIT),
+  ),
+  conflictedPathCount: NonNegativeInt,
+});
+export type PullRequestMergeUpstreamReleaseResult =
+  typeof PullRequestMergeUpstreamReleaseResult.Type;
+
 export const PullRequestRanking = Schema.Struct({
   number: PositiveInt,
   /** 0-100, higher being more worth porting. */

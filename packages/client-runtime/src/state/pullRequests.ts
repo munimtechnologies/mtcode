@@ -75,6 +75,26 @@ export function createPullRequestEnvironmentAtoms<R, E>(
         key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
       },
     }),
+    /**
+     * What the repository this project was forked from has shipped lately. Held far longer than
+     * the change requests are: a release is published a few times a day at most, and every read
+     * of it is a request to the host that the rows on the page do not need.
+     */
+    upstreamRelease: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:pull-requests:upstream-release",
+      tag: WS_METHODS.pullRequestsUpstreamRelease,
+      staleTimeMs: 10 * 60_000,
+    }),
+    /** Taking one, which fetches its tag and merges it. Serial per project, as a pick is. */
+    mergeUpstreamRelease: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:pull-requests:merge-upstream-release",
+      tag: WS_METHODS.pullRequestsMergeUpstreamRelease,
+      scheduler: commandScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
+      },
+    }),
     detail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:detail",
       tag: WS_METHODS.pullRequestsDetail,

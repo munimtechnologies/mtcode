@@ -43,6 +43,8 @@ import {
   type PullRequestThreadCommentsInput,
   type PullRequestThreadCommentsResult,
   type PullRequestUpdateInput,
+  type PullRequestUpstreamRelease,
+  type PullRequestUpstreamReleaseInput,
   type SourceControlProviderInfo,
   type SourceControlProviderKind,
 } from "@t3tools/contracts";
@@ -121,12 +123,27 @@ const VIEWER_CACHE_TTL = Duration.minutes(10);
  * paying a `gh repo view` per list read would be a subprocess per project per page.
  */
 const UPSTREAM_CACHE_TTL = Duration.hours(12);
+/**
+ * How many of the upstream's releases one read asks for. Enough that the newest pre-release is
+ * in it even where a run of stable ones came after, and small enough to stay one page.
+ */
+const UPSTREAM_RELEASE_READ_LIMIT = 20;
 const LIST_CACHE_CAPACITY = 64;
 const LIST_STATS_CACHE_CAPACITY = 32;
 const DETAIL_CACHE_CAPACITY = 128;
 const DIFF_CACHE_CAPACITY = 128;
 
 export type PullRequestError = PullRequestUnavailableError | PullRequestOperationError;
+
+/** An upstream release, with what taking it needs alongside what showing it needs. */
+export interface UpstreamReleaseView {
+  readonly workspaceRoot: string;
+  readonly host: string;
+  readonly provider: SourceControlProviderKind;
+  readonly release: PullRequestUpstreamRelease;
+  /** Tags the upstream has published lately, for checking one a client named. */
+  readonly publishedTags: ReadonlyArray<string>;
+}
 
 export class PullRequestService extends Context.Service<
   PullRequestService,
@@ -152,6 +169,15 @@ export class PullRequestService extends Context.Service<
       },
       PullRequestError
     >;
+    /**
+     * The newest release published by the repository this project's own was forked from, with
+     * everything taking it needs: which checkout to take it into, and which tags the upstream
+     * has actually published. Null where the project is nobody's fork, its host has no releases,
+     * or that host would not answer.
+     */
+    readonly upstreamRelease: (
+      input: PullRequestUpstreamReleaseInput,
+    ) => Effect.Effect<UpstreamReleaseView | null, PullRequestError>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -2116,6 +2142,63 @@ export const make = Effect.gen(function* () {
     DETAIL_STALE_WINDOW,
     DETAIL_CACHE_CAPACITY,
   );
+  /**
+   * The upstream's newest release, preferring a pre-release: a fork that tracks a project's
+   * nightlies wants the nightly, and a repository that publishes none has only its stable ones
+   * to offer. Read through the fork's checkout and API, exactly as the upstream's pull requests
+   * are — the upstream has no project here to be read through otherwise.
+   */
+  const upstreamRelease: PullRequestService["Service"]["upstreamRelease"] = (input) =>
+    listWorkspaceProjects({ projectId: input.projectId }).pipe(
+      Effect.flatMap((workspace): Effect.Effect<UpstreamReleaseView | null, PullRequestError> => {
+        const project = workspace.supported[0];
+        if (project === undefined) return Effect.succeed(null);
+        const listReleases = project.api.listReleases;
+        if (listReleases === undefined) return Effect.succeed(null);
+        return resolveUpstream(project).pipe(
+          Effect.flatMap((repository) =>
+            repository === null
+              ? Effect.succeed(null)
+              : listReleases({
+                  cwd: project.project.workspaceRoot,
+                  repository,
+                  host: project.host,
+                  limit: UPSTREAM_RELEASE_READ_LIMIT,
+                }).pipe(
+                  Effect.map((releases) => {
+                    const newest = [...releases].sort((left, right) =>
+                      right.publishedAt.localeCompare(left.publishedAt),
+                    );
+                    const chosen = newest.find((release) => release.isPrerelease) ?? newest[0];
+                    return chosen === undefined
+                      ? null
+                      : {
+                          workspaceRoot: project.project.workspaceRoot,
+                          host: project.host,
+                          provider: project.api.kind,
+                          release: {
+                            repository,
+                            tagName: chosen.tagName,
+                            ...(chosen.name === null ? {} : { name: chosen.name }),
+                            url: chosen.url,
+                            publishedAt: chosen.publishedAt,
+                            isPrerelease: chosen.isPrerelease,
+                          },
+                          // Every tag the upstream has published lately, so a request naming one
+                          // can be checked against what exists rather than reaching a refspec on
+                          // a page's word.
+                          publishedTags: releases.map((release) => release.tagName),
+                        };
+                  }),
+                  // A host that will not answer costs the section and nothing else: the rest of
+                  // the page is about change requests and has already been read.
+                  Effect.orElseSucceed(() => null),
+                ),
+          ),
+        );
+      }),
+    );
+
   const resolveRef: PullRequestService["Service"]["resolveRef"] = (input) =>
     requireProject(input).pipe(
       Effect.map((project) => ({
@@ -2259,6 +2342,7 @@ export const make = Effect.gen(function* () {
     list,
     listStats,
     resolveRef,
+    upstreamRelease,
     detail,
     activity,
     threadComments,

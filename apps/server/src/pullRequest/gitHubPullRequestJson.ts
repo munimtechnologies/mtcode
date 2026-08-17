@@ -999,6 +999,60 @@ export const REPOSITORY_ACCESS_JSON_FIELDS =
 export const REPOSITORY_PARENT_JQ = "if .fork then .parent.full_name else null end";
 
 /**
+ * What a release is, reduced to the four fields worth showing. Draft releases are dropped here
+ * rather than downstream: a draft is not published, so its tag may not exist to fetch.
+ */
+export const RELEASES_JQ =
+  "[.[] | select(.draft | not) | {tagName: .tag_name, name: .name, url: .html_url, publishedAt: .published_at, isPrerelease: .prerelease}]";
+
+const RawReleaseSchema = Schema.Struct({
+  tagName: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  url: Schema.optional(Schema.NullOr(Schema.String)),
+  publishedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  isPrerelease: Schema.optional(Schema.NullOr(Schema.Boolean)),
+});
+
+const decodeReleases = decodeJsonResult(Schema.Array(RawReleaseSchema));
+
+export interface GitHubRelease {
+  readonly tagName: string;
+  readonly name: string | null;
+  readonly url: string;
+  readonly publishedAt: string;
+  readonly isPrerelease: boolean;
+}
+
+/**
+ * Every published release, newest first as GitHub returns them. One without a tag or a
+ * publication date is skipped rather than failing the read: neither can be fetched or ordered,
+ * and one odd release must not cost the section the rest.
+ */
+export function decodeReleasesJson(
+  raw: string,
+): Result.Result<ReadonlyArray<GitHubRelease>, DecodeFailure> {
+  const decoded = decodeReleases(raw);
+  if (!Result.isSuccess(decoded)) return Result.fail(decoded.failure);
+  return Result.succeed(
+    decoded.success.flatMap((release) => {
+      const tagName = release.tagName.trim();
+      const publishedAt = release.publishedAt?.trim() ?? "";
+      if (tagName.length === 0 || publishedAt.length === 0) return [];
+      const name = release.name?.trim() ?? "";
+      return [
+        {
+          tagName,
+          name: name.length === 0 ? null : name,
+          url: release.url?.trim() ?? "",
+          publishedAt,
+          isPrerelease: release.isPrerelease ?? false,
+        },
+      ];
+    }),
+  );
+}
+
+/**
  * `gh --jq` prints the selected value raw rather than as JSON, so this reads one line of text:
  * `owner/name` for a fork, and nothing at all for everything else.
  *

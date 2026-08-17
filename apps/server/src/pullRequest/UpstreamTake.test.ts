@@ -15,7 +15,7 @@ import * as ServerConfig from "../config.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
-import * as PullRequestCherryPick from "./PullRequestCherryPick.ts";
+import * as UpstreamTake from "./UpstreamTake.ts";
 
 const TestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-cherry-pick-test-" })),
@@ -44,7 +44,7 @@ function runGit(
   return Effect.gen(function* () {
     const git = yield* GitVcsDriver.GitVcsDriver;
     const result = yield* git.execute({
-      operation: "PullRequestCherryPick.test.runGit",
+      operation: "UpstreamTake.test.runGit",
       cwd,
       args,
       allowNonZeroExit,
@@ -114,13 +114,13 @@ function makeFixture(input: { readonly forkChange: string | null }) {
   });
 }
 
-const cherryPickService = PullRequestCherryPick.make.pipe(
+const cherryPickService = UpstreamTake.make.pipe(
   Effect.provideService(ProjectSetupScriptRunner.ProjectSetupScriptRunner, {
     runForThread: () => Effect.succeed({ status: "no-script" as const }),
   }),
 );
 
-it.layer(TestLayer)("PullRequestCherryPick", (it) => {
+it.layer(TestLayer)("UpstreamTake", (it) => {
   it.effect("takes the commits onto a branch and worktree of their own", () =>
     Effect.gen(function* () {
       const fixture = yield* makeFixture({ forkChange: null });
@@ -191,6 +191,88 @@ it.layer(TestLayer)("PullRequestCherryPick", (it) => {
         Effect.map((r) => r.stdout.trim()),
       );
       expect(branches).toBe("");
+    }),
+  );
+
+  it.effect("merges an upstream release onto a branch of its own", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ forkChange: null });
+      const service = yield* cherryPickService;
+      // A release the fork has never seen: the upstream ships something on main and tags it.
+      yield* runGit(fixture.upstream, ["checkout", "main"]);
+      yield* commitFile(fixture.upstream, "released.txt", "shipped\n", "Ship it");
+      yield* runGit(fixture.upstream, ["tag", "v1.2.3"]);
+
+      const result = yield* service.mergeRelease({
+        cwd: fixture.fork,
+        host: fixture.request.host,
+        repository: fixture.request.repository,
+        tagName: "v1.2.3",
+      });
+
+      expect(result.status).toBe("merged");
+      expect(result.branch).toBe("t3code/upstream/v1.2.3");
+      expect(result.behindBy).toBe(1);
+      const fs = yield* FileSystem.FileSystem;
+      expect(yield* fs.readFileString(NodePath.join(result.worktreePath!, "released.txt"))).toBe(
+        "shipped\n",
+      );
+      // A merge, so the fork's own history is still under it rather than replaced by the tag.
+      const parents = yield* runGit(result.worktreePath!, ["log", "-1", "--format=%P"]).pipe(
+        Effect.map((r) => r.stdout.trim().split(" ")),
+      );
+      expect(parents).toHaveLength(2);
+    }),
+  );
+
+  it.effect("says a release is already here rather than making a branch for it", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ forkChange: null });
+      const service = yield* cherryPickService;
+      // Tagged at the commit the fork was cloned from, so its history already contains it.
+      yield* runGit(fixture.upstream, ["checkout", "main"]);
+      yield* runGit(fixture.upstream, ["tag", "v1.0.0"]);
+
+      const result = yield* service.mergeRelease({
+        cwd: fixture.fork,
+        host: fixture.request.host,
+        repository: fixture.request.repository,
+        tagName: "v1.0.0",
+      });
+
+      expect(result.status).toBe("up-to-date");
+      expect(result.worktreePath).toBeNull();
+      expect(result.branch).toBeNull();
+      const branches = yield* runGit(fixture.fork, ["branch", "--list", "t3code/*"]).pipe(
+        Effect.map((r) => r.stdout.trim()),
+      );
+      expect(branches).toBe("");
+    }),
+  );
+
+  it.effect("leaves a conflicting release merge standing, and says what collided", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ forkChange: "one\nthe fork's own line\n" });
+      const service = yield* cherryPickService;
+      yield* runGit(fixture.upstream, ["checkout", "main"]);
+      yield* commitFile(fixture.upstream, "shared.txt", "one\nupstream's own line\n", "Change it");
+      yield* runGit(fixture.upstream, ["tag", "v2.0.0"]);
+
+      const result = yield* service.mergeRelease({
+        cwd: fixture.fork,
+        host: fixture.request.host,
+        repository: fixture.request.repository,
+        tagName: "v2.0.0",
+      });
+
+      expect(result.status).toBe("conflicted");
+      expect(result.conflictedPaths).toEqual(["shared.txt"]);
+      const inProgress = yield* runGit(
+        result.worktreePath!,
+        ["rev-parse", "--verify", "MERGE_HEAD"],
+        true,
+      );
+      expect(inProgress.exitCode).toBe(0);
     }),
   );
 

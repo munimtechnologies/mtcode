@@ -81,6 +81,10 @@ import {
   PullRequestListStatsInput,
   PullRequestCherryPickInput,
   PullRequestCherryPickResult,
+  PullRequestMergeUpstreamReleaseInput,
+  PullRequestMergeUpstreamReleaseResult,
+  PullRequestUpstreamReleaseInput,
+  PullRequestUpstreamReleaseResult,
   PullRequestRankInput,
   PullRequestRankResult,
   PullRequestListStatsResult,
@@ -299,6 +303,8 @@ export const WS_METHODS = {
   pullRequestsSetReaction: "pullRequests.setReaction",
   pullRequestsRank: "pullRequests.rank",
   pullRequestsCherryPick: "pullRequests.cherryPick",
+  pullRequestsUpstreamRelease: "pullRequests.upstreamRelease",
+  pullRequestsMergeUpstreamRelease: "pullRequests.mergeUpstreamRelease",
   pullRequestsInvalidate: "pullRequests.invalidate",
   pullRequestsReviewerCandidates: "pullRequests.reviewerCandidates",
   pullRequestsRequestReviewers: "pullRequests.requestReviewers",
@@ -521,6 +527,27 @@ export const WsPullRequestsCherryPickRpc = Rpc.make(WS_METHODS.pullRequestsCherr
   success: PullRequestCherryPickResult,
   error: PullRequestRpcError,
 });
+
+/**
+ * What the repository this project was forked from has shipped lately. Its own call rather than
+ * part of the listing: a release is not a change request, and the listing must not wait on a
+ * second host read to draw the rows it already has.
+ */
+export const WsPullRequestsUpstreamReleaseRpc = Rpc.make(WS_METHODS.pullRequestsUpstreamRelease, {
+  payload: PullRequestUpstreamReleaseInput,
+  success: PullRequestUpstreamReleaseResult,
+  error: PullRequestRpcError,
+});
+
+/** Take that release into a branch of its own, the way a cherry-pick takes a change request's. */
+export const WsPullRequestsMergeUpstreamReleaseRpc = Rpc.make(
+  WS_METHODS.pullRequestsMergeUpstreamRelease,
+  {
+    payload: PullRequestMergeUpstreamReleaseInput,
+    success: PullRequestMergeUpstreamReleaseResult,
+    error: PullRequestRpcError,
+  },
+);
 
 export const WsPullRequestsDetailRpc = Rpc.make(WS_METHODS.pullRequestsDetail, {
   payload: PullRequestRef,
@@ -1039,6 +1066,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsListStatsRpc,
   WsPullRequestsRankRpc,
   WsPullRequestsCherryPickRpc,
+  WsPullRequestsUpstreamReleaseRpc,
+  WsPullRequestsMergeUpstreamReleaseRpc,
   WsPullRequestsDetailRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsThreadCommentsRpc,

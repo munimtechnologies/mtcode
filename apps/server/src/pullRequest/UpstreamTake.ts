@@ -1,4 +1,8 @@
-import type { PullRequestCherryPickResult, SourceControlProviderKind } from "@t3tools/contracts";
+import type {
+  PullRequestCherryPickResult,
+  PullRequestMergeUpstreamReleaseResult,
+  SourceControlProviderKind,
+} from "@t3tools/contracts";
 import { PullRequestOperationError } from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
@@ -36,7 +40,7 @@ const MAX_REPORTED_CONFLICT_PATHS = 50;
 /** Git allows far more, but a ref path is built from a repository name a host chose. */
 const refSafe = (value: string) => value.replace(/[^A-Za-z0-9._-]+/gu, "-").replace(/^[.-]+/u, "");
 
-export interface PullRequestCherryPickRequest {
+export interface CherryPickRequest {
   /** The project checkout the commits are taken into — branched from, never written to. */
   readonly cwd: string;
   readonly provider: SourceControlProviderKind;
@@ -53,8 +57,18 @@ export interface PullRequestCherryPickRequest {
   readonly threadId?: string | undefined;
 }
 
-export class PullRequestCherryPickService extends Context.Service<
-  PullRequestCherryPickService,
+export interface MergeReleaseRequest {
+  readonly cwd: string;
+  /** Where the release lives, `host` and `owner/name`, resolved by the caller. */
+  readonly host: string;
+  readonly repository: string;
+  /** Checked against what the upstream has published before it reaches here. */
+  readonly tagName: string;
+  readonly threadId?: string | undefined;
+}
+
+export class UpstreamTakeService extends Context.Service<
+  UpstreamTakeService,
   {
     /**
      * Take a change request's commits onto a fresh branch in a worktree of its own. Conflicts
@@ -62,10 +76,14 @@ export class PullRequestCherryPickService extends Context.Service<
      * worktree is left in place mid-pick for somebody, or something, to finish.
      */
     readonly cherryPick: (
-      input: PullRequestCherryPickRequest,
+      input: CherryPickRequest,
     ) => Effect.Effect<PullRequestCherryPickResult, PullRequestOperationError>;
+    /** Take a whole upstream release the same way, as a merge rather than a pick. */
+    readonly mergeRelease: (
+      input: MergeReleaseRequest,
+    ) => Effect.Effect<PullRequestMergeUpstreamReleaseResult, PullRequestOperationError>;
   }
->()("t3/pullRequest/PullRequestCherryPick/PullRequestCherryPickService") {}
+>()("t3/pullRequest/UpstreamTake/UpstreamTakeService") {}
 
 export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
@@ -86,7 +104,7 @@ export const make = Effect.gen(function* () {
   ) =>
     git
       .execute({
-        operation: `PullRequestCherryPick.${operation}`,
+        operation: `UpstreamTake.${operation}`,
         cwd,
         args,
         allowNonZeroExit: options?.allowNonZeroExit ?? false,
@@ -110,7 +128,7 @@ export const make = Effect.gen(function* () {
    * reach, with whatever credentials, protocol and proxying the developer set up for it — a
    * derived HTTPS URL is only the best guess for a repository nothing here has ever talked to.
    */
-  const resolveFetchSource = Effect.fn("PullRequestCherryPick.resolveFetchSource")(function* (
+  const resolveFetchSource = Effect.fn("UpstreamTake.resolveFetchSource")(function* (
     cwd: string,
     host: string,
     repository: string,
@@ -135,8 +153,8 @@ export const make = Effect.gen(function* () {
    * only carries the base branch's own commits, which this checkout either already has or does
    * not want, and cherry-picking one is an error rather than a port.
    */
-  const resolveCommits = Effect.fn("PullRequestCherryPick.resolveCommits")(function* (
-    input: PullRequestCherryPickRequest,
+  const resolveCommits = Effect.fn("UpstreamTake.resolveCommits")(function* (
+    input: CherryPickRequest,
   ) {
     const template = HEAD_REF_TEMPLATE[input.provider];
     if (template === null) {
@@ -198,7 +216,7 @@ export const make = Effect.gen(function* () {
   });
 
   /** A branch name nothing has taken, so a second attempt at the same change request is its own. */
-  const resolveBranchName = Effect.fn("PullRequestCherryPick.resolveBranchName")(function* (
+  const resolveBranchName = Effect.fn("UpstreamTake.resolveBranchName")(function* (
     cwd: string,
     desired: string,
   ) {
@@ -219,8 +237,69 @@ export const make = Effect.gen(function* () {
     return yield* fail(`There are already 100 branches named after picking #${desired}.`);
   });
 
-  const cherryPick: PullRequestCherryPickService["Service"]["cherryPick"] = Effect.fn(
-    "PullRequestCherryPick.cherryPick",
+  /**
+   * A branch of its own and a worktree standing on it, cut from where the project stands — which
+   * is the tree the upstream work is being taken into. Never checked out in the project itself:
+   * the developer is working in that tree, and work that stops on a conflict would leave it
+   * stopped.
+   *
+   * The setup script runs before the take rather than after it, best effort: a conflicted
+   * worktree is one somebody is about to build in, and it should be installing while they read
+   * the conflict.
+   */
+  const openWorktree = Effect.fn("UpstreamTake.openWorktree")(function* (
+    cwd: string,
+    desiredBranch: string,
+    threadId: string | undefined,
+  ) {
+    const branch = yield* resolveBranchName(cwd, desiredBranch);
+    const created = yield* git
+      .createWorktree({ cwd, refName: "HEAD", newRefName: branch, path: null })
+      .pipe(
+        Effect.mapError((error) =>
+          fail(error.detail.trim() || `Could not create a worktree for \`${branch}\`.`, error),
+        ),
+      );
+    const worktreePath = created.worktree.path;
+    if (threadId !== undefined) {
+      yield* projectSetupScriptRunner
+        .runForThread({ threadId, projectCwd: cwd, worktreePath })
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("UpstreamTake setup script failed", {
+              threadId,
+              worktreePath,
+              cause: error,
+            }).pipe(Effect.asVoid),
+          ),
+        );
+    }
+    return { branch, worktreePath };
+  });
+
+  /** What git left unmerged, which is what tells a conflict apart from a failure. */
+  const listConflicts = (worktreePath: string) =>
+    run("conflicts", worktreePath, ["diff", "--name-only", "--diff-filter=U"]).pipe(
+      Effect.map((result) => stdoutLines(result.stdout)),
+      Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+    );
+
+  /** Take back a worktree nobody can carry on in, rather than leaving a branch nobody asked for. */
+  const discardWorktree = Effect.fn("UpstreamTake.discardWorktree")(function* (
+    cwd: string,
+    worktreePath: string,
+    branch: string,
+    abortArgs: ReadonlyArray<string>,
+  ) {
+    yield* run("abort", worktreePath, abortArgs, { allowNonZeroExit: true }).pipe(Effect.ignore);
+    yield* git.removeWorktree({ cwd, path: worktreePath, force: true }).pipe(Effect.ignore);
+    yield* run("deleteBranch", cwd, ["branch", "-D", branch], {
+      allowNonZeroExit: true,
+    }).pipe(Effect.ignore);
+  });
+
+  const cherryPick: UpstreamTakeService["Service"]["cherryPick"] = Effect.fn(
+    "UpstreamTake.cherryPick",
   )(function* (input) {
     const commits = yield* resolveCommits(input);
     // Nothing to take, and so nothing to leave behind: a worktree holding a branch identical to
@@ -236,34 +315,11 @@ export const make = Effect.gen(function* () {
       };
     }
 
-    const branch = yield* resolveBranchName(input.cwd, `t3code/cherry-pick/pr-${input.number}`);
-    // Cut from where the project stands, which is the tree these commits are being ported into.
-    // Never checked out here: the developer is working in that tree, and a pick that stops on a
-    // conflict would leave it stopped.
-    const created = yield* git
-      .createWorktree({ cwd: input.cwd, refName: "HEAD", newRefName: branch, path: null })
-      .pipe(
-        Effect.mapError((error) =>
-          fail(error.detail.trim() || `Could not create a worktree for \`${branch}\`.`, error),
-        ),
-      );
-    const worktreePath = created.worktree.path;
-    // Best effort, and before the pick rather than after it: a conflicted worktree is one
-    // somebody is about to build in, and it should be installing while they read the conflict.
-    // A project with no setup script, or one that fails, still gets its commits.
-    if (input.threadId !== undefined) {
-      yield* projectSetupScriptRunner
-        .runForThread({ threadId: input.threadId, projectCwd: input.cwd, worktreePath })
-        .pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("PullRequestCherryPick setup script failed", {
-              threadId: input.threadId,
-              worktreePath,
-              cause: error,
-            }).pipe(Effect.asVoid),
-          ),
-        );
-    }
+    const { branch, worktreePath } = yield* openWorktree(
+      input.cwd,
+      `t3code/cherry-pick/pr-${input.number}`,
+      input.threadId,
+    );
 
     // `-x` records where each commit came from, which is the only trace left once the branch is
     // squashed or rebased. Redundant commits are kept rather than stopping the sequence: a
@@ -285,14 +341,7 @@ export const make = Effect.gen(function* () {
       };
     }
 
-    const conflicted = yield* run("conflicts", worktreePath, [
-      "diff",
-      "--name-only",
-      "--diff-filter=U",
-    ]).pipe(
-      Effect.map((result) => stdoutLines(result.stdout)),
-      Effect.orElseSucceed(() => []),
-    );
+    const conflicted = yield* listConflicts(worktreePath);
     if (conflicted.length > 0) {
       return {
         status: "conflicted" as const,
@@ -305,23 +354,110 @@ export const make = Effect.gen(function* () {
     }
 
     // Stopped for something other than a conflict — a hook, a missing object, a broken index.
-    // Nothing here is worth carrying on in, so the pick is undone and the worktree taken back
-    // rather than left as a branch nobody asked for.
-    yield* run("abort", worktreePath, ["cherry-pick", "--abort"], {
-      allowNonZeroExit: true,
-    }).pipe(Effect.ignore);
-    yield* git
-      .removeWorktree({ cwd: input.cwd, path: worktreePath, force: true })
-      .pipe(Effect.ignore);
-    yield* run("deleteBranch", input.cwd, ["branch", "-D", branch], {
-      allowNonZeroExit: true,
-    }).pipe(Effect.ignore);
+    // Nothing here is worth carrying on in.
+    yield* discardWorktree(input.cwd, worktreePath, branch, ["cherry-pick", "--abort"]);
     return yield* fail(
       picked.stderr.trim() || picked.stdout.trim() || `Cherry-picking #${input.number} failed.`,
     );
   });
 
-  return { cherryPick } satisfies PullRequestCherryPickService["Service"];
+  /**
+   * Take a whole release rather than one change request: fetch its tag and merge it onto a
+   * branch of its own, in a worktree of its own.
+   *
+   * A merge rather than a pick because a release is not a change to port — it is everything the
+   * upstream has done since, and replaying that commit by commit would be a hundred conflicts
+   * where the merge is one. What the fork has of its own survives it, which is the whole point of
+   * merging into a branch cut from the fork's own HEAD rather than resetting onto the tag.
+   */
+  const mergeRelease: UpstreamTakeService["Service"]["mergeRelease"] = Effect.fn(
+    "UpstreamTake.mergeRelease",
+  )(function* (input) {
+    const source = yield* resolveFetchSource(input.cwd, input.host, input.repository);
+    const tagRef = `refs/t3code/release/${refSafe(input.repository)}/${refSafe(input.tagName)}`;
+    yield* run("fetchTag", input.cwd, [
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      source,
+      `+refs/tags/${input.tagName}:${tagRef}`,
+    ]).pipe(
+      Effect.mapError(() =>
+        fail(
+          `Could not fetch \`${input.tagName}\` from ${input.repository}. The release may have been withdrawn, or its tag never pushed.`,
+        ),
+      ),
+    );
+
+    // Already here, and so nothing to make: the release is in this branch's history, and a
+    // worktree holding a merge that does nothing is only something to clean up later.
+    const contained = yield* run(
+      "isAncestor",
+      input.cwd,
+      ["merge-base", "--is-ancestor", tagRef, "HEAD"],
+      { allowNonZeroExit: true },
+    );
+    if (contained.exitCode === 0) {
+      return {
+        status: "up-to-date" as const,
+        tagName: input.tagName,
+        worktreePath: null,
+        branch: null,
+        conflictedPaths: [],
+        conflictedPathCount: 0,
+      };
+    }
+    const behindBy = yield* run("behindBy", input.cwd, [
+      "rev-list",
+      "--count",
+      `HEAD..${tagRef}`,
+    ]).pipe(
+      Effect.map((result) => Number.parseInt(result.stdout.trim(), 10)),
+      Effect.map((count) => (Number.isFinite(count) && count >= 0 ? count : null)),
+      Effect.orElseSucceed(() => null),
+    );
+
+    const { branch, worktreePath } = yield* openWorktree(
+      input.cwd,
+      `t3code/upstream/${refSafe(input.tagName)}`,
+      input.threadId,
+    );
+    // `--no-ff` so the release is a merge in the history rather than a branch quietly becoming
+    // the upstream's; `--no-edit` because nobody is at a terminal to close an editor.
+    const merged = yield* run("merge", worktreePath, ["merge", "--no-ff", "--no-edit", tagRef], {
+      allowNonZeroExit: true,
+    });
+    const behind = behindBy === null ? {} : { behindBy };
+    if (merged.exitCode === 0) {
+      return {
+        status: "merged" as const,
+        tagName: input.tagName,
+        worktreePath,
+        branch,
+        ...behind,
+        conflictedPaths: [],
+        conflictedPathCount: 0,
+      };
+    }
+    const conflicted = yield* listConflicts(worktreePath);
+    if (conflicted.length > 0) {
+      return {
+        status: "conflicted" as const,
+        tagName: input.tagName,
+        worktreePath,
+        branch,
+        ...behind,
+        conflictedPaths: conflicted.slice(0, MAX_REPORTED_CONFLICT_PATHS),
+        conflictedPathCount: conflicted.length,
+      };
+    }
+    yield* discardWorktree(input.cwd, worktreePath, branch, ["merge", "--abort"]);
+    return yield* fail(
+      merged.stderr.trim() || merged.stdout.trim() || `Merging \`${input.tagName}\` failed.`,
+    );
+  });
+
+  return { cherryPick, mergeRelease } satisfies UpstreamTakeService["Service"];
 });
 
-export const layer = Layer.effect(PullRequestCherryPickService, make);
+export const layer = Layer.effect(UpstreamTakeService, make);

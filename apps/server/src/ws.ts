@@ -36,6 +36,7 @@ import {
   type ProjectFileFailure,
   type ProjectFileOperation,
   ProjectListEntriesError,
+  PullRequestOperationError,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
@@ -96,7 +97,7 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
-import * as PullRequestCherryPick from "./pullRequest/PullRequestCherryPick.ts";
+import * as UpstreamTake from "./pullRequest/UpstreamTake.ts";
 import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -367,7 +368,7 @@ const makeWsRpcLayer = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const pullRequestRanking = yield* PullRequestRanking.PullRequestRankingService;
-      const pullRequestCherryPick = yield* PullRequestCherryPick.PullRequestCherryPickService;
+      const upstreamTake = yield* UpstreamTake.UpstreamTakeService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1697,7 +1698,7 @@ const makeWsRpcLayer = (
               Effect.flatMap((project) =>
                 pullRequests.detail(input).pipe(
                   Effect.flatMap((detail) =>
-                    pullRequestCherryPick.cherryPick({
+                    upstreamTake.cherryPick({
                       cwd: project.workspaceRoot,
                       provider: detail.provider,
                       host: project.host,
@@ -1708,6 +1709,49 @@ const makeWsRpcLayer = (
                     }),
                   ),
                 ),
+              ),
+            ),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsUpstreamRelease]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsUpstreamRelease,
+            // Only the release itself crosses the wire: where to take it and which tags exist are
+            // for the merge below to re-read, not for a page to hold and hand back.
+            pullRequests
+              .upstreamRelease(input)
+              .pipe(Effect.map((view) => ({ release: view?.release ?? null }))),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsMergeUpstreamRelease]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsMergeUpstreamRelease,
+            // The upstream is resolved here rather than named by the client, and the tag is
+            // checked against what that upstream has actually published: it reaches a refspec,
+            // and a page can be stale or lying.
+            pullRequests.upstreamRelease({ projectId: input.projectId }).pipe(
+              Effect.flatMap((view) =>
+                view === null
+                  ? Effect.fail(
+                      new PullRequestOperationError({
+                        operation: "mergeUpstreamRelease",
+                        detail: "This project has no upstream releases to take.",
+                      }),
+                    )
+                  : !view.publishedTags.includes(input.tagName)
+                    ? Effect.fail(
+                        new PullRequestOperationError({
+                          operation: "mergeUpstreamRelease",
+                          detail: `${view.release.repository} has not published \`${input.tagName}\` lately. Reload the page and take the release it shows.`,
+                        }),
+                      )
+                    : upstreamTake.mergeRelease({
+                        cwd: view.workspaceRoot,
+                        host: view.host,
+                        repository: view.release.repository,
+                        tagName: input.tagName,
+                        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+                      }),
               ),
             ),
             { "rpc.aggregate": "pull-requests" },

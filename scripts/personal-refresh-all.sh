@@ -25,17 +25,45 @@ echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) orchestrate start ===="
 
 cd "$REPO"
 git fetch "$PERSONAL_REMOTE" personal
+# Upstream too, because the fork is meant to stay level with it rather than drift: the fork being
+# unchanged is no longer a reason to skip a run, since upstream may have moved instead.
+UPSTREAM_REMOTE="${T3_UPSTREAM_REMOTE:-origin}"
+UPSTREAM_BRANCH="${T3_UPSTREAM_BRANCH:-main}"
+git fetch "$UPSTREAM_REMOTE" "$UPSTREAM_BRANCH"
 NEW=$(git rev-parse "$PERSONAL_REMOTE/personal")
+UPSTREAM_HEAD=$(git rev-parse "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH")
 OLD=$(cat "$STATE" 2>/dev/null || true)
 echo "${PERSONAL_REMOTE}/personal=$NEW previously=$OLD"
-
-if [[ "$NEW" == "$OLD" && -z "${T3_FORCE_REBUILD:-}" ]]; then
-  echo "no changes — skipping rebuild"
-  exit 0
-fi
+echo "${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}=$UPSTREAM_HEAD"
 
 git checkout personal
 git reset --hard "$PERSONAL_REMOTE/personal"
+
+# --- stay level with upstream ---
+# The fork carries its own features on top of T3 Code, and every hour it spends behind is another
+# hour of drift for those features to conflict with. So each run merges upstream first and the
+# build decides whether it was a good idea: a merge that compiles is pushed, one that does not
+# never leaves this machine.
+#
+# Conflicts are not fixed here. A script cannot judge which side of a conflict was deliberate;
+# the merge is taken back and the pull requests page's "Take release" button hands the same merge
+# to an agent in a worktree, which can.
+BEHIND=$(git rev-list --count "HEAD..${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}")
+MERGED_UPSTREAM=0
+if [[ "$BEHIND" -eq 0 ]]; then
+  echo "level with ${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}"
+elif git merge --no-edit "${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}"; then
+  MERGED_UPSTREAM=1
+  echo "UPSTREAM_MERGED $BEHIND commits from ${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}"
+else
+  git merge --abort || true
+  echo "UPSTREAM_MERGE_CONFLICT $BEHIND commits behind ${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH} — take the release from the pull requests page and let an agent resolve it" >&2
+fi
+
+if [[ "$NEW" == "$OLD" && "$MERGED_UPSTREAM" -eq 0 && -z "${T3_FORCE_REBUILD:-}" ]]; then
+  echo "no changes — skipping rebuild"
+  exit 0
+fi
 
 # Bake T3 Connect public client config into desktop artifacts (gitignored .env).
 # Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
@@ -56,6 +84,15 @@ echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 # --- Mac ---
 echo "-- building Mac --"
 pnpm dist:desktop:dmg:arm64
+
+# The build is the review. An upstream merge only becomes the fork's history once it has compiled
+# here — pushed before Blade builds, because Blade builds from the fork rather than from this
+# tree, and an unpushed merge would have the three machines running different code.
+if [[ "$MERGED_UPSTREAM" -eq 1 ]]; then
+  git push "$PERSONAL_REMOTE" personal
+  NEW=$(git rev-parse HEAD)
+  echo "UPSTREAM_MERGE_PUSHED $NEW"
+fi
 DMG=$(ls -1t "$REPO"/release/T3-Code-*-arm64.dmg | head -1)
 MOUNT=$(hdiutil attach "$DMG" -nobrowse | awk 'END{for(i=3;i<=NF;i++) printf "%s%s", (i>3?" ":""), $i; print ""}')
 APP=$(find "$MOUNT" -maxdepth 1 -name '*.app' -print | head -1)

@@ -58,6 +58,9 @@ T3 Code works with the platforms your team already uses:
   and creates no branch
 - **Implement** is there for the change whose code will not travel — it reimplements the behavior
   in your tree instead of taking the commits
+- The upstream's latest release sits above the list with a **Take release** button, which merges
+  that tag the same way: onto its own branch, in its own worktree, with a thread that resolves the
+  conflicts — and is told to stop and say so if taking it would make your fork worse
 
 **Fix what you wrote, in place**
 
