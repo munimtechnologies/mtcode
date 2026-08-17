@@ -240,16 +240,20 @@ export function PreviewView({
         throw error;
       }
       updatePreviewServerSnapshot(threadRef, result.value);
-      if (runtimeTabId) {
-        await applyPreviewGuestViewport(
-          previewBridge?.automation.setViewport,
-          runtimeTabId,
-          nextViewport,
-        );
-      }
     },
-    [resize, runtimeTabId, tabId, threadRef],
+    [resize, tabId, threadRef],
   );
+
+  const viewportOverrideKey =
+    viewport._tag === "fill" ? "fill" : `${viewport._tag}:${viewport.width}x${viewport.height}`;
+  useEffect(() => {
+    if (!runtimeTabId || !desktopOverlay?.hasWebContents) return;
+    void applyPreviewGuestViewport(
+      previewBridge?.automation.setViewport,
+      runtimeTabId,
+      viewport,
+    ).catch(() => undefined);
+  }, [desktopOverlay?.hasWebContents, runtimeTabId, viewport, viewportOverrideKey]);
 
   const handleToggleDeviceToolbar = () => {
     if (!runtimeTabId) return;

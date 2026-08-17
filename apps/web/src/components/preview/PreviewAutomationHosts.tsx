@@ -180,14 +180,6 @@ const waitForRenderedViewport = async (
       const declaredViewport = readDeclaredViewport(webview);
       const renderedViewport = webview ? await readWebviewViewport(webview) : null;
       if (
-        setting._tag !== "fill" &&
-        renderedViewport &&
-        Math.abs(renderedViewport.width - setting.width) <= 1 &&
-        Math.abs(renderedViewport.height - setting.height) <= 1
-      ) {
-        return renderedViewport;
-      }
-      if (
         renderedViewport &&
         isPreviewViewportReady({
           setting,
@@ -531,6 +523,17 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               try {
                 await applyPreviewGuestViewport(setViewport, ready.runtimeTabId, setting);
               } catch (error) {
+                const rollback = await resize({
+                  environmentId,
+                  input: {
+                    threadId: request.threadId,
+                    tabId: ready.tabId,
+                    viewport: previousSetting,
+                  },
+                });
+                if (rollback._tag !== "Failure") {
+                  updatePreviewServerSnapshot(threadRef, rollback.value);
+                }
                 await applyPreviewGuestViewport(
                   setViewport,
                   ready.runtimeTabId,
