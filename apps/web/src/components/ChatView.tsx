@@ -146,7 +146,10 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { isThreadOwnPullRequest } from "./pullRequest/pullRequestDetail.logic";
+import {
+  isThreadOwnPullRequest,
+  pullRequestActionNeedsVcsRefresh,
+} from "./pullRequest/pullRequestDetail.logic";
 import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
@@ -1223,6 +1226,7 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const switchGitRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
+  const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
   const setThreadRuntimeMode = useAtomCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
   });
@@ -6162,6 +6166,13 @@ function ChatViewContent(props: ChatViewProps) {
         }
         chromeVariant="collapse"
         composerDraftTarget={composerDraftTarget}
+        onActed={(action) => {
+          if (!pullRequestActionNeedsVcsRefresh(action) || gitStatusCwd === null) return;
+          void refreshVcsStatus({
+            environmentId: activeThread.environmentId,
+            input: { cwd: gitStatusCwd },
+          });
+        }}
         onStateChange={handlePullRequestTabStatusChange}
       />
     ) : activeRightPanelSurface?.kind === "agents" ? (
