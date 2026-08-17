@@ -360,7 +360,7 @@ fn truncate(value: &str, limit: usize) -> String {
 /// Unknown modifiers are rejected (except `fn`, which has no synthetic
 /// equivalent and is intentionally ignored) so a typo like `ctl` cannot
 /// silently send the bare key while reporting success.
-fn key_sequence(key: &str, modifiers: &[String]) -> Result<String, String> {
+fn key_sequence(key: &str, modifiers: &[String]) -> Result<String> {
     let mut sequence = String::new();
     for modifier in modifiers {
         let token = match modifier.to_lowercase().as_str() {
@@ -372,9 +372,9 @@ fn key_sequence(key: &str, modifiers: &[String]) -> Result<String, String> {
             // than refusing an otherwise valid chord.
             "fn" => "",
             other => {
-                return Err(format!(
+                return Err(DesktopError::new(format!(
                     "unsupported modifier '{other}' — use ctrl, shift, alt, or cmd"
-                ));
+                )));
             }
         };
         sequence.push_str(token);
@@ -567,7 +567,7 @@ impl Desktop for WindowsDesktop {
     }
 
     fn press_key(&mut self, key: &str, modifiers: &[String]) -> Result<String> {
-        let sequence = key_sequence(key, modifiers).map_err(DesktopError::new)?;
+        let sequence = key_sequence(key, modifiers)?;
         Keyboard::default()
             .send_keys(&sequence)
             .map_err(|error| DesktopError::new(format!("key press failed: {error}")))?;
