@@ -209,9 +209,9 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
  * Firefox uses `cookies.sqlite`, and its profile paths from `profiles.ini`
  * may already be absolute.
  *
- * Newer Chromium versions (127+) moved the cookie database into a `Network`
- * subdirectory. The candidate list includes both locations so callers can
- * tolerate either layout.
+ * Chrome 96+ moved network-related files (including Cookies) into a `Network`
+ * subdirectory for sandboxing. The candidate list includes both locations so
+ * callers tolerate fresh and legacy installs alike.
  */
 export const cookieDatabaseCandidatePaths = (
   definition: BrowserImportSourceDefinition,
@@ -229,7 +229,7 @@ export const cookieDatabaseCandidatePaths = (
   if (definition.engine === "safari") {
     return [context.path.join(profilePath, "Cookies.binarycookies")];
   }
-  // Chromium: older versions use `Cookies`, 127+ use `Network/Cookies`.
+  // Chromium: pre-96 uses `Cookies`, 96+ use `Network/Cookies`.
   return [
     context.path.join(profilePath, "Cookies"),
     context.path.join(profilePath, "Network", "Cookies"),
