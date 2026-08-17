@@ -3,11 +3,7 @@ import { CircleIcon } from "lucide-react";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  PullRequestFiltersMenu,
-  pullRequestProjectKey,
-  SORT_OPTIONS,
-} from "./PullRequestListFilters";
+import { PullRequestFiltersMenu, pullRequestProjectKey } from "./PullRequestListFilters";
 
 function findValueChange(
   node: ReactNode,
@@ -59,9 +55,6 @@ function menu(overrides: Partial<Parameters<typeof PullRequestFiltersMenu>[0]>) 
     onInvolvement: () => undefined,
     filters: {},
     onFilters: () => undefined,
-    sort: "updated" as const,
-    sortOptions: SORT_OPTIONS,
-    onSort: () => undefined,
     host: undefined,
     hostOptions: [],
     onHost: () => undefined,
@@ -184,24 +177,5 @@ describe("pull request filters menu", () => {
         id: "b c" as ProjectId,
       }),
     );
-  });
-});
-
-describe("sort", () => {
-  it("offers both orders, and reports the one chosen", () => {
-    const onSort = vi.fn();
-    const group = findValueChange(findLabeledGroup(menu({ onSort }), "Sort"));
-    expect(group).toBeDefined();
-
-    group?.props.onValueChange("useful");
-    expect(onSort).toHaveBeenCalledWith("useful");
-  });
-
-  it("does not emit a change when the order already shown is chosen again", () => {
-    const onSort = vi.fn();
-    const group = findValueChange(findLabeledGroup(menu({ sort: "updated", onSort }), "Sort"));
-
-    group?.props.onValueChange("updated");
-    expect(onSort).not.toHaveBeenCalled();
   });
 });

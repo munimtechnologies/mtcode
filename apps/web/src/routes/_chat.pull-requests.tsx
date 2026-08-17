@@ -15,6 +15,7 @@ import type {
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
+  ClockIcon,
   EyeIcon,
   GitForkIcon,
   MonitorIcon,
@@ -27,6 +28,7 @@ import {
   LoaderIcon,
   RefreshCwIcon,
   SearchIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -34,7 +36,6 @@ import {
   filterPullRequestsByInvolvement,
   findScopedProject,
   groupPullRequestsByInvolvement,
-  isPullRequestSortOrder,
   sortPullRequestEntries,
   matchesPullRequestFilters,
   matchesPullRequestQuery,
@@ -57,11 +58,10 @@ import {
   type MergedPullRequestList,
   type PullRequestDiffStats,
   type PullRequestPartitionsSnapshot,
-  type PullRequestSortOrder,
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
+import { PullRequestUpstreamCard } from "../components/pullRequest/PullRequestUpstreamCard";
 import { useAtomValue } from "@effect/atom-react";
-import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { usePrimarySettings } from "~/hooks/useSettings";
 import { resolveAppModelSelectionState } from "~/modelSelection";
 import { primaryServerProvidersAtom } from "~/state/server";
@@ -73,8 +73,6 @@ import {
   pullRequestProjectKey,
   type PullRequestExpectedHost,
   type PullRequestFilterOption,
-  RECENCY_ONLY_SORT_OPTIONS,
-  SORT_OPTIONS,
 } from "../components/pullRequest/PullRequestListFilters";
 import { PullRequestListEmptyState } from "../components/pullRequest/PullRequestListEmptyState";
 import { PullRequestListGhost } from "../components/pullRequest/PullRequestGhosts";
@@ -116,14 +114,8 @@ import { getSourceControlPresentationForKind } from "~/sourceControlPresentation
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 export interface PullRequestsSearch {
-  readonly involvement: PullRequestFeed;
+  readonly involvement: PullRequestInvolvement;
   readonly state: PullRequestListState;
-  /**
-   * What each section is ordered by. Optional so a link written before there was a choice — and
-   * every navigation that only means to change the state or the involvement — still type-checks;
-   * `validateSearch` fills it in, so a mounted route always has one.
-   */
-  readonly sort?: PullRequestSortOrder;
   /**
    * Narrows the list to one server. Absent means every connected one, which is the default the
    * page has now — so a link written before servers could be chosen still opens the whole list.
@@ -156,15 +148,6 @@ export interface PullRequestsSearch {
 }
 
 // The state filters wear the same glyphs the rows do, so the two read as one vocabulary.
-/**
- * The upstream view sits on the involvement control because that is where the reader already
- * chooses whose work they are looking at — but it is a repository scope rather than an
- * involvement, so it carries its own value and is unfolded into the two fields the server takes.
- */
-const UPSTREAM_FEED = "upstream";
-
-type PullRequestFeed = PullRequestInvolvement | typeof UPSTREAM_FEED;
-
 const INVOLVEMENT_TABS = [
   { value: "all", label: "All", Icon: LayersIcon },
   { value: "reviewing", label: "Reviewing", Icon: EyeIcon },
@@ -212,14 +195,9 @@ const EMPTY_PENDING_SURFACES = new Set<string>();
 export const Route = createFileRoute("/_chat/pull-requests")({
   validateSearch: (raw: Record<string, unknown>): PullRequestsSearch => ({
     involvement:
-      raw.involvement === "reviewing" ||
-      raw.involvement === "authored" ||
-      raw.involvement === UPSTREAM_FEED
-        ? raw.involvement
-        : "all",
+      raw.involvement === "reviewing" || raw.involvement === "authored" ? raw.involvement : "all",
     state:
       raw.state === "closed" || raw.state === "merged" || raw.state === "all" ? raw.state : "open",
-    sort: isPullRequestSortOrder(raw.sort) ? raw.sort : "updated",
     ...(typeof raw.repository === "string" && raw.repository
       ? { repository: raw.repository.slice(0, 200) }
       : {}),
@@ -448,7 +426,6 @@ function PullRequestsRouteView() {
           return {
             involvement: next.involvement ?? previous.involvement,
             state: next.state ?? previous.state,
-            ...(next.sort === undefined ? {} : { sort: next.sort }),
             ...(next.repository ? { repository: next.repository } : {}),
             ...(next.number ? { number: next.number } : {}),
             ...(next.projectId ? { projectId: next.projectId } : {}),
@@ -501,11 +478,7 @@ function PullRequestsRouteView() {
   // Searching asks the hosts, which takes a round trip, so the text is held for a moment before
   // it is sent. Until it lands, the rows already on screen are narrowed locally: the answer is
   // late but the page is not.
-  // The upstream view is not an involvement the hosts understand: it reads everybody's work on
-  // one other repository, so it asks for `all` and narrows by repository instead.
-  const upstreamFeed = search.involvement === UPSTREAM_FEED;
-  const involvement: PullRequestInvolvement = upstreamFeed ? "all" : search.involvement;
-  const upstreamMode = upstreamFeed ? ("only" as const) : undefined;
+  const involvement: PullRequestInvolvement = search.involvement;
 
   const typedQuery = (search.q ?? "").trim();
   const sentQuery = useDebouncedValue(typedQuery, SEARCH_DEBOUNCE_MS);
@@ -655,7 +628,6 @@ function PullRequestsRouteView() {
               ...(hasFilters ? { filters } : {}),
               ...(sentParsed.text ? { query: sentParsed.text } : {}),
               ...(cursors === undefined ? {} : { cursors }),
-              ...(upstreamMode === undefined ? {} : { upstream: upstreamMode }),
             } satisfies PullRequestListInput,
           },
         ];
@@ -698,7 +670,6 @@ function PullRequestsRouteView() {
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
-          ...(upstreamMode === undefined ? {} : { upstream: upstreamMode }),
         } satisfies PullRequestListInput,
       })),
     [
@@ -712,6 +683,34 @@ function PullRequestsRouteView() {
     ],
   );
   const baselineQuery = usePullRequestList(baselineTargets);
+  // The upstream reads on its own rather than as part of the feed. Sharing one slice is how a
+  // busy upstream crowds out the reader's own work — it is a different question with a different
+  // answer, so it gets a request and a budget of its own.
+  const upstreamTargets = useMemo(
+    () =>
+      environmentQueries.map(({ environmentId, projectIds }) => ({
+        environmentId,
+        input: {
+          state: search.state,
+          involvement: "all" as const,
+          upstream: "only" as const,
+          limit: PAGE_SIZE,
+          ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+          ...(projectIds ? { projectIds } : {}),
+          ...(search.host ? { host: search.host } : {}),
+          ...(menuFiltered ? { filters: menuFilters } : {}),
+        } satisfies PullRequestListInput,
+      })),
+    [environmentQueries, menuFiltered, menuFilters, scopedProjectId, search.host, search.state],
+  );
+  const upstreamQuery = usePullRequestList(upstreamTargets);
+  const upstreamEntries = useMemo(() => {
+    const rows = upstreamQuery.data?.entries ?? [];
+    // The search box narrows these the way it narrows everything else on the page.
+    return typedParsed.text.length === 0
+      ? rows
+      : rows.filter((row) => matchesPullRequestQuery(row, typedParsed.text));
+  }, [upstreamQuery.data?.entries, typedParsed.text]);
   // The priority groups' own reads. The feed below is paginated by recency, so an older authored
   // or review-requested row can be missing from its first page; partitioned from these
   // server-filtered reads instead, the priority view is complete up front and a continuation can
@@ -1149,7 +1148,7 @@ function PullRequestsRouteView() {
   // agent needs no reads of its own. Every candidate goes in — the server splits a long set across
   // prompts rather than taking the first few — so a section reordered by this is reordered whole.
   const rankTargets = useMemo(() => {
-    if (search.sort !== "useful") return NO_RANK_TARGETS;
+    if (upstreamEntries.length === 0) return NO_RANK_TARGETS;
     const byRepository = new Map<
       string,
       {
@@ -1159,10 +1158,7 @@ function PullRequestsRouteView() {
         };
       }
     >();
-    for (const entry of entries) {
-      // Only the upstream section is ranked: the reader's own work and their review queue are
-      // ordered by what is waiting on them, which no judgement of usefulness improves.
-      if (entry.isUpstream !== true) continue;
+    for (const entry of upstreamEntries) {
       const key = `${entry.environmentId} ${entry.projectId} ${entry.repository}`;
       const held = byRepository.get(key);
       const candidate = {
@@ -1185,10 +1181,14 @@ function PullRequestsRouteView() {
       held.input.candidates.push(candidate);
     }
     return [...byRepository.values()];
-  }, [entries, rankingModel, search.sort]);
-  const { usefulness, error: rankingErrorRaw } = usePullRequestUsefulness(rankTargets);
-  // Only worth saying when an order that depends on it was asked for.
-  const rankingError = search.sort === "useful" ? rankingErrorRaw : null;
+  }, [upstreamEntries, rankingModel]);
+  const {
+    usefulness,
+    reasons: rankingReasons,
+    isPending: rankingPending,
+    error: rankingErrorRaw,
+  } = usePullRequestUsefulness(rankTargets);
+  const rankingError = upstreamEntries.length === 0 ? null : rankingErrorRaw;
 
   const groups = useMemo(() => {
     if (search.involvement !== "all") return [{ key: "others" as const, label: "", entries }];
@@ -1215,15 +1215,10 @@ function PullRequestsRouteView() {
     const reviewing = narrow(
       partitionsWanted ? (reviewingQuery.data?.entries ?? held?.reviewing) : undefined,
     );
-    const grouped =
-      authored === undefined || reviewing === undefined
-        ? groupPullRequestsByInvolvement(entries, viewers)
-        : partitionPullRequestsWithPriority(entries, authored, reviewing);
-    if ((search.sort ?? "updated") === "updated") return grouped;
-    return grouped.map((group) => ({
-      ...group,
-      entries: sortPullRequestEntries(group.entries, search.sort ?? "updated", usefulness),
-    }));
+    if (authored === undefined || reviewing === undefined) {
+      return groupPullRequestsByInvolvement(entries, viewers);
+    }
+    return partitionPullRequestsWithPriority(entries, authored, reviewing);
   }, [
     hasLocalFilters,
     localFilters,
@@ -1235,10 +1230,22 @@ function PullRequestsRouteView() {
     reviewingQuery.data?.entries,
     scopeKey,
     search.involvement,
-    search.sort,
-    usefulness,
     viewers,
   ]);
+
+  /**
+   * The upstream, in the two orders worth having at once: what an agent thinks is worth porting,
+   * and what simply landed most recently. Both hold every row — the same pull request appearing
+   * in each is the point, since "useful" and "recent" are different questions about it.
+   */
+  const upstreamSections = useMemo(() => {
+    if (upstreamEntries.length === 0) return null;
+    return {
+      repository: upstreamEntries[0]!.repository,
+      mostUseful: sortPullRequestEntries(upstreamEntries, "useful", usefulness),
+      latest: sortPullRequestEntries(upstreamEntries, "updated"),
+    };
+  }, [upstreamEntries, usefulness]);
 
   // Keyed by every row being shown — the partitions can hold rows the feed has not paged to —
   // so scrolling further asks only about what is new. One read per environment, each asking only
@@ -1501,6 +1508,67 @@ function PullRequestsRouteView() {
         </div>
       )}
 
+      {upstreamSections !== null ? (
+        <div className="space-y-4 pt-2">
+          {/* A rule with the repository sitting in it: the work below is somebody else's, and the
+              break has to be obvious enough that nobody reads it as more of their own queue. */}
+          <div className="flex items-center gap-3 pt-2">
+            <span className="h-px flex-1 bg-border" />
+            <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <GitForkIcon className="size-3.5" />
+              {upstreamSections.repository}
+            </span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">
+              <SparklesIcon className="size-3.5" />
+              Most useful
+              {rankingPending ? <LoaderIcon aria-hidden className="size-3 animate-spin" /> : null}
+            </h2>
+            <div className="space-y-2">
+              {upstreamSections.mostUseful.map((entry) => (
+                <PullRequestUpstreamCard
+                  key={`useful-${pullRequestEntryKey(entry)}`}
+                  entry={entry}
+                  {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
+                    ? { reason: rankingReasons.get(pullRequestEntryKey(entry))! }
+                    : {})}
+                  selected={
+                    selected?.environmentId === entry.environmentId &&
+                    selected.repository === entry.repository &&
+                    selected.number === entry.number
+                  }
+                  onSelect={selectEntry}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">
+              <ClockIcon className="size-3.5" />
+              Latest
+            </h2>
+            <div className="space-y-2">
+              {upstreamSections.latest.map((entry) => (
+                <PullRequestUpstreamCard
+                  key={`latest-${pullRequestEntryKey(entry)}`}
+                  entry={entry}
+                  selected={
+                    selected?.environmentId === entry.environmentId &&
+                    selected.repository === entry.repository &&
+                    selected.number === entry.number
+                  }
+                  onSelect={selectEntry}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {rankingError !== null ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
           {/* Named rather than swallowed: ranking is a model call, and the usual reason it does
@@ -1559,46 +1627,6 @@ function PullRequestsRouteView() {
       Icon: environment.displayUrl === null ? MonitorIcon : ServerIcon,
     })),
   ];
-  // On the page rather than in the filters menu: this is which body of work is being looked at,
-  // not a narrowing of one, and it is the switch the page exists to offer. Involvement stays in
-  // the menu, and it applies within whichever of these is showing.
-  // Named after the repository once the page has seen one, so the switch says which upstream it
-  // means rather than making the reader remember.
-  const upstreamRepository = entries.find((entry) => entry.isUpstream === true)?.repository;
-  const upstreamLabel = upstreamRepository ?? "Upstream";
-
-  const feedTabs = (
-    <ToggleGroup
-      className="gap-1"
-      size="sm"
-      value={[upstreamFeed ? UPSTREAM_FEED : "workspace"]}
-      onValueChange={(value) => {
-        const next = value[0];
-        if (next === UPSTREAM_FEED) {
-          updateListScope({ involvement: UPSTREAM_FEED });
-          return;
-        }
-        if (next === "workspace" && upstreamFeed) {
-          // Back to the reader's own work, at the involvement the menu is still set to.
-          updateListScope({ involvement: "all", sort: "updated" });
-        }
-      }}
-    >
-      <Toggle aria-label="Pull requests in this workspace" value="workspace" variant="ghost">
-        <LayersIcon className="size-3.5" />
-        Workspace
-      </Toggle>
-      <Toggle
-        aria-label="Pull requests from the upstream repository"
-        value={UPSTREAM_FEED}
-        variant="ghost"
-      >
-        <GitForkIcon className="size-3.5" />
-        {upstreamLabel}
-      </Toggle>
-    </ToggleGroup>
-  );
-
   const filtersMenu = (
     <PullRequestFiltersMenu
       state={search.state}
@@ -1607,15 +1635,12 @@ function PullRequestsRouteView() {
       involvement={involvement}
       involvementOptions={INVOLVEMENT_TABS}
       onInvolvement={(involvement) =>
-        updateListScope({ involvement: involvement as PullRequestFeed })
+        updateListScope({ involvement: involvement as PullRequestInvolvement })
       }
       filters={menuFilters}
       onFilters={(next) =>
         updateListScope({ draft: next.draft, review: next.review, checks: next.checks })
       }
-      sort={upstreamFeed ? (search.sort ?? "updated") : "updated"}
-      sortOptions={upstreamFeed ? SORT_OPTIONS : RECENCY_ONLY_SORT_OPTIONS}
-      onSort={(sort) => updateListScope({ sort })}
       host={search.host}
       hostOptions={hostMenuOptions}
       onHost={(host) => updateListScope({ host })}
@@ -1645,12 +1670,11 @@ function PullRequestsRouteView() {
     host: search.host,
     hostMenuOptions,
     onInvolvement: (involvement: string) =>
-      updateListScope({ involvement: involvement as PullRequestFeed }),
+      updateListScope({ involvement: involvement as PullRequestInvolvement }),
     onState: (state: PullRequestListState) => updateListScope({ state }),
     onHost: (host: string | undefined) => updateListScope({ host }),
     searchInput,
     filtersMenu,
-    feedTabs,
     rightPanelControl:
       // Footprint reserve while the panel is closed: the toggle itself stays
       // mounted at the fixed titlebar inset in both states so it cannot move
@@ -1920,7 +1944,6 @@ function PullRequestsColumn({
   onHost,
   searchInput,
   filtersMenu,
-  feedTabs,
   rightPanelControl,
   rightPanelOpen,
   listBody,
@@ -1928,7 +1951,7 @@ function PullRequestsColumn({
   refreshing: boolean;
   onRefresh: () => void;
   searchValue: string;
-  involvement: PullRequestFeed;
+  involvement: PullRequestInvolvement;
   state: PullRequestListState;
   host: string | undefined;
   hostMenuOptions: ReadonlyArray<PullRequestFilterOption<string>>;
@@ -1937,7 +1960,6 @@ function PullRequestsColumn({
   onHost: (host: string | undefined) => void;
   searchInput: ReactNode;
   filtersMenu: ReactNode;
-  feedTabs: ReactNode;
   rightPanelControl: ReactNode;
   rightPanelOpen: boolean;
   listBody: ReactNode;
@@ -2089,7 +2111,6 @@ function PullRequestsColumn({
               {searchInput}
               {filtersMenu}
             </div>
-            <div className="flex items-center">{feedTabs}</div>
             {/* Scrolled past this marker, the controls are gone and the title takes over. */}
             <div ref={markerRef} aria-hidden className="-mt-3 h-px w-full" />
           </div>

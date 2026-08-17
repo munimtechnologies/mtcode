@@ -13,9 +13,7 @@ import {
   EyeOffIcon,
   FolderGit2Icon,
   GitPullRequestDraftIcon,
-  ClockIcon,
   LayersIcon,
-  SparklesIcon,
   ListFilterIcon,
   LoaderIcon,
   SearchIcon,
@@ -37,7 +35,6 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isPullRequestSortOrder, type PullRequestSortOrder } from "./pullRequestList.logic";
 
 export interface PullRequestFilterOption<Value extends string> {
   readonly value: Value;
@@ -126,14 +123,6 @@ const DRAFT_OPTIONS = [
   { value: "hide", label: "Hide drafts", Icon: EyeOffIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
 
-export const SORT_OPTIONS = [
-  { value: "updated", label: "Latest", Icon: ClockIcon },
-  { value: "useful", label: "Most useful", Icon: SparklesIcon },
-] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
-
-/** Without ranking there is one order, so the group shows the one it is already on. */
-export const RECENCY_ONLY_SORT_OPTIONS = [SORT_OPTIONS[0]] as const;
-
 const REVIEW_OPTIONS = [
   { value: UNFILTERED_VALUE, label: "All", Icon: LayersIcon },
   { value: "approved", label: "Approved", Icon: CircleCheckIcon },
@@ -206,9 +195,6 @@ export function PullRequestFiltersMenu({
   onInvolvement,
   filters,
   onFilters,
-  sort,
-  sortOptions,
-  onSort,
   host,
   hostOptions,
   onHost,
@@ -235,15 +221,6 @@ export function PullRequestFiltersMenu({
   /** The narrowings beyond state and involvement; an absent field is that group unfiltered. */
   filters: PullRequestListFilters;
   onFilters: (filters: PullRequestListFilters) => void;
-  /** What each section is ordered by. */
-  sort: PullRequestSortOrder;
-  /**
-   * Which orders to offer. Ranking asks an agent what is worth porting, which is a question only
-   * the upstream view can answer — so the page leaves that option out elsewhere rather than
-   * offering an order that would quietly do nothing.
-   */
-  sortOptions: ReadonlyArray<PullRequestFilterOption<string>>;
-  onSort: (sort: PullRequestSortOrder) => void;
   host: string | undefined;
   /**
    * Includes the "all hosts" entry, whose value is the empty string. With fewer than two real
@@ -328,13 +305,6 @@ export function PullRequestFiltersMenu({
           value={involvement}
           options={involvementOptions}
           onChange={onInvolvement}
-        />
-        <MenuSeparator />
-        <PullRequestFilterRadioGroup
-          label="Sort"
-          value={sort}
-          options={sortOptions}
-          onChange={(next) => onSort(isPullRequestSortOrder(next) ? next : "updated")}
         />
         <MenuSeparator />
         <PullRequestFilterRadioGroup
