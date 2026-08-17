@@ -72,8 +72,8 @@ you wanted, Delete the Goal and set a sharper Objective.
 **Settle**, **Snooze**, and closing the client do not Pause. The server keeps the Goal. Work
 continues if you shelf the Thread, hide it until later, or close the laptop or the mobile app.
 
-Restarting the server does not Pause either. If a Turn was cut off mid-run, T3 Code settles it as
-interrupted on startup and an Active Goal picks up with a fresh Continuation.
+Restarting the server does not Pause either. On startup an Active Goal picks up where it left off:
+if a Turn was cut off mid-run T3 Code settles it as interrupted, then starts a fresh Continuation.
 
 ## Continuations
 
