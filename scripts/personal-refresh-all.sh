@@ -67,6 +67,25 @@ hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force || true
 INSTALLED_APP=$(find /Applications -maxdepth 1 -name 'T3 Code*.app' -print | head -1)
 echo "Mac installed: $INSTALLED_APP ($(defaults read "$INSTALLED_APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || true))"
 echo "Mac name: $(defaults read "$INSTALLED_APP/Contents/Info" CFBundleName 2>/dev/null || true)"
+
+# electron-builder leaves an unsigned build ad-hoc signed, and an ad-hoc signature's identity is
+# the binary's own hash — so every rebuild is a different application as far as macOS is
+# concerned, and every privacy grant the developer has given is asked for again. Re-signing with
+# a Developer ID gives the bundle a designated requirement of "this bundle id, this team", which
+# is the same after every build, and the grants survive.
+#
+# Not fatal: a machine with no identity, or a locked keychain, still gets the build. It just
+# keeps being asked for permission.
+SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  if codesign --force --deep --sign "$SIGN_IDENTITY" "$INSTALLED_APP" >/dev/null 2>&1; then
+    echo "Mac signed: $SIGN_IDENTITY"
+  else
+    echo "Mac signing failed — permission prompts will return on each rebuild" >&2
+  fi
+else
+  echo "no Developer ID identity found — leaving the ad-hoc signature" >&2
+fi
 # Blade and Dell are both reopened after their install; the Mac was the one machine left shut
 # down, so every refresh ended with the app the developer is actually sitting in front of gone.
 open -a "$INSTALLED_APP" && echo "Mac relaunched" || echo "Mac relaunch failed" >&2
