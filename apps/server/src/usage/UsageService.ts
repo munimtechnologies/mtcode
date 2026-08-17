@@ -39,6 +39,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
+import { projectUsageSummaryForClient } from "./usageClientCompat.ts";
 import { loadCursorUsageRecords, type CursorExportLoadResult } from "./usageCursorExport.ts";
 import { parseRateTable, type RateTable } from "./usagePricing.ts";
 import { readOpenCodeUsage, resolveOpenCodeDatabasePaths } from "./usageOpenCode.ts";
@@ -139,22 +140,27 @@ export const layerTest = Layer.succeed(
   UsageService,
   UsageService.of({
     readSummary: (input) =>
-      Effect.succeed({
-        contractVersion: USAGE_CONTRACT_VERSION,
-        readAt: "1970-01-01T00:00:00.000Z",
-        timeZone: input.timeZone,
-        sinceDay: input.sinceDay,
-        untilDay: input.untilDay,
-        buckets: [],
-        sources: [],
-        pricing: {
-          status: "unavailable",
-          source: LITELLM_RATES_URL,
-          fetchedAt: null,
-          knownModels: 0,
-        },
-        scanDurationMs: 0,
-      }),
+      Effect.succeed(
+        projectUsageSummaryForClient(
+          {
+            contractVersion: USAGE_CONTRACT_VERSION,
+            readAt: "1970-01-01T00:00:00.000Z",
+            timeZone: input.timeZone,
+            sinceDay: input.sinceDay,
+            untilDay: input.untilDay,
+            buckets: [],
+            sources: [],
+            pricing: {
+              status: "unavailable",
+              source: LITELLM_RATES_URL,
+              fetchedAt: null,
+              knownModels: 0,
+            },
+            scanDurationMs: 0,
+          },
+          input.clientContractVersion,
+        ),
+      ),
   }),
 );
 
@@ -603,25 +609,28 @@ export const make = Effect.gen(function* () {
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
 
-    return {
-      contractVersion: USAGE_CONTRACT_VERSION,
-      readAt: DateTime.formatIso(readAt),
-      timeZone: input.timeZone,
-      sinceDay: input.sinceDay,
-      untilDay: input.untilDay,
-      buckets: aggregated.buckets,
-      sources,
-      pricing: {
-        status: ratesStatus,
-        source: LITELLM_RATES_URL,
-        fetchedAt:
-          ratesFetchedAtMs === null
-            ? null
-            : DateTime.formatIso(DateTime.makeUnsafe(ratesFetchedAtMs)),
-        knownModels: rates.size,
-      },
-      scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
-    } satisfies UsageSummary;
+    return projectUsageSummaryForClient(
+      {
+        contractVersion: USAGE_CONTRACT_VERSION,
+        readAt: DateTime.formatIso(readAt),
+        timeZone: input.timeZone,
+        sinceDay: input.sinceDay,
+        untilDay: input.untilDay,
+        buckets: aggregated.buckets,
+        sources,
+        pricing: {
+          status: ratesStatus,
+          source: LITELLM_RATES_URL,
+          fetchedAt:
+            ratesFetchedAtMs === null
+              ? null
+              : DateTime.formatIso(DateTime.makeUnsafe(ratesFetchedAtMs)),
+          knownModels: rates.size,
+        },
+        scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
+      } satisfies UsageSummary,
+      input.clientContractVersion,
+    );
   });
 
   return { readSummary } as const;

@@ -84,6 +84,7 @@ export function useUsage(input: UsageSummaryInput): UsageView {
         resolution: input.resolution,
         sinceTime: input.sinceTime,
         untilTime: input.untilTime,
+        clientContractVersion: input.clientContractVersion,
       }),
     [
       input.sinceDay,
@@ -92,6 +93,7 @@ export function useUsage(input: UsageSummaryInput): UsageView {
       input.resolution,
       input.sinceTime,
       input.untilTime,
+      input.clientContractVersion,
     ],
   );
   const atom = usageByWindowAtom(windowKey);

@@ -27,6 +27,17 @@ import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
  */
 export const USAGE_CONTRACT_VERSION = 6 as const;
 
+/**
+ * Contract version currently shipped by https://app.t3.codes (pingdotgg/t3code
+ * main). Personal / ahead servers project down to this shape when the client
+ * does not advertise a newer {@link UsageSummaryInput.clientContractVersion},
+ * so hosted Connect clients can still decode summaries.
+ */
+export const HOSTED_USAGE_CONTRACT_VERSION = 4 as const;
+
+/** Providers the hosted app.t3.codes client (contract v4) knows how to decode. */
+export const HOSTED_USAGE_PROVIDER_KINDS = ["claude", "codex"] as const;
+
 export const UsageProviderKind = Schema.Literals(["claude", "codex", "cursor", "grok", "opencode"]);
 export type UsageProviderKind = typeof UsageProviderKind.Type;
 
@@ -180,6 +191,12 @@ export const UsageSummaryInput = Schema.Struct({
   sinceTime: Schema.optional(TrimmedNonEmptyString),
   /** Exclusive UTC instant for an hourly rolling window. */
   untilTime: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Contract version the client can decode. Omitted by older hosted clients
+   * (app.t3.codes); servers then project to {@link HOSTED_USAGE_CONTRACT_VERSION}.
+   * Matching personal clients send {@link USAGE_CONTRACT_VERSION}.
+   */
+  clientContractVersion: Schema.optional(Schema.Number),
 });
 export type UsageSummaryInput = typeof UsageSummaryInput.Type;
 

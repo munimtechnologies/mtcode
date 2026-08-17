@@ -5,6 +5,7 @@
  * @module usageFormat
  */
 import {
+  USAGE_CONTRACT_VERSION,
   UsageDay,
   type UsagePricingStatus,
   type UsageResolution,
@@ -242,6 +243,7 @@ export function makeWindow(
       resolution,
       sinceTime: sinceTime.toISOString(),
       untilTime: untilTime.toISOString(),
+      clientContractVersion: USAGE_CONTRACT_VERSION,
     };
   }
   if (days <= ALL_USAGE_WINDOW_DAYS) {
@@ -250,6 +252,7 @@ export function makeWindow(
       untilDay: UsageDay.make(untilDay),
       timeZone,
       resolution: "day",
+      clientContractVersion: USAGE_CONTRACT_VERSION,
     };
   }
   // Subtracting fixed milliseconds from `now` lands on the wrong calendar day
@@ -264,5 +267,6 @@ export function makeWindow(
     untilDay: UsageDay.make(untilDay),
     timeZone,
     resolution,
+    clientContractVersion: USAGE_CONTRACT_VERSION,
   };
 }

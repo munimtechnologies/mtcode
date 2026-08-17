@@ -1,0 +1,27 @@
+---
+description: Ship personal desktop builds to Mac + Blade + Dell together
+alwaysApply: true
+---
+
+# Personal desktop ship (Mac → Blade → Dell)
+
+After changing the desktop app (or anything that needs a new installed build), do **not** stop at a Mac-only DMG install.
+
+1. Commit on `personal` and make sure it is on `fork` (`sheehanmunim/t3code@personal`). Blade builds from that remote, not from this Mac tree.
+2. Ship the fleet with:
+
+```bash
+bash scripts/personal-ship-desktop.sh
+```
+
+That rebuilds Mac, then **must** install + relaunch via `scripts/personal-install-relaunch-mac.sh` (clears quarantine, signs, `open`s the app path, activates, verifies `MAC_GUI_VISIBLE`). Then Blade/Dell refresh.
+
+Never leave Mac install at "copied to /Applications" without relaunch. Do not use bare `pnpm dist:desktop:dmg:arm64` + `cp` / `codes.t3.mac.rebuild.once` unless the user asks for Mac-only — and even then call `personal-install-relaunch-mac.sh` so the app comes back on its own.
+
+That install script **must** be used (not a hand `cp` into `/Applications` while T3 is open). It detaches a worker that: force-quits every T3 Code process, swaps the bundle only after they are gone, then opens a fresh app and waits for `MAC_GUI_VISIBLE`. Copying over a live app is what leaves a white window that never relaunches.
+
+Electron GitHub auto-update is not the personal fleet path. This SSH refresh pipeline is.
+
+## app.t3.codes + ahead fork
+
+Hosted https://app.t3.codes is built from upstream main. Personal servers are often contract-ahead (usage v6 vs hosted v4). Usage responses must keep working for hosted clients via `projectUsageSummaryForClient` (omit `clientContractVersion` → hosted v4 shape). Matching personal clients send `clientContractVersion: USAGE_CONTRACT_VERSION` from `makeWindow`. When adding wire-breaking contract changes that hosted still needs, extend that compat projection rather than breaking Connect.
