@@ -389,11 +389,8 @@ export function ComputerHistorySettings() {
                 ? status.lastError
                 : `Phase: ${status.phase} · events in segment: ${status.eventCount} · platform: ${status.platform}`
             }
-            control={
-              <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={busy}>
-                Refresh
-              </Button>
-            }
+            // No control: this row already re-reads itself every few seconds, so a button to do
+            // the same thing only invited a press that changed nothing.
           />
         ) : null}
       </SettingsSection>
