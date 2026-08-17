@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -7,6 +8,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Predicate from "effect/Predicate";
 import * as PlatformError from "effect/PlatformError";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
@@ -135,6 +137,45 @@ const isPlatformError = (value: unknown): value is PlatformError.PlatformError =
 export const isSecretAlreadyExistsError = (error: SecretStoreError): boolean =>
   "cause" in error && isPlatformError(error.cause) && error.cause.reason._tag === "AlreadyExists";
 
+/**
+ * Windows hands out short-lived handles on a file the moment it is written —
+ * Defender's real-time scan and the search indexer both do it — and replacing
+ * that file meanwhile fails with EPERM even though the path and its permissions
+ * are fine. POSIX has no equivalent, so this only ever fires on Windows.
+ */
+const TRANSIENT_REPLACE_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+const isTransientReplaceError = (error: PlatformError.PlatformError): boolean => {
+  const reason = error.reason;
+  if (reason._tag === "Busy") {
+    return true;
+  }
+  // Node reports the lock as EPERM, which normalizes to the catch-all `Unknown`
+  // tag, so the errno on the wrapped cause is the only thing that identifies it.
+  // A denial that carries no errno stays fatal — retrying it only adds latency.
+  const cause: unknown = "cause" in reason ? reason.cause : undefined;
+  return (
+    Predicate.isObject(cause) &&
+    "code" in cause &&
+    Predicate.isString(cause.code) &&
+    TRANSIENT_REPLACE_CODES.has(cause.code)
+  );
+};
+
+/**
+ * Rides out a scanner's grip on the destination without masking a real
+ * permission failure: a genuine EPERM still fails, just a beat later.
+ */
+const transientReplaceRetry = {
+  while: isTransientReplaceError,
+  schedule: Schedule.exponential("10 millis").pipe(
+    Schedule.modifyDelay(({ duration }) =>
+      Effect.succeed(Duration.min(duration, Duration.millis(200))),
+    ),
+    Schedule.upTo({ duration: "2 seconds" }),
+  ),
+} as const;
+
 export class ServerSecretStore extends Context.Service<
   ServerSecretStore,
   {
@@ -199,7 +240,7 @@ export const make = Effect.gen(function* () {
         return Effect.gen(function* () {
           yield* fileSystem.writeFile(tempPath, value);
           yield* fileSystem.chmod(tempPath, 0o600);
-          yield* fileSystem.rename(tempPath, secretPath);
+          yield* fileSystem.rename(tempPath, secretPath).pipe(Effect.retry(transientReplaceRetry));
           yield* fileSystem.chmod(secretPath, 0o600);
         }).pipe(
           Effect.catch((cause) =>

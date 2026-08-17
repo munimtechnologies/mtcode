@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, it, live } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -70,6 +70,51 @@ const makeRenameFailureSecretStoreLayer = () =>
   ServerSecretStore.layer.pipe(
     Layer.provide(makeServerConfigLayer()),
     Layer.provideMerge(RenameFailureFileSystemLayer),
+  );
+
+/**
+ * Windows lets a virus scanner hold the destination for a moment after the
+ * temp file lands, so the first replaces fail with EPERM and a later one wins.
+ */
+const makeTransientRenameFileSystemLayer = (failures: number) =>
+  Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const attemptsRef = yield* Ref.make(0);
+
+      return {
+        ...fileSystem,
+        rename: (from, to) =>
+          Ref.updateAndGet(attemptsRef, (count) => count + 1).pipe(
+            Effect.flatMap((attempt) =>
+              attempt > failures
+                ? fileSystem.rename(from, to)
+                : Effect.fail(
+                    PlatformError.systemError({
+                      _tag: "Unknown",
+                      module: "FileSystem",
+                      method: "rename",
+                      pathOrDescriptor: `${String(from)} -> ${String(to)}`,
+                      description: "EPERM while replacing secret file.",
+                      cause: Object.assign(new Error("EPERM: operation not permitted, rename"), {
+                        code: "EPERM",
+                      }),
+                    }),
+                  ),
+            ),
+          ),
+      } satisfies FileSystem.FileSystem;
+    }),
+  ).pipe(Layer.provide(NodeServices.layer));
+
+const makeTransientRenameSecretStoreLayer = (failures: number) =>
+  ServerSecretStore.layer.pipe(
+    Layer.provide(makeServerConfigLayer()),
+    Layer.provideMerge(makeTransientRenameFileSystemLayer(failures)),
+    // `live` runs on the real clock so the backoff actually elapses, but unlike
+    // `it.effect` it brings no platform services of its own.
+    Layer.provideMerge(NodeServices.layer),
   );
 
 const RemoveFailureFileSystemLayer = Layer.effect(
@@ -251,6 +296,20 @@ it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
       assert.instanceOf(error.cause, PlatformError.PlatformError);
       assert.equal((error.cause as PlatformError.PlatformError).reason._tag, "PermissionDenied");
     }).pipe(Effect.provide(makeRenameFailureSecretStoreLayer())),
+  );
+
+  // Live clock: the retry backoff is real elapsed time, so a test clock never
+  // reaches the second attempt.
+  live("retries a replace the platform briefly refuses", () =>
+    Effect.gen(function* () {
+      const secretStore = yield* ServerSecretStore.ServerSecretStore;
+
+      yield* secretStore.set("session-signing-key", Uint8Array.from([1, 2, 3]));
+
+      const stored = yield* secretStore.get("session-signing-key");
+
+      assert.deepEqual(Option.getOrNull(stored), Uint8Array.from([1, 2, 3]));
+    }).pipe(Effect.provide(makeTransientRenameSecretStoreLayer(2))),
   );
 
   it.effect("propagates remove failures other than missing-file errors", () =>
