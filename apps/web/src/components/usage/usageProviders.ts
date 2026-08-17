@@ -43,3 +43,27 @@ export const PROVIDER_PRESENTATION = {
 
 /** The chart layers every series from zero, so order only controls how it is read. */
 export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProviderKind[];
+
+/** Claude and Codex are the only providers with subscription rate-limit windows today. */
+export const LIMITS_PROVIDER_ORDER: readonly UsageProviderKind[] = ["codex", "claude"];
+
+export const PROVIDER_LABEL = Object.fromEntries(
+  Object.entries(PROVIDER_PRESENTATION).map(([provider, presentation]) => [
+    provider,
+    presentation.label,
+  ]),
+) as Record<UsageProviderKind, string>;
+
+export const PROVIDER_COLOR = Object.fromEntries(
+  Object.entries(PROVIDER_PRESENTATION).map(([provider, presentation]) => [
+    provider,
+    presentation.color,
+  ]),
+) as Record<UsageProviderKind, string>;
+
+export const PROVIDER_MARK = Object.fromEntries(
+  Object.entries(PROVIDER_PRESENTATION).map(([provider, presentation]) => [
+    provider,
+    presentation.mark,
+  ]),
+) as Record<UsageProviderKind, Icon>;

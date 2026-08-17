@@ -230,6 +230,10 @@
     "./usageFormat": {
       "types": "./src/usageFormat.ts",
       "import": "./src/usageFormat.ts"
+    },
+    "./limitsFormat": {
+      "types": "./src/limitsFormat.ts",
+      "import": "./src/limitsFormat.ts"
     }
   },
   "scripts": {

@@ -28,6 +28,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AccountLimitsHoverCard } from "../usage/AccountLimits";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
@@ -217,7 +218,9 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
                     </SidebarMenuButton>
                   }
                 />
-                <TooltipPopup side="top">Usage</TooltipPopup>
+                <TooltipPopup side="right" align="end" sideOffset={8}>
+                  <AccountLimitsHoverCard />
+                </TooltipPopup>
               </Tooltip>
             </SidebarMenuItem>
           </>

@@ -1,11 +1,12 @@
 import type { UsagePricingStatus, UsageProviderKind } from "@t3tools/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import { useAccountLimits } from "../../state/accountLimits";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import {
   enumerateDays,
@@ -26,6 +27,7 @@ import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
+import { AccountLimitsSection } from "./AccountLimits";
 import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION } from "./usageProviders";
 
@@ -45,7 +47,8 @@ export function UsagePage() {
   const [breakdown, setBreakdown] = useState<"model" | "time">("model");
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
-  const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
+  const { merged, environments, isPending, isPartial, refresh: refreshUsage } = useUsage(window);
+  const { refresh: refreshLimits } = useAccountLimits();
 
   // Hold the content until every environment is terminal. Rendering merged
   // totals while devices are still answering makes every number on the page
@@ -96,7 +99,7 @@ export function UsagePage() {
       window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
     });
   };
-  const refreshWindow = () => {
+  const refreshWindow = useCallback(() => {
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     if (
       nextWindow.sinceDay === window.sinceDay &&
@@ -104,11 +107,21 @@ export function UsagePage() {
       nextWindow.sinceTime === window.sinceTime &&
       nextWindow.untilTime === window.untilTime
     ) {
-      refresh();
+      refreshUsage();
+      refreshLimits();
     } else {
       setWindowSelection({ days: windowDays, window: nextWindow });
     }
-  };
+  }, [
+    windowDays,
+    isPast24Hours,
+    window.sinceDay,
+    window.untilDay,
+    window.sinceTime,
+    window.untilTime,
+    refreshUsage,
+    refreshLimits,
+  ]);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
@@ -176,6 +189,8 @@ export function UsagePage() {
                 </Button>
               </div>
             </div>
+
+            <AccountLimitsSection />
 
             {settling ? (
               <>

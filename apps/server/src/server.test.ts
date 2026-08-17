@@ -153,6 +153,7 @@ import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClien
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
 import * as Data from "effect/Data";
 
 import { makeOrchestrationIntegrationHarness } from "../integration/OrchestrationEngineHarness.integration.ts";
@@ -856,6 +857,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(resourceTelemetryLayer),
       Layer.provide(UsageService.layerTest),
+      Layer.provide(AccountLimitsService.layerTest),
       Layer.provide(
         Layer.mock(BrowserTraceCollector.BrowserTraceCollector)({
           record: () => Effect.void,
