@@ -12,6 +12,7 @@ import {
   decodePullRequestNodeIdJson,
   decodePullRequestSearchJson,
   decodeRepositoryAccessJson,
+  decodeRepositoryParent,
   decodeReviewerCandidatesJson,
   decodeReviewThreadCommentsJson,
   decodeReviewThreadsJson,
@@ -1359,5 +1360,21 @@ describe("how far a branch trails its base", () => {
 
   it("refuses a body that is not the answer to this question", () => {
     expect(Result.isSuccess(decodeBaseComparisonJson("{"))).toBe(false);
+  });
+});
+
+describe("decodeRepositoryParent", () => {
+  it("reads the parent of a fork", () => {
+    expect(decodeRepositoryParent("pingdotgg/t3code\n")).toBe("pingdotgg/t3code");
+  });
+
+  it("reads no parent for a repository that is nobody's fork", () => {
+    // `gh --jq` prints nothing at all where the expression selects null.
+    expect(decodeRepositoryParent("")).toBeNull();
+    expect(decodeRepositoryParent("\n")).toBeNull();
+  });
+
+  it("reads no parent where the answer is not an owner and a name", () => {
+    expect(decodeRepositoryParent("null")).toBeNull();
   });
 });

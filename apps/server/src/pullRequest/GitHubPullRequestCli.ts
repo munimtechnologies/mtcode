@@ -40,7 +40,7 @@ import {
   decodePullRequestStatsJson,
   decodeReactionSubjectScopeJson,
   decodeRepositoryAccessJson,
-  decodeRepositoryParentJson,
+  decodeRepositoryParent,
   decodeReviewerCandidatesJson,
   decodeReviewDismissalsJson,
   decodeReviewThreadCommentsJson,
@@ -59,7 +59,7 @@ import {
   REMOVE_REACTION_GRAPHQL_MUTATION,
   gitHubReactionContent,
   REPOSITORY_ACCESS_JSON_FIELDS,
-  REPOSITORY_PARENT_JSON_FIELDS,
+  REPOSITORY_PARENT_JQ,
   RESOLVE_REVIEW_THREAD_GRAPHQL_MUTATION,
   REVIEWER_CANDIDATES_GRAPHQL_QUERY,
   REVIEW_THREAD_COMMENTS_GRAPHQL_QUERY,
@@ -1651,33 +1651,25 @@ export const make = Effect.gen(function* () {
           }),
         ),
 
-    getRepositoryParent: (input) =>
-      github
+    getRepositoryParent: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      return github
         .execute({
           cwd: input.cwd,
+          // REST rather than `gh repo view`, which reads through GraphQL: the fork parent is one
+          // field of the plain repository resource, and GraphQL is the part of the API that goes
+          // away first — an outage there should not cost a section the rest of the page can fill.
           args: [
-            "repo",
-            "view",
-            `${input.host}/${input.repository}`,
-            "--json",
-            REPOSITORY_PARENT_JSON_FIELDS,
+            "api",
+            "--hostname",
+            input.host,
+            `repos/${owner}/${name}`,
+            "--jq",
+            REPOSITORY_PARENT_JQ,
           ],
         })
-        .pipe(
-          Effect.flatMap((result) => {
-            const decoded = decodeRepositoryParentJson(result.stdout.trim());
-            return Result.isSuccess(decoded)
-              ? Effect.succeed(decoded.success)
-              : Effect.fail(
-                  new GitHubPullRequestReadError({
-                    command: "gh",
-                    cwd: input.cwd,
-                    operation: "getRepositoryParent",
-                    cause: decoded.failure,
-                  }),
-                );
-          }),
-        ),
+        .pipe(Effect.map((result) => decodeRepositoryParent(result.stdout)));
+    },
 
     getViewerAccess: (input) => {
       const { owner, name } = parseRepositorySelector(input.repository);
