@@ -71,6 +71,7 @@ import {
   PreviewAutomationResponse,
   PreviewAutomationScrollInput,
   PreviewAutomationSnapshot,
+  PreviewAutomationSnapshotInclude,
   PreviewAutomationStatus,
   PreviewAutomationStreamEvent,
   PreviewAutomationTypeInput,
@@ -1036,6 +1037,10 @@ export const DesktopPreviewAutomationSetViewportInputSchema = Schema.Union([
     clear: Schema.Literal(true),
   }),
 ]);
+export const DesktopPreviewAutomationSnapshotInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  include: Schema.optional(Schema.Array(PreviewAutomationSnapshotInclude)),
+});
 
 export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
@@ -1292,7 +1297,10 @@ export interface DesktopPreviewBridge {
   };
   automation: {
     status: (tabId: string) => Promise<PreviewAutomationStatus>;
-    snapshot: (tabId: string) => Promise<PreviewAutomationSnapshot>;
+    snapshot: (
+      tabId: string,
+      include?: ReadonlyArray<PreviewAutomationSnapshotInclude>,
+    ) => Promise<PreviewAutomationSnapshot>;
     setViewport: (
       tabId: string,
       input: { readonly width: number; readonly height: number } | { readonly clear: true },
