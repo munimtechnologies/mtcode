@@ -2366,6 +2366,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       extendInfo: {
         NSAppleEventsUsageDescription:
           "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",
+        NSMicrophoneUsageDescription: "T3 Code uses the microphone for voice dictation.",
       },
       protocols: [
         {

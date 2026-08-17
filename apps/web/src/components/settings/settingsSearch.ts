@@ -137,6 +137,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "desktop-notifications",
+    title: "Notifications",
+    to: "/settings/general",
+  },
+  {
     id: "new-threads",
     title: "New threads",
     to: "/settings/general",
@@ -296,6 +301,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Computer History timeline",
     to: "/settings/computer-history",
     targetId: "computer-history-timeline",
+  },
+  {
+    id: "voice-dictation",
+    title: "Voice dictation",
+    to: "/settings/general",
   },
   {
     id: "archive",

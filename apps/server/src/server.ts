@@ -13,6 +13,7 @@ import * as ComputerHistoryService from "./computerHistory/service.ts";
 import * as ServerConfig from "./config.ts";
 import {
   otlpTracesProxyRouteLayer,
+  transcriptionRouteLayer,
   assetRouteLayer,
   serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
@@ -495,6 +496,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     otlpTracesProxyRouteLayer,
+    transcriptionRouteLayer,
     assetRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,

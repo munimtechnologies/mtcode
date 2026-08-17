@@ -113,6 +113,31 @@ export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill",
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
 export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
 
+export const DesktopNotificationEventSettingsSchema = Schema.Struct({
+  approval: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  input: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  completion: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  failure: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+});
+export type DesktopNotificationEventSettings = typeof DesktopNotificationEventSettingsSchema.Type;
+
+export const DEFAULT_DESKTOP_NOTIFICATION_EVENT_SETTINGS: DesktopNotificationEventSettings =
+  Schema.decodeSync(DesktopNotificationEventSettingsSchema)({});
+
+export const DesktopNotificationSettingsSchema = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  soundEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showContext: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  events: DesktopNotificationEventSettingsSchema.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DESKTOP_NOTIFICATION_EVENT_SETTINGS)),
+  ),
+});
+export type DesktopNotificationSettings = typeof DesktopNotificationSettingsSchema.Type;
+
+export const DEFAULT_DESKTOP_NOTIFICATION_SETTINGS: DesktopNotificationSettings = Schema.decodeSync(
+  DesktopNotificationSettingsSchema,
+)({});
+
 /**
  * A user-chosen font family (a single name or a comma-separated list). Empty
  * means "use the app default"; clients compose their own fallback stacks.
@@ -128,6 +153,9 @@ export type FontFamilyPreference = typeof FontFamilyPreference.Type;
  */
 export const DEFAULT_BROWSER_VIEWPORT: PreviewViewportSetting = FILL_PREVIEW_VIEWPORT;
 export const DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW = true;
+
+export const VoiceTranscriptionProvider = Schema.Literals(["openai", "groq"]);
+export type VoiceTranscriptionProvider = typeof VoiceTranscriptionProvider.Type;
 
 export const ClientSettingsSchema = Schema.Struct({
   browserDefaultViewport: PreviewViewportSetting.pipe(
@@ -169,6 +197,9 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  desktopNotifications: DesktopNotificationSettingsSchema.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DESKTOP_NOTIFICATION_SETTINGS)),
+  ),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE)),
   ),
@@ -251,6 +282,12 @@ export const ClientSettingsSchema = Schema.Struct({
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
+  voiceTranscriptionEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  voiceTranscriptionProvider: VoiceTranscriptionProvider.pipe(
+    Schema.withDecodingDefault(Effect.succeed("openai" as const)),
+  ),
+  voiceTranscriptionApiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  voiceTranscriptionModel: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
@@ -913,6 +950,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
+  desktopNotifications: Schema.optionalKey(DesktopNotificationSettingsSchema),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   glassOpacity: Schema.optionalKey(GlassOpacity),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
@@ -957,6 +995,10 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   timestampFormat: Schema.optionalKey(TimestampFormat),
+  voiceTranscriptionEnabled: Schema.optionalKey(Schema.Boolean),
+  voiceTranscriptionProvider: Schema.optionalKey(VoiceTranscriptionProvider),
+  voiceTranscriptionApiKey: Schema.optionalKey(TrimmedString),
+  voiceTranscriptionModel: Schema.optionalKey(TrimmedString),
   wordWrap: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

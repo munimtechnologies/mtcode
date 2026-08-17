@@ -24,6 +24,12 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
+  desktopNotifications: {
+    enabled: false,
+    soundEnabled: true,
+    showContext: true,
+    events: { approval: true, input: true, completion: true, failure: true },
+  },
   environmentIdentificationMode: "artwork",
   favorites: [],
   fontFamilyCode: "",
@@ -49,6 +55,10 @@ const clientSettings: ClientSettings = {
   sidebarThreadPreviewCount: 6,
   legacySidebarEnabled: false,
   timestampFormat: "24-hour",
+  voiceTranscriptionEnabled: true,
+  voiceTranscriptionProvider: "openai",
+  voiceTranscriptionApiKey: "",
+  voiceTranscriptionModel: "",
   wordWrap: true,
 };
 

@@ -460,6 +460,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).extendInfo, {
         NSAppleEventsUsageDescription:
           "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",
+        NSMicrophoneUsageDescription: "T3 Code uses the microphone for voice dictation.",
       });
       // Native binaries and helper executables cannot load from inside an
       // asar; everything else stays packed. The Claude SDK platform packages
