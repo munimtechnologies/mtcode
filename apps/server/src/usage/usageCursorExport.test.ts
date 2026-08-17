@@ -59,7 +59,7 @@ describe("parseCursorUsageCsv", () => {
       totals: {
         uncachedInputTokens: 5,
         cachedInputTokens: 0,
-        cacheCreationTokens: 5,
+        cacheCreationTokens: 10,
         outputTokens: 15,
         reasoningTokens: 0,
       },
@@ -80,7 +80,7 @@ describe("parseCursorUsageCsv", () => {
       totals: {
         uncachedInputTokens: 775,
         cachedInputTokens: 105891,
-        cacheCreationTokens: 28342 - 775,
+        cacheCreationTokens: 28342,
         outputTokens: 21282,
         reasoningTokens: 0,
       },
@@ -106,5 +106,16 @@ describe("parseCursorUsageCsv", () => {
 
   it("returns empty for non-CSV payloads", () => {
     expect(parseCursorUsageCsv('{"error":true}', "user_1")).toEqual([]);
+  });
+
+  it("collapses ISO-timestamp rows to one session per calendar day", () => {
+    const csv = `Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
+"2025-11-13T18:36:05.846Z","On-Demand","gpt-5-codex","No","0","8263","66964","1612","76839","0.03"
+"2025-11-13T13:35:04.658Z","On-Demand","gpt-5-codex","No","0","2000","1000","500","3500","0.02"`;
+
+    const records = parseCursorUsageCsv(csv, "user_1");
+    expect(records).toHaveLength(2);
+    expect(records[0]?.sessionId).toBe("cursor-user_1-2025-11-13");
+    expect(records[1]?.sessionId).toBe("cursor-user_1-2025-11-13");
   });
 });

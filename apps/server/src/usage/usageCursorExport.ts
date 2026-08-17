@@ -262,11 +262,13 @@ export function parseCursorUsageCsv(csv: string, userId: string): readonly Usage
     const outputTokens = parseTokenCount(fields[outputIdx] ?? "0");
     const costUsd = parseCostUsd(unquote(fields[costIdx] ?? ""));
 
-    const cacheWrite = Math.max(0, inputWithCacheWrite - inputWithoutCacheWrite);
     const totals: UsageTokenTotals = {
       uncachedInputTokens: inputWithoutCacheWrite,
       cachedInputTokens: cacheRead,
-      cacheCreationTokens: cacheWrite,
+      // The two input columns are disjoint buckets: tokens written to cache
+      // and tokens read fresh. Cursor's Total Tokens is their sum plus cache
+      // read and output, so the columns must not be diffed.
+      cacheCreationTokens: inputWithCacheWrite,
       outputTokens,
       reasoningTokens: 0,
     };
@@ -284,7 +286,9 @@ export function parseCursorUsageCsv(csv: string, userId: string): readonly Usage
       provider: "cursor",
       timestampMs,
       model,
-      sessionId: `cursor-${userId}-${dateStr}`,
+      // Modern exports timestamp every row, so a per-row session id would
+      // count every event as its own session. Collapse to the calendar day.
+      sessionId: `cursor-${userId}-${dateStr.slice(0, 10)}`,
       totals,
       // Numeric Cost only. Included / "-" stay null so LiteLLM prices them.
       reportedCostUsd: costUsd,
