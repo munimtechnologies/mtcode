@@ -7,6 +7,7 @@ export type SettingsPath =
   | "/settings/plugins"
   | "/settings/providers"
   | "/settings/integrations"
+  | "/settings/skills"
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/computer-use"
@@ -34,6 +35,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/plugins": "Plugins",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
+  "/settings/skills": "Skills",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
   "/settings/computer-use": "Computer Use",
@@ -248,6 +250,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Auto-show floating preview",
     to: "/settings/integrations",
     targetId: "browser",
+  },
+  {
+    id: "skills",
+    title: "Skills",
+    to: "/settings/skills",
   },
   {
     id: "source-control",
