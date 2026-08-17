@@ -11,6 +11,7 @@ export type SettingsPath =
   | "/settings/connections"
   | "/settings/computer-use"
   | "/settings/computer-history"
+  | "/settings/beta"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -38,6 +39,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/connections": "Connections",
   "/settings/computer-use": "Computer Use",
   "/settings/computer-history": "Computer History",
+  "/settings/beta": "Beta",
   "/settings/archived": "Archive",
 };
 
@@ -296,6 +298,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Computer History timeline",
     to: "/settings/computer-history",
     targetId: "computer-history-timeline",
+  },
+  {
+    id: "voice-dictation",
+    title: "Voice dictation",
+    to: "/settings/beta",
   },
   {
     id: "archive",

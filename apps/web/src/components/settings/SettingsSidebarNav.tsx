@@ -11,7 +11,7 @@ import {
   ArchiveIcon,
   BlocksIcon,
   BotIcon,
-  BlocksIcon,
+  FlaskConicalIcon,
   GitBranchIcon,
   HistoryIcon,
   KeyboardIcon,
@@ -59,6 +59,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/connections": Link2Icon,
   "/settings/computer-use": MonitorIcon,
   "/settings/computer-history": HistoryIcon,
+  "/settings/beta": FlaskConicalIcon,
   "/settings/archived": ArchiveIcon,
 };
 
