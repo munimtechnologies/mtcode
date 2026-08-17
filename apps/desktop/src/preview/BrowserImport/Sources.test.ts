@@ -224,6 +224,26 @@ Path=Profiles/wxyz.empty
     ),
   );
 
+  it.effect("drops empty profiles when falling back to the Profiles/ scan", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = firefox.userDataDirectory(context)!;
+        yield* fileSystem.makeDirectory(`${root}/Profiles/filled.default`, { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/Profiles/filled.default/cookies.sqlite`, "db");
+        yield* fileSystem.makeDirectory(`${root}/Profiles/empty.default`, { recursive: true });
+
+        assert.deepEqual(yield* listSourceProfiles(firefox, context), [
+          {
+            directory: context.path.join("Profiles", "filled.default"),
+            name: "filled.default",
+          },
+        ]);
+      }),
+    ),
+  );
+
   it.effect("discovers profiles with cookies under Network/ (Chromium 127+)", () =>
     run(
       Effect.gen(function* () {
@@ -309,6 +329,7 @@ describe("isSourceRunning for Firefox", () => {
         const root = firefox.userDataDirectory(context)!;
         const profile = `${root}/Profiles/abcd.default-release`;
         yield* fileSystem.makeDirectory(profile, { recursive: true });
+        yield* fileSystem.writeFileString(`${profile}/cookies.sqlite`, "db");
 
         assert.isFalse(yield* isSourceRunning(firefox, context));
 
@@ -335,6 +356,7 @@ describe("isSourceRunning for Firefox", () => {
         const root = firefox.userDataDirectory(context)!;
         const profile = `${root}/Profiles/gx7x7fqx.default-release`;
         yield* fileSystem.makeDirectory(profile, { recursive: true });
+        yield* fileSystem.writeFileString(`${profile}/cookies.sqlite`, "db");
 
         // On Windows, Firefox creates parent.lock as a regular file that
         // persists after the process exits. The file is only locked while

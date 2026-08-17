@@ -171,11 +171,19 @@ export const make = Effect.gen(function* BrowserImportMake() {
     );
     // Try each candidate path and use the first one that exists. Chromium 96+
     // moved the cookie database into `Network/Cookies`, so both locations are
-    // checked. The FileSystem service comes from the captured platformServices
-    // context so this method keeps its empty requirements channel.
+    // checked. The probe is `stat`, matching `entryExists` in Sources.ts rather
+    // than `access`/`exists`: TCC permits `stat` on Safari's jar but can deny
+    // `access`, so an `exists` check would report missing a database the
+    // listing just proved present and fail the import with `readFailed`
+    // instead of reaching the Full Disk Access path. The FileSystem service
+    // comes from the captured platformServices context so this method keeps
+    // its empty requirements channel.
     const fileSystem = Context.get(platformServices, FileSystem.FileSystem);
     const existing = yield* Effect.forEach(candidates, (candidate) =>
-      fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false)),
+      fileSystem.stat(candidate).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      ),
     );
     const databasePath = candidates.find((_, index) => existing[index]);
     if (databasePath === undefined) {

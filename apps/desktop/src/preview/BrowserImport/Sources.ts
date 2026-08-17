@@ -431,13 +431,24 @@ export const listSourceProfiles = Effect.fn("BrowserImportSources.listSourceProf
     }
 
     // No readable `profiles.ini`, so fall back to scanning the directory the
-    // profiles actually live in.
-    return yield* fileSystem.readDirectory(context.path.join(root, "Profiles")).pipe(
-      Effect.map((entries) =>
-        entries.map((entry) => ({ directory: context.path.join("Profiles", entry), name: entry })),
+    // profiles actually live in, keeping only the ones a cookie database
+    // proves were launched.
+    const scanned = yield* fileSystem
+      .readDirectory(context.path.join(root, "Profiles"))
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+    const found = yield* Effect.forEach(scanned, (entry) =>
+      Effect.forEach(
+        cookieDatabaseCandidatePaths(definition, context, context.path.join("Profiles", entry)),
+        (candidate) => entryExists(candidate),
+      ).pipe(
+        Effect.map((results) =>
+          results.some(Boolean)
+            ? { directory: context.path.join("Profiles", entry), name: entry }
+            : undefined,
+        ),
       ),
-      Effect.orElseSucceed(() => [] as ReadonlyArray<BrowserImportSourceProfile>),
     );
+    return found.filter((profile) => profile !== undefined);
   }
 
   const declared = yield* fileSystem.readFileString(context.path.join(root, "Local State")).pipe(
