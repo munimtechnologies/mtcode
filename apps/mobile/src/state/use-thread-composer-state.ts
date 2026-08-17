@@ -167,14 +167,18 @@ export function useThreadComposerState() {
       goal: selectedThreadDetail?.goal ?? selectedThreadShell.goal,
     });
     if (intercept.kind !== "none") {
-      const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>) => {
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      // Reports the failure and returns whether the command succeeded, so the
+      // draft survives a failed Objective command and can be retried.
+      const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>): boolean => {
+        const succeeded = result._tag === "Success";
+        if (!succeeded && !isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
           Alert.alert(
             "Could not update Objective",
             error instanceof Error ? error.message : "Failed to update the Objective.",
           );
         }
+        return succeeded;
       };
       if (intercept.kind === "alert") {
         Alert.alert(intercept.title, intercept.message);
@@ -184,20 +188,23 @@ export function useThreadComposerState() {
       const threadId = selectedThreadShell.id;
       if (intercept.kind === "clear") {
         const result = await clearThreadGoal({ environmentId, input: { threadId } });
-        reportGoalCommandFailure(result);
-        clearComposerDraftContent(threadKey);
+        if (reportGoalCommandFailure(result)) {
+          clearComposerDraftContent(threadKey);
+        }
         return null;
       }
       if (intercept.kind === "pause") {
         const result = await pauseThreadGoal({ environmentId, input: { threadId } });
-        reportGoalCommandFailure(result);
-        clearComposerDraftContent(threadKey);
+        if (reportGoalCommandFailure(result)) {
+          clearComposerDraftContent(threadKey);
+        }
         return null;
       }
       if (intercept.kind === "resume") {
         const result = await resumeThreadGoal({ environmentId, input: { threadId } });
-        reportGoalCommandFailure(result);
-        clearComposerDraftContent(threadKey);
+        if (reportGoalCommandFailure(result)) {
+          clearComposerDraftContent(threadKey);
+        }
         return null;
       }
       const result = await setThreadGoal({
@@ -208,8 +215,9 @@ export function useThreadComposerState() {
           messageId: MessageId.make(makeQueuedMessageMetadata().messageId),
         },
       });
-      reportGoalCommandFailure(result);
-      clearComposerDraftContent(threadKey);
+      if (reportGoalCommandFailure(result)) {
+        clearComposerDraftContent(threadKey);
+      }
       return null;
     }
 
