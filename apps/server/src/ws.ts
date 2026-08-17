@@ -96,6 +96,7 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -364,6 +365,7 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const pullRequestRanking = yield* PullRequestRanking.PullRequestRankingService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1651,6 +1653,38 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pullRequestsListStats, pullRequests.listStats(input), {
             "rpc.aggregate": "pull-requests",
           }),
+        [WS_METHODS.pullRequestsRank]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsRank,
+            // Resolved first, so a client cannot have an agent read a repository the project it
+            // named has nothing to do with.
+            pullRequests
+              .resolveRef({
+                projectId: input.projectId,
+                repository: input.repository,
+                number: input.candidates[0]?.number ?? 1,
+              })
+              .pipe(
+                Effect.flatMap((project) =>
+                  pullRequestRanking
+                    .rank({
+                      cwd: project.workspaceRoot,
+                      repository: project.repository,
+                      intoRepository: project.projectTitle,
+                      candidates: input.candidates,
+                      modelSelection: input.modelSelection,
+                    })
+                    .pipe(
+                      Effect.map((rankings) => ({
+                        host: project.host,
+                        repository: project.repository,
+                        rankings,
+                      })),
+                    ),
+                ),
+              ),
+            { "rpc.aggregate": "pull-requests" },
+          ),
         [WS_METHODS.pullRequestsDetail]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsDetail, pullRequests.detail(input), {
             "rpc.aggregate": "pull-requests",

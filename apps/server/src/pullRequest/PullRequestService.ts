@@ -137,6 +137,21 @@ export class PullRequestService extends Context.Service<
     readonly listStats: (
       input: PullRequestListStatsInput,
     ) => Effect.Effect<PullRequestListStatsResult, PullRequestError>;
+    /**
+     * Check that a reference names a repository this project may read, and answer where to read
+     * it from. Exists so ranking — which needs a checkout and the project's name, but none of
+     * this service's host machinery — can be its own service without duplicating the check that
+     * keeps a client from naming any repository it likes.
+     */
+    readonly resolveRef: (input: PullRequestRef) => Effect.Effect<
+      {
+        readonly workspaceRoot: string;
+        readonly projectTitle: string;
+        readonly repository: string;
+        readonly host: string;
+      },
+      PullRequestError
+    >;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -2099,6 +2114,16 @@ export const make = Effect.gen(function* () {
     DETAIL_STALE_WINDOW,
     DETAIL_CACHE_CAPACITY,
   );
+  const resolveRef: PullRequestService["Service"]["resolveRef"] = (input) =>
+    requireProject(input).pipe(
+      Effect.map((project) => ({
+        workspaceRoot: project.project.workspaceRoot,
+        projectTitle: project.project.title,
+        repository: project.repository,
+        host: project.host,
+      })),
+    );
+
   const detail: PullRequestService["Service"]["detail"] = (input) => {
     const key = JSON.stringify([refEpoch(input), input.projectId, input.repository, input.number]);
     return staleDetail(key, Cache.get(detailCache, key));
@@ -2231,6 +2256,7 @@ export const make = Effect.gen(function* () {
   return PullRequestService.of({
     list,
     listStats,
+    resolveRef,
     detail,
     activity,
     threadComments,

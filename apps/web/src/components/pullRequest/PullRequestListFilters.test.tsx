@@ -55,6 +55,8 @@ function menu(overrides: Partial<Parameters<typeof PullRequestFiltersMenu>[0]>) 
     onInvolvement: () => undefined,
     filters: {},
     onFilters: () => undefined,
+    sort: "updated" as const,
+    onSort: () => undefined,
     host: undefined,
     hostOptions: [],
     onHost: () => undefined,

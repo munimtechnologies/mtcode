@@ -10,6 +10,7 @@ import type {
   PullRequestListResult,
   PullRequestListState,
   SourceControlProviderKind,
+  PullRequestRankInput,
 } from "@t3tools/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
@@ -32,6 +33,8 @@ import {
   filterPullRequestsByInvolvement,
   findScopedProject,
   groupPullRequestsByInvolvement,
+  isPullRequestSortOrder,
+  sortPullRequestEntries,
   matchesPullRequestFilters,
   matchesPullRequestQuery,
   parsePullRequestQuery,
@@ -53,8 +56,11 @@ import {
   type MergedPullRequestList,
   type PullRequestDiffStats,
   type PullRequestPartitionsSnapshot,
+  type PullRequestSortOrder,
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
+import { useClientSettings } from "~/hooks/useSettings";
+import { createModelSelection } from "@t3tools/shared/model";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
   PullRequestFiltersMenu,
@@ -96,6 +102,7 @@ import {
   usePullRequestList,
   usePullRequestListStats,
   type EnvironmentQueryTarget,
+  usePullRequestUsefulness,
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cn } from "~/lib/utils";
@@ -105,6 +112,12 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 export interface PullRequestsSearch {
   readonly involvement: PullRequestInvolvement;
   readonly state: PullRequestListState;
+  /**
+   * What each section is ordered by. Optional so a link written before there was a choice — and
+   * every navigation that only means to change the state or the involvement — still type-checks;
+   * `validateSearch` fills it in, so a mounted route always has one.
+   */
+  readonly sort?: PullRequestSortOrder;
   /**
    * Narrows the list to one server. Absent means every connected one, which is the default the
    * page has now — so a link written before servers could be chosen still opens the whole list.
@@ -175,6 +188,7 @@ const PULL_REQUESTS_PANEL_ID = ThreadId.make("pull-requests-panel");
 const PULL_REQUESTS_PANEL_ENVIRONMENT_ID = "pull-requests-panel" as EnvironmentId;
 /** Stable so a read that is not wanted right now does not re-key on every render. */
 const NO_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> = [];
+const NO_RANK_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestRankInput>> = [];
 const EMPTY_PREVIEW_SESSIONS = {};
 const EMPTY_PREVIEW_DESKTOP_STATE = {};
 const EMPTY_TERMINAL_LABELS = new Map<string, string>();
@@ -186,6 +200,7 @@ export const Route = createFileRoute("/_chat/pull-requests")({
       raw.involvement === "reviewing" || raw.involvement === "authored" ? raw.involvement : "all",
     state:
       raw.state === "closed" || raw.state === "merged" || raw.state === "all" ? raw.state : "open",
+    sort: isPullRequestSortOrder(raw.sort) ? raw.sort : "updated",
     ...(typeof raw.repository === "string" && raw.repository
       ? { repository: raw.repository.slice(0, 200) }
       : {}),
@@ -414,6 +429,7 @@ function PullRequestsRouteView() {
           return {
             involvement: next.involvement ?? previous.involvement,
             state: next.state ?? previous.state,
+            ...(next.sort === undefined ? {} : { sort: next.sort }),
             ...(next.repository ? { repository: next.repository } : {}),
             ...(next.number ? { number: next.number } : {}),
             ...(next.projectId ? { projectId: next.projectId } : {}),
@@ -442,6 +458,17 @@ function PullRequestsRouteView() {
     selectedProjectId: undefined,
     selectedEnvironmentId: undefined,
   };
+  // Ranking runs on whichever agent the reader has put first in their favourites: they already
+  // chose a model there, and a page with no composer has nowhere else to ask.
+  const rankingFavorite = useClientSettings((settings) => settings.favorites?.[0]);
+  const rankingModel = useMemo(
+    () =>
+      rankingFavorite === undefined
+        ? null
+        : createModelSelection(rankingFavorite.provider, rankingFavorite.model, []),
+    [rankingFavorite],
+  );
+
   const updateListScope = (patch: {
     [Key in keyof PullRequestsSearch]?: PullRequestsSearch[Key] | undefined;
   }) => {
@@ -1096,6 +1123,49 @@ function PullRequestsRouteView() {
    * listing leaves them out and they arrive a moment later, into rows that already draw without
    * them. Keyed by the rows being shown, so scrolling further asks only about what is new.
    */
+  // One ranking call per repository being judged, carrying the rows the page already holds so the
+  // agent needs no reads of its own. Every candidate goes in — the server splits a long set across
+  // prompts rather than taking the first few — so a section reordered by this is reordered whole.
+  const rankTargets = useMemo(() => {
+    if (search.sort !== "useful" || rankingModel === null) return NO_RANK_TARGETS;
+    const byRepository = new Map<
+      string,
+      {
+        environmentId: EnvironmentId;
+        input: PullRequestRankInput & {
+          candidates: Array<PullRequestRankInput["candidates"][number]>;
+        };
+      }
+    >();
+    for (const entry of entries) {
+      // Only the upstream section is ranked: the reader's own work and their review queue are
+      // ordered by what is waiting on them, which no judgement of usefulness improves.
+      if (entry.isUpstream !== true) continue;
+      const key = `${entry.environmentId} ${entry.projectId} ${entry.repository}`;
+      const held = byRepository.get(key);
+      const candidate = {
+        number: entry.number,
+        title: entry.title,
+        ...(entry.labels.length > 0 ? { labels: entry.labels.map((label) => label.name) } : {}),
+      };
+      if (held === undefined) {
+        byRepository.set(key, {
+          environmentId: entry.environmentId,
+          input: {
+            projectId: entry.projectId,
+            repository: entry.repository,
+            candidates: [candidate],
+            modelSelection: rankingModel,
+          },
+        });
+        continue;
+      }
+      held.input.candidates.push(candidate);
+    }
+    return [...byRepository.values()];
+  }, [entries, rankingModel, search.sort]);
+  const { usefulness } = usePullRequestUsefulness(rankTargets);
+
   const groups = useMemo(() => {
     if (search.involvement !== "all") return [{ key: "others" as const, label: "", entries }];
     // Until both partitions have answered, the snapshot's stand in — they are yesterday's
@@ -1121,10 +1191,15 @@ function PullRequestsRouteView() {
     const reviewing = narrow(
       partitionsWanted ? (reviewingQuery.data?.entries ?? held?.reviewing) : undefined,
     );
-    if (authored === undefined || reviewing === undefined) {
-      return groupPullRequestsByInvolvement(entries, viewers);
-    }
-    return partitionPullRequestsWithPriority(entries, authored, reviewing);
+    const grouped =
+      authored === undefined || reviewing === undefined
+        ? groupPullRequestsByInvolvement(entries, viewers)
+        : partitionPullRequestsWithPriority(entries, authored, reviewing);
+    if ((search.sort ?? "updated") === "updated") return grouped;
+    return grouped.map((group) => ({
+      ...group,
+      entries: sortPullRequestEntries(group.entries, search.sort ?? "updated", usefulness),
+    }));
   }, [
     hasLocalFilters,
     localFilters,
@@ -1136,6 +1211,8 @@ function PullRequestsRouteView() {
     reviewingQuery.data?.entries,
     scopeKey,
     search.involvement,
+    search.sort,
+    usefulness,
     viewers,
   ]);
 
@@ -1462,6 +1539,8 @@ function PullRequestsRouteView() {
       onFilters={(next) =>
         updateListScope({ draft: next.draft, review: next.review, checks: next.checks })
       }
+      sort={search.sort ?? "updated"}
+      onSort={(sort) => updateListScope({ sort })}
       host={search.host}
       hostOptions={hostMenuOptions}
       onHost={(host) => updateListScope({ host })}

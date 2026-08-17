@@ -532,6 +532,8 @@ export const PullRequestRanking = Schema.Struct({
 export type PullRequestRanking = typeof PullRequestRanking.Type;
 
 export const PullRequestRankResult = Schema.Struct({
+  /** Echoed with the host so the page can key a score to the row it belongs to. */
+  host: TrimmedNonEmptyString,
   repository: TrimmedNonEmptyString,
   rankings: Schema.Array(PullRequestRanking),
 });

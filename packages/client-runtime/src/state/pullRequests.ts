@@ -51,6 +51,16 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       tag: WS_METHODS.pullRequestsListStats,
       staleTimeMs: 60_000,
     }),
+    /**
+     * What an agent makes of a repository's pull requests. Held far longer than the rows
+     * themselves: a judgement about what a change does only goes stale when the change does, and
+     * every read of it is a model call somebody waits on.
+     */
+    rank: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:pull-requests:rank",
+      tag: WS_METHODS.pullRequestsRank,
+      staleTimeMs: 30 * 60_000,
+    }),
     detail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:detail",
       tag: WS_METHODS.pullRequestsDetail,

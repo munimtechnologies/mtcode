@@ -79,6 +79,8 @@ import {
   PullRequestListInput,
   PullRequestListResult,
   PullRequestListStatsInput,
+  PullRequestRankInput,
+  PullRequestRankResult,
   PullRequestListStatsResult,
   PullRequestOperationError,
   PullRequestReactionInput,
@@ -293,6 +295,7 @@ export const WS_METHODS = {
   pullRequestsReplyToThread: "pullRequests.replyToThread",
   pullRequestsSetThreadResolution: "pullRequests.setThreadResolution",
   pullRequestsSetReaction: "pullRequests.setReaction",
+  pullRequestsRank: "pullRequests.rank",
   pullRequestsInvalidate: "pullRequests.invalidate",
   pullRequestsReviewerCandidates: "pullRequests.reviewerCandidates",
   pullRequestsRequestReviewers: "pullRequests.requestReviewers",
@@ -490,6 +493,17 @@ export const WsPullRequestsListRpc = Rpc.make(WS_METHODS.pullRequestsList, {
 export const WsPullRequestsListStatsRpc = Rpc.make(WS_METHODS.pullRequestsListStats, {
   payload: PullRequestListStatsInput,
   success: PullRequestListStatsResult,
+  error: PullRequestRpcError,
+});
+
+/**
+ * Ask an agent which of these pull requests are worth porting. Its own call rather than part of
+ * the listing: it costs a model round trip, so the rows are drawn from the listing first and
+ * reorder once this answers.
+ */
+export const WsPullRequestsRankRpc = Rpc.make(WS_METHODS.pullRequestsRank, {
+  payload: PullRequestRankInput,
+  success: PullRequestRankResult,
   error: PullRequestRpcError,
 });
 
@@ -1008,6 +1022,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
+  WsPullRequestsRankRpc,
   WsPullRequestsDetailRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsThreadCommentsRpc,

@@ -101,6 +101,7 @@ const collectQueueUntil = Effect.fn("TransferBudget.collectQueueUntil")(function
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
+import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { isThreadDetailEvent, resolveAvailableEditorsForConfig } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
@@ -831,6 +832,12 @@ const buildAppUnderTest = (options?: {
     );
 
     const appLayer = servedRoutesLayer.pipe(
+      // Ranking reaches an agent CLI, which this test has no business starting.
+      Layer.provide(
+        Layer.mock(PullRequestRanking.PullRequestRankingService)({
+          rank: () => Effect.succeed([]),
+        }),
+      ),
       Layer.provide(resourceTelemetryLayer),
       Layer.provide(UsageService.layerTest),
       Layer.provide(
