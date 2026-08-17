@@ -20,6 +20,12 @@ git checkout personal
 git reset --hard "$PERSONAL_REMOTE/personal"
 echo "HEAD=$(git rev-parse --short HEAD) $(git log -1 --oneline)"
 
+# Bake T3 Connect public client config into desktop artifacts (gitignored .env).
+if [[ ! -f .env ]]; then
+  cp .env.example .env
+  echo "created .env from .env.example for T3 Connect"
+fi
+
 pnpm dist:desktop:dmg:arm64
 
 DMG=$(ls -1t "$REPO"/release/T3-Code-*-arm64.dmg | head -1)

@@ -55,6 +55,13 @@ if (($new -eq $old) -and ($force -ne "1")) {
 git checkout personal
 git reset --hard origin/personal
 
+# Bake T3 Connect public client config into desktop artifacts (gitignored .env).
+# Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
+if (-not (Test-Path ".env")) {
+  Copy-Item ".env.example" ".env"
+  Log "created .env from .env.example for T3 Connect"
+}
+
 if (-not $env:T3CODE_DESKTOP_VERSION) {
   # Avoid jq regex on Windows; parse JSON in PowerShell.
   $releases = ConvertFrom-Json -InputObject (gh api "repos/pingdotgg/t3code/releases" --paginate)
