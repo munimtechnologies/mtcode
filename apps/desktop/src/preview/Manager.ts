@@ -2990,7 +2990,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       locator,
     );
     const point = yield* evaluateWithDebugger<
-      { x: number; y: number } | { invalidSelector: true; message: string } | { notFound: true }
+      | { x: number; y: number }
+      | { invalidSelector: true; message: string }
+      | {
+          notFound: true;
+          failureKind: "missing" | "hidden" | "disabled";
+        }
+      | {
+          notFound: true;
+          failureKind: "ambiguous";
+          matchCount: number;
+        }
     >(
       tabId,
       send,
@@ -2998,11 +3008,24 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           try {
             const injected = globalThis.__t3PlaywrightInjected;
             const parsed = injected.parseSelector(${locatorJson});
-            const element = injected.querySelector(parsed, document, true);
-            if (!element) return { notFound: true };
+            let element;
+            try {
+              element = injected.querySelector(parsed, document, true);
+            } catch (error) {
+              const message = String(error);
+              if (message.toLowerCase().includes("strict mode")) {
+                const matches = injected.querySelectorAll
+                  ? injected.querySelectorAll(parsed, document)
+                  : [];
+                return { notFound: true, failureKind: "ambiguous", matchCount: matches.length || 2 };
+              }
+              throw error;
+            }
+            if (!element) return { notFound: true, failureKind: "missing" };
             const visible = injected.elementState(element, "visible");
             const enabled = injected.elementState(element, "enabled");
-            if (!visible.matches || !enabled.matches) return { notFound: true };
+            if (!visible.matches) return { notFound: true, failureKind: "hidden" };
+            if (!enabled.matches) return { notFound: true, failureKind: "disabled" };
             element.scrollIntoView({ block: "center", inline: "center" });
             const rect = element.getBoundingClientRect();
             return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -3022,10 +3045,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
     }
     if ("notFound" in point) {
-      return yield* new PreviewAutomationTargetNotFoundError({
+      return yield* PreviewAutomationTargetNotFoundError.fromLookupFailure({
         operation: "click",
         tabId,
         ...automationSelectorDiagnostics(input),
+        ...(point.failureKind === "ambiguous"
+          ? { failureKind: "ambiguous", matchCount: point.matchCount }
+          : { failureKind: point.failureKind }),
       });
     }
     return point;
@@ -3668,18 +3694,85 @@ export class PreviewAutomationEvaluationError extends Schema.TaggedErrorClass<Pr
   }
 }
 
+const PreviewAutomationTargetLookupFields = {
+  operation: Schema.String,
+  tabId: Schema.String,
+  selectorKind: PreviewAutomationSelectorKind,
+  selectorLength: Schema.optionalKey(Schema.Number),
+};
+
 export class PreviewAutomationTargetNotFoundError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotFoundError>()(
   "PreviewAutomationTargetNotFoundError",
+  PreviewAutomationTargetLookupFields,
+) {
+  static fromLookupFailure(
+    input: {
+      readonly operation: string;
+      readonly tabId: string;
+      readonly selectorKind: PreviewAutomationSelectorKind;
+      readonly selectorLength?: number;
+    } & (
+      | { readonly failureKind: "ambiguous"; readonly matchCount: number }
+      | { readonly failureKind?: "missing" | "hidden" | "disabled" }
+    ),
+  ) {
+    const shared = {
+      operation: input.operation,
+      tabId: input.tabId,
+      selectorKind: input.selectorKind,
+      ...(input.selectorLength === undefined ? {} : { selectorLength: input.selectorLength }),
+    };
+    if (input.failureKind === "hidden") {
+      return new PreviewAutomationTargetHiddenError(shared);
+    }
+    if (input.failureKind === "disabled") {
+      return new PreviewAutomationTargetDisabledError(shared);
+    }
+    if (input.failureKind === "ambiguous") {
+      return new PreviewAutomationTargetAmbiguousError({
+        ...shared,
+        matchCount: input.matchCount,
+      });
+    }
+    return new PreviewAutomationTargetNotFoundError(shared);
+  }
+
+  override get message(): string {
+    const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
+    return `Preview automation ${this.operation} could not find ${target} in tab ${this.tabId}`;
+  }
+}
+
+export class PreviewAutomationTargetHiddenError extends Schema.TaggedErrorClass<PreviewAutomationTargetHiddenError>()(
+  "PreviewAutomationTargetHiddenError",
+  PreviewAutomationTargetLookupFields,
+) {
+  override get message(): string {
+    const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
+    return `Preview automation ${this.operation} found ${target} in tab ${this.tabId}, but it is not visible`;
+  }
+}
+
+export class PreviewAutomationTargetDisabledError extends Schema.TaggedErrorClass<PreviewAutomationTargetDisabledError>()(
+  "PreviewAutomationTargetDisabledError",
+  PreviewAutomationTargetLookupFields,
+) {
+  override get message(): string {
+    const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
+    return `Preview automation ${this.operation} found ${target} in tab ${this.tabId}, but it is disabled`;
+  }
+}
+
+export class PreviewAutomationTargetAmbiguousError extends Schema.TaggedErrorClass<PreviewAutomationTargetAmbiguousError>()(
+  "PreviewAutomationTargetAmbiguousError",
   {
-    operation: Schema.String,
-    tabId: Schema.String,
-    selectorKind: PreviewAutomationSelectorKind,
-    selectorLength: Schema.optionalKey(Schema.Number),
+    ...PreviewAutomationTargetLookupFields,
+    matchCount: Schema.Number,
   },
 ) {
   override get message(): string {
     const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
-    return `Preview automation ${this.operation} could not find ${target} in tab ${this.tabId}`;
+    return `Preview automation ${this.operation} matched ${this.matchCount} elements for ${target} in tab ${this.tabId}`;
   }
 }
 
@@ -3798,6 +3891,9 @@ export const PreviewManagerError = Schema.Union([
   PreviewAutomationDebuggerAttachedError,
   PreviewAutomationEvaluationError,
   PreviewAutomationTargetNotFoundError,
+  PreviewAutomationTargetHiddenError,
+  PreviewAutomationTargetDisabledError,
+  PreviewAutomationTargetAmbiguousError,
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationCoordinatesOutsideViewportError,
   PreviewAutomationInvalidSelectorError,
