@@ -1048,21 +1048,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const occurredAt = yield* nowIso;
-      const events: Array<Omit<OrchestrationEvent, "sequence">> = [
-        {
+      const events: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      // Deleting the Objective also stops the active run: the turn only exists
+      // to serve the Goal, and leaving it running would surprise users who
+      // deleted from another device (matches thread.turn.interrupt's reactor).
+      if (thread.latestTurn?.state === "running") {
+        events.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
             aggregateId: command.threadId,
             occurredAt,
             commandId: command.commandId,
           })),
-          type: "thread.goal-cleared",
+          type: "thread.turn-interrupt-requested",
           payload: {
             threadId: command.threadId,
-            updatedAt: occurredAt,
+            createdAt: occurredAt,
           },
+        });
+      }
+      events.push({
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.goal-cleared",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: occurredAt,
         },
-      ];
+      });
       if (thread.goal != null) {
         events.push(
           yield* goalActivityAppendedEvent({

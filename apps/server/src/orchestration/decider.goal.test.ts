@@ -334,6 +334,28 @@ it.layer(NodeServices.layer)("Goal decider", (it) => {
     }),
   );
 
+  it.effect("clears the Goal and interrupts a running Turn", () =>
+    Effect.gen(function* () {
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.goal.clear",
+          commandId: CommandId.make("cmd-goal-clear-running"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel({
+          goal: existingGoal(),
+          latestTurn: runningTurn(),
+        }),
+      });
+      const events = Array.isArray(decided) ? decided : [decided];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.turn-interrupt-requested",
+        "thread.goal-cleared",
+        "thread.activity-appended",
+      ]);
+    }),
+  );
+
   it.effect("pauses an existing Goal without interrupting the Turn", () =>
     Effect.gen(function* () {
       const decided = yield* decideOrchestrationCommand({
