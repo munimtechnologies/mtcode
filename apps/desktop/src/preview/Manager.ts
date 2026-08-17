@@ -25,6 +25,7 @@ import type {
   PreviewAutomationNetworkEntry,
   PreviewAutomationScrollInput,
   PreviewAutomationSnapshot,
+  PreviewAutomationSnapshotInclude,
   PreviewAutomationStatus,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
@@ -2863,11 +2864,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   const captureAutomationSnapshot = Effect.fn("PreviewManager.captureAutomationSnapshot")(
-    function* (tabId: string, wc: Electron.WebContents, send: SendCommand) {
-      yield* Effect.all([send("Runtime.enable"), send("Accessibility.enable")], {
-        concurrency: 2,
-        discard: true,
-      });
+    function* (
+      tabId: string,
+      wc: Electron.WebContents,
+      send: SendCommand,
+      include: ReadonlyArray<PreviewAutomationSnapshotInclude> = [],
+    ) {
+      const includeAx = include.includes("ax");
+      const includeConsole = include.includes("console");
+      const includeNetwork = include.includes("network");
+      yield* send("Runtime.enable");
+      if (includeAx) yield* send("Accessibility.enable");
       const page = yield* evaluateWithDebugger<{
         url: string;
         title: string;
@@ -2905,14 +2912,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             const rect = element.getBoundingClientRect();
             return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
           };
+          const clickable = (element) => {
+            if (element.matches("a[href],button,input,textarea,select,[role],[tabindex]")) return true;
+            const role = element.getAttribute("role");
+            if (role === "row" || role === "gridcell" || role === "option") return true;
+            const style = getComputedStyle(element);
+            return style.cursor === "pointer" && (element.tagName === "TR" || element.tagName === "TD" || element.tagName === "DIV");
+          };
+          const seen = new Set();
           const elements = Array.from(document.querySelectorAll(
-            "a[href],button,input,textarea,select,[role],[tabindex]"
-          )).filter(visible).slice(0, ${MAX_INTERACTIVE_ELEMENTS}).map((element) => {
+            "a[href],button,input,textarea,select,[role],[tabindex],[role=row],tr,[role=gridcell]"
+          )).filter((element) => {
+            if (!visible(element) || !clickable(element) || seen.has(element)) return false;
+            seen.add(element);
+            return true;
+          }).slice(0, ${MAX_INTERACTIVE_ELEMENTS}).map((element, index) => {
             const rect = element.getBoundingClientRect();
             return {
+              id: "e" + (index + 1),
               tag: element.tagName.toLowerCase(),
               role: element.getAttribute("role"),
-              name: element.getAttribute("aria-label") || element.innerText || element.getAttribute("name") || "",
+              name: (element.getAttribute("aria-label") || element.innerText || element.getAttribute("name") || "").slice(0, 160),
               selector: selectorFor(element),
               x: rect.x,
               y: rect.y,
@@ -2920,29 +2940,45 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               height: rect.height
             };
           });
+          const main = document.querySelector("main");
           return {
             url: location.href,
             title: document.title,
             loading: document.readyState !== "complete",
-            visibleText: (document.body?.innerText || "").slice(0, ${MAX_VISIBLE_TEXT_LENGTH}),
+            visibleText: ((main && main.innerText) || document.body?.innerText || "").slice(0, ${MAX_VISIBLE_TEXT_LENGTH}),
             interactiveElements: elements
           };
         })()`,
         true,
       );
-      const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
-        send("Accessibility.getFullAXTree"),
-        attemptPromise(
-          {
-            operation: "automationSnapshot.capturePage",
-            tabId,
-            webContentsId: wc.id,
-          },
-          () => wc.capturePage(),
+      const accessibility = includeAx ? yield* send("Accessibility.getFullAXTree") : undefined;
+      const [diagnostics, timelines] = yield* Effect.all(
+        [Ref.get(diagnosticsRef), Ref.get(actionTimelineRef)],
+        { concurrency: 2 },
+      );
+      const sourceImage = yield* attemptPromise(
+        {
+          operation: "automationSnapshot.capturePage",
+          tabId,
+          webContentsId: wc.id,
+        },
+        () => wc.capturePage(),
+      ).pipe(
+        Effect.catch(() =>
+          send("Page.captureScreenshot", { format: "png" }).pipe(
+            Effect.map((result) => {
+              const data =
+                result !== null &&
+                typeof result === "object" &&
+                "data" in result &&
+                typeof result.data === "string"
+                  ? result.data
+                  : "";
+              return nativeImage.createFromBuffer(Buffer.from(data, "base64"));
+            }),
+          ),
         ),
-        Ref.get(diagnosticsRef),
-        Ref.get(actionTimelineRef),
-      ]);
+      );
       const sourceSize = sourceImage.getSize();
       const image =
         sourceSize.width > MAX_SCREENSHOT_WIDTH
@@ -2952,9 +2988,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const browserDiagnostics = diagnostics.get(wc.id);
       return {
         ...page,
-        accessibilityTree: accessibility,
-        consoleEntries: [...(browserDiagnostics?.consoleEntries ?? [])],
-        networkEntries: [...(browserDiagnostics?.networkEntries ?? [])],
+        ...(includeAx ? { accessibilityTree: accessibility } : {}),
+        consoleEntries: includeConsole ? [...(browserDiagnostics?.consoleEntries ?? [])] : [],
+        networkEntries: includeNetwork ? [...(browserDiagnostics?.networkEntries ?? [])] : [],
         actionTimeline: [...(timelines.get(tabId) ?? [])],
         screenshot: {
           mimeType: "image/png" as const,
@@ -2968,10 +3004,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const automationSnapshot = Effect.fn("PreviewManager.automationSnapshot")(function* (
     tabId: string,
+    include: ReadonlyArray<PreviewAutomationSnapshotInclude> = [],
   ) {
     const wc = yield* requireWebContents(tabId);
     return yield* withControlSession(tabId, wc, "snapshot", (send) =>
-      captureAutomationSnapshot(tabId, wc, send),
+      captureAutomationSnapshot(tabId, wc, send, include),
     );
   });
 
@@ -3398,7 +3435,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* send("Runtime.enable");
     const locator = automationLocator(input);
     if (locator) yield* ensurePlaywrightInjected(tabId, send);
-    const [locatorJson, textJson, urlIncludesJson] = yield* Effect.all([
+    const [locatorJson, textJson, urlIncludesJson, scopeJson] = yield* Effect.all([
       locator
         ? encodeJson({ operation: "automationWaitFor.encodeLocator", tabId }, locator)
         : Effect.succeed(null),
@@ -3408,6 +3445,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       input.urlIncludes
         ? encodeJson({ operation: "automationWaitFor.encodeUrl", tabId }, input.urlIncludes)
         : Effect.succeed(null),
+      encodeJson({ operation: "automationWaitFor.encodeScope", tabId }, input.scope ?? "main"),
     ]);
     const deadline = (yield* currentMillis) + timeoutMs;
     while ((yield* currentMillis) <= deadline) {
@@ -3418,9 +3456,29 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         send,
         `(() => {
               try {
-                const selectorMatched = ${locatorJson ? `(() => { const injected = globalThis.__t3PlaywrightInjected; return injected.querySelector(injected.parseSelector(${locatorJson}), document, false) !== null; })()` : "true"};
+                const root = ${scopeJson} === "document"
+                  ? document.documentElement
+                  : (document.querySelector("main") || document.documentElement);
+                const selectorMatched = ${
+                  locatorJson
+                    ? `(() => {
+                  const injected = globalThis.__t3PlaywrightInjected;
+                  const parsed = injected.parseSelector(${locatorJson});
+                  const element = injected.querySelector(parsed, root, false);
+                  if (!element) return false;
+                  const visible = injected.elementState(element, "visible");
+                  if (!visible.matches) return false;
+                  if (element.getAttribute("role") === "dialog") {
+                    const slot = element.getAttribute("data-slot") || "";
+                    if (slot.includes("trigger")) return false;
+                  }
+                  return true;
+                })()`
+                    : "true"
+                };
+                const textRoot = root instanceof Element ? root : (root.body || document.body);
                 const textMatched = ${
-                  textJson ? `(document.body?.innerText || "").includes(${textJson})` : "true"
+                  textJson ? `(textRoot?.innerText || "").includes(${textJson})` : "true"
                 };
                 const urlMatched = ${
                   urlIncludesJson ? `location.href.includes(${urlIncludesJson})` : "true"
@@ -3876,6 +3934,7 @@ export class PreviewManager extends Context.Service<
     ) => Effect.Effect<PreviewAutomationStatus, PreviewManagerError>;
     readonly automationSnapshot: (
       tabId: string,
+      include?: ReadonlyArray<PreviewAutomationSnapshotInclude>,
     ) => Effect.Effect<PreviewAutomationSnapshot, PreviewManagerError>;
     readonly automationClick: (
       tabId: string,
