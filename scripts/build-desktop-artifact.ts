@@ -862,6 +862,14 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
   },
+  {
+    // Staged by `stageDesktopMcp` on macOS and `stageDesktopMcpRust` elsewhere, but never listed
+    // here — so it was built on every release and then left out of the bundle, and Computer Use
+    // and Computer History both reported the binary missing on an installed app while working
+    // fine from a checkout. `resolveDesktopMcpBinaryPathSync` looks for exactly this layout.
+    from: "apps/desktop/prod-resources/t3-desktop-mcp",
+    to: "t3-desktop-mcp",
+  },
 ] as const;
 
 export interface MacPasskeySigningConfiguration {
