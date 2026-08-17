@@ -396,6 +396,7 @@ function buildCodexCollaborationMode(input: {
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly computerHistoryContext?: string;
+  readonly browserToolsAvailable?: boolean;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   // Mode-less turns still need Computer History when present — otherwise ordinary
   // sendTurn calls silently drop the loaded context.
@@ -411,11 +412,11 @@ function buildCodexCollaborationMode(input: {
       model,
       reasoning_effort: reasoningEffort,
       developer_instructions: buildCodexDeveloperInstructions(
+        // The defaulted mode rather than the input's: a turn with no mode still carries
+        // Computer History, and passing undefined here would drop its instructions.
         interactionMode,
-        {
-          model,
-          reasoningEffort,
-        },
+        { model, reasoningEffort },
+        input.browserToolsAvailable ?? true,
         input.computerHistoryContext
           ? { computerHistoryContext: input.computerHistoryContext }
           : undefined,
@@ -437,6 +438,8 @@ export function buildTurnStartParams(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
   readonly computerHistoryContext?: string;
+  /** Defaults to true so callers that predate the agent-access gate are unchanged. */
+  readonly browserToolsAvailable?: boolean;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -460,6 +463,7 @@ export function buildTurnStartParams(input: {
     ...(input.computerHistoryContext
       ? { computerHistoryContext: input.computerHistoryContext }
       : {}),
+    browserToolsAvailable: input.browserToolsAvailable ?? true,
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2014,6 +2018,10 @@ export const makeCodexSessionRuntime = (
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
             ...(computerHistoryContext ? { computerHistoryContext } : {}),
+            // Derived from the session's own MCP configuration rather than the
+            // setting, so the prompt describes the tools this turn actually
+            // has even if the setting changed after the session started.
+            browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

@@ -233,7 +233,10 @@ const validationLayer = it.layer(
     }),
   ).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-    Layer.provideMerge(ServerSettingsService.layerTest()),
+    // Desktop control off, because this suite asserts the runtime input exactly and the desktop
+    // MCP is injected into it whenever its binary happens to be built on the machine running the
+    // tests — which made the assertion pass in CI and fail on a developer's own checkout.
+    Layer.provideMerge(ServerSettingsService.layerTest({ desktopControl: { enabled: false } })),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
