@@ -7,6 +7,7 @@ import {
   TurnId,
   type OrchestrationEvent,
   type OrchestrationThread,
+  type OrchestrationThreadShell,
 } from "@t3tools/contracts";
 import { goalBlockCommandId, goalContinuationCommandId } from "@t3tools/shared/goalContinuation";
 import * as Clock from "effect/Clock";
@@ -150,6 +151,35 @@ function sessionSetEvent(input: {
   };
 }
 
+function toShell(
+  thread: OrchestrationThread,
+): OrchestrationThreadShell & { readonly goal: OrchestrationThreadShell["goal"] } {
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    modelSelection: thread.modelSelection,
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestTurn: thread.latestTurn,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    archivedAt: thread.archivedAt,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
+    goal: thread.goal
+      ? { status: thread.goal.status, objectivePreview: thread.goal.objective }
+      : null,
+    session: thread.session,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+  };
+}
+
 describe("GoalReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<GoalReactor, unknown> | null = null;
   let scope: Scope.Closeable | null = null;
@@ -182,6 +212,13 @@ describe("GoalReactor", () => {
 
     const snapshotQuery = {
       getThreadDetailById,
+      getShellSnapshot: () =>
+        Effect.succeed({
+          snapshotSequence: 0,
+          projects: [],
+          threads: threads.map(toShell),
+          updatedAt: NOW,
+        }),
     } as unknown as ProjectionSnapshotQueryShape;
 
     runtime = ManagedRuntime.make(
@@ -381,5 +418,111 @@ describe("GoalReactor", () => {
       ),
       threadId: THREAD_ID,
     });
+  });
+
+  it("settles a Turn orphaned by restart and resumes the active Goal", async () => {
+    const harness = await createHarness([
+      makeThread({
+        goal: activeGoal(),
+        latestTurn: {
+          turnId: TURN_ID,
+          state: "running",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+        session: {
+          threadId: THREAD_ID,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: TURN_ID,
+          lastError: null,
+          updatedAt: NOW,
+        },
+      }),
+    ]);
+    await waitFor(() => harness.dispatch.mock.calls.length === 2);
+
+    expect(harness.dispatch).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: "thread.session.set",
+        commandId: CommandId.make(`goal-restart-settle:${THREAD_ID}:${TURN_ID}`),
+        threadId: THREAD_ID,
+        session: expect.objectContaining({
+          status: "interrupted",
+          activeTurnId: null,
+        }),
+      }),
+    );
+    expect(harness.dispatch).toHaveBeenNthCalledWith(2, {
+      type: "thread.goal.continue",
+      commandId: CommandId.make(
+        goalContinuationCommandId({
+          threadId: THREAD_ID,
+          goalUpdatedAt: NOW,
+          completedTurnId: TURN_ID,
+        }),
+      ),
+      threadId: THREAD_ID,
+      completedTurnId: TURN_ID,
+    });
+  });
+
+  it("leaves a running Turn alone when its Session is fresh from this process", async () => {
+    const freshSessionUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+    const harness = await createHarness([
+      makeThread({
+        goal: activeGoal(),
+        latestTurn: {
+          turnId: TURN_ID,
+          state: "running",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+        session: {
+          threadId: THREAD_ID,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: TURN_ID,
+          lastError: null,
+          updatedAt: freshSessionUpdatedAt,
+        },
+      }),
+    ]);
+    await harness.drain();
+    expect(harness.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not settle an orphaned Turn when the Goal is paused", async () => {
+    const harness = await createHarness([
+      makeThread({
+        goal: activeGoal("paused"),
+        latestTurn: {
+          turnId: TURN_ID,
+          state: "running",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+        session: {
+          threadId: THREAD_ID,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: TURN_ID,
+          lastError: null,
+          updatedAt: NOW,
+        },
+      }),
+    ]);
+    await harness.drain();
+    expect(harness.dispatch).not.toHaveBeenCalled();
   });
 });
