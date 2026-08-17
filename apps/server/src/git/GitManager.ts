@@ -957,7 +957,11 @@ export const make = Effect.gen(function* () {
         // track origin/main. That upstream is the branch's base, not its
         // published PR head. Looking up PRs for it can attach an old reverse
         // merge from main and auto-settle an unrelated feature thread.
-        if (headContext.headBranch !== details.branch && upstreamHeadIsDefault) {
+        if (
+          headContext.headBranch !== details.branch &&
+          upstreamHeadIsDefault &&
+          !headContext.isCrossRepository
+        ) {
           return { latest: null, headContext };
         }
         // Only skip when the branch is untracked as well: anything carrying an
