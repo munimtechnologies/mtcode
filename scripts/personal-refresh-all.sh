@@ -81,13 +81,28 @@ ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass -Fi
   -ForceRebuild 1
 
 # --- Dell (install only from Blade-staged installer via this Mac) ---
+# One machine being off, asleep, or behind a tunnel that is not up must not undo the refresh for
+# the others: reaching Dell used to be the last thing that could kill the run outright, taking
+# the settings sync and the built-sha record down with it and leaving the next run to redo a
+# build that had already succeeded. Errors are reported and the refresh carries on without it.
+refresh_dell() {
+  mkdir -p /tmp/t3-personal-installer || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 blade:dev/T3-Code-personal-x64.exe \
+    /tmp/t3-personal-installer/T3-Code-personal-x64.exe || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 /tmp/t3-personal-installer/T3-Code-personal-x64.exe \
+    dell:dev/T3-Code-personal-x64.exe || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
+    dell:dev/personal-refresh-dell.ps1 || return 1
+  ssh -o BatchMode=yes -o ConnectTimeout=30 dell powershell.exe -NoProfile -ExecutionPolicy Bypass \
+    -File C:/Users/busin/dev/personal-refresh-dell.ps1 || return 1
+}
+
 echo "-- refreshing Dell --"
-mkdir -p /tmp/t3-personal-installer
-scp -o BatchMode=yes blade:dev/T3-Code-personal-x64.exe /tmp/t3-personal-installer/T3-Code-personal-x64.exe
-scp -o BatchMode=yes /tmp/t3-personal-installer/T3-Code-personal-x64.exe dell:dev/T3-Code-personal-x64.exe
-scp -o BatchMode=yes "$REPO/scripts/personal-refresh-dell.ps1" dell:dev/personal-refresh-dell.ps1
-ssh -o BatchMode=yes dell powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
-  C:/Users/busin/dev/personal-refresh-dell.ps1
+if refresh_dell; then
+  echo "Dell refreshed"
+else
+  echo "Dell could not be reached — skipped. Mac and Blade are still up to date." >&2
+fi
 
 # After both Windows installs, push Mac preference files to Blade + Dell.
 echo "-- syncing settings Mac → Blade/Dell --"

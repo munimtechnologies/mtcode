@@ -142,7 +142,9 @@ push_host() {
   echo "done $host"
 }
 
-push_host blade muhha
-push_host dell busin
+# Same reasoning as the refresh: a host that cannot be reached is reported, not fatal, so one
+# machine being away does not cost the others their settings.
+push_host blade muhha || echo "blade settings sync failed" >&2
+push_host dell busin || echo "dell settings sync failed" >&2
 
 echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) settings sync done ===="
