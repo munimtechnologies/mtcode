@@ -20,6 +20,7 @@ import {
   handoffPrompt,
   handoffReviewComments,
   isPullRequestVerdictStale,
+  isStackedPullRequestBase,
   isThreadOwnPullRequest,
   latestPullRequestReviewOutcomes,
   newestPullRequestCommitAt,
@@ -170,6 +171,47 @@ describe("pull request composer target", () => {
 
     expect(pullRequestComposerTarget("page", target)).toBeNull();
     expect(pullRequestComposerTarget("thread", target)).toBe(target);
+  });
+});
+
+describe("stacked pull request classification", () => {
+  it("requires a known default branch", () => {
+    expect(isStackedPullRequestBase("main", [{ name: "main", isDefault: false }])).toBe(false);
+  });
+
+  it("recognizes local and remote forms of the default branch", () => {
+    expect(
+      isStackedPullRequestBase("main", [{ name: "main", isDefault: true, isRemote: false }]),
+    ).toBe(false);
+    expect(
+      isStackedPullRequestBase("main", [
+        { name: "origin/main", isDefault: true, isRemote: true, remoteName: "origin" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("classifies a non-default base as stacked once the default is known", () => {
+    expect(
+      isStackedPullRequestBase("feature-base", [
+        { name: "origin/main", isDefault: true, isRemote: true, remoteName: "origin" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not mistake a nested branch suffix for the default branch", () => {
+    expect(
+      isStackedPullRequestBase("main", [
+        {
+          name: "origin/feature/main",
+          isDefault: true,
+          isRemote: true,
+          remoteName: "origin",
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      isStackedPullRequestBase("1.0", [{ name: "release/1.0", isDefault: true, isRemote: false }]),
+    ).toBe(true);
   });
 });
 

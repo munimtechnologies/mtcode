@@ -274,6 +274,82 @@ describe("buildThreadFeed", () => {
     );
   });
 
+  it("collapses interleaved lifecycle rows by top-level tool identity", () => {
+    const turnId = TurnId.make("turn-interleaved-tools");
+    const lifecycleActivity = (
+      id: string,
+      createdAt: string,
+      kind: "tool.updated" | "tool.completed",
+      toolCallId: string,
+      title: string,
+    ) =>
+      makeActivity({
+        id: EventId.make(id),
+        kind,
+        tone: "tool",
+        summary: title,
+        createdAt,
+        turnId,
+        payload: {
+          itemType: "command_execution",
+          toolCallId,
+          title,
+          detail: title,
+        },
+      });
+    const thread = makeThread({
+      id: ThreadId.make("thread-interleaved-tools"),
+      projectId: ProjectId.make("project-1"),
+      title: "Interleaved tools",
+      latestTurn: {
+        turnId,
+        state: "completed",
+        requestedAt: "2026-04-01T00:00:00.000Z",
+        startedAt: "2026-04-01T00:00:01.000Z",
+        completedAt: "2026-04-01T00:00:05.000Z",
+        assistantMessageId: null,
+      },
+      activities: [
+        lifecycleActivity(
+          "tool-a-updated",
+          "2026-04-01T00:00:01.000Z",
+          "tool.updated",
+          "call-a",
+          "Preparing first call",
+        ),
+        lifecycleActivity(
+          "tool-b-updated",
+          "2026-04-01T00:00:02.000Z",
+          "tool.updated",
+          "call-b",
+          "Preparing second call",
+        ),
+        lifecycleActivity(
+          "tool-a-completed",
+          "2026-04-01T00:00:03.000Z",
+          "tool.completed",
+          "call-a",
+          "First call complete",
+        ),
+        lifecycleActivity(
+          "tool-b-completed",
+          "2026-04-01T00:00:04.000Z",
+          "tool.completed",
+          "call-b",
+          "Second call complete",
+        ),
+      ],
+    });
+
+    const group = buildThreadFeed(thread)[0];
+    expect(group?.type).toBe("activity-group");
+    if (!group || group.type !== "activity-group") return;
+    expect(group.activities.map((activity) => activity.id)).toEqual([
+      "tool-a-completed",
+      "tool-b-completed",
+    ]);
+  });
+
   it("keeps MCP inputs available to expanded mobile work rows", () => {
     const turnId = TurnId.make("turn-mcp");
     const thread = makeThread({

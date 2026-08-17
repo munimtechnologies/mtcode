@@ -1,12 +1,48 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  getTerminalSidebarMaxWidth,
+  resolveTerminalCustomLabelAfterRename,
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalExit,
   shouldHandleTerminalSelectionMouseUp,
+  shouldShowTerminalSidebar,
   terminalSelectionActionDelayForClickCount,
   terminalSelectionLineRange,
 } from "./ThreadTerminalDrawer";
+
+describe("resolveTerminalCustomLabelAfterRename", () => {
+  it("does not persist an untouched automatic label after it changes", () => {
+    expect(resolveTerminalCustomLabelAfterRename("bash", null, "bash", "vite")).toBeNull();
+  });
+
+  it("keeps an intentional custom label", () => {
+    expect(resolveTerminalCustomLabelAfterRename("server", null, "bash", "vite")).toBe("server");
+  });
+
+  it("keeps an untouched custom label when the automatic label changes to match it", () => {
+    expect(resolveTerminalCustomLabelAfterRename("server", "server", "bash", "server")).toBe(
+      "server",
+    );
+  });
+});
+
+describe("getTerminalSidebarMaxWidth", () => {
+  it("reserves usable terminal space in a narrow panel", () => {
+    expect(getTerminalSidebarMaxWidth()).toBe(320);
+    expect(getTerminalSidebarMaxWidth(360)).toBe(144);
+    expect(getTerminalSidebarMaxWidth(480)).toBe(264);
+    expect(getTerminalSidebarMaxWidth(800)).toBe(320);
+  });
+});
+
+describe("shouldShowTerminalSidebar", () => {
+  it("shows the sidebar only when there is more than one terminal", () => {
+    expect(shouldShowTerminalSidebar(0)).toBe(false);
+    expect(shouldShowTerminalSidebar(1)).toBe(false);
+    expect(shouldShowTerminalSidebar(2)).toBe(true);
+  });
+});
 
 describe("resolveTerminalSelectionActionPosition", () => {
   it("prefers the selection rect over the last pointer position", () => {
