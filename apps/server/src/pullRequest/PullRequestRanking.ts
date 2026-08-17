@@ -38,9 +38,18 @@ const RANKING_CACHE_CAPACITY = 2_000;
  * Keyed by what was actually judged rather than by the request: the page re-asks whenever any row
  * in the upstream moves, and without this every one of those asks was a fresh model call over
  * rows that had already been scored — which is what made ranking feel like it ran constantly.
+ *
+ * The model is part of the key because the judgement is the model's, not the repository's. Two
+ * agents rank the same backlog differently, and that difference is the reason to switch — so a
+ * switch has to show the new model's opinion rather than reuse the old one's. Each keeps its own
+ * answers, so switching back is free and switching to something never used ranks afresh.
  */
-const rankingCacheKey = (repository: string, candidate: { number: number; title: string }) =>
-  `${repository}#${candidate.number}\u0000${candidate.title}`;
+const rankingCacheKey = (
+  repository: string,
+  model: ModelSelection,
+  candidate: { number: number; title: string },
+) =>
+  `${model.instanceId}/${model.model}\u0000${repository}#${candidate.number}\u0000${candidate.title}`;
 
 function chunk<A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<ReadonlyArray<A>> {
   const chunks: Array<ReadonlyArray<A>> = [];
@@ -110,7 +119,7 @@ export const make = Effect.gen(function* () {
       const held: Array<PullRequestRanking> = [];
       const unjudged: Array<(typeof input.candidates)[number]> = [];
       for (const candidate of input.candidates) {
-        const key = rankingCacheKey(input.repository, candidate);
+        const key = rankingCacheKey(input.repository, input.modelSelection, candidate);
         const entry = cache.get(key);
         if (entry !== undefined && now - entry.at <= RANKING_CACHE_TTL_MS) {
           held.push(entry.ranking);
@@ -164,7 +173,11 @@ export const make = Effect.gen(function* () {
         rankings.push(ranking);
         const candidate = byNumber.get(ranking.number);
         if (candidate !== undefined) {
-          rememberRanking(rankingCacheKey(input.repository, candidate), ranking, now);
+          rememberRanking(
+            rankingCacheKey(input.repository, input.modelSelection, candidate),
+            ranking,
+            now,
+          );
         }
       }
 

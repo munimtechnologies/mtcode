@@ -61,7 +61,7 @@ function PrivacyExclusionList({
   placeholder: string;
   items: ReadonlyArray<string>;
   onChange: (next: string[]) => void;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
 }) {
   const [draft, setDraft] = useState("");
   const [adding, setAdding] = useState(false);
@@ -167,7 +167,7 @@ function ComputerHistoryPrivacyDialog({
   onOpenChange: (open: boolean) => void;
   apps: ReadonlyArray<string>;
   websites: ReadonlyArray<string>;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
   onSave: (next: { apps: string[]; websites: string[] }) => void;
 }) {
   const [draftApps, setDraftApps] = useState<string[]>([...apps]);
@@ -271,11 +271,15 @@ export function ComputerHistorySettings() {
       computerHistory: partial,
     });
     const bridge = window.desktopBridge;
-    if (!bridge?.patchComputerHistorySettings) return;
+    // Captured rather than re-read inside the callback: narrowing a method off an object does not
+    // survive into an async closure, since nothing stops the property changing in between. Bound
+    // so the bridge stays the receiver.
+    const patchSettings = bridge?.patchComputerHistorySettings?.bind(bridge);
+    if (!patchSettings) return;
     patchQueue.current = patchQueue.current
       .catch(() => undefined)
       .then(async () => {
-        const nextStatus = await bridge.patchComputerHistorySettings({
+        const nextStatus = await patchSettings({
           ...(partial.enabled === undefined ? {} : { enabled: partial.enabled }),
           ...(partial.paused === undefined ? {} : { paused: partial.paused }),
           ...(partial.mirrorToCodex === undefined ? {} : { mirrorToCodex: partial.mirrorToCodex }),
@@ -287,7 +291,7 @@ export function ComputerHistorySettings() {
           ...(partial.websites === undefined ? {} : { websites: [...partial.websites] }),
         });
         setStatus(nextStatus);
-        const timeline = await bridge.getComputerHistoryTimeline?.();
+        const timeline = await bridge?.getComputerHistoryTimeline?.();
         if (timeline) setItems([...timeline.items]);
       });
   };

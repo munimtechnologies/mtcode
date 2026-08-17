@@ -95,30 +95,29 @@ function PullRequestUpstreamCardImpl({
           </>
         ) : null}
         <span className="ml-auto shrink-0">{formatRelativeTimeLabel(entry.updatedAt)}</span>
+        {/* On the meta line rather than a band across the card: it is one action among the row's
+            details, and given its own full-width row it read as the card's purpose rather than a
+            shortcut. Stops the click from also opening the row underneath it. */}
+        <Button
+          size="xs"
+          variant="ghost"
+          className="h-5 shrink-0 gap-1 px-1.5 text-[11px] font-normal"
+          disabled={implementing}
+          onClick={(event) => {
+            event.stopPropagation();
+            onImplement(entry);
+          }}
+        >
+          {implementing ? (
+            "Opening..."
+          ) : (
+            <>
+              <SparklesIcon className="size-3" />
+              Implement
+            </>
+          )}
+        </Button>
       </div>
-
-      {/* The whole point of the shelf is picking something to port, so the action is on the card
-          rather than two clicks away inside the pull request. Stops the click from also opening
-          the row underneath it. */}
-      <Button
-        size="xs"
-        variant="outline"
-        className="mt-auto w-full"
-        disabled={implementing}
-        onClick={(event) => {
-          event.stopPropagation();
-          onImplement(entry);
-        }}
-      >
-        {implementing ? (
-          "Opening..."
-        ) : (
-          <>
-            <SparklesIcon className="size-3" />
-            Implement
-          </>
-        )}
-      </Button>
     </div>
   );
 }

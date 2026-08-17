@@ -181,3 +181,26 @@ it.effect("judges a pull request again once its title changes", () =>
     assert.deepStrictEqual(yield* Ref.get(batches), [[1], [1]]);
   }),
 );
+
+it.effect("judges again when the reader switches to another agent", () =>
+  Effect.gen(function* () {
+    const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<number>>>([]);
+    const ranking = yield* makeRanking({ batches });
+    const other = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+    };
+
+    yield* ranking.rank(request(2));
+    yield* ranking.rank({ ...request(2), modelSelection: other });
+    // Switching is how a reader asks for a second opinion, so it must not be served the first.
+    assert.deepStrictEqual(yield* Ref.get(batches), [
+      [1, 2],
+      [1, 2],
+    ]);
+
+    yield* ranking.rank(request(2));
+    // ...and switching back costs nothing, because each agent keeps its own answers.
+    assert.strictEqual((yield* Ref.get(batches)).length, 2);
+  }),
+);
