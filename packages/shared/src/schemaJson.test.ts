@@ -152,3 +152,42 @@ Done.`),
     expect(diagnostic.endsWith("\n... and 2 more issue(s)")).toBe(true);
   });
 });
+
+describe("extractJsonObject with imperfect agent replies", () => {
+  it("skips a brace in prose and finds the answer after it", () => {
+    const raw =
+      'Here is the result. I used {curly} loosely.\n{"rankings":[{"number":7,"score":90}]}';
+
+    expect(JSON.parse(extractJsonObject(raw))).toEqual({
+      rankings: [{ number: 7, score: 90 }],
+    });
+  });
+
+  it("unwraps a fenced block", () => {
+    const raw = '```json\n{"rankings":[{"number":1,"score":50}]}\n```';
+
+    expect(JSON.parse(extractJsonObject(raw))).toEqual({ rankings: [{ number: 1, score: 50 }] });
+  });
+
+  it("keeps the entries a cut-off reply did deliver", () => {
+    // A long ranking that stopped mid-entry: the first two are whole and worth keeping.
+    const raw = '{"rankings":[{"number":1,"score":90},{"number":2,"score":80},{"number":3,"sco';
+
+    expect(JSON.parse(extractJsonObject(raw))).toEqual({
+      rankings: [
+        { number: 1, score: 90 },
+        { number: 2, score: 80 },
+      ],
+    });
+  });
+
+  it("closes a reply cut off between entries", () => {
+    const raw = '{"rankings":[{"number":1,"score":90},';
+
+    expect(JSON.parse(extractJsonObject(raw))).toEqual({ rankings: [{ number: 1, score: 90 }] });
+  });
+
+  it("leaves an unparseable reply to the caller's own error", () => {
+    expect(extractJsonObject("{not json at all")).toBe("{not json at all");
+  });
+});
