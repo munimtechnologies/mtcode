@@ -2867,5 +2867,17 @@ describe("Preview automation diagnostics", () => {
     expect(hidden.message).not.toContain("secret");
     expect(disabled.message).not.toContain("secret");
     expect(ambiguous.message).not.toContain("secret");
+
+    const fromAmbiguous = PreviewManager.PreviewAutomationTargetNotFoundError.fromLookupFailure({
+      operation: "click",
+      tabId: "tab_1",
+      selectorKind: "locator",
+      selectorLength: selector.length,
+      failureKind: "ambiguous",
+      matchCount: 3,
+    });
+    expect(fromAmbiguous).toBeInstanceOf(PreviewManager.PreviewAutomationTargetAmbiguousError);
+    expect(fromAmbiguous.message).toContain("matched 3 elements");
+    expect(fromAmbiguous.message).not.toContain("secret");
   });
 });

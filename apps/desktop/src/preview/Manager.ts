@@ -2994,8 +2994,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       | { invalidSelector: true; message: string }
       | {
           notFound: true;
-          failureKind: "missing" | "hidden" | "disabled" | "ambiguous";
-          matchCount?: number;
+          failureKind: "missing" | "hidden" | "disabled";
+        }
+      | {
+          notFound: true;
+          failureKind: "ambiguous";
+          matchCount: number;
         }
     >(
       tabId,
@@ -3041,12 +3045,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
     }
     if ("notFound" in point) {
-      return yield* raiseAutomationTargetLookupError({
+      return yield* PreviewAutomationTargetNotFoundError.fromLookupFailure({
         operation: "click",
         tabId,
         ...automationSelectorDiagnostics(input),
-        failureKind: point.failureKind,
-        ...(point.matchCount === undefined ? {} : { matchCount: point.matchCount }),
+        ...(point.failureKind === "ambiguous"
+          ? { failureKind: "ambiguous", matchCount: point.matchCount }
+          : { failureKind: point.failureKind }),
       });
     }
     return point;
@@ -3700,6 +3705,38 @@ export class PreviewAutomationTargetNotFoundError extends Schema.TaggedErrorClas
   "PreviewAutomationTargetNotFoundError",
   PreviewAutomationTargetLookupFields,
 ) {
+  static fromLookupFailure(
+    input: {
+      readonly operation: string;
+      readonly tabId: string;
+      readonly selectorKind: PreviewAutomationSelectorKind;
+      readonly selectorLength?: number;
+    } & (
+      | { readonly failureKind: "ambiguous"; readonly matchCount: number }
+      | { readonly failureKind?: "missing" | "hidden" | "disabled" }
+    ),
+  ) {
+    const shared = {
+      operation: input.operation,
+      tabId: input.tabId,
+      selectorKind: input.selectorKind,
+      ...(input.selectorLength === undefined ? {} : { selectorLength: input.selectorLength }),
+    };
+    if (input.failureKind === "hidden") {
+      return new PreviewAutomationTargetHiddenError(shared);
+    }
+    if (input.failureKind === "disabled") {
+      return new PreviewAutomationTargetDisabledError(shared);
+    }
+    if (input.failureKind === "ambiguous") {
+      return new PreviewAutomationTargetAmbiguousError({
+        ...shared,
+        matchCount: input.matchCount,
+      });
+    }
+    return new PreviewAutomationTargetNotFoundError(shared);
+  }
+
   override get message(): string {
     const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
     return `Preview automation ${this.operation} could not find ${target} in tab ${this.tabId}`;
@@ -3738,35 +3775,6 @@ export class PreviewAutomationTargetAmbiguousError extends Schema.TaggedErrorCla
     return `Preview automation ${this.operation} matched ${this.matchCount} elements for ${target} in tab ${this.tabId}`;
   }
 }
-
-const raiseAutomationTargetLookupError = (input: {
-  readonly operation: string;
-  readonly tabId: string;
-  readonly selectorKind: PreviewAutomationSelectorKind;
-  readonly selectorLength?: number;
-  readonly failureKind?: "missing" | "hidden" | "disabled" | "ambiguous";
-  readonly matchCount?: number;
-}) => {
-  const shared = {
-    operation: input.operation,
-    tabId: input.tabId,
-    selectorKind: input.selectorKind,
-    ...(input.selectorLength === undefined ? {} : { selectorLength: input.selectorLength }),
-  };
-  if (input.failureKind === "hidden") {
-    return new PreviewAutomationTargetHiddenError(shared);
-  }
-  if (input.failureKind === "disabled") {
-    return new PreviewAutomationTargetDisabledError(shared);
-  }
-  if (input.failureKind === "ambiguous") {
-    return new PreviewAutomationTargetAmbiguousError({
-      ...shared,
-      matchCount: input.matchCount ?? 0,
-    });
-  }
-  return new PreviewAutomationTargetNotFoundError(shared);
-};
 
 export class PreviewAutomationTargetNotEditableError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotEditableError>()(
   "PreviewAutomationTargetNotEditableError",
