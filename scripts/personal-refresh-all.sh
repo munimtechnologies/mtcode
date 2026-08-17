@@ -116,11 +116,25 @@ refresh_dell() {
     -File C:/Users/busin/dev/personal-refresh-dell.ps1 || return 1
 }
 
+# Blade is on the same LAN as Dell and holds the same key, so when the tunnel from this Mac is
+# down Blade can still reach it. That tunnel is the least reliable part of the fleet, and without
+# this Dell simply falls behind every refresh it is missing from.
+refresh_dell_via_blade() {
+  scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell-via-blade.ps1" \
+    blade:dev/personal-refresh-dell-via-blade.ps1 || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
+    blade:dev/personal-refresh-dell.ps1 || return 1
+  ssh -o BatchMode=yes -o ConnectTimeout=60 blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
+    -File C:/Users/muhha/dev/personal-refresh-dell-via-blade.ps1 || return 1
+}
+
 echo "-- refreshing Dell --"
 if refresh_dell; then
   echo "Dell refreshed"
+elif refresh_dell_via_blade; then
+  echo "Dell refreshed over the LAN from Blade"
 else
-  echo "Dell could not be reached — skipped. Mac and Blade are still up to date." >&2
+  echo "Dell could not be reached, directly or through Blade — skipped." >&2
 fi
 
 # After both Windows installs, push Mac preference files to Blade + Dell.
