@@ -2921,9 +2921,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               goal={threadGoal}
               isWorking={threadGoal?.status === "active" && phase === "running"}
               onAction={onThreadGoalAction}
-              onEdit={(objective) => {
-                applyPromptReplacement(0, promptRef.current.length, `/goal ${objective}`);
-              }}
+              // While a pending question owns the composer text, editing the
+              // Objective would overwrite the custom answer instead.
+              onEdit={
+                activePendingProgress
+                  ? undefined
+                  : (objective) => {
+                      applyPromptReplacement(0, promptRef.current.length, `/goal ${objective}`);
+                    }
+              }
             />
             <ComposerStashBadge
               count={stashQueue.length}
