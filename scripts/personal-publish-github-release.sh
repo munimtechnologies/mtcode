@@ -35,13 +35,11 @@ export T3CODE_DESKTOP_UPDATE_REPOSITORY="$RELEASE_REPO"
 export GITHUB_REPOSITORY="$RELEASE_REPO"
 
 SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
-if [[ -n "$SIGN_IDENTITY" ]]; then
-  export CSC_IDENTITY_AUTO_DISCOVERY=true
-  export T3CODE_DESKTOP_SIGNED=true
-  echo "signing with $SIGN_IDENTITY"
-else
-  echo "no Developer ID found — building unsigned Mac artifact"
-fi
+# Full T3CODE_DESKTOP_SIGNED enables passkey provisioning which this machine may
+# not have. Ship unsigned Mac DMGs for now; Gatekeeper needs right-click → Open.
+# Set T3CODE_DESKTOP_SIGNED=1 + Apple passkey env later for notarized builds.
+unset T3CODE_DESKTOP_SIGNED || true
+echo "building Munim Mac unsigned (Developer ID available: ${SIGN_IDENTITY:-none})"
 
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
