@@ -33,7 +33,7 @@ interface UpdatesHarnessOptions {
   readonly env?: Record<string, string | undefined>;
 }
 
-const flushCallbacks = Effect.yieldNow;
+const flushCallbacks = Effect.promise(() => Promise.resolve()).pipe(Effect.asVoid);
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
@@ -286,10 +286,12 @@ describe("DesktopUpdates", () => {
         yield* flushCallbacks;
 
         const state = yield* updates.getState;
-        assert.equal(state.status, "available");
+        // Auto-download starts immediately; mock downloadUpdate resolves without an
+        // update-downloaded event, so status stays at downloading.
+        assert.equal(state.status, "downloading");
         assert.equal(state.availableVersion, "1.2.4");
         assert.isNotNull(state.checkedAt);
-        assert.equal(harness.sentStates.at(-1)?.status, "available");
+        assert.equal(harness.sentStates.at(-1)?.status, "downloading");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -321,7 +323,7 @@ describe("DesktopUpdates", () => {
         yield* flushCallbacks;
 
         const state = yield* updates.getState;
-        assert.equal(state.status, "available");
+        assert.equal(state.status, "downloading");
         assert.deepEqual(state.releaseNotes, [
           {
             version: "1.2.4-nightly.20260709.766",
@@ -425,10 +427,7 @@ describe("DesktopUpdates", () => {
         harness.emit("update-available", { version: "1.2.4" });
         yield* flushCallbacks;
 
-        const result = yield* updates.download;
-        assert.isTrue(result.accepted);
-        assert.isFalse(result.completed);
-
+        // Auto-download already attempted and failed during update-available handling.
         const failedState = yield* updates.getState;
         assert.equal(failedState.status, "available");
         assert.equal(failedState.errorContext, "download");
@@ -448,11 +447,18 @@ describe("DesktopUpdates", () => {
         setDisableDifferentialDownload: Effect.suspend(() => {
           disableDifferentialCalls += 1;
           if (disableDifferentialCalls === 1) {
+            // configure
             return Effect.void;
           }
           if (disableDifferentialCalls === 2) {
+            // auto-download from update-available: fail so status stays available
+            return Effect.die(new Error("auto-download setup failed"));
+          }
+          if (disableDifferentialCalls === 3) {
+            // first manual download: hang so we can interrupt
             return Deferred.succeed(actionStarted, undefined).pipe(Effect.andThen(Effect.never));
           }
+          // retry after interrupt
           return Effect.void;
         }),
       });
@@ -464,13 +470,20 @@ describe("DesktopUpdates", () => {
           harness.emit("update-available", { version: "1.2.4" });
           yield* flushCallbacks;
 
+          const afterAutoDownload = yield* updates.getState;
+          assert.equal(afterAutoDownload.status, "available");
+
           const downloadFiber = yield* updates.download.pipe(Effect.forkScoped);
           yield* Deferred.await(actionStarted);
           yield* Fiber.interrupt(downloadFiber);
 
           const interruptedState = yield* updates.getState;
           assert.equal(interruptedState.status, "available");
-          assert.isNull(interruptedState.message);
+          assert.equal(interruptedState.errorContext, "download");
+          assert.equal(
+            interruptedState.message,
+            "Desktop update download action failed unexpectedly.",
+          );
 
           const retry = yield* updates.download;
           assert.isTrue(retry.accepted);
@@ -493,9 +506,7 @@ describe("DesktopUpdates", () => {
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
 
-        const result = yield* updates.install;
-        assert.isTrue(result.accepted);
-        assert.isFalse(result.completed);
+        // Auto-install already ran (and failed) on update-downloaded.
         assert.isFalse(yield* Ref.get(desktopState.quitting));
 
         const failedState = yield* updates.getState;
@@ -505,6 +516,32 @@ describe("DesktopUpdates", () => {
 
         const changedState = yield* updates.setChannel("nightly");
         assert.equal(changedState.channel, "nightly");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("auto-installs and relaunches after update-downloaded", () => {
+    let stopCalls = 0;
+    const harness = makeHarness({
+      stopBackend: Effect.sync(() => {
+        stopCalls += 1;
+      }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const desktopState = yield* DesktopState.DesktopState;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "downloaded");
+        assert.equal(state.downloadedVersion, "1.2.4");
+        assert.equal(stopCalls, 1);
+        // Successful quitAndInstall leaves quitting=true (app is exiting).
+        assert.isTrue(yield* Ref.get(desktopState.quitting));
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

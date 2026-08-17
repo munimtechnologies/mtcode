@@ -583,6 +583,13 @@ export const make = Effect.gen(function* () {
             version: info.version,
             releaseNoteGroups: releaseNotes.length,
           });
+          // Personal fork: download as soon as an update is available (no rocket click).
+          const downloadResult = yield* downloadAvailableUpdate;
+          yield* logUpdaterInfo("auto-download finished", {
+            version: info.version,
+            accepted: downloadResult.accepted,
+            completed: downloadResult.completed,
+          });
         }),
       ),
       Effect.catchCause((cause) => {
@@ -688,6 +695,13 @@ export const make = Effect.gen(function* () {
           const state = yield* Ref.get(updateStateRef);
           yield* setState(reduceDesktopUpdateStateOnDownloadComplete(state, info.version));
           yield* logUpdaterInfo("update downloaded", { version: info.version });
+          // Personal fork: install + relaunch as soon as the download finishes.
+          const installResult = yield* installDownloadedUpdate;
+          yield* logUpdaterInfo("auto-install finished", {
+            version: info.version,
+            accepted: installResult.accepted,
+            completed: installResult.completed,
+          });
         }),
       ),
       Effect.catchCause((cause) => {

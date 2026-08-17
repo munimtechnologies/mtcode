@@ -1,4 +1,5 @@
 # Refresh Blade to latest personal fork (upstream nightly + CU/History).
+# Clone remote "origin" here is github.com/sheehanmunim/t3code (personal branch).
 # Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork while
 # product name stays "T3 Code".
 $ErrorActionPreference = "Stop"
@@ -14,7 +15,7 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir ("refresh-{0:yyyyMMdd}.log" -f (Get-Date))
 function Log($msg) {
   $line = "[{0}] {1}" -f (Get-Date -Format o), $msg
-  Add-Content -Path $log -Value $line -Encoding utf8
+  Add-Content -Path $log -Value $line -Encoding ascii
   Write-Output $line
 }
 
@@ -26,16 +27,20 @@ if (-not (Test-Path $repo)) {
 Set-Location $repo
 git fetch origin personal
 $new = (git rev-parse origin/personal).Trim()
-$old = if (Test-Path $stateFile) { (Get-Content $stateFile -Raw).Trim() } else { "" }
+$old = ""
+if (Test-Path $stateFile) {
+  $old = (Get-Content $stateFile -Raw).Trim()
+}
 Log "origin/personal=$new previously=$old"
 
 $staged = Join-Path $env:USERPROFILE "dev\T3-Code-personal-x64.exe"
-if ($new -eq $old -and -not $env:T3_FORCE_REBUILD) {
+$force = [string]$env:T3_FORCE_REBUILD
+if (($new -eq $old) -and ($force -ne "1")) {
   if (Test-Path $staged) {
-    Log "no changes — skipping rebuild"
+    Log "no changes - skipping rebuild"
     exit 0
   }
-  Log "no changes but staged installer missing — rebuilding"
+  Log "no changes but staged installer missing - rebuilding"
 }
 
 git checkout personal
@@ -49,8 +54,16 @@ if (-not $env:T3CODE_DESKTOP_VERSION) {
 Log "T3CODE_DESKTOP_VERSION=$($env:T3CODE_DESKTOP_VERSION)"
 
 Log ("HEAD=" + (git rev-parse --short HEAD) + " " + (git log -1 --oneline))
+# pnpm writes progress to stderr; with Stop that becomes a terminating error.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & pnpm dist:desktop:win:x64 *>> $log
-if ($LASTEXITCODE -ne 0) { Log "build failed"; exit $LASTEXITCODE }
+$buildExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($buildExit -ne 0) {
+  Log "build failed exit=$buildExit"
+  exit $buildExit
+}
 
 $installerPath = Get-ChildItem (Join-Path $repo "release\T3-Code-*-x64.exe") |
   Sort-Object LastWriteTime -Descending |
@@ -87,5 +100,5 @@ if ($exe) {
   Log "launching $($exe.Name)"
   Start-Process $exe.FullName
 }
-Set-Content -Path $stateFile -Value $new -Encoding utf8
+Set-Content -Path $stateFile -Value $new -Encoding ascii
 Log "refresh done"

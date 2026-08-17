@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Keep personal fork apps current on Mac + Blade + Dell.
+# Source of truth: sheehanmunim/t3code@personal (git remote "fork" on this Mac).
 # Builds with latest upstream nightly version so logo/artwork are Nightly,
 # but product name stays "T3 Code".
+#
+# Flow: push feature commits to fork/personal → this job (launchd every 3h, or
+# T3_FORCE_REBUILD=1) rebuilds Mac, builds Windows on Blade, installs on Dell.
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
+# Mac checkout uses "fork" → github.com/sheehanmunim/t3code (not origin/pingdotgg).
+PERSONAL_REMOTE="${T3_PERSONAL_REMOTE:-fork}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
 STATE="$LOG_DIR/last-built-sha"
 mkdir -p "$LOG_DIR"
@@ -15,10 +21,10 @@ exec >>"$LOG" 2>&1
 echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) orchestrate start ===="
 
 cd "$REPO"
-git fetch origin personal
-NEW=$(git rev-parse origin/personal)
+git fetch "$PERSONAL_REMOTE" personal
+NEW=$(git rev-parse "$PERSONAL_REMOTE/personal")
 OLD=$(cat "$STATE" 2>/dev/null || true)
-echo "origin/personal=$NEW previously=$OLD"
+echo "${PERSONAL_REMOTE}/personal=$NEW previously=$OLD"
 
 if [[ "$NEW" == "$OLD" && -z "${T3_FORCE_REBUILD:-}" ]]; then
   echo "no changes — skipping rebuild"
@@ -26,7 +32,7 @@ if [[ "$NEW" == "$OLD" && -z "${T3_FORCE_REBUILD:-}" ]]; then
 fi
 
 git checkout personal
-git reset --hard origin/personal
+git reset --hard "$PERSONAL_REMOTE/personal"
 
 # Match latest upstream nightly version string → Nightly icons + sidebar artwork
 NIGHTLY_TAG=$(gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
