@@ -69,13 +69,6 @@ const chromiumSource = (input: {
   readonly keychainService: string;
   readonly keychainAccount: string;
   readonly macSegments: ReadonlyArray<string>;
-  readonly windowsSegments?: ReadonlyArray<string>;
-  /**
-   * Forks that sit under roaming `%APPDATA%` with no `User Data` level. Opera
-   * is the one that does this; everything else follows the local-AppData
-   * convention above.
-   */
-  readonly windowsRoamingSegments?: ReadonlyArray<string>;
   readonly linuxSegments?: ReadonlyArray<string>;
 }): BrowserImportSourceDefinition => ({
   id: input.id,
@@ -83,23 +76,12 @@ const chromiumSource = (input: {
   engine: "chromium",
   platforms: [
     "darwin" as NodeJS.Platform,
-    ...(input.windowsSegments || input.windowsRoamingSegments ? ["win32" as NodeJS.Platform] : []),
     ...(input.linuxSegments ? ["linux" as NodeJS.Platform] : []),
   ],
   keychainService: input.keychainService,
   keychainAccount: input.keychainAccount,
   userDataDirectory: (context) => {
     if (context.platform === "darwin") return macApplicationSupport(context, ...input.macSegments);
-    if (context.platform === "win32") {
-      if (input.windowsRoamingSegments) {
-        return context.appData
-          ? context.path.join(context.appData, ...input.windowsRoamingSegments)
-          : undefined;
-      }
-      return input.windowsSegments && context.localAppData
-        ? context.path.join(context.localAppData, ...input.windowsSegments, "User Data")
-        : undefined;
-    }
     return input.linuxSegments
       ? context.path.join(context.home, ".config", ...input.linuxSegments)
       : undefined;
@@ -107,13 +89,16 @@ const chromiumSource = (input: {
 });
 
 export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition> = [
+  // No Chromium fork is importable on Windows: since Chrome 127 their cookies
+  // are encrypted to the browser's own identity (App-Bound Encryption), so no
+  // other process can read them. macOS and Linux keep working, so only the
+  // Windows segments are omitted.
   chromiumSource({
     id: "chrome",
     name: "Chrome",
     keychainService: "Chrome Safe Storage",
     keychainAccount: "Chrome",
     macSegments: ["Google", "Chrome"],
-    windowsSegments: ["Google", "Chrome"],
     linuxSegments: ["google-chrome"],
   }),
   chromiumSource({
@@ -122,7 +107,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
     keychainService: "Microsoft Edge Safe Storage",
     keychainAccount: "Microsoft Edge",
     macSegments: ["Microsoft Edge"],
-    windowsSegments: ["Microsoft", "Edge"],
     linuxSegments: ["microsoft-edge"],
   }),
   chromiumSource({
@@ -131,7 +115,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
     keychainService: "Brave Safe Storage",
     keychainAccount: "Brave",
     macSegments: ["BraveSoftware", "Brave-Browser"],
-    windowsSegments: ["BraveSoftware", "Brave-Browser"],
     linuxSegments: ["BraveSoftware", "Brave-Browser"],
   }),
   chromiumSource({
@@ -140,7 +123,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
     keychainService: "Vivaldi Safe Storage",
     keychainAccount: "Vivaldi",
     macSegments: ["Vivaldi"],
-    windowsSegments: ["Vivaldi"],
     linuxSegments: ["vivaldi"],
   }),
   chromiumSource({
@@ -149,7 +131,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
     keychainService: "Opera Safe Storage",
     keychainAccount: "Opera",
     macSegments: ["com.operasoftware.Opera"],
-    windowsRoamingSegments: ["Opera Software", "Opera Stable"],
     linuxSegments: ["opera"],
   }),
   // Arc and Helium ship macOS-only builds.
@@ -525,12 +506,10 @@ export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")
   // at the root finds nothing and reports a running browser as importable.
   if (definition.engine === "safari") return false;
   if (definition.engine !== "firefox") {
-    // Chromium names its single lock differently per platform: a dangling
-    // `SingletonLock` symlink on macOS and Linux, a `lockfile` held via
-    // LockFileEx on Windows. `isLockHeld` answers for both — existence on
-    // the former, an actual lock probe on the latter.
-    const lock = context.platform === "win32" ? "lockfile" : "SingletonLock";
-    return yield* isLockHeld(context.path.join(root, lock), context.platform);
+    // Chromium leaves a dangling `SingletonLock` symlink for as long as an
+    // instance holds the user-data directory. No Chromium fork is importable
+    // on Windows, so the macOS/Linux symlink is the only shape to answer for.
+    return yield* entryExists(context.path.join(root, "SingletonLock"));
   }
 
   const profiles = yield* listSourceProfiles(definition, context);

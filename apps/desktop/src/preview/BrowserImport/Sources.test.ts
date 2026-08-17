@@ -21,7 +21,6 @@ import {
 } from "./Sources.ts";
 
 const helium = BROWSER_IMPORT_SOURCES.find((source) => source.id === "helium")!;
-const chrome = BROWSER_IMPORT_SOURCES.find((source) => source.id === "chrome")!;
 
 /** A scratch home with the source's user-data directory already created. */
 const withSourceHome = Effect.fnUntraced(function* () {
@@ -72,30 +71,6 @@ describe("isSourceRunning", () => {
         );
 
         assert.isTrue(yield* isSourceRunning(helium, context));
-      }),
-    ),
-  );
-
-  it.effect("does not treat a stale Chromium lockfile as a running browser", () =>
-    run(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-chrome-" });
-        const context = yield* sourcePathContext.pipe(
-          Effect.provideService(HostProcessEnvironment, {
-            HOME: home,
-            USERPROFILE: home,
-            LOCALAPPDATA: `${home}\\AppData\\Local`,
-          }),
-          Effect.provideService(HostProcessPlatform, "win32"),
-        );
-        const root = chrome.userDataDirectory(context)!;
-        yield* fileSystem.makeDirectory(root, { recursive: true });
-
-        // On Windows Chromium locks `lockfile` via LockFileEx; the file itself
-        // persists after the browser exits, so mere existence is not running.
-        yield* fileSystem.writeFileString(`${root}\\lockfile`, "");
-        assert.isFalse(yield* isSourceRunning(chrome, context));
       }),
     ),
   );
@@ -336,7 +311,6 @@ describe("cookieDatabaseCandidatePaths", () => {
 });
 
 const firefox = BROWSER_IMPORT_SOURCES.find((source) => source.id === "firefox")!;
-const opera = BROWSER_IMPORT_SOURCES.find((source) => source.id === "opera")!;
 
 describe("isSourceRunning for Firefox", () => {
   it.effect("finds the lock inside the profile, not at the root", () =>
@@ -389,29 +363,18 @@ describe("isSourceRunning for Firefox", () => {
 });
 
 describe("Windows user-data directories", () => {
-  it.effect("puts Opera under roaming AppData without a User Data level", () =>
-    run(
-      Effect.gen(function* () {
-        const context = yield* sourcePathContext.pipe(
-          Effect.provideService(HostProcessEnvironment, {
-            USERPROFILE: "C:\\Users\\u",
-            APPDATA: "C:\\Users\\u\\AppData\\Roaming",
-            LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local",
-          }),
-          Effect.provideService(HostProcessPlatform, "win32"),
-        );
-
-        // Opera does not follow the local-AppData `User Data` convention its
-        // Chromium relatives use, so deriving it that way never found it.
-        assert.include(opera.userDataDirectory(context) ?? "", "Roaming");
-        assert.include(opera.userDataDirectory(context) ?? "", "Opera Stable");
-        assert.notInclude(opera.userDataDirectory(context) ?? "", "User Data");
-
-        const chrome = BROWSER_IMPORT_SOURCES.find((source) => source.id === "chrome")!;
-        assert.include(chrome.userDataDirectory(context) ?? "", "Local");
-        assert.include(chrome.userDataDirectory(context) ?? "", "User Data");
-      }),
-    ),
+  it.effect("does not support any Chromium fork on win32", () =>
+    Effect.gen(function* () {
+      // No Chromium fork lists win32 anymore: since Chrome 127 their cookies
+      // are App-Bound Encrypted, so nothing can import them. Omitting the
+      // platform is what makes `unavailableReason` report `unsupportedPlatform`,
+      // hiding these sources like Arc and Helium.
+      for (const source of BROWSER_IMPORT_SOURCES) {
+        if (source.engine === "chromium") {
+          assert.notInclude(source.platforms, "win32");
+        }
+      }
+    }),
   );
 });
 
