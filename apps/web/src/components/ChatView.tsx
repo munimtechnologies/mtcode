@@ -5015,9 +5015,11 @@ function ChatViewContent(props: ChatViewProps) {
     const goalCommand = parseGoalComposerCommand(trimmed);
     let pendingGoalObjective: string | null = null;
     if (goalCommand !== null && !directAnnotation) {
+      // Goal commands own only the prompt text: images, contexts, annotations,
+      // and review comments attached to the draft must survive a /goal submit.
       const clearGoalComposer = () => {
         promptRef.current = "";
-        clearComposerDraftContent(composerDraftTarget);
+        setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       };
       const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>) => {
