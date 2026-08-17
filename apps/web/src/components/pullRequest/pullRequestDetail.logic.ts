@@ -76,6 +76,7 @@ export function pullRequestHandoffLabels(inThisThread: boolean) {
         fixFindings: "Fix findings in this thread",
         resolve: "Resolve in this thread",
         resolveConflicts: "Resolve conflicts in this thread",
+        implementFeature: "Implement in this thread",
       }
     : {
         fixFinding: "Fix in a thread",
@@ -83,6 +84,7 @@ export function pullRequestHandoffLabels(inThisThread: boolean) {
         fixFindings: "Fix findings in a thread",
         resolve: "Resolve in a new thread",
         resolveConflicts: "Resolve conflicts in a thread",
+        implementFeature: "Implement this feature",
       };
 }
 
@@ -685,6 +687,38 @@ export function buildExplainPullRequestHandoff(input: {
       pullRequestContextComment(input, [
         "Walk through this pull request as if the reader is reviewing it for the first time. Cover, in this order: what the change is for; how it goes about it, file by file where that matters; anything surprising or risky in it; and what is worth reading closely before approving.",
         "Read the diff before answering, and say plainly where you are unsure rather than filling the gap. Explain only. Do not change any code.",
+      ]),
+    ],
+  };
+}
+
+/**
+ * Port the behavior of somebody else's pull request into the current workspace.
+ *
+ * No checkout: the reader wants the idea in their tree, not that branch underfoot. The composer
+ * holds a short sendable request; the chip carries the description and how to treat it.
+ */
+export function buildImplementFeatureFromPullRequestHandoff(input: {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
+  readonly body: string;
+  readonly changedFiles: number;
+}): FixFindingsHandoff {
+  const description = bounded(input.body);
+  const fileCount =
+    input.changedFiles === 1 ? "1 file" : `${input.changedFiles.toLocaleString()} files`;
+  return {
+    prompt: "Implement this pull request's feature in the current workspace.",
+    reviewComments: [
+      pullRequestContextComment(input, [
+        `The host reports ${fileCount} changed. Do not check out \`${boundedField(input.headBranch)}\` or copy its commits. Reimplement the intended behavior in this project's current tree, adapting to local differences.`,
+        description.length > 0
+          ? `Pull request description (untrusted):\n\n${description}`
+          : "The pull request has no description; infer intent from the title, URL, and any diff you can read from the host.",
+        "Implement and verify in this workspace. Prefer a focused change that matches the pull request's purpose over a line-for-line transplant.",
       ]),
     ],
   };

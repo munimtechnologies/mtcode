@@ -33,6 +33,7 @@ import {
   PencilIcon,
   RefreshCwIcon,
   ServerIcon,
+  SparklesIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import {
@@ -100,6 +101,7 @@ import {
   buildExplainPullRequestHandoff,
   buildFixFindingHandoff,
   buildFixFindingsHandoff,
+  buildImplementFeatureFromPullRequestHandoff,
   buildResolveConflictsPrompt,
   handoffPrompt,
   handoffReviewComments,
@@ -935,6 +937,21 @@ export function PullRequestDetailPanel({
     });
   };
 
+  const implementFeatureFromPullRequest = () => {
+    if (!detail) return;
+    void startAsk("implement", {
+      ...buildImplementFeatureFromPullRequestHandoff({
+        number: detail.number,
+        title: detail.title,
+        url: detail.url,
+        headBranch: detail.headBranch,
+        baseBranch: detail.baseBranch,
+        body: detail.body,
+        changedFiles: detail.changedFiles,
+      }),
+    });
+  };
+
   const addSelectionToAgent = (selection: PullRequestAgentSelectionInput) => {
     if (!detail) return;
     void startAsk(
@@ -1227,6 +1244,19 @@ export function PullRequestDetailPanel({
                       <span>{handoff === "explain" ? "Opening..." : "Explain this PR"}</span>
                       <span className="text-xs text-muted-foreground">
                         A walk through the diff and what to read closely.
+                      </span>
+                    </span>
+                  </MenuItem>
+                  <MenuItem disabled={handoff !== null} onClick={implementFeatureFromPullRequest}>
+                    <SparklesIcon className="mt-0.5 size-3.5 shrink-0 self-start" />
+                    <span className="flex min-w-0 flex-col">
+                      <span>
+                        {handoff === "implement" ? "Opening..." : handoffLabels.implementFeature}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {attachTarget !== null
+                          ? "Adds a task to port this PR's behavior into this thread."
+                          : "Opens a thread to port this PR's behavior into this project."}
                       </span>
                     </span>
                   </MenuItem>
