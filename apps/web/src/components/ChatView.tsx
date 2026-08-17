@@ -5022,14 +5022,16 @@ function ChatViewContent(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       };
-      const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>) => {
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>): boolean => {
+        const succeeded = result._tag === "Success";
+        if (!succeeded && !isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
           setThreadError(
             activeThread.id,
             error instanceof Error ? error.message : "Failed to update the Objective.",
           );
         }
+        return succeeded;
       };
       if (goalCommand.action === "status") {
         toastManager.add(
@@ -5097,8 +5099,11 @@ function ChatViewContent(props: ChatViewProps) {
                   environmentId,
                   input: { threadId: activeThread.id },
                 });
-        reportGoalCommandFailure(result);
-        clearGoalComposer();
+        // Only a successful command consumes the draft; failures keep the
+        // text so the user can retry.
+        if (reportGoalCommandFailure(result)) {
+          clearGoalComposer();
+        }
         return;
       }
       if (isServerThread) {
@@ -5110,8 +5115,9 @@ function ChatViewContent(props: ChatViewProps) {
             messageId: newMessageId(),
           },
         });
-        reportGoalCommandFailure(result);
-        clearGoalComposer();
+        if (reportGoalCommandFailure(result)) {
+          clearGoalComposer();
+        }
         return;
       }
       pendingGoalObjective = goalCommand.objective;
