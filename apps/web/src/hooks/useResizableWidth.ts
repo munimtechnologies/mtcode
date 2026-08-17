@@ -1,7 +1,13 @@
 import * as Schema from "effect/Schema";
-import { type PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-import { getLocalStorageItem, setLocalStorageItem } from "./useLocalStorage";
+import { useLocalStorage } from "./useLocalStorage";
 
 const WidthSchema = Schema.Finite;
 
@@ -28,12 +34,10 @@ export interface ResizableWidthHandlers {
 
 /**
  * Width state for a side-anchored panel resized via a drag handle on the
- * specified edge. Width is read from localStorage on mount and persisted on
- * drag-end (not on every rAF tick — would otherwise be ~60 writes/sec).
+ * specified edge. Mounted consumers sharing a storage key stay synchronized.
  *
- * The hook updates an internal `width` state during drag (so the panel
- * follows the cursor live) and only commits to localStorage when the user
- * lifts the pointer.
+ * The hook keeps drag width local so the panel follows the cursor without
+ * writing at rAF frequency, then commits once when the pointer lifts.
  */
 export function useResizableWidth(options: UseResizableWidthOptions): {
   readonly width: number;
@@ -49,19 +53,9 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     [defaultWidth, maxWidth, minWidth],
   );
 
-  // No cross-tab subscription: panel width is per-window state.
-  const [width, setWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return defaultWidth;
-    try {
-      const stored = getLocalStorageItem(storageKey, WidthSchema);
-      return clamp(stored ?? defaultWidth);
-    } catch (error) {
-      console.error("Could not read persisted panel width.", error);
-      return defaultWidth;
-    }
-  });
-
-  const clampedWidth = clamp(width);
+  const [storedWidth, setStoredWidth] = useLocalStorage(storageKey, defaultWidth, WidthSchema);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const clampedWidth = clamp(dragWidth ?? storedWidth);
 
   const dragStateRef = useRef<{
     pointerId: number;
@@ -71,6 +65,16 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     rafId: number | null;
     target: HTMLElement;
   } | null>(null);
+
+  useEffect(() => {
+    if (
+      dragStateRef.current === null &&
+      dragWidth !== null &&
+      clamp(storedWidth) === clamp(dragWidth)
+    ) {
+      setDragWidth(null);
+    }
+  }, [clamp, dragWidth, storedWidth]);
 
   const releasePointer = useCallback((pointerId: number) => {
     const state = dragStateRef.current;
@@ -127,7 +131,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
         const active = dragStateRef.current;
         if (!active) return;
         active.rafId = null;
-        setWidth(active.pending);
+        setDragWidth(active.pending);
       });
     },
     [clamp, edge],
@@ -139,24 +143,19 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
       if (!state || state.pointerId !== event.pointerId) return;
       const finalWidth = clamp(state.pending);
       releasePointer(event.pointerId);
-      // Commit once at drag-end to avoid 60Hz localStorage writes.
-      try {
-        setLocalStorageItem(storageKey, finalWidth, WidthSchema);
-      } catch (error) {
-        console.error("Could not persist panel width.", error);
-      }
-      setWidth(finalWidth);
+      setDragWidth(finalWidth);
+      setStoredWidth(finalWidth);
     },
-    [clamp, releasePointer, storageKey],
+    [clamp, releasePointer, setStoredWidth],
   );
 
   const onPointerCancel = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       const state = dragStateRef.current;
       if (!state || state.pointerId !== event.pointerId) return;
-      // Don't persist a cancelled drag; revert to the start width.
+      // Don't persist a cancelled drag; use the latest shared stored width.
       releasePointer(event.pointerId);
-      setWidth(state.startWidth);
+      setDragWidth(null);
     },
     [releasePointer],
   );
