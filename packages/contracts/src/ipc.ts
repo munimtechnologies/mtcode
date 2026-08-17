@@ -1156,6 +1156,15 @@ export interface DesktopPreviewBridge {
    * override). Persists per tab and is re-applied across webview swaps.
    */
   setColorScheme: (tabId: string, colorScheme: DesktopPreviewColorScheme) => Promise<void>;
+  /**
+   * Apply or clear a guest device-metrics override without taking agent
+   * control. Used by the toolbar and restore path so a human resize does
+   * not flash the agent-controlling badge.
+   */
+  setViewport: (
+    tabId: string,
+    input: { readonly width: number; readonly height: number } | { readonly clear: true },
+  ) => Promise<void>;
   /** Open the guest webview's DevTools (detached). */
   openDevTools: (tabId: string) => Promise<void>;
   /** Drop cookies + storage data for the preview partition (all tabs). */

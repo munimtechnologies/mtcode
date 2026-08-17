@@ -246,14 +246,16 @@ export function PreviewView({
 
   const viewportOverrideKey =
     viewport._tag === "fill" ? "fill" : `${viewport._tag}:${viewport.width}x${viewport.height}`;
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
   useEffect(() => {
     if (!runtimeTabId || !desktopOverlay?.hasWebContents) return;
     void applyPreviewGuestViewport(
-      previewBridge?.automation.setViewport,
+      previewBridge?.setViewport,
       runtimeTabId,
-      viewport,
+      viewportRef.current,
     ).catch(() => undefined);
-  }, [desktopOverlay?.hasWebContents, runtimeTabId, viewport, viewportOverrideKey]);
+  }, [desktopOverlay?.hasWebContents, runtimeTabId, viewportOverrideKey]);
 
   const handleToggleDeviceToolbar = () => {
     if (!runtimeTabId) return;
