@@ -34,6 +34,13 @@ fi
 git checkout personal
 git reset --hard "$PERSONAL_REMOTE/personal"
 
+# Bake T3 Connect public client config into desktop artifacts (gitignored .env).
+# Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
+if [[ ! -f .env ]]; then
+  cp .env.example .env
+  echo "created .env from .env.example for T3 Connect"
+fi
+
 # Match latest upstream nightly version string → Nightly icons + sidebar artwork
 NIGHTLY_TAG=$(gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
 if [[ -z "$NIGHTLY_TAG" ]]; then
@@ -72,20 +79,9 @@ echo "-- refreshing Dell --"
 mkdir -p /tmp/t3-personal-installer
 scp -o BatchMode=yes blade:dev/T3-Code-personal-x64.exe /tmp/t3-personal-installer/T3-Code-personal-x64.exe
 scp -o BatchMode=yes /tmp/t3-personal-installer/T3-Code-personal-x64.exe dell:dev/T3-Code-personal-x64.exe
-ssh -o BatchMode=yes dell 'powershell.exe -NoProfile -Command "
-$ErrorActionPreference=\"Stop\"
-Get-Process | Where-Object { $_.ProcessName -like \"*T3*\" } | Stop-Process -Force -ErrorAction SilentlyContinue
-try { winget uninstall --id T3Tools.T3Code --silent --disable-interactivity | Out-Null } catch {}
-foreach ($name in @(\"Uninstall T3 Code (Nightly).exe\",\"Uninstall T3 Code (Alpha).exe\",\"Uninstall T3 Code.exe\")) {
-  $u = Join-Path $env:LOCALAPPDATA \"Programs\\t3code\\$name\"
-  if (Test-Path $u) { Start-Process $u -ArgumentList \"/S\" -Wait }
-}
-Start-Process \"C:\\Users\\busin\\dev\\T3-Code-personal-x64.exe\" -ArgumentList \"/S\" -Wait
-Start-Sleep 2
-$exe = Get-ChildItem \"$env:LOCALAPPDATA\\Programs\\t3code\\T3 Code*.exe\" | Where-Object { $_.Name -notlike \"Uninstall*\" } | Select-Object -First 1
-if ($exe) { Start-Process $exe.FullName }
-Write-Output (\"DELL_REFRESHED \" + $exe.Name)
-"'
+scp -o BatchMode=yes "$REPO/scripts/personal-refresh-dell.ps1" dell:dev/personal-refresh-dell.ps1
+ssh -o BatchMode=yes dell powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
+  C:/Users/busin/dev/personal-refresh-dell.ps1
 
 echo "$NEW" > "$STATE"
 echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) orchestrate done ===="
