@@ -57,14 +57,16 @@ describe("SessionStartupReconciler", () => {
       dispatched.push(command);
       return input.dispatchImplementation
         ? input.dispatchImplementation()
-        : (Effect.void as ReturnType<OrchestrationEngineService["Service"]["dispatch"]>);
+        : (Effect.succeed({ sequence: dispatched.length }) as ReturnType<
+            OrchestrationEngineService["Service"]["dispatch"]
+          >);
     });
 
     const providerService: Partial<ProviderServiceShape> = {
       listSessions: () =>
         Effect.succeed(
           (input.liveSessionThreadIds ?? []).map((threadId) => ({ threadId })),
-        ) as ReturnType<ProviderServiceShape["listSessions"]>,
+        ) as unknown as ReturnType<ProviderServiceShape["listSessions"]>,
       startSession: () => unsupported(),
       sendTurn: () => unsupported(),
       interruptTurn: () => unsupported(),
@@ -86,9 +88,7 @@ describe("SessionStartupReconciler", () => {
           latestSequence: Effect.succeed(0),
         } as unknown as OrchestrationEngineService["Service"]),
       ),
-      Layer.provideMerge(
-        Layer.succeed(ProviderService, providerService as ProviderServiceShape),
-      ),
+      Layer.provideMerge(Layer.succeed(ProviderService, providerService as ProviderServiceShape)),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getShellSnapshot: () =>
@@ -173,7 +173,10 @@ describe("SessionStartupReconciler", () => {
 
     await runReconcile();
 
-    expect(harness.dispatched.map((command) => command.threadId)).toEqual([activeId, archivedId]);
+    const settledThreadIds = harness.dispatched.flatMap((command) =>
+      command.type === "thread.session.set" ? [command.threadId] : [],
+    );
+    expect(settledThreadIds).toEqual([activeId, archivedId]);
   });
 
   it("skips settled sessions and sessions with a live provider process", async () => {
@@ -227,13 +230,16 @@ describe("SessionStartupReconciler", () => {
         makeThreadShell(secondId, session(secondId)),
       ],
       dispatchImplementation: () =>
-        Effect.fail(new Error("dispatch rejected")) as ReturnType<
+        Effect.die(new Error("dispatch rejected")) as ReturnType<
           OrchestrationEngineService["Service"]["dispatch"]
         >,
     });
 
     await runReconcile();
 
-    expect(harness.dispatched.map((command) => command.threadId)).toEqual([firstId, secondId]);
+    const attemptedThreadIds = harness.dispatched.flatMap((command) =>
+      command.type === "thread.session.set" ? [command.threadId] : [],
+    );
+    expect(attemptedThreadIds).toEqual([firstId, secondId]);
   });
 });

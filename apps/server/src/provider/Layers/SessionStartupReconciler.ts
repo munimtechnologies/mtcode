@@ -1,4 +1,4 @@
-import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { CommandId, type OrchestrationThreadShell } from "@t3tools/contracts";
@@ -80,8 +80,9 @@ const makeSessionStartupReconciler = Effect.gen(function* () {
       return;
     }
 
-    const nowMillis = yield* Clock.currentTimeMillis;
-    const now = new Date(nowMillis).toISOString();
+    const nowUtc = yield* DateTime.now;
+    const now = DateTime.formatIso(nowUtc);
+    const nowMillis = DateTime.toEpochMillis(nowUtc);
     let settledCount = 0;
     for (const thread of orphans) {
       if (yield* settleOrphan(thread, now, nowMillis)) {
