@@ -169,22 +169,28 @@ export const make = Effect.gen(function* BrowserImportMake() {
       pathContext,
       requestedProfile.directory,
     );
-    const databasePath =
-      candidates.length === 0
-        ? undefined
-        : yield* Effect.gen(function* () {
-            const fileSystem = yield* FileSystem.FileSystem;
-            return yield* Effect.forEach(candidates, (candidate) =>
-              fileSystem.stat(candidate).pipe(
-                Effect.map(() => candidate),
-                Effect.orElse(() => Effect.succeed(undefined)),
-              ),
-            ).pipe(Effect.map((results) => results.find((p) => p !== undefined)));
-          });
+    // Try each candidate path and use the first one that exists. Chromium 96+
+    // moved the cookie database into `Network/Cookies`, so both locations are
+    // checked. The stat is synchronous because it is a fast local-FS probe and
+    // avoids needing to pick an Effect pipe combinator that varies across
+    // beta releases.
+    const nodeFs = require("node:fs") as typeof import("node:fs");
+    const databasePath = (() => {
+      for (const candidate of candidates) {
+        try {
+          nodeFs.statSync(candidate);
+          return candidate;
+        } catch {}
+      }
+      return undefined;
+    })();
     if (databasePath === undefined) {
+      // A profile we listed moments ago can lose its database before the
+      // import runs (browser data cleanup, a profile reset). That is a read
+      // failure, not a platform problem.
       return yield* new BrowserImportFailedError({
         sourceId: definition.id,
-        reason: "unsupportedPlatform",
+        reason: "readFailed",
       });
     }
 

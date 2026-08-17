@@ -188,6 +188,43 @@ describe("listSourceProfiles", () => {
     ),
   );
 
+  it.effect("drops Firefox profiles that hold no cookie database", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = firefox.userDataDirectory(context)!;
+        yield* fileSystem.makeDirectory(root, { recursive: true });
+        yield* fileSystem.writeFileString(
+          `${root}/profiles.ini`,
+          `[Profile0]
+Name=original
+IsRelative=1
+Path=Profiles/abcd.default-release
+Default=1
+
+[Profile1]
+Name=empty
+IsRelative=1
+Path=Profiles/wxyz.empty
+`,
+        );
+        yield* fileSystem.makeDirectory(`${root}/Profiles/abcd.default-release`, {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(
+          `${root}/Profiles/abcd.default-release/cookies.sqlite`,
+          "db",
+        );
+        yield* fileSystem.makeDirectory(`${root}/Profiles/wxyz.empty`, { recursive: true });
+
+        assert.deepEqual(yield* listSourceProfiles(firefox, context), [
+          { directory: "Profiles/abcd.default-release", name: "original" },
+        ]);
+      }),
+    ),
+  );
+
   it.effect("discovers profiles with cookies under Network/ (Chromium 127+)", () =>
     run(
       Effect.gen(function* () {

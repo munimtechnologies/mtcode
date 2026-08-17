@@ -337,10 +337,7 @@ const entryExists = Effect.fnUntraced(function* (path: string) {
  * disk after the process exits; `stat` always succeeds, so we must try to
  * open the file with write access to detect the active lock.
  */
-const isLockHeld = Effect.fnUntraced(function* (
-  lockPath: string,
-  platform: "darwin" | "linux" | "win32",
-) {
+const isLockHeld = Effect.fnUntraced(function* (lockPath: string, platform: NodeJS.Platform) {
   if (platform !== "win32") return yield* entryExists(lockPath);
   return yield* Effect.tryPromise({
     try: () =>
@@ -355,7 +352,7 @@ const isLockHeld = Effect.fnUntraced(function* (
         });
       }),
     catch: () => false,
-  });
+  }).pipe(Effect.catchCause(() => Effect.succeed(false)));
 });
 
 /** Shape of the slice of Chromium's `Local State` that names its profiles. */
@@ -391,7 +388,7 @@ const countProfileCookies = Effect.fnUntraced(function* (
   definition: BrowserImportSourceDefinition,
   context: BrowserImportPathContext,
   directory: string,
-): Effect.fn.Return<number | undefined, never> {
+): Effect.fn.Return<number | undefined, never, FileSystem.FileSystem> {
   const candidates = cookieDatabaseCandidatePaths(definition, context, directory);
   const databasePath = yield* Effect.forEach(candidates, (candidate) =>
     entryExists(candidate).pipe(Effect.map((exists) => (exists ? candidate : undefined))),
@@ -448,7 +445,19 @@ export const listSourceProfiles = Effect.fn("BrowserImportSources.listSourceProf
       Effect.map(parseFirefoxProfiles),
       Effect.orElseSucceed(() => [] as ReadonlyArray<BrowserImportSourceProfile>),
     );
-    if (declared.length > 0) return declared;
+    // `profiles.ini` also lists profiles the installer created but the user
+    // never launched, which hold no cookie database and nothing to import.
+    // Only keep the ones a database proves exist, like the directory scans
+    // below do.
+    if (declared.length > 0) {
+      const found = yield* Effect.forEach(declared, (profile) =>
+        Effect.forEach(
+          cookieDatabaseCandidatePaths(definition, context, profile.directory),
+          (candidate) => entryExists(candidate),
+        ).pipe(Effect.map((results) => (results.some(Boolean) ? profile : undefined))),
+      );
+      return found.filter((profile) => profile !== undefined);
+    }
 
     // No readable `profiles.ini`, so fall back to scanning the directory the
     // profiles actually live in.
