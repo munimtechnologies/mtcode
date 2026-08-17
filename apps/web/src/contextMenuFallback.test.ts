@@ -24,6 +24,7 @@ class FakeElement {
   parent: FakeElement | null = null;
   style: Record<string, string> & { cssText?: string } = {};
   dataset: Record<string, string> = {};
+  attributes = new Map<string, string>();
   className = "";
   disabled = false;
   type = "";
@@ -53,6 +54,10 @@ class FakeElement {
     const existing = this.listeners.get(type) ?? [];
     existing.push(listener);
     this.listeners.set(type, existing);
+  }
+
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
   }
 
   dispatchEvent(event: FakeDomEvent) {
@@ -183,6 +188,21 @@ afterEach(() => {
 });
 
 describe("showContextMenuFallback", () => {
+  it("renders one separator between menu sections", async () => {
+    const selectionPromise = showContextMenuFallback([
+      { id: "rename", label: "Rename" },
+      { id: "archive", label: "Archive", separatorBefore: true },
+    ]);
+    const separators = (document as unknown as FakeDocument)
+      .querySelectorAll("div")
+      .filter((element) => element.dataset.contextMenuSeparator === "true");
+
+    expect(separators).toHaveLength(1);
+    expect(separators[0]?.attributes.get("role")).toBe("separator");
+    dismissContextMenu();
+    await expect(selectionPromise).resolves.toBeNull();
+  });
+
   it("resolves a clicked flat menu item", async () => {
     const selectionPromise = showContextMenuFallback([
       { id: "rename", label: "Rename" },
