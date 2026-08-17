@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
+import { applyPreviewGuestViewport } from "~/components/preview/previewGuestViewport";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { cn } from "~/lib/utils";
 
@@ -191,6 +192,19 @@ export function HostedBrowserWebview(props: {
     deviceToolbarVisible,
     aspectRatio: lockedAspectRatio,
   });
+  const guestViewportKey = browserViewportSettingKey(effectiveViewport);
+  const guestViewportRef = useRef(effectiveViewport);
+  guestViewportRef.current = effectiveViewport;
+  useEffect(() => {
+    const setViewport = previewBridge?.setViewport;
+    if (!setViewport) return;
+    const frame = window.requestAnimationFrame(() => {
+      void applyPreviewGuestViewport(setViewport, runtimeTabId, guestViewportRef.current).catch(
+        () => undefined,
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [guestViewportKey, runtimeTabId, webviewGeneration]);
   const fittedSourceViewport =
     presentation.fitSourceContent && lastRect
       ? resolveFittedBrowserViewport(

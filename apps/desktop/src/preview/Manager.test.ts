@@ -1295,11 +1295,18 @@ describe("PreviewManager", () => {
         yield* manager.createTab("tab_viewport");
         yield* manager.registerWebview("tab_viewport", 42);
         yield* manager.setViewport("tab_viewport", { width: 390, height: 844 });
+        yield* manager.setViewport("tab_viewport", { width: 844, height: 390 });
         yield* manager.setViewport("tab_viewport", { clear: true });
 
         expect(sendCommand).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", {
           width: 390,
           height: 844,
+          deviceScaleFactor: 1,
+          mobile: true,
+        });
+        expect(sendCommand).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", {
+          width: 844,
+          height: 390,
           deviceScaleFactor: 1,
           mobile: true,
         });
