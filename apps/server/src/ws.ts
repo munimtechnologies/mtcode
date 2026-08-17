@@ -2314,11 +2314,26 @@ const makeWsRpcLayer = (
                 Stream.debounce(Duration.millis(PROVIDER_STATUS_DEBOUNCE_MS)),
               );
               const settingsUpdates = serverSettings.streamChanges.pipe(
-                Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
                 Stream.map((settings) => ({
                   version: 1 as const,
                   type: "settingsUpdated" as const,
-                  payload: { settings },
+                  payload: {
+                    settings: ServerSettings.redactServerSettingsForClient(settings),
+                  },
+                })),
+              );
+              const environmentLabelUpdates = serverSettings.streamChanges.pipe(
+                Stream.map((settings) => settings.environmentLabel),
+                Stream.changes,
+                Stream.mapEffect((environmentLabel) =>
+                  serverEnvironment
+                    .setEnvironmentLabel(environmentLabel)
+                    .pipe(Effect.andThen(serverEnvironment.getDescriptor)),
+                ),
+                Stream.map((environment) => ({
+                  version: 1 as const,
+                  type: "environmentLabelUpdated" as const,
+                  payload: { label: environment.label },
                 })),
               );
 
@@ -2328,7 +2343,10 @@ const makeWsRpcLayer = (
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
-                Stream.merge(providerStatuses, settingsUpdates),
+                Stream.merge(
+                  providerStatuses,
+                  Stream.merge(settingsUpdates, environmentLabelUpdates),
+                ),
               );
 
               return Stream.concat(
