@@ -46,40 +46,48 @@ echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
 echo "UPDATE_REPO=$T3CODE_DESKTOP_UPDATE_REPOSITORY"
 
 # --- Mac arm64 ---
-echo "-- building Munim Mac arm64 --"
-pnpm dist:desktop:dmg:arm64
+EXPECTED_MAC="$REPO/release/T3-Code-Munim-${T3CODE_DESKTOP_VERSION}-arm64.dmg"
+if [[ "${T3_MUNIM_SKIP_MAC:-}" == "1" && -f "$EXPECTED_MAC" ]]; then
+  echo "-- reusing existing Munim Mac DMG --"
+elif [[ -f "$EXPECTED_MAC" && "${T3_MUNIM_FORCE_MAC:-}" != "1" ]]; then
+  echo "-- reusing existing Munim Mac DMG (set T3_MUNIM_FORCE_MAC=1 to rebuild) --"
+else
+  echo "-- building Munim Mac arm64 --"
+  pnpm dist:desktop:dmg:arm64
+fi
 
-MAC_DMG=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.dmg 2>/dev/null | head -1)
-MAC_ZIP=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.zip 2>/dev/null | head -1)
-MAC_YML=$(ls -t "$REPO"/release/*-mac.yml "$REPO"/release/latest-mac.yml 2>/dev/null | head -1)
+MAC_DMG=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.dmg 2>/dev/null | head -1 || true)
+MAC_ZIP=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.zip 2>/dev/null | head -1 || true)
+MAC_YML=""
+for candidate in "$REPO"/release/nightly-mac.yml "$REPO"/release/latest-mac.yml; do
+  if [[ -f "$candidate" ]]; then
+    MAC_YML="$candidate"
+    break
+  fi
+done
+if [[ -z "$MAC_YML" ]]; then
+  MAC_YML=$(ls -t "$REPO"/release/*-mac.yml 2>/dev/null | head -1 || true)
+fi
 if [[ -z "$MAC_DMG" ]]; then
   echo "Mac DMG not found in release/" >&2
   ls -la "$REPO"/release | head -40 >&2
   exit 1
 fi
+echo "MAC_DMG=$MAC_DMG"
+echo "MAC_ZIP=${MAC_ZIP:-none}"
+echo "MAC_YML=${MAC_YML:-none}"
 
 # Optional local codesign of the .app inside DMG is handled by electron-builder when CSC is set.
 # Clear quarantine on the DMG we ship.
 xattr -cr "$MAC_DMG" 2>/dev/null || true
 
-# --- Windows x64 via Blade (reuse fleet host) ---
+# --- Windows x64 via Blade (PS1 file avoids nested $env escaping bugs) ---
 echo "-- building Munim Windows x64 on Blade --"
-ssh -o BatchMode=yes blade "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"
-  \$ErrorActionPreference='Stop'
-  \$repo='C:/Users/muhha/dev/t3code-personal'
-  if (-not (Test-Path \$repo)) { git clone https://github.com/sheehanmunim/t3code.git \$repo }
-  Set-Location \$repo
-  git fetch origin personal
-  git checkout personal
-  git reset --hard origin/personal
-  \$env:T3CODE_DESKTOP_DISTRO='munim'
-  \$env:T3CODE_DESKTOP_UPDATE_REPOSITORY='$RELEASE_REPO'
-  \$env:GITHUB_REPOSITORY='$RELEASE_REPO'
-  \$env:T3CODE_DESKTOP_VERSION='$T3CODE_DESKTOP_VERSION'
-  \$env:Path = 'C:\\Program Files\\nodejs;' + \$env:Path
-  pnpm install
-  pnpm dist:desktop:win:x64
-\""
+scp -o BatchMode=yes "$REPO/scripts/personal-publish-munim-win.ps1" blade:dev/personal-publish-munim-win.ps1
+ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File C:/Users/muhha/dev/personal-publish-munim-win.ps1 \
+  -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
+  -UpdateRepository "$RELEASE_REPO"
 
 WIN_REMOTE=$(ssh -o BatchMode=yes blade 'powershell.exe -NoProfile -Command "Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/T3-Code-Munim-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName"')
 WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1)
@@ -87,6 +95,7 @@ if [[ -z "$WIN_REMOTE" ]]; then
   echo "Windows exe not found on Blade" >&2
   exit 1
 fi
+echo "WIN_REMOTE=$WIN_REMOTE"
 WIN_LOCAL="$REPO/release/$(basename "$WIN_REMOTE")"
 scp -o BatchMode=yes "blade:$WIN_REMOTE" "$WIN_LOCAL"
 # Also pull yml/blockmap if present
