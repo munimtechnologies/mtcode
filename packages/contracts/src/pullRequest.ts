@@ -7,6 +7,7 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ModelSelection } from "./orchestration.ts";
@@ -522,6 +523,52 @@ export const PullRequestRankInput = Schema.Struct({
   modelSelection: ModelSelection,
 });
 export type PullRequestRankInput = typeof PullRequestRankInput.Type;
+
+/**
+ * How a cherry-pick ended. `applied` and `conflicted` both leave a worktree to carry on in —
+ * a conflicted one is the ordinary outcome, not a failure, because a fork worth having has
+ * diverged from the branch these commits were written against.
+ *
+ * `empty` is the third answer worth telling apart: every commit is already in the branch, so
+ * there is nothing to pick and no worktree to leave behind.
+ */
+export const PullRequestCherryPickStatus = Schema.Literals(["applied", "conflicted", "empty"]);
+export type PullRequestCherryPickStatus = typeof PullRequestCherryPickStatus.Type;
+
+/** How many conflicting paths a result carries before the rest are only counted. */
+const CHERRY_PICK_CONFLICT_PATH_LIMIT = 50;
+
+export const PullRequestCherryPickInput = Schema.Struct({
+  projectId: ProjectId,
+  repository: TrimmedNonEmptyString,
+  number: PositiveInt,
+  /**
+   * The thread the worktree is being made for, where the caller has already opened one. Only the
+   * project's setup script needs it, and it only runs for a checkout that knows whose it is — a
+   * worktree with no dependencies installed is not one anybody can build in.
+   */
+  threadId: Schema.optional(ThreadId),
+});
+export type PullRequestCherryPickInput = typeof PullRequestCherryPickInput.Type;
+
+export const PullRequestCherryPickResult = Schema.Struct({
+  status: PullRequestCherryPickStatus,
+  /** Null for `empty`, where nothing was created to carry on in. */
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  /** Commits in the range, whether or not they all landed. */
+  commits: NonNegativeInt,
+  /**
+   * The paths git left unmerged, for naming them in the hand-off rather than making the agent
+   * discover the shape of its own task. Bounded: a conflict across a thousand files is a
+   * sentence about the branch, not a list worth carrying.
+   */
+  conflictedPaths: Schema.Array(TrimmedNonEmptyString).check(
+    Schema.isMaxLength(CHERRY_PICK_CONFLICT_PATH_LIMIT),
+  ),
+  conflictedPathCount: NonNegativeInt,
+});
+export type PullRequestCherryPickResult = typeof PullRequestCherryPickResult.Type;
 
 export const PullRequestRanking = Schema.Struct({
   number: PositiveInt,

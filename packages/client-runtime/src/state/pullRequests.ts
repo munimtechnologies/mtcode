@@ -61,6 +61,20 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       tag: WS_METHODS.pullRequestsRank,
       staleTimeMs: 30 * 60_000,
     }),
+    /**
+     * Fetch a change request's commits and take them onto a branch of their own. Serial per
+     * project rather than per environment: two picks in one checkout would race for the same
+     * git index, while a pick in one project has no reason to hold up a merge in another.
+     */
+    cherryPick: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:pull-requests:cherry-pick",
+      tag: WS_METHODS.pullRequestsCherryPick,
+      scheduler: commandScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
+      },
+    }),
     detail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:detail",
       tag: WS_METHODS.pullRequestsDetail,

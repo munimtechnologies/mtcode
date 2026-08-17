@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { pullRequestHostOf, ThreadId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
@@ -66,7 +67,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { toastManager } from "../components/ui/toast";
-import { buildImplementFeatureFromPullRequestHandoff } from "../components/pullRequest/pullRequestDetail.logic";
+import {
+  buildCherryPickPullRequestHandoff,
+  buildImplementFeatureFromPullRequestHandoff,
+  readableFailure,
+} from "../components/pullRequest/pullRequestDetail.logic";
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolvePullRequestRankingModelSelection } from "@t3tools/shared/serverSettings";
@@ -1280,6 +1285,131 @@ function PullRequestsRouteView() {
       setImplementingKey(null);
     }
   };
+
+  /**
+   * Take an upstream change's own commits rather than rewriting them: onto a branch of its own,
+   * in a worktree of its own, with a thread standing in it.
+   *
+   * Never the project's own checkout. A pick that stops on a conflict stops wherever it is run,
+   * and the tree somebody is working in is the one place that must not happen.
+   *
+   * The thread is opened before the pick, as the pull request's own checkout button does it: the
+   * project's setup script only runs for a worktree that knows which thread it is for, and a
+   * worktree with no dependencies installed is not one anybody can finish a conflict in.
+   */
+  const cherryPickCommand = useAtomCommand(pullRequestEnvironment.cherryPick, {
+    reportFailure: false,
+  });
+  const [pickingKey, setPickingKey] = useState<string | null>(null);
+  const cherryPickUpstream = async (entry: EnvironmentPullRequestEntry) => {
+    if (pickingKey !== null) return;
+    const key = pullRequestEntryKey(entry);
+    setPickingKey(key);
+    const projectRef = scopeProjectRef(entry.environmentId, entry.projectId);
+    // No timeout: fetching and applying somebody else's branch takes as long as it takes, and a
+    // toast that expires halfway through reads as a pick that finished.
+    const toastId = toastManager.add({
+      type: "loading",
+      title: `Cherry-picking #${entry.number}...`,
+    });
+    try {
+      const opened = await newThread(projectRef).then(
+        (result) => result,
+        () => null,
+      );
+      if (opened === null) {
+        toastManager.update(toastId, {
+          type: "error",
+          title: "Could not open a thread for the pick",
+          description: "Try again from the project, or open a thread first.",
+        });
+        return;
+      }
+      const picked = await cherryPickCommand({
+        environmentId: entry.environmentId,
+        input: {
+          projectId: entry.projectId,
+          repository: entry.repository,
+          number: entry.number,
+          threadId: opened.threadId,
+        },
+      });
+      if (picked._tag === "Failure") {
+        toastManager.update(toastId, {
+          type: "error",
+          title: `Could not cherry-pick #${entry.number}`,
+          // The server's own sentence — which base branch went missing, which host publishes no
+          // commits to fetch — is the only thing that says what to do about it.
+          description: readableFailure(
+            squashAtomCommandFailure(picked),
+            "The commits could not be fetched or applied. Open the pull request to see what it touches.",
+          ),
+        });
+        return;
+      }
+      const result = picked.value;
+      // Nothing was taken because there was nothing to take, and no branch was left behind to
+      // point a thread at. Success, not failure — this is the answer to "do I already have it".
+      if (result.status === "empty" || result.branch === null || result.worktreePath === null) {
+        toastManager.update(toastId, {
+          type: "success",
+          title: `Nothing to pick from #${entry.number}`,
+          description: "Every commit on it is already in this project.",
+        });
+        return;
+      }
+      const task = buildCherryPickPullRequestHandoff({
+        number: entry.number,
+        title: entry.title,
+        url: entry.url,
+        headBranch: entry.headBranch,
+        baseBranch: entry.baseBranch,
+        status: result.status,
+        branch: result.branch,
+        commits: result.commits,
+        conflictedPaths: result.conflictedPaths,
+        conflictedPathCount: result.conflictedPathCount,
+      });
+      const pointed = await newThread(projectRef, {
+        branch: result.branch,
+        worktreePath: result.worktreePath,
+        envMode: "worktree",
+      }).then(
+        (session) => session,
+        () => null,
+      );
+      if (pointed === null) {
+        // The branch is on disk either way; only the thread failed to move onto it. Saying so
+        // beats a success message that sends somebody to a composer pointed somewhere else.
+        toastManager.update(toastId, {
+          type: "warning",
+          title: "Picked, but the thread stayed where it was",
+          description: `The commits are on \`${result.branch}\`. Point a thread at it from the branch picker.`,
+        });
+        return;
+      }
+      const store = useComposerDraftStore.getState();
+      store.setPrompt(pointed.draftId, task.prompt);
+      store.setReviewComments(pointed.draftId, task.reviewComments);
+      toastManager.update(
+        toastId,
+        result.status === "applied"
+          ? {
+              type: "success",
+              title: `Picked onto ${result.branch}`,
+              description:
+                "It applied cleanly. The task is in the composer — read it over, then send.",
+            }
+          : {
+              type: "warning",
+              title: `Picked onto ${result.branch}, with conflicts`,
+              description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer — read it over, then send.`,
+            },
+      );
+    } finally {
+      setPickingKey(null);
+    }
+  };
   const rankingError = upstreamEntries.length === 0 ? null : rankingErrorRaw;
 
   const groups = useMemo(() => {
@@ -1648,7 +1778,9 @@ function PullRequestsRouteView() {
                   <PullRequestUpstreamCard
                     entry={entry}
                     onImplement={(row) => void implementUpstream(row)}
+                    onCherryPick={(row) => void cherryPickUpstream(row)}
                     implementing={implementingKey === pullRequestEntryKey(entry)}
+                    picking={pickingKey === pullRequestEntryKey(entry)}
                     {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
                       ? { reason: rankingReasons.get(pullRequestEntryKey(entry))! }
                       : {})}

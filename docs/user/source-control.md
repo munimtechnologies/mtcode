@@ -45,6 +45,20 @@ T3 Code works with the platforms your team already uses:
 - Command-click (Control-click on Windows and Linux) a pull request number in the sidebar to open it in your browser instead of in T3 Code
 - Check out a teammate's branch to review code locally
 
+**Take changes from the project you forked**
+
+- When a project's repository is a fork, the **Pull requests** page shows the upstream's open pull
+  requests below your own, in two orders: what an agent rates as most worth taking, and what
+  landed most recently
+- **Cherry-pick** fetches a pull request's own commits onto a branch of its own, in a worktree of
+  its own, and opens a thread standing in it — your working tree is never touched
+- Conflicts are expected when a fork has moved on, so the pick is left where it stopped and the
+  thread opens with the conflicting files named and the task written out
+- Nothing to take is an answer too: a pull request you have already merged or picked reports that
+  and creates no branch
+- **Implement** is there for the change whose code will not travel — it reimplements the behavior
+  in your tree instead of taking the commits
+
 **Fix what you wrote, in place**
 
 - Rewrite a pull request's title and description from the review itself, in Markdown, with a

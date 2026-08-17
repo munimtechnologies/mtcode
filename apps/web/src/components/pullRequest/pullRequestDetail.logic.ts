@@ -734,6 +734,65 @@ export function buildImplementFeatureFromPullRequestHandoff(input: {
   };
 }
 
+/** How many conflicting paths the hand-off names before the rest are only counted. */
+const CHERRY_PICK_NAMED_PATHS = 20;
+
+/**
+ * Carry on a cherry-pick that has already run: the commits are on a branch of their own, in a
+ * worktree of its own, and this is the thread standing in it.
+ *
+ * The two outcomes ask for different work and say so. A stopped pick is a conversation with git —
+ * finish the sequence — while a clean one is the harder question of whether somebody else's
+ * change means the same thing in this tree at all. Neither is a hand-off about a pull request the
+ * agent has to go and find: the code is already under it.
+ */
+export function buildCherryPickPullRequestHandoff(input: {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
+  readonly status: "applied" | "conflicted";
+  readonly branch: string;
+  readonly commits: number;
+  readonly conflictedPaths: ReadonlyArray<string>;
+  readonly conflictedPathCount: number;
+}): FixFindingsHandoff {
+  const branch = boundedField(input.branch);
+  const commitCount =
+    input.commits === 1 ? "1 commit" : `${input.commits.toLocaleString()} commits`;
+  if (input.status === "applied") {
+    return {
+      prompt: "Check this cherry-pick over.",
+      reviewComments: [
+        pullRequestContextComment(input, [
+          `Its ${commitCount} applied cleanly onto \`${branch}\`, which is the branch checked out in this worktree.`,
+          "Applying cleanly is not the same as being right: the commits were written against another copy of this project, and git only reports that the lines they touched had not moved. Read what they do, check the change still means the same thing here, and adapt anything this project has since renamed, moved, or does differently.",
+          "Then verify it builds and its tests pass. Say plainly if the change does not belong in this tree after all.",
+        ]),
+      ],
+    };
+  }
+  const named = input.conflictedPaths.slice(0, CHERRY_PICK_NAMED_PATHS);
+  const unnamed = input.conflictedPathCount - named.length;
+  return {
+    prompt: "Finish this cherry-pick.",
+    reviewComments: [
+      pullRequestContextComment(input, [
+        `Its ${commitCount} are being cherry-picked onto \`${branch}\`, the branch checked out in this worktree, and git has stopped on a conflict.`,
+        // The conflict is the expected outcome rather than a mistake to be undone, and an agent
+        // told only "resolve the conflicts" reaches for --abort or for "theirs" wholesale.
+        "This project has moved on from the copy those commits were written against, so conflicts are expected. Resolve each one by keeping what this project does and adding what the change is for — not by taking either side whole.",
+        named.length === 0
+          ? "Run `git status` to see where the pick stopped."
+          : `Conflicting now:\n${named.map((path) => `> ${boundedField(path)}`).join("\n")}${unnamed > 0 ? `\n> ...and ${unnamed.toLocaleString()} more` : ""}`,
+        "Stage what you resolve and run `git cherry-pick --continue`. Later commits can stop the same way, so carry on until `git status` reports no cherry-pick in progress. Then verify the result builds and its tests pass.",
+        "Do not abandon the pick with `git cherry-pick --abort` unless the change genuinely cannot be carried over — and if it cannot, stop and say why rather than inventing a replacement.",
+      ]),
+    ],
+  };
+}
+
 export function buildAddSelectionToAgentHandoff(input: {
   readonly number: number;
   readonly title: string;

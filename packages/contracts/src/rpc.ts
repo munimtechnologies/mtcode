@@ -79,6 +79,8 @@ import {
   PullRequestListInput,
   PullRequestListResult,
   PullRequestListStatsInput,
+  PullRequestCherryPickInput,
+  PullRequestCherryPickResult,
   PullRequestRankInput,
   PullRequestRankResult,
   PullRequestListStatsResult,
@@ -296,6 +298,7 @@ export const WS_METHODS = {
   pullRequestsSetThreadResolution: "pullRequests.setThreadResolution",
   pullRequestsSetReaction: "pullRequests.setReaction",
   pullRequestsRank: "pullRequests.rank",
+  pullRequestsCherryPick: "pullRequests.cherryPick",
   pullRequestsInvalidate: "pullRequests.invalidate",
   pullRequestsReviewerCandidates: "pullRequests.reviewerCandidates",
   pullRequestsRequestReviewers: "pullRequests.requestReviewers",
@@ -504,6 +507,18 @@ export const WsPullRequestsListStatsRpc = Rpc.make(WS_METHODS.pullRequestsListSt
 export const WsPullRequestsRankRpc = Rpc.make(WS_METHODS.pullRequestsRank, {
   payload: PullRequestRankInput,
   success: PullRequestRankResult,
+  error: PullRequestRpcError,
+});
+
+/**
+ * Take somebody else's commits onto a branch of your own, in a worktree of its own. Its own call
+ * rather than part of a hand-off: it fetches, branches and picks before any thread exists, and
+ * what it answers — clean, conflicted, or nothing to take — decides what the thread is asked to
+ * do.
+ */
+export const WsPullRequestsCherryPickRpc = Rpc.make(WS_METHODS.pullRequestsCherryPick, {
+  payload: PullRequestCherryPickInput,
+  success: PullRequestCherryPickResult,
   error: PullRequestRpcError,
 });
 
@@ -1023,6 +1038,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsRankRpc,
+  WsPullRequestsCherryPickRpc,
   WsPullRequestsDetailRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsThreadCommentsRpc,

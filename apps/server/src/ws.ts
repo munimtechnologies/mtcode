@@ -96,6 +96,7 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as PullRequestCherryPick from "./pullRequest/PullRequestCherryPick.ts";
 import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -366,6 +367,7 @@ const makeWsRpcLayer = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const pullRequestRanking = yield* PullRequestRanking.PullRequestRankingService;
+      const pullRequestCherryPick = yield* PullRequestCherryPick.PullRequestCherryPickService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1683,6 +1685,31 @@ const makeWsRpcLayer = (
                     ),
                 ),
               ),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsCherryPick]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsCherryPick,
+            // Resolved first, as ranking is: the repository the commits are taken from has to be
+            // one this project reads — its own or its upstream — rather than one a client named.
+            // The detail read alongside it answers the rest, and is the one the page just made.
+            pullRequests.resolveRef(input).pipe(
+              Effect.flatMap((project) =>
+                pullRequests.detail(input).pipe(
+                  Effect.flatMap((detail) =>
+                    pullRequestCherryPick.cherryPick({
+                      cwd: project.workspaceRoot,
+                      provider: detail.provider,
+                      host: project.host,
+                      repository: project.repository,
+                      number: input.number,
+                      baseBranch: detail.baseBranch,
+                      ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+                    }),
+                  ),
+                ),
+              ),
+            ),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsDetail]: (input) =>

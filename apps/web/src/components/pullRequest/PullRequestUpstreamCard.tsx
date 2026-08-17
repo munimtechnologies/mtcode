@@ -1,4 +1,4 @@
-import { LoaderIcon, SparklesIcon } from "lucide-react";
+import { GitBranchPlusIcon, LoaderIcon, SparklesIcon } from "lucide-react";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
@@ -22,8 +22,12 @@ interface PullRequestUpstreamCardProps {
   readonly onSelect: (entry: EnvironmentPullRequestEntry) => void;
   /** Port this change into the project the row was read through. */
   readonly onImplement: (entry: EnvironmentPullRequestEntry) => void;
+  /** Take the change's own commits onto a branch of their own, in a worktree of its own. */
+  readonly onCherryPick: (entry: EnvironmentPullRequestEntry) => void;
   /** True while a hand-off this card started is still opening its thread. */
   readonly implementing: boolean;
+  /** True while this card's pick is still fetching, branching and applying. */
+  readonly picking: boolean;
 }
 
 /**
@@ -39,8 +43,11 @@ function PullRequestUpstreamCardImpl({
   selected,
   onSelect,
   onImplement,
+  onCherryPick,
   implementing,
+  picking,
 }: PullRequestUpstreamCardProps) {
+  const busy = implementing || picking;
   return (
     // A div rather than a button: the card carries a button of its own, and a button inside a
     // button is neither valid nor operable by keyboard. The role and key handling put back what
@@ -81,33 +88,64 @@ function PullRequestUpstreamCardImpl({
         </span>
         {/* Top right, outlined: the corner is where an action on a card is looked for, and a
             ghost icon among muted metadata read as another detail rather than something to
-            press. Stops the click from also opening the row underneath. */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="outline"
-                className="size-6 shrink-0"
-                aria-label={`Implement pull request #${entry.number} in this project`}
-                disabled={implementing}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onImplement(entry);
-                }}
-              >
-                {implementing ? (
-                  <LoaderIcon aria-hidden className="size-3.5 animate-spin" />
-                ) : (
-                  <SparklesIcon className="size-3.5" />
-                )}
-              </Button>
-            }
-          />
-          <TooltipPopup>
-            {implementing ? "Opening a thread..." : "Implement in this project"}
-          </TooltipPopup>
-        </Tooltip>
+            press. Both stop the click from also opening the row underneath.
+
+            Taking the commits comes first because it is what somebody watching an upstream
+            usually wants; reimplementing is for the change whose code will not travel. */}
+        <div className="flex shrink-0 items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="outline"
+                  className="size-6 shrink-0"
+                  aria-label={`Cherry-pick pull request #${entry.number} into this project`}
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCherryPick(entry);
+                  }}
+                >
+                  {picking ? (
+                    <LoaderIcon aria-hidden className="size-3.5 animate-spin" />
+                  ) : (
+                    <GitBranchPlusIcon className="size-3.5" />
+                  )}
+                </Button>
+              }
+            />
+            <TooltipPopup>
+              {picking ? "Cherry-picking..." : "Cherry-pick onto a branch of its own"}
+            </TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="outline"
+                  className="size-6 shrink-0"
+                  aria-label={`Implement pull request #${entry.number} in this project`}
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onImplement(entry);
+                  }}
+                >
+                  {implementing ? (
+                    <LoaderIcon aria-hidden className="size-3.5 animate-spin" />
+                  ) : (
+                    <SparklesIcon className="size-3.5" />
+                  )}
+                </Button>
+              }
+            />
+            <TooltipPopup>
+              {implementing ? "Opening a thread..." : "Implement in this project"}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
       </div>
 
       {reason ? (

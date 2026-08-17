@@ -19,6 +19,7 @@ import {
   FileDiffIcon,
   FolderGit2Icon,
   GitBranchIcon,
+  GitBranchPlusIcon,
   GitCommitHorizontalIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -101,6 +102,7 @@ import {
   buildExplainPullRequestHandoff,
   buildFixFindingHandoff,
   buildFixFindingsHandoff,
+  buildCherryPickPullRequestHandoff,
   buildImplementFeatureFromPullRequestHandoff,
   buildResolveConflictsPrompt,
   handoffPrompt,
@@ -561,6 +563,7 @@ export function PullRequestDetailPanel({
     void refreshFromHost();
   }, [forcedRefreshToken, refreshFromHost]);
   const runAction = useAtomCommand(pullRequestEnvironment.runAction, { reportFailure: false });
+  const cherryPick = useAtomCommand(pullRequestEnvironment.cherryPick, { reportFailure: false });
   // Which action is in flight, not merely that one is: every control here is disabled while any
   // of them runs, but only the button that was pressed may say what it is doing.
   const [pendingAction, setPendingAction] = useState<PullRequestAction | null>(null);
@@ -950,6 +953,113 @@ export function PullRequestDetailPanel({
         changedFiles: detail.changedFiles,
       }),
     });
+  };
+
+  /**
+   * Take the change's own commits rather than rewriting them: onto a branch of its own, in a
+   * worktree of its own, with a thread standing in it.
+   *
+   * The thread is opened before the pick for the same reason a checkout is — the project's setup
+   * script only runs for a worktree that knows which thread it is for — and pointed at the
+   * worktree afterwards, once there is one to point at.
+   */
+  const cherryPickPullRequest = async () => {
+    if (!detail || handoff !== null) return;
+    setHandoff("cherry-pick");
+    const toastId = toastManager.add({
+      type: "loading",
+      title: `Cherry-picking #${detail.number}...`,
+    });
+    const projectRef = scopeProjectRef(actingEnvironmentId, acting?.projectId ?? detail.projectId);
+    try {
+      const opened = await newThread(projectRef).then(
+        (result) => result,
+        () => null,
+      );
+      if (opened === null) {
+        toastManager.update(toastId, {
+          type: "error",
+          title: "Could not open a thread for the pick",
+          description: "Try again from the project, or open a thread first.",
+        });
+        return;
+      }
+      const picked = await cherryPick({
+        environmentId: actingEnvironmentId,
+        input: {
+          projectId: acting?.projectId ?? detail.projectId,
+          repository: detail.repository,
+          number: detail.number,
+          threadId: opened.threadId,
+        },
+      });
+      if (picked._tag === "Failure") {
+        toastManager.update(toastId, {
+          type: "error",
+          title: `Could not cherry-pick #${detail.number}`,
+          description: readableFailure(
+            squashAtomCommandFailure(picked),
+            "The commits could not be fetched or applied.",
+          ),
+        });
+        return;
+      }
+      const result = picked.value;
+      if (result.status === "empty" || result.branch === null || result.worktreePath === null) {
+        toastManager.update(toastId, {
+          type: "success",
+          title: `Nothing to pick from #${detail.number}`,
+          description: "Every commit on it is already in this project.",
+        });
+        return;
+      }
+      const task = buildCherryPickPullRequestHandoff({
+        number: detail.number,
+        title: detail.title,
+        url: detail.url,
+        headBranch: detail.headBranch,
+        baseBranch: detail.baseBranch,
+        status: result.status,
+        branch: result.branch,
+        commits: result.commits,
+        conflictedPaths: result.conflictedPaths,
+        conflictedPathCount: result.conflictedPathCount,
+      });
+      const pointed = await newThread(projectRef, {
+        branch: result.branch,
+        worktreePath: result.worktreePath,
+        envMode: "worktree",
+      }).then(
+        (session) => session,
+        () => null,
+      );
+      if (pointed === null) {
+        toastManager.update(toastId, {
+          type: "warning",
+          title: "Picked, but the thread stayed where it was",
+          description: `The commits are on \`${result.branch}\`. Point a thread at it from the branch picker.`,
+        });
+        return;
+      }
+      writeTaskToComposer(pointed.draftId, task);
+      toastManager.update(
+        toastId,
+        result.status === "applied"
+          ? {
+              type: "success",
+              title: `Picked onto ${result.branch}`,
+              description:
+                "It applied cleanly. The task is in the composer — read it over, then send.",
+            }
+          : {
+              type: "warning",
+              title: `Picked onto ${result.branch}, with conflicts`,
+              description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer — read it over, then send.`,
+            },
+      );
+    } finally {
+      setHandoff(null);
+    }
   };
 
   const addSelectionToAgent = (selection: PullRequestAgentSelectionInput) => {
@@ -1381,6 +1491,35 @@ export function PullRequestDetailPanel({
                   ) : null}
                 </MenuPopup>
               </Menu>
+              {/* Taking the commits themselves, for the far more common case where the code
+                  travels: a branch of its own with the pick already run on it, conflicts and
+                  all. Beside reimplementing rather than instead of it — which of the two is
+                  wanted depends on how far this project has drifted from theirs. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={handoff !== null}
+                      onClick={() => void cherryPickPullRequest()}
+                    >
+                      {handoff === "cherry-pick" ? (
+                        "Picking..."
+                      ) : (
+                        <>
+                          <GitBranchPlusIcon className="size-3" />
+                          Cherry-pick
+                        </>
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipPopup>
+                  Fetches this PR&apos;s commits onto a branch of their own, in a worktree, with a
+                  thread standing in it.
+                </TooltipPopup>
+              </Tooltip>
               {/* Porting a change into your own tree is a reason to open somebody else's pull
                   request, not an afterthought of reading it — so it is a button beside the other
                   one rather than the fourth line of a menu nobody opens. */}
