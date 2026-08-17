@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
+  ThreadHistoryImportedPayload,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
@@ -26,13 +27,6 @@ import {
   ThreadPinnedPayload,
   ThreadPinReorderedPayload,
   ThreadSnoozedPayload,
-  ThreadGoalBlockedPayload,
-  ThreadGoalClearedPayload,
-  ThreadGoalCompletedPayload,
-  ThreadGoalPausedPayload,
-  ThreadGoalResumedPayload,
-  ThreadGoalSetPayload,
-  ThreadGoalUsageLimitedPayload,
   ThreadUnpinnedPayload,
   ThreadUnarchivedPayload,
   ThreadUnsettledPayload,
@@ -81,24 +75,6 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
-}
-
-function patchThreadGoalStatus(
-  threads: ReadonlyArray<OrchestrationThread>,
-  threadId: ThreadId,
-  status: NonNullable<OrchestrationThread["goal"]>["status"],
-  updatedAt: string,
-): OrchestrationThread[] {
-  return threads.map((thread) => {
-    if (thread.id !== threadId || thread.goal == null) {
-      return thread;
-    }
-    return {
-      ...thread,
-      goal: { ...thread.goal, status, updatedAt },
-      updatedAt,
-    };
-  });
 }
 
 function decodeForEvent<A>(
@@ -172,9 +148,7 @@ function retainThreadMessagesAfterRevert(
     }
   }
 
-  return messages.filter(
-    (message) => message.deliveryState !== "queued" && retainedMessageIds.has(message.id),
-  );
+  return messages.filter((message) => retainedMessageIds.has(message.id));
 }
 
 function retainThreadActivitiesAfterRevert(
@@ -332,7 +306,6 @@ export function projectEvent(
             settledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
-            goal: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -430,103 +403,6 @@ export function projectEvent(
             snoozedAt: null,
             updatedAt: payload.updatedAt,
           }),
-        })),
-      );
-
-    case "thread.goal-set":
-      return decodeForEvent(ThreadGoalSetPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            goal: {
-              objective: payload.objective,
-              status: payload.status,
-              createdAt: payload.createdAt,
-              updatedAt: payload.updatedAt,
-            },
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
-    case "thread.goal-paused":
-      return decodeForEvent(ThreadGoalPausedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: patchThreadGoalStatus(
-            nextBase.threads,
-            payload.threadId,
-            "paused",
-            payload.updatedAt,
-          ),
-        })),
-      );
-
-    case "thread.goal-resumed":
-      return decodeForEvent(ThreadGoalResumedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: patchThreadGoalStatus(
-            nextBase.threads,
-            payload.threadId,
-            "active",
-            payload.updatedAt,
-          ),
-        })),
-      );
-
-    case "thread.goal-cleared":
-      return decodeForEvent(ThreadGoalClearedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            goal: null,
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
-    case "thread.goal-completed":
-      return decodeForEvent(ThreadGoalCompletedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: patchThreadGoalStatus(
-            nextBase.threads,
-            payload.threadId,
-            "complete",
-            payload.updatedAt,
-          ),
-        })),
-      );
-
-    case "thread.goal-blocked":
-      return decodeForEvent(ThreadGoalBlockedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: patchThreadGoalStatus(
-            nextBase.threads,
-            payload.threadId,
-            "blocked",
-            payload.updatedAt,
-          ),
-        })),
-      );
-
-    case "thread.goal-usage-limited":
-      return decodeForEvent(
-        ThreadGoalUsageLimitedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: patchThreadGoalStatus(
-            nextBase.threads,
-            payload.threadId,
-            "usageLimited",
-            payload.updatedAt,
-          ),
         })),
       );
 
@@ -674,57 +550,28 @@ export function projectEvent(
         };
       });
 
-    case "thread.turn-queued": {
-      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
-      if (!thread) {
-        return Effect.succeed(nextBase);
-      }
-      return Effect.succeed({
-        ...nextBase,
-        threads: updateThread(nextBase.threads, event.payload.threadId, {
-          messages: thread.messages.map((message) =>
-            message.id === event.payload.messageId
-              ? { ...message, deliveryState: "queued" as const }
-              : message,
-          ),
-          updatedAt: event.occurredAt,
+    case "thread.history-imported":
+      return decodeForEvent(
+        ThreadHistoryImportedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: [...thread.messages, ...payload.messages].slice(-MAX_THREAD_MESSAGES),
+              activities: [...thread.activities, ...payload.activities]
+                .toSorted(compareThreadActivities)
+                .slice(-500),
+              updatedAt: payload.updatedAt,
+            }),
+          };
         }),
-      });
-    }
-
-    case "thread.queued-turn-dispatched": {
-      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
-      if (!thread) {
-        return Effect.succeed(nextBase);
-      }
-      return Effect.succeed({
-        ...nextBase,
-        threads: updateThread(nextBase.threads, event.payload.threadId, {
-          messages: thread.messages.map((message) => {
-            if (message.id !== event.payload.messageId) {
-              return message;
-            }
-            const { deliveryState: _, ...deliveredMessage } = message;
-            return deliveredMessage;
-          }),
-          updatedAt: event.occurredAt,
-        }),
-      });
-    }
-
-    case "thread.queued-turn-cancelled": {
-      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
-      if (!thread) {
-        return Effect.succeed(nextBase);
-      }
-      return Effect.succeed({
-        ...nextBase,
-        threads: updateThread(nextBase.threads, event.payload.threadId, {
-          messages: thread.messages.filter((message) => message.id !== event.payload.messageId),
-          updatedAt: event.occurredAt,
-        }),
-      });
-    }
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {

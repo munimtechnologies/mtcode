@@ -23,7 +23,6 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
   collectSessionConfigOptionValues,
-  decideToolCallUpdateEmission,
   extractModelConfigId,
   findSessionConfigOption,
   mergeToolCallState,
@@ -36,12 +35,6 @@ import {
   type AcpSessionModeState,
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
-
-interface AcpToolCallTrackedState {
-  readonly state: AcpToolCallState;
-  readonly lastEmittedDetailLength: number | undefined;
-  readonly skippedSinceEmit: number;
-}
 
 function formatConfigOptionValue(value: string | boolean): string {
   return JSON.stringify(value);
@@ -68,6 +61,9 @@ export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
   readonly resumeSessionId?: string;
+  /** Hermes may print a short banner before beginning its JSON-RPC stream. */
+  readonly discardNonJsonStdoutLines?: boolean;
+  readonly sessionCreateTimeout?: Duration.Input;
   readonly sessionLoadTimeout?: Duration.Input;
   readonly sessionLoadReplayIdleGap?: Duration.Input;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
@@ -76,7 +72,6 @@ export interface AcpSessionRuntimeOptions {
     readonly version: string;
   };
   readonly authMethodId: string;
-  readonly skipAuthenticate?: boolean;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -84,6 +79,13 @@ export interface AcpSessionRuntimeOptions {
     readonly logOutgoing?: boolean;
     readonly logger?: (event: EffectAcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
   };
+}
+
+export function resolveAcpAuthMethodId(
+  configuredMethodId: string,
+  initializeResult: Pick<EffectAcpSchema.InitializeResponse, "authMethods">,
+): string | undefined {
+  return configuredMethodId.trim() || initializeResult.authMethods?.[0]?.id.trim() || undefined;
 }
 
 export interface AcpSessionRequestLogEvent {
@@ -287,7 +289,7 @@ export const make = (
     const runtimeScope = yield* Scope.Scope;
     const eventQueue = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
-    const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallTrackedState>());
+    const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantItemRuntimeId = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -361,8 +363,12 @@ export const make = (
         ),
       );
 
+    const acpChild = options.discardNonJsonStdoutLines
+      ? { ...child, stdout: discardNonJsonStdoutLines(child.stdout) }
+      : child;
+
     const acpContext = yield* Layer.build(
-      EffectAcpClient.layerChildProcess(child, {
+      EffectAcpClient.layerChildProcess(acpChild, {
         ...(options.protocolLogging?.logIncoming !== undefined
           ? { logIncoming: options.protocolLogging.logIncoming }
           : {}),
@@ -549,9 +555,10 @@ export const make = (
         acp.agent.initialize(initializePayload),
       );
 
-      if (!options.skipAuthenticate) {
+      const authMethodId = resolveAcpAuthMethodId(options.authMethodId, initializeResult);
+      if (authMethodId) {
         const authenticatePayload = {
-          methodId: options.authMethodId,
+          methodId: authMethodId,
         } satisfies EffectAcpSchema.AuthenticateRequest;
 
         yield* runLoggedRequest(
@@ -645,11 +652,30 @@ export const make = (
           cwd: options.cwd,
           mcpServers: options.mcpServers ?? [],
         } satisfies EffectAcpSchema.NewSessionRequest;
-        const created = yield* runLoggedRequest(
+        const createSession = runLoggedRequest(
           "session/new",
           createPayload,
           acp.agent.createSession(createPayload),
         );
+        const created = yield* options.sessionCreateTimeout === undefined
+          ? createSession
+          : createSession.pipe(
+              Effect.timeoutOption(options.sessionCreateTimeout),
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    Effect.fail(
+                      new EffectAcpErrors.AcpTransportError({
+                        operation: "call-rpc",
+                        method: "session/new",
+                        detail: "session/new timed out waiting for the agent to initialize",
+                        cause: undefined,
+                      }),
+                    ),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            );
         sessionId = created.sessionId;
         sessionSetupResult = created;
       }
@@ -861,7 +887,7 @@ const handleSessionUpdate = ({
 }: {
   readonly queue: Queue.Queue<AcpSessionRuntimeEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
-  readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallTrackedState>>;
+  readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly assistantItemRuntimeId: string;
   readonly params: EffectAcpSchema.SessionNotification;
@@ -879,31 +905,18 @@ const handleSessionUpdate = ({
           queue,
           assistantSegmentRef,
         });
-        const { merged, decision } = yield* Ref.modify(toolCallsRef, (current) => {
-          const tracked = current.get(event.toolCall.toolCallId);
-          const previous = tracked?.state;
+        const { previous, merged } = yield* Ref.modify(toolCallsRef, (current) => {
+          const previous = current.get(event.toolCall.toolCallId);
           const nextToolCall = mergeToolCallState(previous, event.toolCall);
-          const decision = decideToolCallUpdateEmission({
-            previous,
-            next: nextToolCall,
-            lastEmittedDetailLength: tracked?.lastEmittedDetailLength,
-            skippedSinceEmit: tracked?.skippedSinceEmit ?? 0,
-          });
           const next = new Map(current);
           if (nextToolCall.status === "completed" || nextToolCall.status === "failed") {
             next.delete(nextToolCall.toolCallId);
           } else {
-            next.set(nextToolCall.toolCallId, {
-              state: nextToolCall,
-              lastEmittedDetailLength: decision.emit
-                ? nextToolCall.detail?.length
-                : tracked?.lastEmittedDetailLength,
-              skippedSinceEmit: decision.skippedSinceEmit,
-            });
+            next.set(nextToolCall.toolCallId, nextToolCall);
           }
-          return [{ merged: nextToolCall, decision }, next] as const;
+          return [{ previous, merged: nextToolCall }, next] as const;
         });
-        if (!decision.emit) {
+        if (!shouldEmitToolCallUpdate(previous, merged)) {
           continue;
         }
         yield* Queue.offer(queue, {
@@ -947,6 +960,51 @@ function updateModeState(modeState: AcpSessionModeState, nextModeId: string): Ac
         currentModeId: normalized,
       }
     : modeState;
+}
+
+function shouldEmitToolCallUpdate(
+  previous: AcpToolCallState | undefined,
+  next: AcpToolCallState,
+): boolean {
+  if (next.status === "completed" || next.status === "failed") {
+    return true;
+  }
+  if (!next.detail) {
+    return false;
+  }
+  return previous === undefined || previous.title !== next.title || previous.detail !== next.detail;
+}
+
+const stdoutDecoder = new TextDecoder();
+const stdoutEncoder = new TextEncoder();
+
+function discardNonJsonStdoutLines<E>(
+  stream: Stream.Stream<Uint8Array, E>,
+): Stream.Stream<Uint8Array, E> {
+  return Stream.unwrap(
+    Effect.gen(function* () {
+      const pendingRef = yield* Ref.make("");
+      return stream.pipe(
+        Stream.mapEffect((chunk) =>
+          Ref.modify(pendingRef, (pending) => {
+            const text = pending + stdoutDecoder.decode(chunk, { stream: true });
+            const lines = text.split(/\r?\n/g);
+            const nextPending = lines.pop() ?? "";
+            const filtered = lines
+              .filter((line) => {
+                const trimmed = line.trimStart();
+                return trimmed.startsWith("{") || trimmed.startsWith("[");
+              })
+              .map((line) => `${line}\n`)
+              .join("");
+            return [filtered, nextPending] as const;
+          }),
+        ),
+        Stream.filter((chunk) => chunk.length > 0),
+        Stream.map((chunk) => stdoutEncoder.encode(chunk)),
+      );
+    }),
+  );
 }
 
 const assistantItemId = (sessionId: string, runtimeId: string, segmentIndex: number) =>
