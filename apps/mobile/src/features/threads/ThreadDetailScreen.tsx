@@ -125,6 +125,7 @@ export interface ThreadDetailScreenProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onCancelQueuedMessage: (messageId: MessageId) => void;
   readonly onReconnectEnvironment: () => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
@@ -689,6 +690,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             onEndFollowEnabledChange={setEndFollowEnabled}
             skills={selectedProviderSkills}
             loadEarlier={props.loadEarlier ?? null}
+            onCancelQueuedMessage={props.onCancelQueuedMessage}
           />
         </View>
       ) : (

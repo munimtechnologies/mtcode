@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo } from "react";
 
 import {
@@ -51,6 +52,7 @@ import { threadEnvironment } from "./threads";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useAtomCommand } from "./use-atom-command";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
+import { mobilePreferencesAtom } from "./preferences";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -95,6 +97,7 @@ export function useThreadComposerState() {
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
   const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
+  const preferences = useAtomValue(mobilePreferencesAtom);
 
   useEffect(() => {
     ensureComposerDraftsLoaded();
@@ -147,7 +150,7 @@ export function useThreadComposerState() {
   }, [selectedThreadDetail, selectedThreadSessionActivity, selectedThreadShell]);
 
   const onSendMessage = useCallback(async () => {
-    if (!selectedThreadShell) {
+    if (!selectedThreadShell || !AsyncResult.isSuccess(preferences)) {
       return null;
     }
 
@@ -238,6 +241,7 @@ export function useThreadComposerState() {
       modelSelection: draft.modelSelection ?? thread.modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: draft.interactionMode ?? thread.interactionMode,
+      deliveryMode: preferences.value.steerActiveTurns === false ? "after-current" : "immediate",
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey);
@@ -256,6 +260,7 @@ export function useThreadComposerState() {
   }, [
     clearThreadGoal,
     pauseThreadGoal,
+    preferences,
     resumeThreadGoal,
     selectedEnvironmentServerConfig,
     selectedThreadDetail,

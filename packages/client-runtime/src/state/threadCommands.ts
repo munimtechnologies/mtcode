@@ -5,6 +5,7 @@ import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.
 import {
   type ArchiveThreadInput,
   type CreateThreadInput,
+  type CancelQueuedThreadTurnInput,
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
   type RespondToThreadApprovalInput,
@@ -30,6 +31,7 @@ import {
   type UpdateThreadMetadataInput,
   archiveThread,
   createThread,
+  cancelQueuedThreadTurn,
   deleteThread,
   interruptThreadTurn,
   respondToThreadApproval,
@@ -59,6 +61,7 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 export type {
   ArchiveThreadInput,
   CreateThreadInput,
+  CancelQueuedThreadTurnInput,
   DeleteThreadInput,
   InterruptThreadTurnInput,
   RespondToThreadApprovalInput,
@@ -211,6 +214,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     startTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:start-turn",
       execute: (input: StartThreadTurnInput) => startThreadTurn(input),
+      scheduler,
+      concurrency,
+    }),
+    cancelQueuedTurn: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:cancel-queued-turn",
+      execute: (input: CancelQueuedThreadTurnInput) => cancelQueuedThreadTurn(input),
       scheduler,
       concurrency,
     }),
