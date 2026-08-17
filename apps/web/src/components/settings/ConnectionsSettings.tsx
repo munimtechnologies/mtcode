@@ -9,7 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { type ReactNode, memo, useCallback, useId, useMemo, useState } from "react";
+import { type ReactNode, memo, useCallback, useEffect, useId, useMemo, useState } from "react";
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
@@ -1368,6 +1368,11 @@ function EnvironmentLabelControl({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(label);
   const [saving, setSaving] = useState(false);
+  const [pendingDuplicateLabel, setPendingDuplicateLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canRename) setPendingDuplicateLabel(null);
+  }, [canRename]);
 
   if (!canRename && !showValue) return null;
 
@@ -1375,23 +1380,7 @@ function EnvironmentLabelControl({
     setValue(label);
     setEditing(false);
   };
-  const save = async () => {
-    const nextLabel = value.trim();
-    const duplicate =
-      nextLabel.length > 0 &&
-      environmentLabels.some(
-        (environment) =>
-          environment.environmentId !== environmentId && environment.label === nextLabel,
-      );
-    if (
-      duplicate &&
-      !window.confirm(
-        `Another environment is already named “${nextLabel}”. Use this name for both environments?`,
-      )
-    ) {
-      return;
-    }
-
+  const save = async (nextLabel: string) => {
     setSaving(true);
     const result = await renameEnvironment({ environmentId, input: nextLabel });
     setSaving(false);
@@ -1434,39 +1423,87 @@ function EnvironmentLabelControl({
   }
 
   return (
-    <form
-      className="flex min-w-0 items-center gap-1.5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void save();
-      }}
-    >
-      <Input
-        autoFocus
-        className="h-7 w-48"
-        aria-label="Environment name"
-        maxLength={40}
-        value={value}
-        disabled={saving}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") cancel();
+    <>
+      <form
+        className="flex min-w-0 items-center gap-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const nextLabel = value.trim();
+          const duplicate =
+            nextLabel.length > 0 &&
+            environmentLabels.some(
+              (environment) =>
+                environment.environmentId !== environmentId && environment.label === nextLabel,
+            );
+          if (duplicate) {
+            setPendingDuplicateLabel(nextLabel);
+            return;
+          }
+          void save(nextLabel);
         }}
-      />
-      <Button size="icon-xs" type="submit" disabled={saving} aria-label="Save environment name">
-        {saving ? <Spinner className="size-3" /> : <CheckIcon className="size-3" />}
-      </Button>
-      <Button
-        size="icon-xs"
-        type="button"
-        variant="ghost"
-        disabled={saving}
-        aria-label="Cancel environment rename"
-        onClick={cancel}
       >
-        <XIcon className="size-3" />
-      </Button>
-    </form>
+        <Input
+          autoFocus
+          size="compact"
+          className="w-48"
+          aria-label="Environment name"
+          maxLength={40}
+          value={value}
+          disabled={saving}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            cancel();
+          }}
+        />
+        <Button size="icon-xs" type="submit" disabled={saving} aria-label="Save environment name">
+          {saving ? <Spinner className="size-3" /> : <CheckIcon className="size-3" />}
+        </Button>
+        <Button
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+          disabled={saving}
+          aria-label="Cancel environment rename"
+          onClick={cancel}
+        >
+          <XIcon className="size-3" />
+        </Button>
+      </form>
+      <AlertDialog
+        open={pendingDuplicateLabel !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDuplicateLabel(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Use this name twice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Another environment is already named “{pendingDuplicateLabel}”. Both environments will
+              use the same name.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              type="button"
+              onClick={() => {
+                const nextLabel = pendingDuplicateLabel;
+                setPendingDuplicateLabel(null);
+                if (nextLabel !== null) void save(nextLabel);
+              }}
+            >
+              Use name
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
   );
 }
 
