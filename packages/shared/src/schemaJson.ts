@@ -321,7 +321,7 @@ export function extractJsonObject(raw: string): string {
     if (scan.lastComplete !== null) {
       const repaired =
         trimmed.slice(start, scan.lastComplete).replace(/,\s*$/u, "") +
-        [...scan.stack].reverse().join("");
+        scan.stack.toReversed().join("");
       if (parsesAsJson(repaired)) return repaired;
     }
   }
