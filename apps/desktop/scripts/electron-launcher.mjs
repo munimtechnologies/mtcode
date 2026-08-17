@@ -15,7 +15,7 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code";
 export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
@@ -28,6 +28,16 @@ const developmentMacIconPngPath = NodePath.join(
   "blueprint-macos-1024.png",
 );
 const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "prod", "black-macos-1024.png");
+const nightlyMacIconPngPath = NodePath.join(
+  repoRoot,
+  "assets",
+  "nightly",
+  "nightly-macos-1024.png",
+);
+// Personal fork: prefer Nightly dock icon for packaged/local non-dev launches.
+const packagedMacIconPngPath = NodeFS.existsSync(nightlyMacIconPngPath)
+  ? nightlyMacIconPngPath
+  : productionMacIconPngPath;
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
@@ -167,7 +177,7 @@ function registerMacLauncherBundle(appBundlePath) {
 
 export function resolveMacLauncherIconPaths(runtimeDir, development = isDevelopment) {
   return {
-    sourceIconPath: development ? developmentMacIconPngPath : productionMacIconPngPath,
+    sourceIconPath: development ? developmentMacIconPngPath : packagedMacIconPngPath,
     generatedIconPath: NodePath.join(runtimeDir, development ? "icon-dev.icns" : "icon-prod.icns"),
   };
 }

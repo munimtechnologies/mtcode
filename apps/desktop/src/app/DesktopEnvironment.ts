@@ -106,7 +106,9 @@ function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    // Personal fork: keep Nightly stage for sidebar artwork/logo channel, but
+    // show the plain product name in the shell (no "Alpha"/"Nightly" suffix).
+    displayName: APP_BASE_NAME,
   };
 }
 

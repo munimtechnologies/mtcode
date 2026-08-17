@@ -1,5 +1,6 @@
 # Refresh Blade to latest personal fork (upstream nightly + CU/History).
-# Rebuilds only when origin/personal moved (unless T3_FORCE_REBUILD=1).
+# Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork while
+# product name stays "T3 Code".
 $ErrorActionPreference = "Stop"
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
   [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" +
@@ -39,6 +40,14 @@ if ($new -eq $old -and -not $env:T3_FORCE_REBUILD) {
 
 git checkout personal
 git reset --hard origin/personal
+
+if (-not $env:T3CODE_DESKTOP_VERSION) {
+  $tag = (gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty').Trim()
+  if (-not $tag) { throw "could not resolve latest nightly tag" }
+  $env:T3CODE_DESKTOP_VERSION = $tag.TrimStart("v")
+}
+Log "T3CODE_DESKTOP_VERSION=$($env:T3CODE_DESKTOP_VERSION)"
+
 Log ("HEAD=" + (git rev-parse --short HEAD) + " " + (git log -1 --oneline))
 & pnpm dist:desktop:win:x64 *>> $log
 if ($LASTEXITCODE -ne 0) { Log "build failed"; exit $LASTEXITCODE }
@@ -53,19 +62,30 @@ Log "stopping T3"
 Get-Process | Where-Object { $_.ProcessName -like "*T3*" } |
   Stop-Process -Force -ErrorAction SilentlyContinue
 
-Log "uninstalling official Nightly if present"
+Log "uninstalling previous installs if present"
 try {
   winget uninstall --id T3Tools.T3Code --silent --disable-interactivity 2>&1 | Out-String | ForEach-Object { Log $_ }
 } catch {}
-$nightlyUninst = Join-Path $env:LOCALAPPDATA "Programs\t3code\Uninstall T3 Code (Nightly).exe"
-if (Test-Path $nightlyUninst) {
-  Start-Process -FilePath $nightlyUninst -ArgumentList "/S" -Wait
+foreach ($name in @(
+  "Uninstall T3 Code (Nightly).exe",
+  "Uninstall T3 Code (Alpha).exe",
+  "Uninstall T3 Code.exe"
+)) {
+  $uninst = Join-Path $env:LOCALAPPDATA "Programs\t3code\$name"
+  if (Test-Path $uninst) {
+    Start-Process -FilePath $uninst -ArgumentList "/S" -Wait
+  }
 }
 
 Log "installing $installerPath"
 Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
 Start-Sleep 2
-Log "launching Alpha"
-Start-Process (Join-Path $env:LOCALAPPDATA "Programs\t3code\T3 Code (Alpha).exe")
+$exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\t3code\T3 Code*.exe") |
+  Where-Object { $_.Name -notlike "Uninstall*" } |
+  Select-Object -First 1
+if ($exe) {
+  Log "launching $($exe.Name)"
+  Start-Process $exe.FullName
+}
 Set-Content -Path $stateFile -Value $new -Encoding utf8
 Log "refresh done"

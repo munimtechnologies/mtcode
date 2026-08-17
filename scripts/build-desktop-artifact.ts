@@ -2215,10 +2215,10 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
   return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`;
 }
 
-export function resolveDesktopProductName(version: string): string {
-  return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+export function resolveDesktopProductName(_version: string): string {
+  // Personal fork: ship as plain "T3 Code" while still using nightly icons/artwork
+  // when the version string is a nightly (see resolveDesktopUpdateChannel).
+  return desktopPackageJson.productName ?? "T3 Code";
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
