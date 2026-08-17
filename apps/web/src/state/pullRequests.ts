@@ -2,9 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { createPullRequestEnvironmentAtoms } from "@t3tools/client-runtime/state/pull-requests";
 import type {
   EnvironmentId,
+  ProjectId,
   PullRequestListInput,
   PullRequestListStatsInput,
-  PullRequestRankInput,
+  PullRequestStackListInput,
+  PullRequestStackSummary,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -26,9 +28,9 @@ export interface EnvironmentQueryTarget<Input> {
   readonly input: Input;
 }
 
-interface MergedEnvironmentQueryView<A> {
+interface MergedEnvironmentQueryView<Input, A> {
   /** One entry per environment that has answered, in the order the targets were given. */
-  readonly values: ReadonlyArray<readonly [EnvironmentId, A]>;
+  readonly values: ReadonlyArray<readonly [EnvironmentQueryTarget<Input>, A]>;
   /** The first environment that failed. Others may still have answered — this is not fatal. */
   readonly error: string | null;
   readonly isPending: boolean;
@@ -49,9 +51,9 @@ function createMergedEnvironmentQuery<Input, A>(
   ) => Atom.Atom<AsyncResult.AsyncResult<A, unknown>>,
 ) {
   const family = Atom.family((key: string) =>
-    Atom.make((get): MergedEnvironmentQueryView<A> => {
+    Atom.make((get): MergedEnvironmentQueryView<Input, A> => {
       const targets = JSON.parse(key) as ReadonlyArray<EnvironmentQueryTarget<Input>>;
-      const values: Array<readonly [EnvironmentId, A]> = [];
+      const values: Array<readonly [EnvironmentQueryTarget<Input>, A]> = [];
       let error: string | null = null;
       let isPending = false;
       for (const target of targets) {
@@ -61,12 +63,12 @@ function createMergedEnvironmentQuery<Input, A>(
           error = formatEnvironmentQueryError(result.cause);
         }
         const value = Option.getOrNull(AsyncResult.value(result));
-        if (value !== null) values.push([target.environmentId, value]);
+        if (value !== null) values.push([target, value]);
       }
       return { values, error, isPending };
     }).pipe(Atom.withLabel(`${label}:${key}`)),
   );
-  const empty = Atom.make<MergedEnvironmentQueryView<A>>({
+  const empty = Atom.make<MergedEnvironmentQueryView<Input, A>>({
     values: [],
     error: null,
     isPending: false,
@@ -93,6 +95,11 @@ const usePullRequestStatsQuery = createMergedEnvironmentQuery(
   pullRequestEnvironment.listStats,
 );
 
+const usePullRequestStacksQuery = createMergedEnvironmentQuery(
+  "web-pull-request-stacks:list",
+  pullRequestEnvironment.stackList,
+);
+
 export interface MergedPullRequestListView {
   readonly data: MergedPullRequestList | null;
   readonly error: string | null;
@@ -105,48 +112,15 @@ export function usePullRequestList(
   targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>>,
 ): MergedPullRequestListView {
   const query = usePullRequestListsQuery(targets);
-  const data = useMemo(() => mergePullRequestLists(query.values), [query.values]);
+  const data = useMemo(
+    () =>
+      mergePullRequestLists(query.values.map(([target, value]) => [target.environmentId, value])),
+    [query.values],
+  );
   return { data, error: query.error, isPending: query.isPending, refresh: query.refresh };
 }
 
 /** The line counts for the rows on screen, asked of each environment for its own rows. */
-const usePullRequestRankQuery = createMergedEnvironmentQuery(
-  "web-pull-requests:rank",
-  pullRequestEnvironment.rank,
-);
-
-/**
- * What an agent makes of the rows it was given, keyed the way the list keys its rows so a score
- * survives the list being re-read, re-merged and re-sorted.
- *
- * Every candidate handed in is ranked — the server splits a long set across prompts rather than
- * taking the first few — so a section reordered by this is reordered whole.
- */
-export function usePullRequestUsefulness(
-  targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestRankInput>>,
-): {
-  readonly usefulness: ReadonlyMap<string, number>;
-  readonly reasons: ReadonlyMap<string, string>;
-  readonly isPending: boolean;
-  readonly error: string | null;
-} {
-  const query = usePullRequestRankQuery(targets);
-  return useMemo(() => {
-    const usefulness = new Map<string, number>();
-    const reasons = new Map<string, string>();
-    for (const [environmentId, result] of query.values) {
-      for (const ranking of result.rankings) {
-        // Keyed exactly as `pullRequestEntryKey` keys its rows, so a score survives the list
-        // being re-read, re-merged and re-sorted.
-        const key = `${environmentId}:${result.host}:${result.repository}#${ranking.number}`;
-        usefulness.set(key, ranking.score);
-        if (ranking.reason !== undefined) reasons.set(key, ranking.reason);
-      }
-    }
-    return { usefulness, reasons, isPending: query.isPending, error: query.error };
-  }, [query.values, query.isPending, query.error]);
-}
-
 export function usePullRequestListStats(
   targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestListStatsInput>>,
 ): {
@@ -158,10 +132,33 @@ export function usePullRequestListStats(
     () =>
       query.values.length === 0
         ? null
-        : query.values.flatMap(([environmentId, result]) =>
-            result.stats.map((stat) => ({ ...stat, environmentId })),
+        : query.values.flatMap(([target, result]) =>
+            result.stats.map((stat) => ({ ...stat, environmentId: target.environmentId })),
           ),
     [query.values],
   );
   return { stats, refresh: query.refresh };
+}
+
+export interface EnvironmentPullRequestStack extends PullRequestStackSummary {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+}
+
+export function usePullRequestStacks(
+  targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestStackListInput>>,
+) {
+  const query = usePullRequestStacksQuery(targets);
+  const stacks = useMemo(
+    () =>
+      query.values.flatMap(([target, result]) =>
+        result.stacks.map((stack) => ({
+          ...stack,
+          environmentId: target.environmentId,
+          projectId: target.input.projectId,
+        })),
+      ),
+    [query.values],
+  );
+  return { stacks, error: query.error, isPending: query.isPending, refresh: query.refresh };
 }

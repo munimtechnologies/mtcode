@@ -1,12 +1,7 @@
 "use client";
 
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  canCreateProjectInEnvironment,
-  getCloneDestinationBrowsePath,
-  getCloneDestinationPath,
-  getCloneDirectoryName,
-} from "@t3tools/client-runtime/operations/projects";
+import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
@@ -30,23 +25,21 @@ import {
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
-import {
-  formatGoalStatusMessage,
-  goalChipActionLabel,
-  goalChipActions,
-} from "@t3tools/shared/composerTrigger";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
-  BlocksIcon,
+  CloudUploadIcon,
   CornerLeftUpIcon,
-  CrosshairIcon,
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
   LinkIcon,
+  LayersIcon,
   MessageSquareIcon,
   PaletteIcon,
+  PlusIcon,
+  RefreshCwIcon,
   SettingsIcon,
   SquarePenIcon,
   TextSearchIcon,
@@ -64,12 +57,10 @@ import {
   type ReactNode,
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useThreadGoalActions } from "../hooks/useThreadGoalActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
@@ -78,10 +69,12 @@ import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
+import { pullRequestEnvironment } from "../state/pullRequests";
+import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { readEnvironmentSupportsGoal, useProjects, useThreadShells } from "../state/entities";
+import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -101,6 +94,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newProjectId } from "../lib/utils";
+import { requestAddStackStep } from "../gitStackActionBus";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import {
@@ -111,7 +105,6 @@ import {
 } from "../wslPaths";
 import {
   ADDON_ICON_CLASS,
-  browseInputEndPaddingClass,
   buildBrowseGroups,
   buildProjectActionItems,
   buildRootGroups,
@@ -122,12 +115,12 @@ import {
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
   filterCommandPaletteGroups,
-  filterPinnedBrowseEntries,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
+  resolveCurrentStackContext,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
@@ -593,12 +586,14 @@ function OpenCommandPaletteDialog(props: {
   const cloneRepository = useAtomCommand(sourceControlEnvironment.cloneRepository, {
     reportFailure: false,
   });
+  const runStackAction = useAtomCommand(pullRequestEnvironment.runStackAction, {
+    reportFailure: false,
+  });
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
-  const { runGoalAction, showGoalStatus } = useThreadGoalActions();
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -822,16 +817,6 @@ function OpenCommandPaletteDialog(props: {
   );
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null;
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === "repository";
-  // The destination step pins the repository folder onto the browsed path, so
-  // the proposed clone target is "<chosen folder>/<repo>" instead of the bare
-  // folder. A lookup reports "owner/repo"; a pasted clone URL falls back to its
-  // own last segment, minus ".git".
-  const pinnedCloneDirectoryName =
-    addProjectCloneFlow?.step === "confirm"
-      ? getCloneDirectoryName(
-          addProjectCloneFlow.repository?.nameWithOwner ?? addProjectCloneFlow.remoteUrl,
-        )
-      : "";
   const browsePath = useMemo(
     () => getFilesystemBrowsePath(query, browseEnvironmentPlatform, !isRemoteProjectRepositoryStep),
     [browseEnvironmentPlatform, isRemoteProjectRepositoryStep, query],
@@ -875,6 +860,34 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
     : null;
+  const { project: currentProject, cwd: currentStackCwd } = resolveCurrentStackContext({
+    projects,
+    environmentId: currentProjectEnvironmentId,
+    projectId: currentProjectId,
+    threadWorktreePath: activeThread?.worktreePath ?? null,
+    draftWorktreePath: activeDraftThread?.worktreePath ?? null,
+  });
+  const currentServerConfig = useAtomValue(
+    serverEnvironment.configValueAtom(currentProjectEnvironmentId),
+  );
+  const currentStackQuery = useEnvironmentQuery(
+    currentProjectEnvironmentId !== null &&
+      currentStackCwd !== null &&
+      currentProject?.repositoryIdentity?.provider === "github" &&
+      currentServerConfig?.environment.capabilities.pullRequestStacks === true
+      ? pullRequestEnvironment.stackCurrent({
+          environmentId: currentProjectEnvironmentId,
+          input: { cwd: currentStackCwd },
+        })
+      : null,
+  );
+  const currentBranch = activeThread?.branch ?? activeDraftThread?.branch ?? null;
+  const queriedStack = currentStackQuery.data?.stack ?? null;
+  const currentStack =
+    queriedStack && (currentBranch === null || queriedStack.currentBranch === currentBranch)
+      ? queriedStack
+      : null;
+  const currentStackStep = currentStack?.steps.find((step) => step.isCurrent) ?? null;
   const currentProjectCwdForBrowse =
     browseEnvironmentId && currentProjectEnvironmentId === browseEnvironmentId
       ? currentProjectCwd
@@ -904,16 +917,8 @@ function OpenCommandPaletteDialog(props: {
   const isBrowsePending = browseQuery.isPending;
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
   const { visibleEntries: visibleBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
-    () =>
-      pinnedCloneDirectoryName
-        ? filterPinnedBrowseEntries({
-            browseEntries,
-            filterQuery: browsePath.filterQuery,
-            pinnedDirectoryName: pinnedCloneDirectoryName,
-            caseSensitive: !isWindowsPlatform(browseEnvironmentPlatform),
-          })
-        : filterFilesystemBrowseEntries(browseEntries, browsePath.filterQuery),
-    [browseEntries, browseEnvironmentPlatform, browsePath.filterQuery, pinnedCloneDirectoryName],
+    () => filterFilesystemBrowseEntries(browseEntries, browsePath.filterQuery),
+    [browseEntries, browsePath.filterQuery],
   );
 
   const prefetchBrowsePath = useCallback(
@@ -1450,6 +1455,77 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
+  if (currentProjectEnvironmentId && currentProject && currentStackCwd && currentStack) {
+    const runCurrentStackAction = async (action: "submit" | "sync") => {
+      const result = await runStackAction({
+        environmentId: currentProjectEnvironmentId,
+        input: { cwd: currentStackCwd, action },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      currentStackQuery.refresh();
+      toastManager.add({
+        type: "success",
+        title: action === "submit" ? "Stack shared" : "Stack refreshed",
+      });
+    };
+    const repositoryIdentity = currentProject.repositoryIdentity;
+    const currentPullRequest = currentStackStep?.pullRequest;
+
+    if (repositoryIdentity?.owner && repositoryIdentity.name && currentPullRequest) {
+      actionItems.push({
+        kind: "action",
+        value: "action:view-pull-request-stack",
+        searchTerms: ["view", "pull request", "stack", "steps"],
+        title: "View pull request stack",
+        description: `Step ${currentStackStep.position} of ${currentStack.steps.length}`,
+        icon: <LayersIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await navigate({
+            to: "/pull-requests",
+            search: {
+              involvement: "all",
+              state: "all",
+              repository: `${repositoryIdentity.owner}/${repositoryIdentity.name}`,
+              number: currentPullRequest.number,
+              selectedProjectId: currentProject.id,
+              selectedEnvironmentId: currentProjectEnvironmentId,
+            },
+          });
+        },
+      });
+    }
+    actionItems.push(
+      {
+        kind: "action",
+        value: "action:add-stack-step",
+        searchTerms: ["next", "add", "pull request", "stack", "step", "branch"],
+        title: "Start next stack step...",
+        icon: <PlusIcon className={ITEM_ICON_CLASS} />,
+        run: async () =>
+          requestAddStackStep({
+            environmentId: currentProjectEnvironmentId,
+            cwd: currentStackCwd,
+          }),
+      },
+      {
+        kind: "action",
+        value: "action:submit-stack",
+        searchTerms: ["share", "submit", "push", "pull request", "stack"],
+        title: "Share pull request stack",
+        icon: <CloudUploadIcon className={ITEM_ICON_CLASS} />,
+        run: () => runCurrentStackAction("submit"),
+      },
+      {
+        kind: "action",
+        value: "action:sync-stack",
+        searchTerms: ["refresh", "sync", "update", "pull request", "stack"],
+        title: "Refresh pull request stack",
+        icon: <RefreshCwIcon className={ITEM_ICON_CLASS} />,
+        run: () => runCurrentStackAction("sync"),
+      },
+    );
+  }
+
   if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
@@ -1560,48 +1636,6 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread && readEnvironmentSupportsGoal(activeThread.environmentId)) {
-    const goal = activeThread.goal ?? null;
-    const goalForStatus = goal == null ? null : { status: goal.status, objective: goal.objective };
-    actionItems.push({
-      kind: "action",
-      value: "action:goal-status",
-      searchTerms: ["goal", "objective", "status", "/goal"],
-      title: "Show Objective status",
-      description: formatGoalStatusMessage(goalForStatus),
-      icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        showGoalStatus(goalForStatus);
-      },
-    });
-    if (goal != null) {
-      for (const action of goalChipActions(goal.status)) {
-        actionItems.push({
-          kind: "action",
-          value: `action:goal-${action}`,
-          searchTerms: [
-            "goal",
-            "objective",
-            action,
-            goalChipActionLabel(action),
-            "/goal",
-            `/goal ${action}`,
-          ],
-          title: `${goalChipActionLabel(action)} Objective`,
-          description: goal.objective,
-          icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            await runGoalAction({
-              environmentId: activeThread.environmentId,
-              threadId: activeThread.id,
-              action,
-            });
-          },
-        });
-      }
-    }
-  }
-
   actionItems.push({
     kind: "action",
     value: "action:theme-editor",
@@ -1615,18 +1649,6 @@ function OpenCommandPaletteDialog(props: {
         themeHalves,
         initialAppearance: resolvedTheme,
       });
-    },
-  });
-
-  actionItems.push({
-    kind: "action",
-    value: "action:plugins",
-    searchTerms: ["plugins", "marketplace", "mcp", "skills", "harnesses"],
-    title: "Browse plugins",
-    description: "MCP servers and skills across supported harnesses",
-    icon: <BlocksIcon className={ITEM_ICON_CLASS} />,
-    run: async () => {
-      await navigate({ to: "/settings/plugins" });
     },
   });
 
@@ -1880,10 +1902,7 @@ function OpenCommandPaletteDialog(props: {
 
       const provider = remoteProjectSourceProvider(addProjectCloneFlow.source);
       if (!provider) {
-        const destinationPath = getCloneDestinationPath(
-          getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
-          getCloneDirectoryName(rawRepository),
-        );
+        const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
         setAddProjectCloneFlow({
           step: "confirm",
           environmentId: addProjectCloneFlow.environmentId,
@@ -1920,10 +1939,7 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
       const repository = lookupResult.value;
-      const destinationPath = getCloneDestinationPath(
-        getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
-        getCloneDirectoryName(repository.nameWithOwner),
-      );
+      const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId);
       setAddProjectCloneFlow({
         step: "confirm",
         environmentId: addProjectCloneFlow.environmentId,
@@ -1999,14 +2015,7 @@ function OpenCommandPaletteDialog(props: {
 
   const browseTo = useCallback(
     async (name: string): Promise<void> => {
-      const nextQuery = pinnedCloneDirectoryName
-        ? getCloneDestinationBrowsePath({
-            browseDirectoryPath: browsePath.directoryPath,
-            selectedDirectoryName: name,
-            cloneDirectoryName: pinnedCloneDirectoryName,
-            caseSensitive: !isWindowsPlatform(browseEnvironmentPlatform),
-          })
-        : appendBrowsePathSegment(query, name);
+      const nextQuery = appendBrowsePathSegment(query, name);
       await browseNavigation.run(
         () => prefetchBrowsePath(getBrowseDirectoryPath(nextQuery)),
         () => {
@@ -2016,14 +2025,7 @@ function OpenCommandPaletteDialog(props: {
         },
       );
     },
-    [
-      browseNavigation,
-      browseEnvironmentPlatform,
-      browsePath.directoryPath,
-      pinnedCloneDirectoryName,
-      prefetchBrowsePath,
-      query,
-    ],
+    [browseNavigation, prefetchBrowsePath, query],
   );
 
   const browseUp = useCallback(async (): Promise<void> => {
@@ -2032,16 +2034,15 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
-    const nextQuery = getCloneDestinationPath(parentPath, pinnedCloneDirectoryName);
     await browseNavigation.run(
       () => prefetchBrowsePath(parentPath),
       () => {
         setHighlightedItemValue(null);
-        setQuery(nextQuery);
+        setQuery(parentPath);
         setBrowseGeneration((generation) => generation + 1);
       },
     );
-  }, [browseNavigation, browsePath.parentPath, pinnedCloneDirectoryName, prefetchBrowsePath]);
+  }, [browseNavigation, browsePath.parentPath, prefetchBrowsePath]);
 
   // Resolve the add-project path from browse data when available. When the
   // query has a trailing separator (e.g. "~/projects/foo/"), parentPath is the
@@ -2454,16 +2455,13 @@ function OpenCommandPaletteDialog(props: {
       footerTrailing={footerTrailing}
       inputAccessory={inputAccessory}
       inputProps={{
-        // The submit button is absolutely positioned over the field, so the
-        // inner input must reserve enough room for the full action label.
         className:
           addProjectCloneFlow?.step === "repository"
-            ? "*:data-[slot=autocomplete-input]:pe-32!"
+            ? "pe-32"
             : isBrowsing
-              ? browseInputEndPaddingClass({
-                  willCreateProjectPath,
-                  hasHighlightedBrowseItem,
-                })
+              ? willCreateProjectPath
+                ? "pe-36"
+                : "pe-16"
               : undefined,
         placeholder: inputPlaceholder,
         wrapperClassName: isSubmenu

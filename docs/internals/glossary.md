@@ -10,6 +10,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
+- [Source control](#source-control)
 - [Checkpointing](#checkpointing)
 
 ## Concepts
@@ -41,38 +42,6 @@ A single user-to-assistant work cycle inside a thread. It starts with user input
 #### Activity
 
 A user-visible log item attached to a thread. In [the contracts][1], activities cover important non-message events like approvals, tool actions, and failures. They are projected into thread state in [projector.ts][4].
-
-#### Goal
-
-T3's completion contract on a Thread: keep working until the Objective is true, or until Pause, Complete, Clear, Blocked, or Usage-limited. Optional on the Thread read model and on the Thread shell (`status` plus a truncated Objective preview) so the inbox can render without Thread detail. T3 owns Goal state and does not call provider Goal APIs. See [the contracts][1] and [decider.ts][8].
-
-#### Objective
-
-The outcome text a Goal is working toward. The first Turn on an idle Thread records the Objective as a normal user message. Command forms (`/goal`, “slash goal”) never reach a provider.
-
-#### Continuation
-
-A Turn T3 starts while a Goal is Active, with no user message. Continuations wait until the Session is ready, and do not run in plan mode. An activity of kind `goal.continued` marks each one. See [GoalReactor.ts][25].
-
-#### Pause
-
-Goal status that prevents the next Continuation. `thread.goal.pause` does not interrupt a running Turn. Stop (`thread.turn.interrupt` while Active) interrupts this Turn and Pauses. Settle, Snooze, and a closed client do not Pause. Resume (`thread.goal.resume`) makes a Paused, Blocked, or Usage-limited Goal Active again; Resume from Complete is refused.
-
-#### Complete
-
-Terminal success for a Goal. Only the model Completes, via a structured `<objective_complete>` signal — never the user, and never from prose. Continuations stop immediately.
-
-#### Clear
-
-Removes the Goal from the Thread (`thread.goal.clear`) so the Thread returns to one-Turn-at-a-time behavior. The UI asks for confirmation first, and clearing interrupts a running Turn (`thread.turn-interrupt-requested` is emitted alongside `thread.goal-cleared`).
-
-#### Blocked
-
-The work stopped itself. The model Blocks only via `<objective_blocked>`. T3 also Blocks after several consecutive Continuations with no tool work and no checkpoint diff. Resume tries again and resets that streak.
-
-#### Usage-limited
-
-The account hit a provider quota or rate limit. Ordinary Turn errors leave the Goal Active; classified quota/rate-limit failures emit `thread.goal-usage-limited`. Resume tries again after the window resets.
 
 ### Orchestration
 
@@ -148,6 +117,20 @@ Controls how assistant text reaches the thread timeline. In [the contracts][1], 
 
 A point-in-time view of state. The word is used in multiple layers, including orchestration, provider, and checkpointing. See [ProjectionSnapshotQuery.ts][10], [ProviderAdapter.ts][15], and [CheckpointStore.ts][19].
 
+### Source control
+
+#### Pull request stack
+
+An ordered set of GitHub pull requests where each step builds on the step below it. Local stack
+operations use the official `github/gh-stack` GitHub CLI extension in
+[GitHubPullRequestStackService.ts][25]. Remote stack summaries come from GitHub's Stacks API and
+use the contracts in [pullRequestStack.ts][26]. T3 Code calls one item a **stack step**.
+
+#### Submit stack
+
+Push every branch in the current pull request stack and create or update its pull requests. T3
+Code runs `gh stack submit --auto` through [GitHubPullRequestStackService.ts][25].
+
 ### Checkpointing
 
 Checkpointing captures workspace state over time so the app can diff turns and restore earlier points. The main pieces are [CheckpointStore.ts][19], [CheckpointDiffQuery.ts][20], and [CheckpointReactor.ts][6].
@@ -211,4 +194,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
-[25]: ../../apps/server/src/orchestration/Layers/GoalReactor.ts
+[25]: ../../apps/server/src/pullRequestStack/GitHubPullRequestStackService.ts
+[26]: ../../packages/contracts/src/pullRequestStack.ts
