@@ -208,24 +208,43 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
  * Chromium stores the database as `Cookies` under the profile directory;
  * Firefox uses `cookies.sqlite`, and its profile paths from `profiles.ini`
  * may already be absolute.
+ *
+ * Newer Chromium versions (127+) moved the cookie database into a `Network`
+ * subdirectory. The candidate list includes both locations so callers can
+ * tolerate either layout.
+ */
+export const cookieDatabaseCandidatePaths = (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+  profileDirectory: string,
+): ReadonlyArray<string> => {
+  const root = definition.userDataDirectory(context);
+  if (root === undefined) return [];
+  const profilePath = context.path.isAbsolute(profileDirectory)
+    ? profileDirectory
+    : context.path.join(root, profileDirectory);
+  if (definition.engine === "firefox") {
+    return [context.path.join(profilePath, "cookies.sqlite")];
+  }
+  if (definition.engine === "safari") {
+    return [context.path.join(profilePath, "Cookies.binarycookies")];
+  }
+  // Chromium: older versions use `Cookies`, 127+ use `Network/Cookies`.
+  return [
+    context.path.join(profilePath, "Cookies"),
+    context.path.join(profilePath, "Network", "Cookies"),
+  ];
+};
+
+/**
+ * Legacy single-path helper that returns the first candidate. Prefer
+ * `cookieDatabaseCandidatePaths` when checking for existence.
  */
 export const cookieDatabasePath = (
   definition: BrowserImportSourceDefinition,
   context: BrowserImportPathContext,
   profileDirectory: string,
-): string | undefined => {
-  const root = definition.userDataDirectory(context);
-  if (root === undefined) return undefined;
-  const fileName =
-    definition.engine === "firefox"
-      ? "cookies.sqlite"
-      : definition.engine === "safari"
-        ? "Cookies.binarycookies"
-        : "Cookies";
-  return context.path.isAbsolute(profileDirectory)
-    ? context.path.join(profileDirectory, fileName)
-    : context.path.join(root, profileDirectory, fileName);
-};
+): string | undefined => cookieDatabaseCandidatePaths(definition, context, profileDirectory)[0];
 
 /** Chromium keeps the DPAPI-wrapped Windows key in `Local State`. */
 export const localStatePath = (
@@ -310,6 +329,35 @@ const entryExists = Effect.fnUntraced(function* (path: string) {
   );
 });
 
+/**
+ * Whether a lock file is actually held by a running process. On macOS and
+ * Linux Firefox lock files are dangling symlinks that disappear when the
+ * process exits, so `entryExists` is sufficient. On Windows the lock file
+ * (`parent.lock`) is a regular file locked via `LockFileEx` that persists on
+ * disk after the process exits; `stat` always succeeds, so we must try to
+ * open the file with write access to detect the active lock.
+ */
+const isLockHeld = Effect.fnUntraced(function* (
+  lockPath: string,
+  platform: "darwin" | "linux" | "win32",
+) {
+  if (platform !== "win32") return yield* entryExists(lockPath);
+  return yield* Effect.tryPromise({
+    try: () =>
+      new Promise<boolean>((resolve) => {
+        const fs = require("node:fs") as typeof import("node:fs");
+        fs.open(lockPath, "r+", (openErr: NodeJS.ErrnoException | null, fd: number) => {
+          if (openErr) {
+            resolve(openErr.code === "EBUSY" || openErr.code === "EPERM");
+            return;
+          }
+          fs.close(fd, () => resolve(false));
+        });
+      }),
+    catch: () => false,
+  });
+});
+
 /** Shape of the slice of Chromium's `Local State` that names its profiles. */
 const LocalState = Schema.Struct({
   profile: Schema.optional(
@@ -344,7 +392,10 @@ const countProfileCookies = Effect.fnUntraced(function* (
   context: BrowserImportPathContext,
   directory: string,
 ): Effect.fn.Return<number | undefined, never> {
-  const databasePath = cookieDatabasePath(definition, context, directory);
+  const candidates = cookieDatabaseCandidatePaths(definition, context, directory);
+  const databasePath = yield* Effect.forEach(candidates, (candidate) =>
+    entryExists(candidate).pipe(Effect.map((exists) => (exists ? candidate : undefined))),
+  ).pipe(Effect.map((results) => results.find((p) => p !== undefined)));
   if (databasePath === undefined) return undefined;
   return yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -431,8 +482,10 @@ export const listSourceProfiles = Effect.fn("BrowserImportSources.listSourceProf
     .readDirectory(root)
     .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
   const found = yield* Effect.forEach(entries.filter(isSafeProfileDirectory), (directory) =>
-    entryExists(cookieDatabasePath(definition, context, directory) ?? "").pipe(
-      Effect.map((exists) => (exists ? { directory, name: directory } : undefined)),
+    Effect.forEach(cookieDatabaseCandidatePaths(definition, context, directory), (candidate) =>
+      entryExists(candidate),
+    ).pipe(
+      Effect.map((results) => (results.some(Boolean) ? { directory, name: directory } : undefined)),
     ),
   );
   return yield* withCookieCounts(
@@ -472,7 +525,7 @@ export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")
       ? profile.directory
       : context.path.join(root, profile.directory);
     return Effect.forEach(FIREFOX_LOCK_NAMES, (lock) =>
-      entryExists(context.path.join(directory, lock)),
+      isLockHeld(context.path.join(directory, lock), context.platform),
     ).pipe(Effect.map((results) => results.some(Boolean)));
   });
   return found.some(Boolean);
@@ -498,9 +551,11 @@ export const isSourceInstalled = Effect.fn("BrowserImportSources.isSourceInstall
   context: BrowserImportPathContext,
 ): Effect.fn.Return<boolean, never, FileSystem.FileSystem> {
   const profiles = yield* listSourceProfiles(definition, context);
-  const found = yield* Effect.forEach(profiles, (profile) => {
-    const database = cookieDatabasePath(definition, context, profile.directory);
-    return database === undefined ? Effect.succeed(false) : entryExists(database);
-  });
+  const found = yield* Effect.forEach(profiles, (profile) =>
+    Effect.forEach(
+      cookieDatabaseCandidatePaths(definition, context, profile.directory),
+      (candidate) => entryExists(candidate),
+    ).pipe(Effect.map((results) => results.some(Boolean))),
+  );
   return found.some(Boolean);
 });

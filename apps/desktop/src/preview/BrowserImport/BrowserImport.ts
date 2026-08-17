@@ -32,7 +32,7 @@ import { FirefoxCookieReadError, readFirefoxCookies } from "./FirefoxCookies.ts"
 import { readSafariCookies, SafariCookieReadError } from "./SafariCookies.ts";
 import {
   BROWSER_IMPORT_SOURCES,
-  cookieDatabasePath,
+  cookieDatabaseCandidatePaths,
   isSourceInstalled,
   isSourceRunning,
   listSourceProfiles,
@@ -164,7 +164,23 @@ export const make = Effect.gen(function* BrowserImportMake() {
       });
     }
 
-    const databasePath = cookieDatabasePath(definition, pathContext, requestedProfile.directory);
+    const candidates = cookieDatabaseCandidatePaths(
+      definition,
+      pathContext,
+      requestedProfile.directory,
+    );
+    const databasePath =
+      candidates.length === 0
+        ? undefined
+        : yield* Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem;
+            return yield* Effect.forEach(candidates, (candidate) =>
+              fileSystem.stat(candidate).pipe(
+                Effect.map(() => candidate),
+                Effect.orElse(() => Effect.succeed(undefined)),
+              ),
+            ).pipe(Effect.map((results) => results.find((p) => p !== undefined)));
+          });
     if (databasePath === undefined) {
       return yield* new BrowserImportFailedError({
         sourceId: definition.id,

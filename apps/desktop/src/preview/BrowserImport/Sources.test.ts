@@ -12,6 +12,7 @@ import * as NodeSqlite from "node:sqlite";
 import type { BrowserImportPathContext } from "./Sources.ts";
 import {
   BROWSER_IMPORT_SOURCES,
+  cookieDatabaseCandidatePaths,
   cookieDatabasePath,
   isSourceInstalled,
   isSourceRunning,
@@ -105,6 +106,20 @@ describe("isSourceInstalled", () => {
       }),
     ),
   );
+
+  it.effect("detects a Chromium 127+ install with cookies under Network/", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = userDataDirectory(context);
+
+        yield* fileSystem.makeDirectory(`${root}/Default/Network`, { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/Default/Network/Cookies`, "db");
+        assert.isTrue(yield* isSourceInstalled(helium, context));
+      }),
+    ),
+  );
 });
 
 describe("listSourceProfiles", () => {
@@ -173,6 +188,22 @@ describe("listSourceProfiles", () => {
     ),
   );
 
+  it.effect("discovers profiles with cookies under Network/ (Chromium 127+)", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const context = yield* withSourceHome();
+        const root = userDataDirectory(context);
+        yield* fileSystem.makeDirectory(`${root}/Default/Network`, { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/Default/Network/Cookies`, "db");
+
+        assert.deepEqual(yield* listSourceProfiles(helium, context), [
+          { directory: "Default", name: "Default" },
+        ]);
+      }),
+    ),
+  );
+
   it.effect("counts a profile's cookies without decrypting them", () =>
     run(
       Effect.gen(function* () {
@@ -193,11 +224,50 @@ describe("cookieDatabasePath", () => {
   it.effect("places the database under the requested source profile", () =>
     run(
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const context = yield* withSourceHome();
         assert.equal(
           cookieDatabasePath(helium, context, "Profile 1"),
-          `${context.home}/Library/Application Support/net.imput.helium/Profile 1/Cookies`,
+          path.join(context.home, "Library/Application Support/net.imput.helium/Profile 1/Cookies"),
         );
+      }),
+    ),
+  );
+});
+
+describe("cookieDatabaseCandidatePaths", () => {
+  it.effect("returns both Cookies and Network/Cookies for Chromium engines", () =>
+    run(
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const context = yield* withSourceHome();
+        const candidates = cookieDatabaseCandidatePaths(helium, context, "Default");
+        assert.deepEqual(candidates, [
+          path.join(context.home, "Library/Application Support/net.imput.helium/Default/Cookies"),
+          path.join(
+            context.home,
+            "Library/Application Support/net.imput.helium/Default/Network/Cookies",
+          ),
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("returns only cookies.sqlite for Firefox", () =>
+    run(
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const context = yield* sourcePathContext.pipe(
+          Effect.provideService(HostProcessEnvironment, { HOME: "/tmp/test" }),
+          Effect.provideService(HostProcessPlatform, "darwin"),
+        );
+        const candidates = cookieDatabaseCandidatePaths(firefox, context, "Profiles/abc.default");
+        assert.deepEqual(candidates, [
+          path.join(
+            "/tmp/test",
+            "Library/Application Support/Firefox/Profiles/abc.default/cookies.sqlite",
+          ),
+        ]);
       }),
     ),
   );
@@ -229,6 +299,28 @@ describe("isSourceRunning for Firefox", () => {
 
         yield* fileSystem.writeFileString(`${profile}/.parentlock`, "");
         assert.isTrue(yield* isSourceRunning(firefox, context));
+      }),
+    ),
+  );
+
+  it.effect("does not treat a stale parent.lock file as a running browser", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-firefox-" });
+        const context = yield* sourcePathContext.pipe(
+          Effect.provideService(HostProcessEnvironment, { HOME: home }),
+          Effect.provideService(HostProcessPlatform, "win32"),
+        );
+        const root = firefox.userDataDirectory(context)!;
+        const profile = `${root}/Profiles/gx7x7fqx.default-release`;
+        yield* fileSystem.makeDirectory(profile, { recursive: true });
+
+        // On Windows, Firefox creates parent.lock as a regular file that
+        // persists after the process exits. The file is only locked while
+        // Firefox is running; the old stat-based check always found it.
+        yield* fileSystem.writeFileString(`${profile}/parent.lock`, "");
+        assert.isFalse(yield* isSourceRunning(firefox, context));
       }),
     ),
   );
