@@ -211,7 +211,7 @@ export function shouldRetryThreadOutboxDelivery(error: unknown): boolean {
   return isTransportConnectionErrorMessage(errorMessage(error));
 }
 
-export type ThreadOutboxCommandStage = "settings-sync" | "start-turn";
+export type ThreadOutboxCommandStage = "settings-sync" | "start-turn" | "goal-attach";
 export type ThreadOutboxFailureAction = "retry" | "discard";
 
 export function resolveThreadOutboxFailureAction(input: {

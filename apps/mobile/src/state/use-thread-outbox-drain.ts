@@ -173,12 +173,15 @@ export function useThreadOutboxDrain(): void {
   }, []);
 
   const attachQueuedGoal = useCallback(
-    async (queuedMessage: QueuedThreadMessage) => {
+    async (
+      queuedMessage: QueuedThreadMessage,
+      reportFailure: ReturnType<typeof makeDeliveryHelpers>["reportFailure"],
+    ): Promise<boolean> => {
       const objective = queuedAttachGoalObjective(queuedMessage);
       if (objective === null) {
-        return;
+        return true;
       }
-      await setThreadGoal({
+      const goalResult = await setThreadGoal({
         environmentId: queuedMessage.environmentId,
         input: {
           threadId: queuedMessage.threadId,
@@ -186,13 +189,20 @@ export function useThreadOutboxDrain(): void {
           messageId: queuedMessage.messageId,
         },
       });
+      // A failed attach must keep the outbox entry: the retried delivery
+      // dedupes the Turn by commandId and re-attempts the Objective.
+      return !reportFailure(goalResult, "goal-attach");
     },
-    [setThreadGoal],
+    [makeDeliveryHelpers, setThreadGoal],
   );
 
   const dropQueuedCommandForm = useCallback(
     async (queuedMessage: QueuedThreadMessage) => {
-      await attachQueuedGoal(queuedMessage);
+      const { reportFailure } = makeDeliveryHelpers(queuedMessage);
+      const attached = await attachQueuedGoal(queuedMessage, reportFailure);
+      if (!attached) {
+        return false;
+      }
       try {
         await removeThreadOutboxMessage(queuedMessage);
         return true;
@@ -206,7 +216,7 @@ export function useThreadOutboxDrain(): void {
         return false;
       }
     },
-    [attachQueuedGoal],
+    [attachQueuedGoal, makeDeliveryHelpers],
   );
 
   const sendQueuedMessage = useCallback(
@@ -283,7 +293,10 @@ export function useThreadOutboxDrain(): void {
         },
       });
       if (!AsyncResult.isFailure(deliveryResult)) {
-        await attachQueuedGoal(queuedMessage);
+        const attached = await attachQueuedGoal(queuedMessage, reportFailure);
+        if (!attached) {
+          return false;
+        }
       }
       return completeDelivery(deliveryResult);
     },
@@ -311,7 +324,7 @@ export function useThreadOutboxDrain(): void {
       if (isGoalCommandForm(queuedMessage.text)) {
         return dropQueuedCommandForm(queuedMessage);
       }
-      const { completeDelivery } = makeDeliveryHelpers(queuedMessage);
+      const { reportFailure, completeDelivery } = makeDeliveryHelpers(queuedMessage);
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
@@ -334,7 +347,10 @@ export function useThreadOutboxDrain(): void {
         }),
       });
       if (!AsyncResult.isFailure(deliveryResult)) {
-        await attachQueuedGoal(queuedMessage);
+        const attached = await attachQueuedGoal(queuedMessage, reportFailure);
+        if (!attached) {
+          return false;
+        }
       }
       return completeDelivery(deliveryResult);
     },
