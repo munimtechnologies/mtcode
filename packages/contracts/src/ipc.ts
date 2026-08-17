@@ -974,6 +974,18 @@ export interface DesktopPreviewTabDefaults {
   readonly colorScheme?: DesktopPreviewColorScheme | undefined;
 }
 
+export const DesktopPreviewAutomationSetViewportInputSchema = Schema.Union([
+  Schema.Struct({
+    tabId: DesktopPreviewTabIdSchema,
+    width: Schema.Int.check(Schema.isGreaterThan(0)),
+    height: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
+  Schema.Struct({
+    tabId: DesktopPreviewTabIdSchema,
+    clear: Schema.Literal(true),
+  }),
+]);
+
 export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   webContentsId: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -1187,6 +1199,10 @@ export interface DesktopPreviewBridge {
   automation: {
     status: (tabId: string) => Promise<PreviewAutomationStatus>;
     snapshot: (tabId: string) => Promise<PreviewAutomationSnapshot>;
+    setViewport: (
+      tabId: string,
+      input: { readonly width: number; readonly height: number } | { readonly clear: true },
+    ) => Promise<void>;
     click: (tabId: string, input: PreviewAutomationClickInput) => Promise<void>;
     type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
     press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;

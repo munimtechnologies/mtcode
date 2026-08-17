@@ -34,6 +34,7 @@ import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/prev
 import { useRightPanelStore } from "~/rightPanelStore";
 
 import { previewBridge } from "./previewBridge";
+import { applyPreviewGuestViewport } from "./previewGuestViewport";
 import { subscribePreviewAction } from "./previewActionBus";
 import { openPreviewSession } from "./openPreviewSession";
 import { PreviewChromeRow } from "./PreviewChromeRow";
@@ -239,8 +240,15 @@ export function PreviewView({
         throw error;
       }
       updatePreviewServerSnapshot(threadRef, result.value);
+      if (runtimeTabId) {
+        await applyPreviewGuestViewport(
+          previewBridge?.automation.setViewport,
+          runtimeTabId,
+          nextViewport,
+        );
+      }
     },
-    [resize, tabId, threadRef],
+    [resize, runtimeTabId, tabId, threadRef],
   );
 
   const handleToggleDeviceToolbar = () => {
