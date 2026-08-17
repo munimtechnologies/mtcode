@@ -2954,7 +2954,7 @@ describe("ProviderCommandReactor", () => {
     const objective = "Reduce p95 below 120ms";
     const completedTurnId = asTurnId("turn-goal-1");
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-running-for-goal"),
@@ -2971,7 +2971,7 @@ describe("ProviderCommandReactor", () => {
         },
       }),
     );
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.goal.set",
         commandId: CommandId.make("cmd-goal-attach"),
@@ -2979,7 +2979,7 @@ describe("ProviderCommandReactor", () => {
         objective,
       }),
     );
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-ready-for-goal"),
@@ -3001,7 +3001,7 @@ describe("ProviderCommandReactor", () => {
       (entry) => entry.id === ThreadId.make("thread-1"),
     );
     const goalUpdatedAt = threadBeforeContinue?.goal?.updatedAt ?? now;
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.goal.continue",
         commandId: CommandId.make(
@@ -3042,7 +3042,7 @@ describe("ProviderCommandReactor", () => {
     const now = "2026-01-01T00:00:00.000Z";
     const completedTurnId = asTurnId("turn-paused-1");
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-running-paused-goal"),
@@ -3059,7 +3059,7 @@ describe("ProviderCommandReactor", () => {
         },
       }),
     );
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.goal.set",
         commandId: CommandId.make("cmd-goal-attach-paused"),
@@ -3067,14 +3067,14 @@ describe("ProviderCommandReactor", () => {
         objective: "Reduce p95 below 120ms",
       }),
     );
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.goal.pause",
         commandId: CommandId.make("cmd-goal-pause-before-ready"),
         threadId: ThreadId.make("thread-1"),
       }),
     );
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-ready-paused-goal"),
@@ -3091,7 +3091,7 @@ describe("ProviderCommandReactor", () => {
         },
       }),
     );
-    const error = await Effect.runPromise(
+    const error = await harness.runEffect(
       harness.engine
         .dispatch({
           type: "thread.goal.continue",
