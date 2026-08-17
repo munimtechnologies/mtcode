@@ -15,6 +15,7 @@ $dellUser = if ($env:T3_DELL_USER) { $env:T3_DELL_USER } else { "busin" }
 $key = Join-Path $env:USERPROFILE ".ssh\codex_ed25519"
 $installer = Join-Path $env:USERPROFILE "dev\T3-Code-personal-x64.exe"
 $script = Join-Path $env:USERPROFILE "dev\personal-refresh-dell.ps1"
+$launcher = Join-Path $env:USERPROFILE "dev\personal-launch-gui.ps1"
 
 if (-not (Test-Path $installer)) { throw "no staged installer at $installer" }
 if (-not (Test-Path $script)) { throw "no Dell refresh script at $script" }
@@ -30,6 +31,13 @@ if ($LASTEXITCODE -ne 0) { throw "could not copy the installer to $target" }
 
 & scp @sshArgs $script "${target}:dev/personal-refresh-dell.ps1"
 if ($LASTEXITCODE -ne 0) { throw "could not copy the refresh script to $target" }
+
+# Beside it, because the refresh script launches through it -- without this Dell falls back to a
+# session 0 start and its screen stays empty.
+if (Test-Path $launcher) {
+  & scp @sshArgs $launcher "${target}:dev/personal-launch-gui.ps1"
+  if ($LASTEXITCODE -ne 0) { throw "could not copy the launcher to $target" }
+}
 
 & ssh @sshArgs $target "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/$dellUser/dev/personal-refresh-dell.ps1"
 if ($LASTEXITCODE -ne 0) { throw "the refresh script failed on $target" }

@@ -119,7 +119,18 @@ $exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\t3code\T3 Code*.exe"
   Select-Object -First 1
 if ($exe) {
   Log "launching $($exe.Name)"
-  Start-Process $exe.FullName
+  # Not Start-Process: this script runs over SSH, in session 0, which has no desktop -- the app
+  # started there and the machine's screen stayed empty. The launcher runs it in the logged-on
+  # user's session instead and reports whether a window actually appeared.
+  $launcher = Join-Path $PSScriptRoot "personal-launch-gui.ps1"
+  if (Test-Path $launcher) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -ExePath $exe.FullName 2>&1 |
+      ForEach-Object { Log $_ }
+    if ($LASTEXITCODE -ne 0) { Log "the GUI could not be shown -- is anyone logged on?" }
+  } else {
+    Log "no launcher beside this script; falling back to a session 0 start"
+    Start-Process $exe.FullName
+  }
 }
 Set-Content -Path $stateFile -Value $new -Encoding ascii
 Log "refresh done"

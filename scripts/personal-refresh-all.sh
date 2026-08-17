@@ -130,6 +130,9 @@ open -a "$INSTALLED_APP" && echo "Mac relaunched" || echo "Mac relaunch failed" 
 # --- Blade (build + install) ---
 echo "-- refreshing Blade --"
 scp -o BatchMode=yes "$REPO/scripts/personal-refresh-win.ps1" blade:dev/personal-refresh-win.ps1
+# Beside it: both Windows machines launch through this, so that the app lands in the logged-on
+# user's session rather than in session 0, where it runs with no window on any screen.
+scp -o BatchMode=yes "$REPO/scripts/personal-launch-gui.ps1" blade:dev/personal-launch-gui.ps1
 # Pass version/force as -File args (cmd env inheritance to PowerShell is unreliable over SSH).
 ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
   C:/Users/muhha/dev/personal-refresh-win.ps1 \
@@ -149,6 +152,8 @@ refresh_dell() {
     dell:dev/T3-Code-personal-x64.exe || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
     dell:dev/personal-refresh-dell.ps1 || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-launch-gui.ps1" \
+    dell:dev/personal-launch-gui.ps1 || return 1
   ssh -o BatchMode=yes -o ConnectTimeout=30 dell powershell.exe -NoProfile -ExecutionPolicy Bypass \
     -File C:/Users/busin/dev/personal-refresh-dell.ps1 || return 1
 }
@@ -161,6 +166,8 @@ refresh_dell_via_blade() {
     blade:dev/personal-refresh-dell-via-blade.ps1 || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
     blade:dev/personal-refresh-dell.ps1 || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-launch-gui.ps1" \
+    blade:dev/personal-launch-gui.ps1 || return 1
   ssh -o BatchMode=yes -o ConnectTimeout=60 blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
     -File C:/Users/muhha/dev/personal-refresh-dell-via-blade.ps1 || return 1
 }

@@ -38,5 +38,16 @@ $exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\t3code\T3 Code*.exe"
 
 if (-not $exe) { throw "T3 Code exe not found after install" }
 
-Start-Process $exe.FullName
+# Not Start-Process: this runs over SSH, in session 0, which has no desktop -- the app started
+# there and Dell's screen stayed empty. The launcher runs it in the logged-on user's session and
+# reports whether a window actually appeared.
+$launcher = Join-Path $PSScriptRoot "personal-launch-gui.ps1"
+if (Test-Path $launcher) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -ExePath $exe.FullName 2>&1 |
+    ForEach-Object { Write-Output $_ }
+  if ($LASTEXITCODE -ne 0) { Write-Output "DELL_GUI_NOT_SHOWN is anyone logged on?" }
+} else {
+  Write-Output "no launcher beside this script; falling back to a session 0 start"
+  Start-Process $exe.FullName
+}
 Write-Output ("DELL_REFRESHED " + $exe.Name)
