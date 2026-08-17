@@ -45,7 +45,7 @@ function PullRequestUpstreamCardImpl({
         });
       }}
       className={cn(
-        "flex w-full flex-col gap-2 rounded-lg border border-border/60 bg-card px-3 py-2.5 text-left",
+        "flex h-full w-full flex-col gap-2 rounded-lg border border-border/60 bg-card px-3 py-2.5 text-left",
         "transition-colors hover:border-border hover:bg-accent/40",
         selected && "border-primary/50 bg-accent/60",
       )}
@@ -58,11 +58,8 @@ function PullRequestUpstreamCardImpl({
           baseBranch={entry.baseBranch}
           className="mt-0.5 shrink-0"
         />
-        <span className="min-w-0 flex-1 text-sm leading-snug font-medium break-words">
+        <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium">
           {entry.title}
-        </span>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {formatRelativeTimeLabel(entry.updatedAt)}
         </span>
       </div>
 
@@ -72,17 +69,15 @@ function PullRequestUpstreamCardImpl({
         <p className="line-clamp-1 pl-6 text-xs text-muted-foreground">{reason}</p>
       ) : null}
 
-      <div className="flex min-w-0 items-center gap-2 pl-6 text-[11px] text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-1.5 pl-6 text-[11px] text-muted-foreground">
         <span className="shrink-0">#{entry.number}</span>
-        <span aria-hidden>·</span>
-        <span className="truncate">{entry.repository}</span>
         {entry.author ? (
           <>
-            <span aria-hidden>·</span>
             <PullRequestActorAvatar actor={entry.author} className="size-4 shrink-0" />
             <PullRequestActorLabel actor={entry.author} className="truncate" />
           </>
         ) : null}
+        <span className="ml-auto shrink-0">{formatRelativeTimeLabel(entry.updatedAt)}</span>
       </div>
     </button>
   );

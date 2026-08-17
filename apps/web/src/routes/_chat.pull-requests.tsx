@@ -1527,21 +1527,27 @@ function PullRequestsRouteView() {
               Most useful
               {rankingPending ? <LoaderIcon aria-hidden className="size-3 animate-spin" /> : null}
             </h2>
-            <div className="space-y-2">
+            {/* Across rather than down: the pick is a shortlist to browse, and stacking it
+                vertically buried the list below under a second full-length copy of it. */}
+            <div className="-mx-1 flex snap-x snap-mandatory gap-2 overflow-x-auto px-1 pb-1">
               {upstreamSections.mostUseful.map((entry) => (
-                <PullRequestUpstreamCard
+                <div
                   key={`useful-${pullRequestEntryKey(entry)}`}
-                  entry={entry}
-                  {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
-                    ? { reason: rankingReasons.get(pullRequestEntryKey(entry))! }
-                    : {})}
-                  selected={
-                    selected?.environmentId === entry.environmentId &&
-                    selected.repository === entry.repository &&
-                    selected.number === entry.number
-                  }
-                  onSelect={selectEntry}
-                />
+                  className="w-72 shrink-0 snap-start"
+                >
+                  <PullRequestUpstreamCard
+                    entry={entry}
+                    {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
+                      ? { reason: rankingReasons.get(pullRequestEntryKey(entry))! }
+                      : {})}
+                    selected={
+                      selected?.environmentId === entry.environmentId &&
+                      selected.repository === entry.repository &&
+                      selected.number === entry.number
+                    }
+                    onSelect={selectEntry}
+                  />
+                </div>
               ))}
             </div>
           </div>
@@ -1551,11 +1557,15 @@ function PullRequestsRouteView() {
               <ClockIcon className="size-3.5" />
               Latest
             </h2>
-            <div className="space-y-2">
+            {/* The same rows the rest of the page uses: this is the whole upstream in order, so
+                it reads as a list to scan rather than a shortlist to consider. */}
+            <div className="space-y-0.5">
               {upstreamSections.latest.map((entry) => (
-                <PullRequestUpstreamCard
+                <PullRequestRow
                   key={`latest-${pullRequestEntryKey(entry)}`}
-                  entry={entry}
+                  entry={withDiffStat(entry, statsByRow)}
+                  showProjectTitle={false}
+                  showProvider={showProvider}
                   selected={
                     selected?.environmentId === entry.environmentId &&
                     selected.repository === entry.repository &&
