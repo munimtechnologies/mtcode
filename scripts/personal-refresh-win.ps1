@@ -47,7 +47,12 @@ git checkout personal
 git reset --hard origin/personal
 
 if (-not $env:T3CODE_DESKTOP_VERSION) {
-  $tag = (gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty').Trim()
+  # Avoid jq regex on Windows (gojq "function not defined"); filter in PowerShell.
+  $releasesJson = gh api repos/pingdotgg/t3code/releases
+  $tag = ($releasesJson | ConvertFrom-Json |
+    Where-Object { $_.prerelease -eq $true -and $_.tag_name -match "nightly" } |
+    Sort-Object published_at -Descending |
+    Select-Object -First 1 -ExpandProperty tag_name)
   if (-not $tag) { throw "could not resolve latest nightly tag" }
   $env:T3CODE_DESKTOP_VERSION = $tag.TrimStart("v")
 }
