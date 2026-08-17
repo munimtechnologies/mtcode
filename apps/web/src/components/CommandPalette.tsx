@@ -80,7 +80,7 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import { readEnvironmentSupportsGoal, useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -1559,7 +1559,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread) {
+  if (activeThread && readEnvironmentSupportsGoal(activeThread.environmentId)) {
     const goal = activeThread.goal ?? null;
     const goalForStatus = goal == null ? null : { status: goal.status, objective: goal.objective };
     actionItems.push({
@@ -1586,7 +1586,7 @@ function OpenCommandPaletteDialog(props: {
             "/goal",
             `/goal ${action}`,
           ],
-          title: goalChipActionLabel(action),
+          title: `${goalChipActionLabel(action)} Objective`,
           description: goal.objective,
           icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
           run: async () => {
