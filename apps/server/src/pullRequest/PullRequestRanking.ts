@@ -1,5 +1,6 @@
 import type { ModelSelection, PullRequestRanking } from "@t3tools/contracts";
 import { PullRequestOperationError } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -20,6 +21,24 @@ const RANKING_BATCH_SIZE = 40;
  * dozen subprocesses at one model buys nothing but rate limiting.
  */
 const RANKING_BATCH_CONCURRENCY = 1;
+
+/**
+ * How long a judgement about one pull request is kept. Long, because what a change does only
+ * changes when the change does: the entry is keyed by the title it was judged on, so an edited
+ * pull request misses the cache and is judged again on its own.
+ */
+const RANKING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Bounded so a workspace watching a busy upstream for weeks cannot grow this without limit. */
+const RANKING_CACHE_CAPACITY = 2_000;
+
+/**
+ * Keyed by what was actually judged rather than by the request: the page re-asks whenever any row
+ * in the upstream moves, and without this every one of those asks was a fresh model call over
+ * rows that had already been scored — which is what made ranking feel like it ran constantly.
+ */
+const rankingCacheKey = (repository: string, candidate: { number: number; title: string }) =>
+  `${repository}#${candidate.number}\u0000${candidate.title}`;
 
 function chunk<A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<ReadonlyArray<A>> {
   const chunks: Array<ReadonlyArray<A>> = [];
@@ -63,13 +82,47 @@ export class PullRequestRankingService extends Context.Service<
 export const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration.TextGeneration;
 
+  const cache = new Map<string, { readonly at: number; readonly ranking: PullRequestRanking }>();
+
+  const rememberRanking = (key: string, ranking: PullRequestRanking, at: number) => {
+    // Re-inserted so the map's own insertion order doubles as recency for the eviction below.
+    cache.delete(key);
+    cache.set(key, { at, ranking });
+    while (cache.size > RANKING_CACHE_CAPACITY) {
+      const oldest = cache.keys().next();
+      if (oldest.done === true) break;
+      cache.delete(oldest.value);
+    }
+  };
+
   const rank: PullRequestRankingService["Service"]["rank"] = (input) =>
     Effect.gen(function* () {
       if (input.candidates.length === 0) {
         return [];
       }
       const asked = new Set(input.candidates.map((candidate) => candidate.number));
-      const batches = chunk(input.candidates, RANKING_BATCH_SIZE);
+      const now = yield* Clock.currentTimeMillis;
+
+      // Only what has not been judged yet reaches the agent. A page that reloads, or that moves
+      // because one pull request was updated, costs nothing for the rows already scored.
+      const held: Array<PullRequestRanking> = [];
+      const unjudged: Array<(typeof input.candidates)[number]> = [];
+      for (const candidate of input.candidates) {
+        const key = rankingCacheKey(input.repository, candidate);
+        const entry = cache.get(key);
+        if (entry !== undefined && now - entry.at <= RANKING_CACHE_TTL_MS) {
+          held.push(entry.ranking);
+          continue;
+        }
+        if (entry !== undefined) cache.delete(key);
+        unjudged.push(candidate);
+      }
+
+      if (unjudged.length === 0) {
+        return held;
+      }
+
+      const batches = chunk(unjudged, RANKING_BATCH_SIZE);
       const ranked = yield* Effect.forEach(
         batches,
         (batch) =>
@@ -97,14 +150,20 @@ export const make = Effect.gen(function* () {
         { concurrency: RANKING_BATCH_CONCURRENCY },
       );
 
+      const byNumber = new Map(input.candidates.map((candidate) => [candidate.number, candidate]));
       const seen = new Set<number>();
-      const rankings: Array<PullRequestRanking> = [];
+      const rankings: Array<PullRequestRanking> = [...held];
+      for (const ranking of held) seen.add(ranking.number);
       for (const ranking of ranked.flat()) {
         // Only rows that were asked about: a model answering for a pull request nobody named has
         // invented it, and the page would key the score to nothing.
         if (!asked.has(ranking.number) || seen.has(ranking.number)) continue;
         seen.add(ranking.number);
         rankings.push(ranking);
+        const candidate = byNumber.get(ranking.number);
+        if (candidate !== undefined) {
+          rememberRanking(rankingCacheKey(input.repository, candidate), ranking, now);
+        }
       }
 
       if (rankings.length === 0) {

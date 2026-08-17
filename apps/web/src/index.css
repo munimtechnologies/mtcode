@@ -1567,6 +1567,9 @@ code {
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
+  /* Height as well as width: without it a horizontal scroller kept the browser's default bar,
+     which is several times thicker than every vertical one in the app. */
+  height: var(--app-scrollbar-width);
 }
 
 ::-webkit-scrollbar-track {

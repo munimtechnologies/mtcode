@@ -1585,13 +1585,11 @@ function PullRequestsRouteView() {
               </span>
             </h2>
             {/* Across rather than down: the pick is a shortlist to browse, and stacking it
-                vertically buried the list below under a second full-length copy of it. */}
-            <div className="-mx-1 flex snap-x snap-mandatory gap-2 overflow-x-auto px-1 pb-1">
+                vertically buried the list below under a second full-length copy of it. Two rows
+                deep, so one scroll of it carries twice as much without taking more height. */}
+            <div className="-mx-5 grid snap-x snap-mandatory grid-flow-col grid-rows-2 gap-2 overflow-x-auto px-5 pb-1">
               {upstreamSections.mostUseful.map((entry) => (
-                <div
-                  key={`useful-${pullRequestEntryKey(entry)}`}
-                  className="w-72 shrink-0 snap-start"
-                >
+                <div key={`useful-${pullRequestEntryKey(entry)}`} className="w-80 snap-start">
                   <PullRequestUpstreamCard
                     entry={entry}
                     {...(rankingReasons.get(pullRequestEntryKey(entry)) !== undefined
@@ -2172,7 +2170,7 @@ function PullRequestsColumn({
         {/* The top padding is the fade band's own height (1.5rem here), the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
             content actually passing under the chrome fades. */}
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-5 pt-6 pb-12">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-5 pt-6 pb-12">
           <div className="flex flex-col gap-3">
             <div ref={inFlowSearchRef} className="flex items-center gap-2">
               {searchInput}

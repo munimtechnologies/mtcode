@@ -139,3 +139,45 @@ it.effect("asks nothing of an agent when there is nothing to rank", () =>
     assert.deepStrictEqual(yield* Ref.get(batches), []);
   }),
 );
+
+it.effect("judges a pull request once and remembers it", () =>
+  Effect.gen(function* () {
+    const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<number>>>([]);
+    const ranking = yield* makeRanking({ batches });
+
+    const first = yield* ranking.rank(request(3));
+    const second = yield* ranking.rank(request(3));
+
+    assert.deepStrictEqual(second, first);
+    // The second ask reached the agent with nothing: every row was already judged.
+    assert.strictEqual((yield* Ref.get(batches)).length, 1);
+  }),
+);
+
+it.effect("asks again only about the rows it has not judged", () =>
+  Effect.gen(function* () {
+    const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<number>>>([]);
+    const ranking = yield* makeRanking({ batches });
+
+    yield* ranking.rank(request(3));
+    const widened = yield* ranking.rank(request(5));
+
+    assert.strictEqual(widened.length, 5);
+    const seen = yield* Ref.get(batches);
+    // The second call carried the two new pull requests and nothing else.
+    assert.deepStrictEqual(seen[1], [4, 5]);
+  }),
+);
+
+it.effect("judges a pull request again once its title changes", () =>
+  Effect.gen(function* () {
+    const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<number>>>([]);
+    const ranking = yield* makeRanking({ batches });
+
+    yield* ranking.rank({ ...request(1), candidates: [{ number: 1, title: "Before" }] });
+    yield* ranking.rank({ ...request(1), candidates: [{ number: 1, title: "After" }] });
+
+    // Keyed by the title it was judged on, so an edit is not served a stale opinion.
+    assert.deepStrictEqual(yield* Ref.get(batches), [[1], [1]]);
+  }),
+);
