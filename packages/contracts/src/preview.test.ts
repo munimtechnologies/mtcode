@@ -35,14 +35,11 @@ const decodeResizeResult = Schema.decodeUnknownSync(PreviewAutomationResizeResul
 const decodeAutomationHost = Schema.decodeUnknownSync(PreviewAutomationHost);
 const decodeAutomationError = Schema.decodeUnknownSync(PreviewAutomationError);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
-<<<<<<< HEAD
 const decodeSetViewportInput = Schema.decodeUnknownSync(
   DesktopPreviewAutomationSetViewportInputSchema,
 );
-=======
 const decodeSnapshotInput = Schema.decodeUnknownSync(PreviewAutomationSnapshotInput);
 const decodeWaitForInput = Schema.decodeUnknownSync(PreviewAutomationWaitForInput);
->>>>>>> pr-7302
 
 describe("PreviewAutomationOpenInput", () => {
   it("accepts the inline preview visibility flag", () => {
@@ -234,7 +231,6 @@ describe("PreviewAutomationStatus", () => {
   });
 });
 
-<<<<<<< HEAD
 describe("DesktopPreviewAutomationSetViewportInputSchema", () => {
   it("accepts a complete size or an explicit clear, and rejects a partial size", () => {
     expect(decodeSetViewportInput({ tabId: "tab-1", width: 800, height: 600 })).toEqual({
@@ -248,7 +244,9 @@ describe("DesktopPreviewAutomationSetViewportInputSchema", () => {
     });
     expect(() => decodeSetViewportInput({ tabId: "tab-1", width: 800 })).toThrow();
     expect(() => decodeSetViewportInput({ tabId: "tab-1" })).toThrow();
-=======
+  });
+});
+
 describe("PreviewAutomationSnapshotInput", () => {
   it("defaults to a slim snapshot and accepts extra diagnostic slices", () => {
     expect(decodeSnapshotInput({})).toEqual({});
@@ -266,7 +264,6 @@ describe("PreviewAutomationWaitForInput", () => {
     expect(decodeWaitForInput({ text: "Dashboard" })).toEqual({ text: "Dashboard" });
     expect(decodeWaitForInput({ text: "Dashboard", scope: "document" }).scope).toBe("document");
     expect(() => decodeWaitForInput({ scope: "main" })).toThrow();
->>>>>>> pr-7302
   });
 });
 
