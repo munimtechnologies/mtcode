@@ -119,9 +119,10 @@ export function UsageRouteScreen() {
 
   // The pull spinner tracks re-scans of connected environments that have
   // answered before. The initial scan renders its own placeholder.
-  const refreshing = environments.some(
-    (entry) => entry.phase === "connected" && entry.isPending && entry.summary !== null,
-  );
+  // The pull spinner tracks re-scans of environments that have answered
+  // before. The initial scan renders its own placeholder, and the query
+  // deadline prevents an unreachable environment from pinning the spinner on.
+  const refreshing = environments.some((entry) => entry.isPending && entry.summary !== null);
   const selectWindow = (days: number) => {
     setWindowSelection({
       days,

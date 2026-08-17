@@ -58,7 +58,6 @@ export function UsagePage() {
   const [environmentFilter, setEnvironmentFilter] = useState<EnvironmentId | null>(null);
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
-  const [environmentFilter, setEnvironmentFilter] = useState<EnvironmentId | null>(null);
   const {
     merged,
     options,
@@ -273,7 +272,7 @@ export function UsagePage() {
                 </Select>
               </div>
             ) : null}
-            {isPending || (usableEnvironmentCount === 0 && isPartial) ? (
+            {isPending ? (
               <>
                 {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
                 <UsageSkeleton />
@@ -674,7 +673,8 @@ function UsageEmptyState({ children }: { readonly children: string }) {
 }
 
 /**
- * Per-device progress while connected environments answer.
+ * Per-device progress while at least one environment is still answering. Only
+ * rendered with two or more devices; a lone device has nothing to enumerate.
  */
 function UsageDeviceStrip({
   environments,
@@ -735,8 +735,9 @@ function UsageDeviceStrip({
 }
 
 /**
- * Static stand-in with the loaded page's shape. No shimmer; blocks fill in
- * exactly once when the last device answers.
+ * Static stand-in with the loaded page's shape: headline, provider split,
+ * chart and metrics strip. No shimmer; content appears when the first device
+ * answers.
  */
 function UsageSkeleton() {
   return (
