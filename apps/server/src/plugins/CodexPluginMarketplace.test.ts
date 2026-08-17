@@ -312,7 +312,7 @@ testLayer("CodexPluginMarketplace", (it) => {
     }),
   );
 
-  it.effect("keeps same-name packages from different marketplaces separate", () =>
+  it.effect("groups same-name packages and keeps each harness installable", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-shared-" });
@@ -355,31 +355,33 @@ testLayer("CodexPluginMarketplace", (it) => {
       );
 
       const catalog = yield* marketplace.catalog();
-      const codexDetail = yield* marketplace.detail("codex:figma@openai-curated");
+      const detail = yield* marketplace.detail("codex:figma@openai-curated");
       const claudeDetail = yield* marketplace.detail("claude:figma@claude-plugins-official");
 
-      assert.strictEqual(catalog.plugins.length, 2);
+      assert.strictEqual(catalog.plugins.length, 1);
+      assert.strictEqual(catalog.plugins[0]?.id, "codex:figma@openai-curated");
       assert.deepStrictEqual(
-        codexDetail.installTargets.map((target) => ({
-          pluginId: target.pluginId,
-          harness: target.harness,
-          installed: target.installed,
-        })),
-        [{ pluginId: "codex:figma@openai-curated", harness: "codex", installed: false }],
+        catalog.plugins[0]?.support.map((entry) => entry.harness),
+        ["codex", "claude"],
       );
       assert.deepStrictEqual(
-        claudeDetail.installTargets.map((target) => ({
+        detail.installTargets.map((target) => ({
           pluginId: target.pluginId,
           harness: target.harness,
           installed: target.installed,
         })),
         [
+          { pluginId: "codex:figma@openai-curated", harness: "codex", installed: false },
           {
             pluginId: "claude:figma@claude-plugins-official",
             harness: "claude",
             installed: false,
           },
         ],
+      );
+      assert.deepStrictEqual(
+        claudeDetail.installTargets.map((target) => target.pluginId),
+        detail.installTargets.map((target) => target.pluginId),
       );
     }),
   );
@@ -515,6 +517,182 @@ testLayer("CodexPluginMarketplace", (it) => {
       assert.strictEqual(detail.contents.agentCount, 1);
       assert.strictEqual(detail.contents.ruleCount, 1);
       assert.strictEqual(detail.contents.hookCount, 1);
+    }),
+  );
+
+  it.effect("includes ChatGPT public directory plugins that Codex marketplaces omit", () =>
+    Effect.gen(function* () {
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: () => Effect.succeed(unavailableProcessOutput),
+      });
+      const marketplace = yield* makeWithOptions({
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
+        readChatGptPublicPlugins: () =>
+          Effect.succeed([
+            {
+              id: "ticktick-public",
+              name: "ticktick",
+              displayName: "TickTick:To-Do List & Calendar",
+              description: "Reminder, Planner, Countdown",
+              developer: "TickTick",
+              category: "Productivity",
+              version: "1.2.0",
+              logoUrl: "https://ticktick.com/icon.png",
+              homepage: "https://ticktick.com",
+              appCount: 1,
+              skillCount: 0,
+            },
+          ]),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      const detail = yield* marketplace.detail("codex:ticktick@chatgpt-public");
+
+      assert.strictEqual(catalog.plugins.length, 1);
+      assert.strictEqual(catalog.plugins[0]?.name, "TickTick:To-Do List & Calendar");
+      assert.strictEqual(catalog.plugins[0]?.marketplaceName, "ChatGPT Public");
+      assert.strictEqual(detail.installTargets[0]?.installPolicy, "EXTERNAL");
+      assert.strictEqual(detail.contents.appCount, 1);
+      expect(detail.marketplaceUrl).toContain("chatgpt.com/plugins?q=");
+    }),
+  );
+
+  it.effect("merges ChatGPT public search hits that the browse catalog omits", () =>
+    Effect.gen(function* () {
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: () => Effect.succeed(unavailableProcessOutput),
+      });
+      const marketplace = yield* makeWithOptions({
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
+        readChatGptPublicPlugins: () =>
+          Effect.succeed([
+            {
+              id: "github-public",
+              name: "github",
+              displayName: "GitHub",
+              description: "Triage PRs and issues",
+              developer: "GitHub",
+              category: "Developer Tools",
+              version: "Latest",
+              logoUrl: null,
+              homepage: null,
+              appCount: 1,
+              skillCount: 0,
+            },
+          ]),
+        searchChatGptPublicPlugins: (query) =>
+          Effect.succeed(
+            query.includes("tick")
+              ? [
+                  {
+                    id: "ticktick-public",
+                    name: "app-69ddbaba3fb48191a825f22c21b0599d",
+                    displayName: "TickTick:To-Do List & Calendar",
+                    description: "Reminder, Planner, Countdown",
+                    developer: "Appest Inc",
+                    category: "Productivity",
+                    version: "1.0.0",
+                    logoUrl: "https://ticktick.com/icon.png",
+                    homepage: "https://ticktick.com",
+                    appCount: 1,
+                    skillCount: 0,
+                  },
+                ]
+              : [],
+          ),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const browse = yield* marketplace.catalog();
+      const search = yield* marketplace.catalog("tick");
+      const detail = yield* marketplace.detail(
+        "codex:app-69ddbaba3fb48191a825f22c21b0599d@chatgpt-public",
+      );
+
+      assert.deepStrictEqual(
+        browse.plugins.map((plugin) => plugin.name),
+        ["GitHub"],
+      );
+      assert.deepStrictEqual(
+        search.plugins.map((plugin) => plugin.name),
+        ["GitHub", "TickTick:To-Do List & Calendar"],
+      );
+      assert.strictEqual(detail.marketplaceName, "ChatGPT Public");
+      assert.strictEqual(detail.installTargets[0]?.installPolicy, "EXTERNAL");
+    }),
+  );
+
+  it.effect("does not duplicate a ChatGPT public plugin already listed by Codex", () =>
+    Effect.gen(function* () {
+      const record = {
+        pluginId: "hubspot@openai-curated",
+        name: "hubspot",
+        marketplaceName: "openai-curated",
+        version: "2.0.0",
+        installed: false,
+        enabled: false,
+        source: { source: "git", path: "/tmp/hubspot" },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_INSTALL",
+      };
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.succeed(
+            input.command === "codex"
+              ? processOutput(JSON.stringify({ installed: [], available: [record] }))
+              : unavailableProcessOutput,
+          ),
+      });
+      const marketplace = yield* makeWithOptions({
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
+        readChatGptPublicPlugins: () =>
+          Effect.succeed([
+            {
+              id: "hubspot-public",
+              name: "hubspot",
+              displayName: "HubSpot",
+              description: "Insights to action in HubSpot",
+              developer: "HubSpot",
+              category: "Business & Operations",
+              version: "Latest",
+              logoUrl: null,
+              homepage: null,
+              appCount: 1,
+              skillCount: 0,
+            },
+          ]),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      assert.deepStrictEqual(
+        catalog.plugins.map((plugin) => plugin.id),
+        ["codex:hubspot@openai-curated"],
+      );
+      const detail = yield* marketplace.detail("codex:hubspot@openai-curated");
+      assert.deepStrictEqual(detail.installTargets.map((target) => target.pluginId).toSorted(), [
+        "codex:hubspot@chatgpt-public",
+        "codex:hubspot@openai-curated",
+      ]);
     }),
   );
 

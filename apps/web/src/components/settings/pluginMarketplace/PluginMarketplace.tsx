@@ -33,6 +33,7 @@ import { cn } from "~/lib/utils";
 import {
   MARKETPLACE_HARNESSES,
   MARKETPLACE_HARNESS_LABELS,
+  mergeMarketplaceListings,
   type MarketplacePlugin,
 } from "~/pluginMarketplace/catalog";
 import {
@@ -237,21 +238,38 @@ export function PluginMarketplace() {
   const [harness, setHarness] = useState<MarketplaceHarnessFilter>("all");
   const [category, setCategory] = useState<MarketplaceCategoryFilter>("all");
   const plugins = usePluginMarketplaceStore((state) => state.plugins);
+  const searchHits = usePluginMarketplaceStore((state) => state.searchHits);
   const status = usePluginMarketplaceStore((state) => state.catalogStatus);
   const error = usePluginMarketplaceStore((state) => state.catalogError);
   const loadCatalog = usePluginMarketplaceStore((state) => state.loadCatalog);
+  const searchCatalog = usePluginMarketplaceStore((state) => state.searchCatalog);
 
   useEffect(() => {
     void loadCatalog(true).catch(() => undefined);
   }, [loadCatalog]);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void searchCatalog(query).catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [query, searchCatalog]);
+
+  const catalogPlugins = useMemo(() => {
+    if (searchHits.length === 0) return mergeMarketplaceListings(plugins);
+    const knownIds = new Set(plugins.map((plugin) => plugin.id));
+    return mergeMarketplaceListings([
+      ...plugins,
+      ...searchHits.filter((plugin) => !knownIds.has(plugin.id)),
+    ]);
+  }, [plugins, searchHits]);
   const categories = useMemo(
-    () => [...new Set(plugins.map((plugin) => plugin.category))].toSorted(),
-    [plugins],
+    () => [...new Set(catalogPlugins.map((plugin) => plugin.category))].toSorted(),
+    [catalogPlugins],
   );
   const filteredPlugins = useMemo(
-    () => filterMarketplacePlugins(plugins, { query, kind, harness, category }),
-    [category, harness, kind, plugins, query],
+    () => filterMarketplacePlugins(catalogPlugins, { query, kind, harness, category }),
+    [catalogPlugins, category, harness, kind, query],
   );
   const isFiltered =
     query.trim().length > 0 || kind !== "all" || harness !== "all" || category !== "all";

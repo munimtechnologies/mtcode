@@ -563,6 +563,10 @@ export class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullReque
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
 
+const EnvironmentPluginMarketplaceCatalogQuery = {
+  q: Schema.optional(Schema.String),
+};
+
 const EnvironmentPluginMarketplaceReadErrors = [
   PluginMarketplaceUnavailableError,
   PluginMarketplaceNotFoundError,
@@ -580,6 +584,7 @@ export class EnvironmentPluginMarketplaceHttpApi extends HttpApiGroup.make("plug
   .add(
     HttpApiEndpoint.get("catalog", "/api/plugins", {
       headers: OptionalBearerHeaders,
+      payload: EnvironmentPluginMarketplaceCatalogQuery,
       success: PluginMarketplaceCatalog,
       error: EnvironmentPluginMarketplaceReadErrors,
     }).middleware(EnvironmentAuthenticatedAuth),

@@ -21,7 +21,7 @@ export const pluginMarketplaceHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.plugins.catalog")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          return yield* marketplace.catalog();
+          return yield* marketplace.catalog(args.payload?.q);
         }),
       )
       .handle(

@@ -5,9 +5,10 @@ plugins from the current environment. You can also use the Plugins button at the
 sidebar or open the command palette and choose **Browse plugins**.
 
 The marketplace reads installed and available packages from configured Codex and Claude Code
-marketplaces. It also reads Cursor's public marketplace and local Cursor plugin cache. Search by
-name, filter by MCP server, skill, app, harness, or category, and select a plugin to inspect its
-contents. Plugin artwork and metadata come from the package or its published marketplace listing.
+marketplaces. It also reads Cursor's public marketplace and local Cursor plugin cache. When this
+environment is signed in to ChatGPT through Codex, search also queries ChatGPT's public plugin
+index, so listings that only appear there — such as TickTick — show up in results. Filter by MCP
+server, skill, app, harness, or category, and select a plugin to inspect its contents. Plugin artwork and metadata come from the package or its published marketplace listing.
 Use the **Installed** view to see every installed package without repeating those packages throughout
 the browse categories. Equivalent category names from different marketplaces are combined into one
 category.
@@ -16,9 +17,9 @@ Marketplace changes use the configured binary, home directory, and environment o
 provider instance. If more than one enabled instance of the same harness is configured, manage its
 plugins with the provider directly until per-instance marketplace selection is available.
 
-Listings stay scoped to their source harness and marketplace so similarly named packages cannot be
-mistaken for one another. Each detail page manages that specific package and shows its published MCP
-servers and components.
+Same-named packages from different harnesses appear as one listing. The detail page still installs
+and removes each harness copy separately and shows that package's published MCP servers and
+components.
 
 Package contents are shown in the terms used by each harness. Codex bundles skills, MCP connections,
 apps, and optional hooks. Claude Code packages can also include namespaced commands, subagents,
@@ -46,5 +47,5 @@ system can show consent prompts for the applications you choose. When browsing a
 environment, these actions open on the Mac hosting that environment.
 
 Cursor does not currently provide a non-interactive plugin install command, so Cursor rows open the
-official Cursor Marketplace for installation or removal. Secret environment variable values are
-never displayed.
+official Cursor Marketplace for installation or removal. ChatGPT Public listings open the ChatGPT
+plugin directory the same way. Secret environment variable values are never displayed.

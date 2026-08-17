@@ -1,6 +1,7 @@
 import type { PluginMarketplacePlugin } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { mergeMarketplaceListings } from "./catalog";
 import { filterMarketplacePlugins } from "./filter";
 
 function plugin(
@@ -136,5 +137,32 @@ describe("filterMarketplacePlugins", () => {
         category: "Design",
       }).map((entry) => entry.packageName),
     ).toEqual(["design-tools"]);
+  });
+});
+
+describe("mergeMarketplaceListings", () => {
+  it("groups same-named packages and keeps unrelated names apart", () => {
+    const figma = mergeMarketplaceListings([
+      {
+        ...plugin("figma", { category: "Design", summary: "Codex Figma", mcp: 1, installed: true }),
+        name: "Figma",
+      },
+      {
+        ...plugin("figma-claude", {
+          category: "Design",
+          summary: "Claude Figma",
+          skills: 1,
+          harness: "claude",
+        }),
+        name: "Figma",
+      },
+      plugin("docs-canvas", { category: "Design", summary: "Different plugin" }),
+    ]);
+
+    expect(figma.map((entry) => entry.name)).toEqual(["Figma", "docs canvas"]);
+    expect(figma[0]?.installed).toBe(true);
+    expect(figma[0]?.support.map((entry) => entry.harness)).toEqual(["codex", "claude"]);
+    expect(figma[0]?.contents.mcpServerCount).toBe(1);
+    expect(figma[0]?.contents.skillCount).toBe(1);
   });
 });

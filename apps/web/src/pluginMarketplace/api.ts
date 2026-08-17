@@ -4,10 +4,15 @@ import type { PluginMarketplaceHarnessId, PluginMarketplaceSetupAction } from "@
 import { PrimaryEnvironmentHttpClient } from "~/environments/primary/httpClient";
 import { runPrimaryHttp } from "~/lib/runtime";
 
-export function fetchPluginMarketplaceCatalog() {
+export function fetchPluginMarketplaceCatalog(query?: string) {
   return runPrimaryHttp(
     PrimaryEnvironmentHttpClient.pipe(
-      Effect.flatMap((client) => client.plugins.catalog({ headers: {} })),
+      Effect.flatMap((client) =>
+        client.plugins.catalog({
+          headers: {},
+          payload: query?.trim() ? { q: query } : {},
+        }),
+      ),
     ),
   );
 }

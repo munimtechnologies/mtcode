@@ -159,6 +159,7 @@ function InstallTargetRow({
   const pending = usePluginMarketplaceStore((state) => state.pending[target.pluginId] === true);
   const setInstalled = usePluginMarketplaceStore((state) => state.setInstalled);
   const harnessName = MARKETPLACE_HARNESS_LABELS[target.harness];
+  const externalHost = externalMarketplaceLabel(target, harnessName);
   const changeInstallation = (installed: boolean) => {
     void setInstalled(target.pluginId, installed)
       .then(() =>
@@ -189,7 +190,7 @@ function InstallTargetRow({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className={target.installed ? "text-success-foreground" : undefined}>
             {target.installPolicy === "EXTERNAL"
-              ? `Managed in ${harnessName}`
+              ? `Managed in ${externalMarketplaceLabel(target, harnessName)}`
               : pending
                 ? target.installed
                   ? "Removing…"
@@ -223,7 +224,7 @@ function InstallTargetRow({
               render={<a href={target.marketplaceUrl} target="_blank" rel="noreferrer" />}
             >
               <ExternalLinkIcon />
-              Open in {harnessName}
+              Open in {externalHost}
             </Button>
           ) : (
             <span className="text-muted-foreground text-sm">External</span>
@@ -241,9 +242,22 @@ function InstallTargetRow({
   );
 }
 
+function externalMarketplaceLabel(
+  target: Pick<PluginMarketplaceInstallTarget, "marketplaceName" | "marketplaceUrl">,
+  harnessName: string,
+) {
+  return target.marketplaceName === "ChatGPT Public" ||
+    target.marketplaceUrl?.includes("chatgpt.com/plugins")
+    ? "ChatGPT"
+    : harnessName;
+}
+
 function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
   const manageable = plugin.installTargets.filter((target) => target.installPolicy === "AVAILABLE");
   const hasCursorTarget = plugin.installTargets.some((target) => target.harness === "cursor");
+  const hasChatGptPublicTarget = plugin.installTargets.some(
+    (target) => target.marketplaceName === "ChatGPT Public",
+  );
   const managementDescription =
     manageable.length === 1
       ? `${MARKETPLACE_HARNESS_LABELS[manageable[0]!.harness]} is managed here.`
@@ -260,6 +274,9 @@ function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDe
         {managementDescription}{" "}
         {hasCursorTarget
           ? "Cursor keeps its own installation and opens its official plugin flow. "
+          : null}
+        {hasChatGptPublicTarget
+          ? "ChatGPT Public listings open the ChatGPT plugin directory for install. "
           : null}
         Provider capabilities are fixed when a chat starts, so start a new chat after changing an
         installation.

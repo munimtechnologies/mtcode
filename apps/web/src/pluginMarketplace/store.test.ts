@@ -101,6 +101,7 @@ describe("plugin marketplace store", () => {
     usePluginMarketplaceStore.setState({
       catalogStatus: "idle",
       plugins: [],
+      searchHits: [],
       catalogError: null,
       details: {},
       pending: {},
@@ -165,5 +166,27 @@ describe("plugin marketplace store", () => {
 
     expect(removePlugin).toHaveBeenCalledWith(summary.id);
     expect(usePluginMarketplaceStore.getState().details[summary.id]?.plugin?.installed).toBe(false);
+  });
+
+  it("keeps ChatGPT public search hits that the browse catalog omitted", async () => {
+    const tickTick = {
+      ...summary,
+      id: "codex:app-ticktick@chatgpt-public",
+      packageName: "app-ticktick",
+      name: "TickTick:To-Do List & Calendar",
+      marketplaceName: "ChatGPT Public",
+    };
+    vi.mocked(fetchPluginMarketplaceCatalog)
+      .mockResolvedValueOnce({ plugins: [summary] })
+      .mockResolvedValueOnce({ plugins: [summary, tickTick] });
+
+    await usePluginMarketplaceStore.getState().loadCatalog();
+    await usePluginMarketplaceStore.getState().searchCatalog("tick");
+
+    expect(fetchPluginMarketplaceCatalog).toHaveBeenNthCalledWith(2, "tick");
+    expect(usePluginMarketplaceStore.getState().searchHits).toEqual([tickTick]);
+
+    await usePluginMarketplaceStore.getState().searchCatalog("t");
+    expect(usePluginMarketplaceStore.getState().searchHits).toEqual([]);
   });
 });

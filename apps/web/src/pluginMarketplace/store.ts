@@ -19,10 +19,12 @@ export interface PluginDetailState {
 interface PluginMarketplaceStoreState {
   readonly catalogStatus: LoadStatus;
   readonly plugins: ReadonlyArray<PluginMarketplacePlugin>;
+  readonly searchHits: ReadonlyArray<PluginMarketplacePlugin>;
   readonly catalogError: string | null;
   readonly details: Readonly<Record<string, PluginDetailState | undefined>>;
   readonly pending: Readonly<Record<string, boolean | undefined>>;
   loadCatalog: (force?: boolean) => Promise<void>;
+  searchCatalog: (query: string) => Promise<void>;
   loadDetail: (pluginId: string, force?: boolean) => Promise<void>;
   setInstalled: (pluginId: string, installed: boolean) => Promise<void>;
 }
@@ -37,11 +39,14 @@ export function pluginMarketplaceErrorMessage(error: unknown): string {
 }
 
 let catalogRequest: Promise<void> | null = null;
+let searchRequest: Promise<void> | null = null;
+let searchRequestQuery = "";
 const detailRequests = new Map<string, Promise<void>>();
 
 export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((set, get) => ({
   catalogStatus: "idle",
   plugins: [],
+  searchHits: [],
   catalogError: null,
   details: {},
   pending: {},
@@ -59,7 +64,11 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
       }));
       try {
         const catalog = await fetchPluginMarketplaceCatalog();
-        set({ catalogStatus: "ready", plugins: catalog.plugins, catalogError: null });
+        set({
+          catalogStatus: "ready",
+          plugins: catalog.plugins,
+          catalogError: null,
+        });
       } catch (error) {
         set((state) => ({
           catalogStatus: state.plugins.length > 0 ? "ready" : "error",
@@ -73,6 +82,34 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
       await request;
     } finally {
       if (catalogRequest === request) catalogRequest = null;
+    }
+  },
+
+  searchCatalog: async (query) => {
+    const normalized = query.trim();
+    if (normalized.length < 2) {
+      searchRequestQuery = "";
+      set({ searchHits: [] });
+      return;
+    }
+    searchRequestQuery = normalized;
+    const request = (async () => {
+      const catalog = await fetchPluginMarketplaceCatalog(normalized);
+      if (searchRequestQuery !== normalized) return;
+      const knownIds = new Set(get().plugins.map((plugin) => plugin.id));
+      const plugins = get().plugins.map(
+        (plugin) => catalog.plugins.find((entry) => entry.id === plugin.id) ?? plugin,
+      );
+      set({
+        plugins,
+        searchHits: catalog.plugins.filter((plugin) => !knownIds.has(plugin.id)),
+      });
+    })();
+    searchRequest = request;
+    try {
+      await request;
+    } finally {
+      if (searchRequest === request) searchRequest = null;
     }
   },
 

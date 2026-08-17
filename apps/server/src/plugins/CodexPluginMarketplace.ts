@@ -13,6 +13,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as CodexClient from "effect-codex-app-server/client";
 
@@ -59,6 +60,20 @@ import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInst
 import * as ServerSettings from "../serverSettings.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 import * as McpOAuthRuntime from "./McpOAuthRuntime.ts";
+import {
+  CHATGPT_PUBLIC_MARKETPLACE_NAME,
+  CHATGPT_PUBLIC_PLUGIN_SEARCH_MAX_PAGES,
+  CHATGPT_PUBLIC_PLUGIN_SEARCH_MIN_QUERY_LENGTH,
+  type ChatGptPublicPlugin,
+  chatGptPublicPluginMarketplaceUrl,
+  chatGptPublicPluginNameFromPublicId,
+  chatGptPublicPluginSearchUrl,
+  chatGptPublicPluginSourceId,
+  chatGptPublicPluginsFromListResponse,
+  codexChatGptAuthFromTokens,
+  decodeChatGptPublicPluginListResponse,
+  decodeCodexChatGptAccessToken,
+} from "./ChatGptPublicPlugins.ts";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 const MAX_LOGO_BYTES = 1024 * 1024;
@@ -292,6 +307,7 @@ interface PluginSourceRecord {
   readonly externalLogoUrl: string | null;
   readonly directSkills: ReadonlyArray<PluginMarketplaceSkill>;
   readonly directMcpServers: ReadonlyArray<PluginMarketplaceMcpServer>;
+  readonly directApps: ReadonlyArray<PluginMarketplaceApp>;
   readonly directExtensions: ReadonlyArray<PluginMarketplaceExtension>;
   readonly remotePreviewSource: RemotePluginPreviewSource | null;
   readonly hasHooks: boolean;
@@ -439,10 +455,9 @@ interface McpAuthCandidate {
 export class CodexPluginMarketplace extends Context.Service<
   CodexPluginMarketplace,
   {
-    readonly catalog: () => Effect.Effect<
-      PluginMarketplaceCatalog,
-      PluginMarketplaceUnavailableError
-    >;
+    readonly catalog: (
+      query?: string,
+    ) => Effect.Effect<PluginMarketplaceCatalog, PluginMarketplaceUnavailableError>;
     readonly detail: (
       pluginId: string,
     ) => Effect.Effect<
@@ -645,6 +660,40 @@ function publicPluginId(harness: PluginSourceRecord["harness"], pluginId: string
   return `${harness}:${pluginId}`;
 }
 
+function chatGptPublicSourceRecord(plugin: ChatGptPublicPlugin): PluginSourceRecord {
+  const sourcePluginId = chatGptPublicPluginSourceId(plugin);
+  return {
+    pluginId: publicPluginId("codex", sourcePluginId),
+    sourcePluginId,
+    harness: "codex",
+    name: plugin.name,
+    marketplaceName: CHATGPT_PUBLIC_MARKETPLACE_NAME,
+    version: plugin.version,
+    installed: false,
+    enabled: false,
+    pluginRoot: null,
+    manifestDirectory: ".codex-plugin",
+    marketplaceSourceType: "unknown",
+    installPolicy: "EXTERNAL",
+    authPolicy: "ON_INSTALL",
+    fallbackDescription: plugin.description,
+    fallbackDisplayName: plugin.displayName,
+    fallbackDeveloper: plugin.developer,
+    fallbackCategory: plugin.category,
+    fallbackHomepage: plugin.homepage,
+    fallbackRepository: null,
+    marketplaceUrl: chatGptPublicPluginMarketplaceUrl(plugin),
+    externalLogoUrl: plugin.logoUrl,
+    directSkills: [],
+    directMcpServers: [],
+    directApps:
+      plugin.appCount > 0 ? [{ id: plugin.name, name: plugin.displayName, connectorId: null }] : [],
+    directExtensions: [],
+    remotePreviewSource: null,
+    hasHooks: false,
+  };
+}
+
 function mcpHarnessLabel(harness: McpOAuthRuntime.McpOAuthHarness): string {
   return harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : "Cursor";
 }
@@ -775,11 +824,166 @@ function catalogPlugin(
   };
 }
 
+const LISTING_HARNESS_RANK: Readonly<Record<PluginMarketplaceHarnessId, number>> = {
+  codex: 0,
+  claude: 1,
+  cursor: 2,
+};
+
+function listingGroupKey(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLocaleLowerCase()
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function listingHasArtwork(plugin: Pick<PluginMarketplacePlugin, "hasLocalLogo" | "logoUrl">) {
+  return plugin.hasLocalLogo || Boolean(plugin.logoUrl?.trim());
+}
+
+function compareListingPlugins(
+  left: Pick<
+    PluginMarketplacePlugin,
+    | "hasLocalLogo"
+    | "id"
+    | "installPolicy"
+    | "installed"
+    | "logoUrl"
+    | "marketplaceName"
+    | "sourceHarness"
+  >,
+  right: Pick<
+    PluginMarketplacePlugin,
+    | "hasLocalLogo"
+    | "id"
+    | "installPolicy"
+    | "installed"
+    | "logoUrl"
+    | "marketplaceName"
+    | "sourceHarness"
+  >,
+): number {
+  return (
+    Number(right.installed) - Number(left.installed) ||
+    Number(listingHasArtwork(right)) - Number(listingHasArtwork(left)) ||
+    Number(right.installPolicy === "AVAILABLE") - Number(left.installPolicy === "AVAILABLE") ||
+    Number(right.marketplaceName !== CHATGPT_PUBLIC_MARKETPLACE_NAME) -
+      Number(left.marketplaceName !== CHATGPT_PUBLIC_MARKETPLACE_NAME) ||
+    LISTING_HARNESS_RANK[left.sourceHarness] - LISTING_HARNESS_RANK[right.sourceHarness] ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function mergeListingSupport(
+  plugins: ReadonlyArray<Pick<PluginMarketplacePlugin, "support">>,
+): PluginMarketplacePlugin["support"] {
+  const byHarness = new Map<
+    PluginMarketplaceHarnessId,
+    PluginMarketplacePlugin["support"][number]
+  >();
+  for (const plugin of plugins) {
+    for (const entry of plugin.support) {
+      const current = byHarness.get(entry.harness);
+      byHarness.set(entry.harness, {
+        harness: entry.harness,
+        mcp: Boolean(current?.mcp || entry.mcp),
+        skills: Boolean(current?.skills || entry.skills),
+        apps: Boolean(current?.apps || entry.apps),
+      });
+    }
+  }
+  return [...byHarness.values()].toSorted(
+    (left, right) => LISTING_HARNESS_RANK[left.harness] - LISTING_HARNESS_RANK[right.harness],
+  );
+}
+
+function mergeListingContents(
+  plugins: ReadonlyArray<Pick<PluginMarketplacePlugin, "contents">>,
+): PluginMarketplacePlugin["contents"] {
+  return {
+    skillCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.skillCount)),
+    mcpServerCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.mcpServerCount)),
+    appCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.appCount)),
+    commandCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.commandCount)),
+    agentCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.agentCount)),
+    ruleCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.ruleCount)),
+    hookCount: Math.max(0, ...plugins.map((plugin) => plugin.contents.hookCount)),
+    hasHooks: plugins.some((plugin) => plugin.contents.hasHooks),
+  };
+}
+
+function mergeCatalogListings(
+  plugins: ReadonlyArray<PluginMarketplacePlugin>,
+): PluginMarketplacePlugin[] {
+  const groups = new Map<string, PluginMarketplacePlugin[]>();
+  for (const plugin of plugins) {
+    const key = listingGroupKey(plugin.name);
+    const group = groups.get(key) ?? [];
+    group.push(plugin);
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .map((group) => {
+      const primary = [...group].toSorted(compareListingPlugins)[0]!;
+      return {
+        ...primary,
+        installed: group.some((plugin) => plugin.installed),
+        enabled: group.some((plugin) => plugin.enabled),
+        support: mergeListingSupport(group),
+        contents: mergeListingContents(group),
+      };
+    })
+    .toSorted(
+      (left, right) =>
+        Number(right.installed) - Number(left.installed) || left.name.localeCompare(right.name),
+    );
+}
+
+function listingSiblings(
+  plugins: ReadonlyMap<string, LoadedPlugin>,
+  plugin: LoadedPlugin,
+): LoadedPlugin[] {
+  const key = listingGroupKey(plugin.detail.name);
+  return [...plugins.values()].filter(
+    (candidate) => listingGroupKey(candidate.detail.name) === key,
+  );
+}
+
+function mergeLoadedListings(plugins: ReadonlyArray<LoadedPlugin>): LoadedPlugin {
+  const primary = [...plugins].toSorted((left, right) =>
+    compareListingPlugins(left.detail, right.detail),
+  )[0]!;
+  const installTargets = [
+    ...new Map(
+      plugins
+        .flatMap((plugin) => plugin.detail.installTargets)
+        .map((target) => [target.pluginId, target]),
+    ).values(),
+  ];
+  return {
+    ...primary,
+    detail: {
+      ...primary.detail,
+      installed: plugins.some((plugin) => plugin.detail.installed),
+      enabled: plugins.some((plugin) => plugin.detail.enabled),
+      support: mergeListingSupport(plugins.map((plugin) => plugin.detail)),
+      contents: mergeListingContents(plugins.map((plugin) => plugin.detail)),
+      installTargets,
+    },
+  };
+}
+
 interface PluginMarketplaceOptions {
   readonly readCursorMarketplaceHtml?: () => Effect.Effect<
     string,
     PluginMarketplaceUnavailableError
   >;
+  readonly readChatGptPublicPlugins?: () => Effect.Effect<ReadonlyArray<ChatGptPublicPlugin>>;
+  readonly searchChatGptPublicPlugins?: (
+    query: string,
+  ) => Effect.Effect<ReadonlyArray<ChatGptPublicPlugin>>;
   readonly readRemoteText?: (url: string) => Effect.Effect<string | null>;
   readonly platform?: NodeJS.Platform;
   readonly codexPluginRuntime?: CodexPluginRuntime["Service"];
@@ -969,7 +1173,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       record: PluginSourceRecord,
       manifest: PluginManifest,
     ): Effect.fn.Return<ReadonlyArray<PluginMarketplaceApp>> {
-      if (!record.pluginRoot) return [];
+      if (!record.pluginRoot) return record.directApps;
       const configuredPath = typeof manifest.apps === "string" ? manifest.apps : "./.app.json";
       const appsPath = yield* safePluginPath(
         record.pluginRoot,
@@ -1465,7 +1669,10 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             hasHooks: extensions.some((extension) => extension.kind === "hook"),
           },
           support,
-          marketplaceUrl: sanitizeRemoteUrl(record.marketplaceUrl ?? undefined),
+          marketplaceUrl:
+            record.marketplaceName === CHATGPT_PUBLIC_MARKETPLACE_NAME
+              ? record.marketplaceUrl
+              : sanitizeRemoteUrl(record.marketplaceUrl ?? undefined),
           homepage,
           repository,
           capabilities: manifest.interface?.capabilities ?? [],
@@ -1571,6 +1778,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             externalLogoUrl: null,
             directSkills: [],
             directMcpServers: [],
+            directApps: [],
             directExtensions: [],
             remotePreviewSource: null,
             hasHooks: false,
@@ -1713,6 +1921,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 publicFaviconUrl(homepage) ?? githubAvatarUrl(previewSource?.repositoryUrl),
               directSkills: [],
               directMcpServers: [],
+              directApps: [],
               directExtensions: [],
               remotePreviewSource: previewSource,
               hasHooks: false,
@@ -1863,6 +2072,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                   publicFaviconUrl(plugin.publisher?.websiteUrl),
                 directSkills: skills,
                 directMcpServers: mcpServers,
+                directApps: [],
                 directExtensions: extensions,
                 remotePreviewSource: null,
                 hasHooks: (plugin.hooks?.length ?? 0) > 0,
@@ -1873,14 +2083,97 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       },
     );
 
+    const readCodexChatGptAuth = Effect.fn("CodexPluginMarketplace.readCodexChatGptAuth")(
+      function* () {
+        const command = yield* commandFor("codex", "codex");
+        const userHome = hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim();
+        const home =
+          command?.env.CODEX_HOME?.trim() ||
+          hostEnvironment.CODEX_HOME?.trim() ||
+          (userHome ? path.join(userHome, ".codex") : null);
+        if (!home) return null;
+        const encoded = yield* fileSystem
+          .readFileString(path.join(home, "auth.json"))
+          .pipe(Effect.option);
+        if (Option.isNone(encoded)) return null;
+        const decoded = yield* decodeCodexChatGptAccessToken(encoded.value).pipe(Effect.option);
+        return Option.isSome(decoded) ? codexChatGptAuthFromTokens(decoded.value.tokens) : null;
+      },
+    );
+
+    const fetchChatGptPublicPage = Effect.fn("CodexPluginMarketplace.fetchChatGptPublicPage")(
+      function* (url: string) {
+        if (!httpClient) return null;
+        const auth = yield* readCodexChatGptAuth();
+        if (!auth) return null;
+        let request = HttpClientRequest.get(url).pipe(
+          HttpClientRequest.bearerToken(auth.accessToken),
+          HttpClientRequest.setHeader("OAI-Product-Sku", "chatgpt"),
+          HttpClientRequest.acceptJson,
+        );
+        if (auth.accountId) {
+          request = request.pipe(HttpClientRequest.setHeader("ChatGPT-Account-Id", auth.accountId));
+        }
+        const response = yield* httpClient.execute(request).pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap((ok) => ok.json),
+        );
+        return yield* decodeChatGptPublicPluginListResponse(response);
+      },
+    );
+
+    const fetchChatGptPublicPluginPages = Effect.fn(
+      "CodexPluginMarketplace.fetchChatGptPublicPluginPages",
+    )(function* (urlForPage: (pageToken?: string) => string, maxPages: number) {
+      const plugins: ChatGptPublicPlugin[] = [];
+      let pageToken: string | undefined;
+      for (let page = 0; page < maxPages; page += 1) {
+        const decoded = yield* fetchChatGptPublicPage(urlForPage(pageToken));
+        if (!decoded) break;
+        plugins.push(...chatGptPublicPluginsFromListResponse(decoded));
+        const next = decoded.pagination?.next_page_token?.trim();
+        if (!next) break;
+        pageToken = next;
+      }
+      return plugins;
+    });
+
+    const fetchChatGptPublicSearchPlugins = Effect.fn(
+      "CodexPluginMarketplace.fetchChatGptPublicSearchPlugins",
+    )(function* (query: string) {
+      return yield* fetchChatGptPublicPluginPages(
+        (pageToken) => chatGptPublicPluginSearchUrl(query, pageToken),
+        CHATGPT_PUBLIC_PLUGIN_SEARCH_MAX_PAGES,
+      );
+    });
+
+    const readChatGptPublicPluginRecords = Effect.fn(
+      "CodexPluginMarketplace.readChatGptPublicPluginRecords",
+    )(function* () {
+      const plugins = options.readChatGptPublicPlugins
+        ? yield* options.readChatGptPublicPlugins()
+        : [];
+      return plugins.map(chatGptPublicSourceRecord);
+    });
+
+    const searchChatGptPublicPluginRecords = Effect.fn(
+      "CodexPluginMarketplace.searchChatGptPublicPluginRecords",
+    )(function* (query: string) {
+      const plugins = options.searchChatGptPublicPlugins
+        ? yield* options.searchChatGptPublicPlugins(query)
+        : yield* fetchChatGptPublicSearchPlugins(query).pipe(Effect.orElseSucceed(() => []));
+      return plugins.map(chatGptPublicSourceRecord);
+    });
+
     const refreshSnapshot = Effect.fn("CodexPluginMarketplace.refreshSnapshot")(function* () {
       const sourceResults = yield* Effect.all(
         [
           readCodexPluginRecords().pipe(Effect.result),
           readClaudePluginRecords().pipe(Effect.result),
           readCursorPluginRecords().pipe(Effect.result),
+          readChatGptPublicPluginRecords().pipe(Effect.result),
         ],
-        { concurrency: 3 },
+        { concurrency: 4 },
       );
       const sourceRecords = sourceResults.flatMap((result) =>
         Result.isSuccess(result) ? [...result.success] : [],
@@ -1896,7 +2189,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             : { cause: causes.length === 1 ? causes[0] : new AggregateError(causes) }),
         });
       }
-      const sourcePlugins = yield* Effect.forEach(sourceRecords, loadPlugin, { concurrency: 16 });
+      const sourcePlugins = yield* Effect.forEach(sourceRecords, loadPlugin, {
+        concurrency: 16,
+      });
       const loadedPlugins = sourcePlugins.map((plugin) => ({
         ...plugin,
         detail: {
@@ -1927,10 +2222,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       );
       const plugins = new Map(loadedPlugins.map((plugin) => [plugin.detail.id, plugin]));
       const catalog = {
-        plugins: catalogPlugins.toSorted(
-          (left, right) =>
-            Number(right.installed) - Number(left.installed) || left.name.localeCompare(right.name),
-        ),
+        plugins: mergeCatalogListings(catalogPlugins),
       } satisfies PluginMarketplaceCatalog;
       const now = yield* Clock.currentTimeMillis;
       const snapshot = { expiresAt: now + CATALOG_CACHE_TTL_MS, catalog, plugins };
@@ -1975,24 +2267,111 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       return `data:${mimeType};base64,${Buffer.from(bytes.value).toString("base64")}`;
     });
 
+    const withInstallTarget = (plugin: LoadedPlugin): LoadedPlugin => ({
+      ...plugin,
+      detail: {
+        ...plugin.detail,
+        installTargets: [
+          {
+            pluginId: plugin.detail.id,
+            harness: plugin.detail.sourceHarness,
+            marketplaceName: plugin.detail.marketplaceName,
+            version: plugin.detail.version,
+            installed: plugin.record.installed,
+            enabled: plugin.record.enabled,
+            installPolicy: plugin.detail.installPolicy,
+            marketplaceUrl: plugin.detail.marketplaceUrl,
+            contents: plugin.detail.contents,
+          },
+        ],
+      },
+    });
+
+    const rememberLoadedPlugins = Effect.fn("CodexPluginMarketplace.rememberLoadedPlugins")(
+      function* (loaded: ReadonlyArray<LoadedPlugin>) {
+        if (loaded.length === 0) return;
+        yield* snapshotLock.withPermits(1)(
+          Effect.gen(function* () {
+            const current = yield* Ref.get(cachedSnapshot);
+            if (!current) return;
+            const plugins = new Map(current.plugins);
+            for (const plugin of loaded) plugins.set(plugin.detail.id, plugin);
+            yield* Ref.set(cachedSnapshot, { ...current, plugins });
+          }),
+        );
+      },
+    );
+
+    const loadSearchPlugins = Effect.fn("CodexPluginMarketplace.loadSearchPlugins")(function* (
+      snapshot: CatalogSnapshot,
+      query: string,
+    ) {
+      const records = yield* searchChatGptPublicPluginRecords(query);
+      const existingIds = new Set(snapshot.plugins.keys());
+      const novel = records.filter((record) => !existingIds.has(record.pluginId));
+      if (novel.length === 0) return [];
+      const loaded = (yield* Effect.forEach(novel, loadPlugin, { concurrency: 8 })).map(
+        withInstallTarget,
+      );
+      yield* rememberLoadedPlugins(loaded);
+      return yield* Effect.forEach(
+        loaded,
+        (plugin) =>
+          loadLogoDataUrl(
+            plugin.detail.installed ? plugin.logoPath : null,
+            MAX_CATALOG_LOGO_BYTES,
+          ).pipe(Effect.map((logoDataUrl) => catalogPlugin(plugin.detail, logoDataUrl))),
+        { concurrency: 8 },
+      );
+    });
+
     const findPlugin = Effect.fn("CodexPluginMarketplace.findPlugin")(function* (pluginId: string) {
       const snapshot = yield* getSnapshot();
       const plugin = snapshot.plugins.get(pluginId);
-      if (!plugin) return yield* new PluginMarketplaceNotFoundError({ pluginId });
-      return plugin;
+      if (plugin) return plugin;
+      const searchName = chatGptPublicPluginNameFromPublicId(pluginId);
+      if (!searchName) return yield* new PluginMarketplaceNotFoundError({ pluginId });
+      yield* loadSearchPlugins(snapshot, searchName);
+      const resolved = (yield* getSnapshot()).plugins.get(pluginId);
+      if (!resolved) return yield* new PluginMarketplaceNotFoundError({ pluginId });
+      return resolved;
     });
 
-    const catalog = Effect.fn("CodexPluginMarketplace.catalog")(function* () {
-      return (yield* getSnapshot()).catalog;
+    const catalog = Effect.fn("CodexPluginMarketplace.catalog")(function* (query?: string) {
+      const snapshot = yield* getSnapshot();
+      const normalized = query?.trim() ?? "";
+      if (normalized.length < CHATGPT_PUBLIC_PLUGIN_SEARCH_MIN_QUERY_LENGTH) {
+        return snapshot.catalog;
+      }
+      const extras = yield* loadSearchPlugins(snapshot, normalized);
+      if (extras.length === 0) return snapshot.catalog;
+      return {
+        plugins: mergeCatalogListings([...snapshot.catalog.plugins, ...extras]),
+      } satisfies PluginMarketplaceCatalog;
     });
 
     const detail = Effect.fn("CodexPluginMarketplace.detail")(function* (pluginId: string) {
       const plugin = yield* findPlugin(pluginId);
-      const logoDataUrl = yield* loadLogoDataUrl(plugin.logoPath);
-      const loaded = yield* loadRemotePreview(plugin).pipe(
-        Effect.orElseSucceed(() => plugin.detail),
+      const snapshot = yield* getSnapshot();
+      const merged = mergeLoadedListings(listingSiblings(snapshot.plugins, plugin));
+      const logoDataUrl = yield* loadLogoDataUrl(merged.logoPath);
+      const loaded = yield* loadRemotePreview(merged).pipe(
+        Effect.orElseSucceed(() => merged.detail),
       );
-      return { ...loaded, logoDataUrl };
+      return {
+        ...loaded,
+        installed: merged.detail.installed,
+        enabled: merged.detail.enabled,
+        support: merged.detail.support,
+        contents: mergeListingContents([
+          { contents: loaded.contents },
+          ...listingSiblings(snapshot.plugins, plugin).map((sibling) => sibling.detail),
+        ]),
+        installTargets: merged.detail.installTargets.map((target) =>
+          target.pluginId === loaded.id ? { ...target, contents: loaded.contents } : target,
+        ),
+        logoDataUrl,
+      };
     });
 
     const logo = Effect.fn("CodexPluginMarketplace.logo")(function* (pluginId: string) {
@@ -2006,8 +2385,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       function* (pluginId: string) {
         const plugin = yield* findPlugin(pluginId);
         const snapshot = yield* getSnapshot();
+        const merged = mergeLoadedListings(listingSiblings(snapshot.plugins, plugin));
         const candidates = yield* Effect.forEach(
-          plugin.detail.installTargets.filter(
+          merged.detail.installTargets.filter(
             (target) => target.installed && target.contents.mcpServerCount > 0,
           ),
           (target) =>
