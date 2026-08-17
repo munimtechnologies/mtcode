@@ -13,9 +13,6 @@ import { useAtomCommand } from "../state/use-atom-command";
 export function useThreadGoalActions() {
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
-  const completeThreadGoal = useAtomCommand(threadEnvironment.completeGoal, {
-    reportFailure: false,
-  });
   const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
 
   const runGoalAction = useCallback(
@@ -29,9 +26,7 @@ export function useThreadGoalActions() {
           ? pauseThreadGoal
           : input.action === "resume"
             ? resumeThreadGoal
-            : input.action === "complete"
-              ? completeThreadGoal
-              : clearThreadGoal;
+            : clearThreadGoal;
       const result = await run({
         environmentId: input.environmentId,
         input: { threadId: input.threadId },
@@ -47,7 +42,7 @@ export function useThreadGoalActions() {
         );
       }
     },
-    [clearThreadGoal, completeThreadGoal, pauseThreadGoal, resumeThreadGoal],
+    [clearThreadGoal, pauseThreadGoal, resumeThreadGoal],
   );
 
   const showGoalStatus = useCallback(

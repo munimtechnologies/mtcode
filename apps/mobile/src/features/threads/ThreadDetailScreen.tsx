@@ -226,9 +226,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const insets = useSafeAreaInsets();
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
-  const completeThreadGoal = useAtomCommand(threadEnvironment.completeGoal, {
-    reportFailure: false,
-  });
   const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
   const handleGoalAction = useCallback(
     async (action: GoalChipAction) => {
@@ -237,9 +234,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           ? pauseThreadGoal
           : action === "resume"
             ? resumeThreadGoal
-            : action === "complete"
-              ? completeThreadGoal
-              : clearThreadGoal;
+            : clearThreadGoal;
       const result = await run({
         environmentId: props.environmentId,
         input: { threadId: props.selectedThread.id },
@@ -254,7 +249,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     },
     [
       clearThreadGoal,
-      completeThreadGoal,
       pauseThreadGoal,
       props.environmentId,
       props.selectedThread.id,
@@ -630,7 +624,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           onTouchCancel={handleFeedTouchCancel}
         >
           <GoalChip
-            goal={threadGoal}
+            goal={
+              threadGoal == null || "objectivePreview" in threadGoal
+                ? threadGoal
+                : {
+                    status: threadGoal.status,
+                    objectivePreview: threadGoal.objective,
+                  }
+            }
             onAction={
               props.serverConfig?.environment.capabilities.threadGoal === true
                 ? handleGoalAction

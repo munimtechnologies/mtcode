@@ -24,6 +24,7 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
+import { Route as DevGoalChipsRouteImport } from './routes/dev.goal-chips'
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
@@ -103,6 +104,11 @@ const ProjectsProjectKeyRoute = ProjectsProjectKeyRouteImport.update({
   path: '/projects/$projectKey',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DevGoalChipsRoute = DevGoalChipsRouteImport.update({
+  id: '/dev/goal-chips',
+  path: '/dev/goal-chips',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectCallbackRoute = ConnectCallbackRouteImport.update({
   id: '/connect_/callback',
   path: '/connect/callback',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/connect/callback': typeof ConnectCallbackRoute
+  '/dev/goal-chips': typeof DevGoalChipsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/connect/callback': typeof ConnectCallbackRoute
+  '/dev/goal-chips': typeof DevGoalChipsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -174,6 +182,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/connect_/callback': typeof ConnectCallbackRoute
+  '/dev/goal-chips': typeof DevGoalChipsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -197,6 +206,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/pull-requests'
     | '/connect/callback'
+    | '/dev/goal-chips'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/pull-requests'
     | '/connect/callback'
+    | '/dev/goal-chips'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/_chat/pull-requests'
     | '/connect_/callback'
+    | '/dev/goal-chips'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -258,6 +270,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRouteWithChildren
   UsageRoute: typeof UsageRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
+  DevGoalChipsRoute: typeof DevGoalChipsRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
 }
 
@@ -368,6 +381,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dev/goal-chips': {
+      id: '/dev/goal-chips'
+      path: '/dev/goal-chips'
+      fullPath: '/dev/goal-chips'
+      preLoaderRoute: typeof DevGoalChipsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect_/callback': {
       id: '/connect_/callback'
       path: '/connect/callback'
@@ -448,6 +468,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRouteWithChildren,
   UsageRoute: UsageRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
+  DevGoalChipsRoute: DevGoalChipsRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
 }
 export const routeTree = rootRouteImport

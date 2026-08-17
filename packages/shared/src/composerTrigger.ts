@@ -8,7 +8,7 @@ export type ComposerSlashCommand =
   | "goal resume"
   | "goal clear";
 
-export type GoalChipAction = "pause" | "resume" | "complete" | "clear";
+export type GoalChipAction = "pause" | "resume" | "clear";
 
 export const GOAL_PAUSE_HINT =
   "Pause prevents the next Continuation. Stop interrupts this Turn and also Pauses.";
@@ -111,6 +111,18 @@ export function formatGoalStatusMessage(
   return `${formatGoalStatusLabel(goal.status)}: ${goal.objective}`;
 }
 
+/** Accessible label for the composer Goal chip (status in parentheses). */
+export function formatGoalChipAriaLabel(
+  goal: { readonly status: string; readonly objective: string },
+  options?: { readonly isWorking?: boolean },
+): string {
+  const isWorking = options?.isWorking === true && goal.status === "active";
+  const statusNote = isWorking ? "Running" : formatGoalStatusLabel(goal.status);
+  return `Goal: ${goal.objective} (${statusNote})`;
+}
+
+// User-facing actions: pause/resume/clear only. Complete belongs to the model
+// (structured <objective_complete> signal), never to chip or palette chrome.
 export function goalChipActions(status: string): ReadonlyArray<GoalChipAction> {
   const actions: GoalChipAction[] = [];
   if (status === "active") {
@@ -118,9 +130,6 @@ export function goalChipActions(status: string): ReadonlyArray<GoalChipAction> {
   }
   if (status === "paused" || status === "blocked" || status === "usageLimited") {
     actions.push("resume");
-  }
-  if (status !== "complete") {
-    actions.push("complete");
   }
   actions.push("clear");
   return actions;
@@ -132,10 +141,8 @@ export function goalChipActionLabel(action: GoalChipAction): string {
       return "Pause";
     case "resume":
       return "Resume";
-    case "complete":
-      return "Complete";
     case "clear":
-      return "Clear";
+      return "Delete";
   }
 }
 
@@ -304,9 +311,7 @@ export function detectComposerTrigger(
   };
 }
 
-export function parseStandaloneComposerSlashCommand(
-  text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+export function parseStandaloneComposerSlashCommand(text: string): "plan" | "default" | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;

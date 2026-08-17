@@ -6364,18 +6364,6 @@ function ChatViewContent(props: ChatViewProps) {
             {...(routeKind === "draft" && draftId ? { draftId } : {})}
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
-            goal={activeThread.goal ?? null}
-            onGoalAction={
-              supportsGoal
-                ? (action) => {
-                    void runGoalAction({
-                      environmentId,
-                      threadId: activeThread.id,
-                      action,
-                    });
-                  }
-                : undefined
-            }
             changeRequestState={activeThreadPr?.state ?? null}
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
@@ -6597,6 +6585,18 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeThreadActivities={activeThread?.activities}
+                            threadGoal={supportsGoal ? (activeThread.goal ?? null) : null}
+                            onThreadGoalAction={
+                              supportsGoal
+                                ? (action) => {
+                                    void runGoalAction({
+                                      environmentId,
+                                      threadId: activeThread.id,
+                                      action,
+                                    });
+                                  }
+                                : undefined
+                            }
                             resolvedTheme={resolvedTheme}
                             settings={settings}
                             keybindings={keybindings}

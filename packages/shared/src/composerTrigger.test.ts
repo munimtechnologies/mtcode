@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BUILT_IN_GOAL_SLASH_COMMANDS,
   formatGoalActivityLabel,
+  formatGoalChipAriaLabel,
   formatGoalStatusLabel,
   formatGoalStatusMessage,
   GOAL_OBJECTIVE_PREVIEW_MAX_CHARS,
@@ -137,18 +138,24 @@ describe("formatGoalStatusMessage", () => {
 });
 
 describe("goalChipActions", () => {
-  it("offers Pause, Complete, and Clear for an Active Goal", () => {
-    expect(goalChipActions("active")).toEqual(["pause", "complete", "clear"]);
+  it("offers Pause and Delete for an Active Goal", () => {
+    expect(goalChipActions("active")).toEqual(["pause", "clear"]);
   });
 
-  it("offers Resume, Complete, and Clear for Paused, Blocked, and Usage-limited", () => {
-    expect(goalChipActions("paused")).toEqual(["resume", "complete", "clear"]);
-    expect(goalChipActions("blocked")).toEqual(["resume", "complete", "clear"]);
-    expect(goalChipActions("usageLimited")).toEqual(["resume", "complete", "clear"]);
+  it("offers Resume and Delete for Paused, Blocked, and Usage-limited", () => {
+    expect(goalChipActions("paused")).toEqual(["resume", "clear"]);
+    expect(goalChipActions("blocked")).toEqual(["resume", "clear"]);
+    expect(goalChipActions("usageLimited")).toEqual(["resume", "clear"]);
   });
 
-  it("offers only Clear for a Complete Goal", () => {
+  it("offers only Delete for a Complete Goal", () => {
     expect(goalChipActions("complete")).toEqual(["clear"]);
+  });
+
+  it("never offers Complete: the model owns that transition", () => {
+    for (const status of ["active", "paused", "blocked", "usageLimited", "complete"]) {
+      expect(goalChipActions(status)).not.toContain("complete");
+    }
   });
 });
 
@@ -160,12 +167,31 @@ describe("formatGoalStatusLabel", () => {
   });
 });
 
+describe("formatGoalChipAriaLabel", () => {
+  it("prefixes the objective and notes status in parentheses", () => {
+    expect(formatGoalChipAriaLabel({ status: "active", objective: "Reduce p95 below 120ms" })).toBe(
+      "Goal: Reduce p95 below 120ms (Active)",
+    );
+    expect(formatGoalChipAriaLabel({ status: "paused", objective: "Reduce p95 below 120ms" })).toBe(
+      "Goal: Reduce p95 below 120ms (Paused)",
+    );
+  });
+
+  it("uses Running when an active Goal has a live turn", () => {
+    expect(
+      formatGoalChipAriaLabel(
+        { status: "active", objective: "Reduce p95 below 120ms" },
+        { isWorking: true },
+      ),
+    ).toBe("Goal: Reduce p95 below 120ms (Running)");
+  });
+});
+
 describe("goalChipActionLabel", () => {
   it("labels chip actions", () => {
     expect(goalChipActionLabel("pause")).toBe("Pause");
     expect(goalChipActionLabel("resume")).toBe("Resume");
-    expect(goalChipActionLabel("complete")).toBe("Complete");
-    expect(goalChipActionLabel("clear")).toBe("Clear");
+    expect(goalChipActionLabel("clear")).toBe("Delete");
   });
 });
 
