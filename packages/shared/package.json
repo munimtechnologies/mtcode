@@ -238,6 +238,10 @@
     "./limitsFormat": {
       "types": "./src/limitsFormat.ts",
       "import": "./src/limitsFormat.ts"
+    },
+    "./nodeSqliteClient": {
+      "types": "./src/nodeSqliteClient.ts",
+      "import": "./src/nodeSqliteClient.ts"
     }
   },
   "scripts": {
