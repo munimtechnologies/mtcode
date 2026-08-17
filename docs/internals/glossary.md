@@ -60,11 +60,11 @@ Goal status that prevents the next Continuation. `thread.goal.pause` does not in
 
 #### Complete
 
-Terminal success for a Goal. The user Completes from the chip or command palette (`thread.goal.complete`). The model Completes only via a structured `<objective_complete>` signal, not prose. Continuations stop immediately.
+Terminal success for a Goal. Only the model Completes, via a structured `<objective_complete>` signal — never the user, and never from prose. Continuations stop immediately.
 
 #### Clear
 
-Removes the Goal from the Thread (`thread.goal.clear`) so the Thread returns to one-Turn-at-a-time behavior. A running Turn is not auto-interrupted.
+Removes the Goal from the Thread (`thread.goal.clear`) so the Thread returns to one-Turn-at-a-time behavior. The UI asks for confirmation first, and clearing interrupts a running Turn (`thread.turn-interrupt-requested` is emitted alongside `thread.goal-cleared`).
 
 #### Blocked
 

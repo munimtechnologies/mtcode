@@ -27,14 +27,14 @@ can execute.
 
 ## Status
 
-The chip in the Thread header shows the Objective and its status:
+The chip above the composer shows the Objective and its status:
 
 - **Active** — T3 Code will start the next Turn when the current one finishes
 - **Paused** — the next Continuation will not start until you Resume
 - **Blocked** — the work stopped itself; Resume tries again
 - **Usage-limited** — the account hit a quota or rate limit; Resume tries again after the window
   resets
-- **Complete** — the outcome was accepted
+- **Complete** — the agent accepted the outcome as met
 
 Inbox and sidebar rows mark Threads that have an **Active** Goal, so you can find independent work
 without opening the Thread.
@@ -42,10 +42,14 @@ without opening the Thread.
 Type `/goal` with no arguments, or choose **Show Objective status** in the command palette, to see
 the current Objective and status.
 
-## Pause, Resume, Complete, and Clear
+## Edit the Objective
 
-These actions live on the chip, in the command palette, and (except Complete) as composer
-commands. Complete is on the chip and in the command palette only.
+Click the Objective text on the chip to load `/goal <objective>` into the composer. Edit it and
+send to replace the current Objective.
+
+## Pause, Resume, and Delete
+
+These actions live as icons on the chip, in the command palette, and as composer commands.
 
 **Pause** (`/goal pause`) prevents the next Continuation. It does not interrupt a Turn that is
 already running.
@@ -57,10 +61,11 @@ when you only want to prevent the next Continuation.
 Thread is idle, T3 Code starts a Continuation immediately. Resume from Complete is not available;
 set a new Objective instead.
 
-**Complete** means you accept the outcome. Continuations stop.
+**Delete** (`/goal clear`) removes the Goal. Deleting from the chip or command palette asks for
+confirmation first. The Thread goes back to one Turn at a time, and a running Turn is interrupted.
 
-**Clear** (`/goal clear`) removes the Goal. The Thread goes back to one Turn at a time. A running
-Turn is not interrupted; Stop if you also want that Turn to end.
+Only the agent can mark a Goal **Complete**, when its criteria are met. If the outcome is not what
+you wanted, Delete the Goal and set a sharper Objective.
 
 ## What does not Pause
 
@@ -74,8 +79,7 @@ When a Turn finishes and the Goal is still Active, T3 Code starts the next Turn 
 marks why a Turn began.
 
 The agent can Complete or Block only with T3 Code's completion or blocked markers, not by saying
-it is done in chat.
-You can also Complete from the chip. After several Continuations with no tools and no file
+it is done in chat. After several Continuations with no tools and no file
 changes, T3 Code marks the Goal Blocked so empty Turns cannot run forever. Quota and rate-limit
 errors mark it Usage-limited instead of retrying.
 
