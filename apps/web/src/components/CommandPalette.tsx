@@ -63,6 +63,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import { useNavigate, useParams } from "@tanstack/react-router";
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
