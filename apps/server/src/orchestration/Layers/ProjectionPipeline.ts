@@ -987,6 +987,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-queued": {
+          yield* projectionThreadMessageRepository.setDeliveryState({
+            messageId: event.payload.messageId,
+            deliveryState: "queued",
+          });
+          return;
+        }
+
+        case "thread.queued-turn-dispatched": {
+          yield* projectionThreadMessageRepository.setDeliveryState({
+            messageId: event.payload.messageId,
+            deliveryState: null,
+          });
+          return;
+        }
+
+        case "thread.queued-turn-cancelled": {
+          yield* projectionThreadMessageRepository.deleteByMessageId({
+            messageId: event.payload.messageId,
+          });
+          const keptRows = yield* projectionThreadMessageRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          attachmentSideEffects.prunedThreadRelativePaths.set(
+            event.payload.threadId,
+            collectThreadAttachmentRelativePaths(event.payload.threadId, keptRows),
+          );
+          return;
+        }
+
         case "thread.history-imported": {
           yield* Effect.forEach(
             event.payload.messages,

@@ -1230,6 +1230,11 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const setGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+  const pauseGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
+  const resumeGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
+  const clearGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
+  const { runGoalAction } = useThreadGoalActions();
   const cancelQueuedTurn = useAtomCommand(
     threadEnvironment.cancelQueuedTurn,
     "queued message cancellation",

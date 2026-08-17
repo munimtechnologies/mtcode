@@ -86,12 +86,13 @@ const ProjectionThreadMessageDbRowSchema = Schema.Struct({
   deliveryState: Schema.NullOr(Schema.Literal("queued")),
 });
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = Schema.Struct({
-  ...ProjectionThread.fields,
-  modelSelection: Schema.fromJsonString(ModelSelection),
-  goal: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadGoal)),
-  hasQueuedTurns: Schema.optional(Schema.Number),
-});
+const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
+  Struct.assign({
+    modelSelection: Schema.fromJsonString(ModelSelection),
+    goal: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadGoal)),
+    hasQueuedTurns: Schema.optional(Schema.Number),
+  }),
+);
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),

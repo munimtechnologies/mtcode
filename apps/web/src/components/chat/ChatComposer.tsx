@@ -62,9 +62,7 @@ import {
   usePromptStashStore,
   type PromptStashEntry,
 } from "../../promptStashStore";
-import { ComposerGoalBadge } from "./ComposerGoalBadge";
 import { ComposerStashBadge } from "./ComposerStashBadge";
-import type { GoalChipAction } from "./GoalChip";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
@@ -577,10 +575,6 @@ export interface ChatComposerProps {
   // Context window
   activeThreadActivities: Thread["activities"] | undefined;
 
-  // Objective
-  threadGoal: Thread["goal"] | null | undefined;
-  onThreadGoalAction?: ((action: GoalChipAction) => void) | undefined;
-
   // Misc
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -668,8 +662,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeThreadActivities,
-    threadGoal,
-    onThreadGoalAction,
     resolvedTheme,
     settings,
     keybindings,

@@ -40,6 +40,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/connections": "Connections",
   "/settings/computer-use": "Computer Use",
   "/settings/computer-history": "Computer History",
+  "/settings/beta": "Beta",
   "/settings/archived": "Archive",
 };
 
@@ -312,7 +313,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "voice-dictation",
     title: "Voice dictation",
-    to: "/settings/general",
+    to: "/settings/beta",
   },
   {
     id: "archive",

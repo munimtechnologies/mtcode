@@ -80,6 +80,13 @@ export function useThreadComposerState() {
   const selectedThreadDetail = useSelectedThreadDetail();
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
+  const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
+    selectedThreadShell?.environmentId ?? null,
+  );
+  const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
+  const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
+  const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
+  const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
   const preferences = useAtomValue(mobilePreferencesAtom);
 
   useEffect(() => {
@@ -179,7 +186,16 @@ export function useThreadComposerState() {
       );
     });
     return messageId;
-  }, [preferences, selectedThreadDetail, selectedThreadShell]);
+  }, [
+    clearThreadGoal,
+    pauseThreadGoal,
+    preferences,
+    resumeThreadGoal,
+    selectedEnvironmentServerConfig,
+    selectedThreadDetail,
+    selectedThreadShell,
+    setThreadGoal,
+  ]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {
