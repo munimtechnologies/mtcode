@@ -79,6 +79,35 @@ function PullRequestUpstreamCardImpl({
         <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium">
           {entry.title}
         </span>
+        {/* Top right, outlined: the corner is where an action on a card is looked for, and a
+            ghost icon among muted metadata read as another detail rather than something to
+            press. Stops the click from also opening the row underneath. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="outline"
+                className="size-6 shrink-0"
+                aria-label={`Implement pull request #${entry.number} in this project`}
+                disabled={implementing}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onImplement(entry);
+                }}
+              >
+                {implementing ? (
+                  <LoaderIcon aria-hidden className="size-3.5 animate-spin" />
+                ) : (
+                  <SparklesIcon className="size-3.5" />
+                )}
+              </Button>
+            }
+          />
+          <TooltipPopup>
+            {implementing ? "Opening a thread..." : "Implement in this project"}
+          </TooltipPopup>
+        </Tooltip>
       </div>
 
       {reason ? (
@@ -88,35 +117,6 @@ function PullRequestUpstreamCardImpl({
       ) : null}
 
       <div className="mt-auto flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-        {/* Icon alone, at the corner: the card is a shortlist entry, and a labelled control on
-            every one of them read as the card's purpose rather than one thing you can do with it.
-            Stops the click from also opening the row underneath. */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="size-5 shrink-0"
-                aria-label={`Implement pull request #${entry.number} in this project`}
-                disabled={implementing}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onImplement(entry);
-                }}
-              >
-                {implementing ? (
-                  <LoaderIcon aria-hidden className="size-3 animate-spin" />
-                ) : (
-                  <SparklesIcon className="size-3" />
-                )}
-              </Button>
-            }
-          />
-          <TooltipPopup>
-            {implementing ? "Opening a thread..." : "Implement in this project"}
-          </TooltipPopup>
-        </Tooltip>
         <span className="shrink-0">#{entry.number}</span>
         {entry.author ? (
           <>
