@@ -2916,8 +2916,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             if (element.matches("a[href],button,input,textarea,select,[role],[tabindex]")) return true;
             const role = element.getAttribute("role");
             if (role === "row" || role === "gridcell" || role === "option") return true;
+            if (element.tagName !== "TR" && element.tagName !== "TD" && element.tagName !== "DIV") return false;
             const style = getComputedStyle(element);
-            return style.cursor === "pointer" && (element.tagName === "TR" || element.tagName === "TD" || element.tagName === "DIV");
+            if (style.cursor !== "pointer") return false;
+            // cursor is inherited. Keep the outermost pointer container so
+            // nested layout nodes do not fill the interactive-element cap.
+            const parent = element.parentElement;
+            return !parent || getComputedStyle(parent).cursor !== "pointer";
           };
           const seen = new Set();
           const elements = Array.from(document.querySelectorAll(
