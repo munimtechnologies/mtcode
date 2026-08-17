@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off globalTimers:off
 import {
   CommandId,
   EventId,
@@ -11,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { goalBlockCommandId, goalContinuationCommandId } from "@t3tools/shared/goalContinuation";
 import { expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -392,7 +394,7 @@ describe("GoalReactor", () => {
   it.live("Blocks after three empty Continuations instead of starting another", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const emptyContinuationActivities = [
+        const emptyContinuationActivities: OrchestrationThread["activities"] = [
           {
             id: EventId.make("activity-set"),
             tone: "info",
@@ -540,7 +542,9 @@ describe("GoalReactor", () => {
   it.live("leaves a running Turn alone when its Session is fresh from this process", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const freshSessionUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+        const freshSessionUpdatedAt = yield* Effect.map(Clock.currentTimeMillis, (millis) =>
+          new Date(millis + 60_000).toISOString(),
+        );
         const harness = yield* createHarness([
           makeThread({
             goal: activeGoal(),
