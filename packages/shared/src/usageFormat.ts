@@ -185,6 +185,20 @@ export function formatRelativeHourShort(
 }
 
 /**
+ * UI / `makeWindow` sentinel for all available local history. Positive day
+ * counts remain rolling calendar windows; `0` means scan from
+ * {@link ALL_USAGE_SINCE_DAY}.
+ */
+export const ALL_USAGE_WINDOW_DAYS = 0;
+
+/**
+ * Earliest calendar day an "All" window asks environments to scan. Bound far
+ * enough to cover any realistic Claude / Codex / Cursor / Grok / OpenCode
+ * transcript without inventing an unbounded open-ended request.
+ */
+export const ALL_USAGE_SINCE_DAY = "2020-01-01";
+
+/**
  * The window the page requests, expressed in the viewer's own time zone so days
  * line up with what they actually experienced.
  */
@@ -228,6 +242,14 @@ export function makeWindow(
       resolution,
       sinceTime: sinceTime.toISOString(),
       untilTime: untilTime.toISOString(),
+    };
+  }
+  if (days <= ALL_USAGE_WINDOW_DAYS) {
+    return {
+      sinceDay: UsageDay.make(ALL_USAGE_SINCE_DAY),
+      untilDay: UsageDay.make(untilDay),
+      timeZone,
+      resolution: "day",
     };
   }
   // Subtracting fixed milliseconds from `now` lands on the wrong calendar day

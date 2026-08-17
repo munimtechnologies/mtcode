@@ -584,11 +584,17 @@ export const make = Effect.gen(function* () {
     }
     sources.push(toCursorUsageSource(cursorExport, cursorSessionIds.size));
 
+    // Keep at least 90 days warm for short views, but never drop entries that
+    // fall inside the window we just walked (e.g. an "All" scan from 2020).
+    const retentionCutoffMs = Math.min(
+      windowStartMs,
+      startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    );
     const pruned = pruneScanCache(fileCache, {
       livePaths,
       walkedRoots,
       windowStartMs,
-      retentionCutoffMs: startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      retentionCutoffMs,
     });
     if (pruned > 0) cacheDirty = true;
     yield* persistScanCache();

@@ -74,6 +74,24 @@ describe("hourly usage formatting", () => {
     expect(window.untilTime).toBe("2026-08-11T12:37:00.000Z");
   });
 
+  it("builds an all-history window from the shared earliest day", () => {
+    const resolved = new Intl.DateTimeFormat().resolvedOptions();
+    const resolvedOptions = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ ...resolved, timeZone: "UTC" });
+    try {
+      const window = makeWindow(0, new Date("2026-08-11T12:37:42.123Z"));
+
+      expect(window.resolution).toBe("day");
+      expect(window.sinceDay).toBe("2020-01-01");
+      expect(window.untilDay).toBe("2026-08-11");
+      expect(window.sinceTime).toBeUndefined();
+      expect(window.untilTime).toBeUndefined();
+    } finally {
+      resolvedOptions.mockRestore();
+    }
+  });
+
   it("degrades an unknown resolved zone to UTC instead of crashing", () => {
     const resolved = new Intl.DateTimeFormat().resolvedOptions();
     const resolvedOptions = vi

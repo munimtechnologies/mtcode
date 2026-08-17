@@ -20,6 +20,7 @@ import {
   formatTokens,
   formatUsageCost,
   formatUsd,
+  ALL_USAGE_WINDOW_DAYS,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
 import { Button } from "../ui/button";
@@ -42,6 +43,7 @@ const WINDOW_OPTIONS = [
   { days: 7, label: "7 days" },
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
+  { days: ALL_USAGE_WINDOW_DAYS, label: "All" },
 ] as const;
 
 export function UsagePage() {
