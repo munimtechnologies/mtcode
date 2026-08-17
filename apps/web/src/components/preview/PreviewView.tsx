@@ -34,7 +34,6 @@ import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/prev
 import { useRightPanelStore } from "~/rightPanelStore";
 
 import { previewBridge } from "./previewBridge";
-import { applyPreviewGuestViewport } from "./previewGuestViewport";
 import { subscribePreviewAction } from "./previewActionBus";
 import { openPreviewSession } from "./openPreviewSession";
 import { PreviewChromeRow } from "./PreviewChromeRow";
@@ -243,19 +242,6 @@ export function PreviewView({
     },
     [resize, tabId, threadRef],
   );
-
-  const viewportOverrideKey =
-    viewport._tag === "fill" ? "fill" : `${viewport._tag}:${viewport.width}x${viewport.height}`;
-  const viewportRef = useRef(viewport);
-  viewportRef.current = viewport;
-  useEffect(() => {
-    if (!runtimeTabId || !desktopOverlay?.hasWebContents) return;
-    void applyPreviewGuestViewport(
-      previewBridge?.setViewport,
-      runtimeTabId,
-      viewportRef.current,
-    ).catch(() => undefined);
-  }, [desktopOverlay?.hasWebContents, runtimeTabId, viewportOverrideKey]);
 
   const handleToggleDeviceToolbar = () => {
     if (!runtimeTabId) return;
