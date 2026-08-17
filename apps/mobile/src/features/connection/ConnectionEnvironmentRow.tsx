@@ -33,7 +33,7 @@ export function ConnectionEnvironmentRow(props: {
   readonly onRename: (environmentId: EnvironmentId) => void;
   readonly onUpdate: (
     environmentId: EnvironmentId,
-    updates: { readonly label: string; readonly displayUrl: string },
+    updates: { readonly label?: string; readonly displayUrl: string },
   ) => Promise<AtomCommandResult<unknown, unknown>>;
 }) {
   const [url, setUrl] = useState(props.environment.displayUrl);
@@ -56,7 +56,6 @@ export function ConnectionEnvironmentRow(props: {
     );
   const handleSave = useCallback(async () => {
     const result = await props.onUpdate(props.environment.environmentId, {
-      label: "",
       displayUrl: url.trim(),
     });
     if (AsyncResult.isSuccess(result)) {

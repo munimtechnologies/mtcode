@@ -45,6 +45,22 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
+export const runEnvironmentLabelUpdates = Effect.fn("runEnvironmentLabelUpdates")(function* (
+  scope: Scope.Scope,
+) {
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const environment = yield* ServerEnvironment.ServerEnvironment;
+  const changes = yield* settings.subscribeChanges.pipe(Scope.provide(scope));
+  const initialSettings = yield* settings.getSettings;
+
+  yield* environment.setEnvironmentLabel(initialSettings.environmentLabel);
+  return yield* changes.pipe(
+    Stream.runForEach((next) => environment.setEnvironmentLabel(next.environmentLabel)),
+    Scope.provide(scope),
+    Effect.forkIn(scope),
+  );
+});
+
 export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
   {
@@ -357,16 +373,7 @@ export const make = (options?: StartupOptions) =>
       );
 
       const welcomeBase = yield* resolveWelcomeBase;
-      yield* serverEnvironment.setEnvironmentLabel(
-        (yield* serverSettings.getSettings).environmentLabel,
-      );
-      yield* serverSettings.streamChanges.pipe(
-        Stream.runForEach((settings) =>
-          serverEnvironment.setEnvironmentLabel(settings.environmentLabel),
-        ),
-        Scope.provide(reactorScope),
-        Effect.forkScoped,
-      );
+      yield* runEnvironmentLabelUpdates(reactorScope);
       yield* runEnvironmentLabelRelaySync().pipe(Scope.provide(reactorScope), Effect.forkScoped);
 
       const environment = yield* serverEnvironment.getDescriptor;

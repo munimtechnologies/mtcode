@@ -1407,8 +1407,8 @@ function EnvironmentLabelControl({
         {showValue ? <span className="text-[13px] text-muted-foreground">{label}</span> : null}
         {canRename ? (
           <Button
-            size="icon-xs"
-            variant="ghost"
+            size="icon-micro"
+            variant="ghost-muted"
             aria-label={`Rename ${label}`}
             onClick={() => {
               setValue(label);

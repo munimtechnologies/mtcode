@@ -60,7 +60,7 @@ export function SettingsEnvironmentsRouteScreen() {
   const handleUpdateEnvironment = useCallback(
     (
       environmentId: EnvironmentId,
-      updates: { readonly label: string; readonly displayUrl: string },
+      updates: { readonly label?: string; readonly displayUrl: string },
     ) => {
       if (!SHOWCASE_ENABLED) return onUpdateEnvironment(environmentId, updates);
       const actualEnvironment = environmentSections.localEnvironments.find(
