@@ -227,7 +227,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const pauseThreadGoal = useAtomCommand(threadEnvironment.pauseGoal, { reportFailure: false });
   const resumeThreadGoal = useAtomCommand(threadEnvironment.resumeGoal, { reportFailure: false });
   const clearThreadGoal = useAtomCommand(threadEnvironment.clearGoal, { reportFailure: false });
-  const handleGoalAction = useCallback(
+  const dispatchGoalAction = useCallback(
     async (action: GoalChipAction) => {
       const run =
         action === "pause"
@@ -254,6 +254,28 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       props.selectedThread.id,
       resumeThreadGoal,
     ],
+  );
+  const handleGoalAction = useCallback(
+    (action: GoalChipAction) => {
+      if (action !== "clear") {
+        // Pause/resume stay instant.
+        void dispatchGoalAction(action);
+        return;
+      }
+      // Deleting also stops any active run, so confirm first via the native
+      // platform dialog.
+      Alert.alert("Delete this Objective?", "Any active run on this Thread will be stopped.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void dispatchGoalAction("clear");
+          },
+        },
+      ]);
+    },
+    [dispatchGoalAction],
   );
   const selectedThreadDetail = useSelectedThreadDetail();
   const threadGoal = selectedThreadDetail?.goal ?? props.selectedThread.goal ?? null;

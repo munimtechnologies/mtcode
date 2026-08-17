@@ -7,6 +7,7 @@ import { formatGoalStatusMessage, type GoalChipAction } from "@t3tools/shared/co
 import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import { requestConfirmDialog } from "../confirmDialog";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 
@@ -21,6 +22,17 @@ export function useThreadGoalActions() {
       readonly threadId: ThreadId;
       readonly action: GoalChipAction;
     }) => {
+      if (input.action === "clear") {
+        // Deleting also stops any active run, so it needs an explicit confirm.
+        // Pause/resume stay instant.
+        const confirmed = await requestConfirmDialog(
+          "Delete this Objective?\nAny active run on this Thread will be stopped.",
+          { variant: "destructive" },
+        );
+        if (confirmed !== true) {
+          return;
+        }
+      }
       const run =
         input.action === "pause"
           ? pauseThreadGoal
