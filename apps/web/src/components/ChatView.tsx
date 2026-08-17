@@ -6182,6 +6182,13 @@ function ChatViewContent(props: ChatViewProps) {
         chromeVariant="collapse"
         composerDraftTarget={composerDraftTarget}
         onStateChange={handlePullRequestTabStatusChange}
+        onNavigatePullRequest={(number) =>
+          useRightPanelStore.getState().openPullRequest(activeThreadRef, {
+            projectId: activeRightPanelSurface.projectId,
+            repository: activeRightPanelSurface.repository,
+            number,
+          })
+        }
       />
     ) : activeRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
@@ -6257,6 +6264,7 @@ function ChatViewContent(props: ChatViewProps) {
             isServerThread={isServerThread}
             changeRequestState={activeThreadPr?.state ?? null}
             activeProjectName={activeProject?.title}
+            activeProjectRepository={threadRepository ?? undefined}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             activeProjectFaviconPath={activeProject?.faviconPath ?? null}
             openInCwd={gitCwd}

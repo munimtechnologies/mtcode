@@ -54,6 +54,7 @@ interface ChatHeaderProps {
   /** PR state feeding the settled classification, resolved by ChatView. */
   changeRequestState: ChangeRequestStateLike | null;
   activeProjectName: string | undefined;
+  activeProjectRepository: string | undefined;
   activeProjectCwd: string | null;
   activeProjectFaviconPath: string | null;
   openInCwd: string | null;
@@ -115,6 +116,7 @@ export const ChatHeader = memo(function ChatHeader({
   isServerThread,
   changeRequestState,
   activeProjectName,
+  activeProjectRepository,
   activeProjectCwd,
   activeProjectFaviconPath,
   openInCwd,
@@ -341,6 +343,7 @@ export const ChatHeader = memo(function ChatHeader({
         {activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}
+            repository={activeProjectRepository}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
             onOpenPullRequest={onOpenPullRequest}
             {...(draftId ? { draftId } : {})}

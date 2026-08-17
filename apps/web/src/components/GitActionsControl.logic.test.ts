@@ -1,8 +1,13 @@
 import type { VcsStatusResult } from "@t3tools/contracts";
 import { assert, describe, it } from "vite-plus/test";
 import {
+  adaptMenuItemsForStack,
+  adaptQuickActionForStack,
+  areGitControlsBusy,
   buildGitActionProgressStages,
   buildMenuItems,
+  canUsePullRequestStackActions,
+  prepareGitActionForStackSubmit,
   requiresDefaultBranchConfirmation,
   resolveAutoFeatureBranchName,
   resolveDefaultBranchActionDialogCopy,
@@ -10,7 +15,131 @@ import {
   resolveQuickAction,
   resolveThreadBranchUpdate,
   resolveThreadBranchMetadataPatch,
+  runWithPendingState,
+  shouldSubmitStackAfterGitAction,
 } from "./GitActionsControl.logic";
+
+describe("stack-aware Git actions", () => {
+  it.each([
+    ["available", true],
+    ["extension_missing", false],
+    ["unsupported", false],
+    [undefined, false],
+  ] as const)("gates stack actions for %s availability", (availability, expected) => {
+    assert.equal(canUsePullRequestStackActions(availability), expected);
+  });
+
+  it("keeps Git actions disabled while stack membership loads", () => {
+    assert.isTrue(
+      areGitControlsBusy({
+        gitActionRunning: false,
+        stackActionPending: false,
+        stackQueryPending: true,
+      }),
+    );
+  });
+
+  it("keeps automatic stack submission pending until it settles", async () => {
+    const pendingStates: boolean[] = [];
+    let finishSubmit!: () => void;
+    const submit = new Promise<void>((resolve) => {
+      finishSubmit = resolve;
+    });
+
+    const pendingSubmit = runWithPendingState(
+      (pending) => pendingStates.push(pending),
+      () => submit,
+    );
+
+    assert.deepEqual(pendingStates, [true]);
+    finishSubmit();
+    await pendingSubmit;
+    assert.deepEqual(pendingStates, [true, false]);
+  });
+
+  it("keeps one submit action in the stack menu", () => {
+    const items = buildMenuItems(status({ aheadCount: 1 }), false);
+
+    assert.deepEqual(
+      adaptMenuItemsForStack(items).map(({ id, label }) => [id, label]),
+      [
+        ["commit", "Commit"],
+        ["push", "Push & submit stack"],
+      ],
+    );
+  });
+
+  it("keeps the existing pull request action in the stack menu", () => {
+    assert.deepEqual(
+      adaptMenuItemsForStack([
+        {
+          id: "pr",
+          label: "View PR",
+          disabled: false,
+          icon: "pr",
+          kind: "open_pr",
+        },
+      ]),
+      [
+        {
+          id: "pr",
+          label: "View PR",
+          disabled: false,
+          icon: "pr",
+          kind: "open_pr",
+        },
+      ],
+    );
+  });
+
+  it("submits the stack after every action that pushes", () => {
+    assert.deepEqual(
+      (["commit", "push", "create_pr", "commit_push", "commit_push_pr"] as const).map(
+        shouldSubmitStackAfterGitAction,
+      ),
+      [false, true, true, true, true],
+    );
+  });
+
+  it("leaves pull request creation to GitHub Stack", () => {
+    assert.deepEqual(
+      (["commit", "push", "create_pr", "commit_push", "commit_push_pr"] as const).map(
+        prepareGitActionForStackSubmit,
+      ),
+      ["commit", "push", "push", "commit_push", "commit_push"],
+    );
+  });
+
+  it("uses one plain-language submit label for stacked branches", () => {
+    assert.deepInclude(
+      adaptQuickActionForStack({
+        label: "Commit",
+        disabled: false,
+        kind: "run_action",
+        action: "commit",
+      }),
+      { label: "Commit" },
+    );
+    assert.deepInclude(
+      adaptQuickActionForStack({
+        label: "Commit & push",
+        disabled: false,
+        kind: "run_action",
+        action: "commit_push",
+      }),
+      { label: "Commit & submit stack" },
+    );
+    assert.deepInclude(
+      adaptQuickActionForStack({
+        label: "Push",
+        disabled: false,
+        kind: "run_action",
+        action: "push",
+      }),
+      { label: "Submit stack" },
+    );
+  });
+});
 
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   return {

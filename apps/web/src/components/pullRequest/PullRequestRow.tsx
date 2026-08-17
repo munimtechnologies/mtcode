@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { LayersIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
@@ -22,6 +23,7 @@ function PullRequestRowImpl({
   showProvider,
   environmentLabel,
   matchedElsewhere,
+  stackPosition,
   onSelect,
 }: {
   entry: EnvironmentPullRequestEntry;
@@ -36,6 +38,7 @@ function PullRequestRowImpl({
    * commit message. Saying so is the difference between a result and an apparently random row.
    */
   matchedElsewhere?: boolean;
+  stackPosition?: { readonly position: number; readonly total: number } | undefined;
   onSelect: (entry: EnvironmentPullRequestEntry) => void;
 }) {
   const { Icon, providerName } = getSourceControlPresentationForKind(entry.provider);
@@ -60,7 +63,15 @@ function PullRequestRowImpl({
         baseBranch={entry.baseBranch}
       />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-foreground">{entry.title}</span>
+        <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+          <span className="truncate">{entry.title}</span>
+          {stackPosition ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+              <LayersIcon aria-hidden className="size-3" />
+              {stackPosition.position}/{stackPosition.total}
+            </span>
+          ) : null}
+        </span>
         <PullRequestMetaLine className="mt-0.5 text-xs text-muted-foreground/70">
           <span className="flex shrink-0 items-center gap-1">
             {showProvider ? (

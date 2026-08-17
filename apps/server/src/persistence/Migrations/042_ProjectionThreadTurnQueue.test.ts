@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("041_ProjectionThreadTurnQueue", (it) => {
+layer("042_ProjectionThreadTurnQueue", (it) => {
   it.effect("adds durable queued turns and message delivery state", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
