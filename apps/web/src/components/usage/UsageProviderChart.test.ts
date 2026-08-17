@@ -47,11 +47,12 @@ describe("buildDayColumns", () => {
       "2026-08-01",
       {
         day: "2026-08-01",
-        costUsd: 30,
-        totalTokens: 300,
+        costUsd: 40,
+        totalTokens: 400,
         byProvider: new Map([
           ["codex" as const, { costUsd: 10, totalTokens: 100 }],
           ["claude" as const, { costUsd: 20, totalTokens: 200 }],
+          ["grok" as const, { costUsd: 7, totalTokens: 70 }],
           ["opencode" as const, { costUsd: 3, totalTokens: 30 }],
         ]),
       },
@@ -69,12 +70,12 @@ describe("buildDayColumns", () => {
   ]);
 
   it("plots each day on its own", () => {
-    expect(buildDayColumns(days, byDay, "cost").map((column) => column.total)).toEqual([33, 0, 5]);
+    expect(buildDayColumns(days, byDay, "cost").map((column) => column.total)).toEqual([40, 0, 5]);
   });
 
   it("reads the requested metric", () => {
     expect(buildDayColumns(days, byDay, "tokens").map((column) => column.total)).toEqual([
-      330, 0, 50,
+      400, 0, 50,
     ]);
   });
 
@@ -87,6 +88,7 @@ describe("buildDayColumns", () => {
       { provider: "codex", value: 10 },
       { provider: "claude", value: 20 },
       { provider: "cursor", value: 0 },
+      { provider: "grok", value: 7 },
       { provider: "opencode", value: 3 },
     ]);
   });
@@ -103,23 +105,28 @@ describe("hourly chart columns", () => {
   it("zero-fills inactive hours and preserves hourly provider values", () => {
     const byHour = new Map([
       [
-        "2026-08-11T09:37:00.000Z",
+        "2026-08-01T12:00:00.000Z",
         {
-          day: "2026-08-11",
-          hourStart: "2026-08-11T09:37:00.000Z",
-          costUsd: 4,
-          totalTokens: 40,
-          byProvider: new Map([["codex" as const, { costUsd: 4, totalTokens: 40 }]]),
+          day: "2026-08-01",
+          hourStart: "2026-08-01T12:00:00.000Z",
+          costUsd: 12,
+          totalTokens: 120,
+          byProvider: new Map([
+            ["codex" as const, { costUsd: 5, totalTokens: 50 }],
+            ["claude" as const, { costUsd: 7, totalTokens: 70 }],
+          ]),
         },
       ],
     ]);
 
-    expect(
-      buildDayColumns(
-        ["2026-08-11T08:37:00.000Z", "2026-08-11T09:37:00.000Z", "2026-08-11T10:37:00.000Z"],
-        byHour,
-        "cost",
-      ).map((column) => column.total),
-    ).toEqual([0, 4, 0]);
+    const columns = buildDayColumns(
+      ["2026-08-01T11:00:00.000Z", "2026-08-01T12:00:00.000Z"],
+      byHour,
+      "cost",
+      "hour",
+    );
+
+    expect(columns.map((column) => column.total)).toEqual([0, 12]);
+    expect(columns[1]?.bands.find((band) => band.provider === "codex")?.value).toBe(5);
   });
 });

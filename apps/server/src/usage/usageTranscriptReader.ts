@@ -20,6 +20,7 @@ import {
   mightCarryUsage,
   parseClaudeLine,
   parseCodexLine,
+  parseGrokLine,
   type TranscriptProviderKind,
   type UsageRecord,
 } from "./usageTranscripts.ts";
@@ -40,6 +41,7 @@ export interface TranscriptFile {
 export async function listTranscriptFiles(
   root: string,
   sinceMs: number,
+  provider?: UsageProviderKind,
 ): Promise<readonly TranscriptFile[]> {
   const found: TranscriptFile[] = [];
 
@@ -57,6 +59,7 @@ export async function listTranscriptFiles(
         continue;
       }
       if (!entry.name.endsWith(".jsonl")) continue;
+      if (provider === "grok" && entry.name !== "updates.jsonl") continue;
       try {
         const stats = await NodeFSP.stat(child);
         if (stats.mtimeMs >= sinceMs) {
@@ -125,6 +128,12 @@ export async function readTranscriptRecords(
         }
         const record = parseCodexLine(line, codexState);
         if (record !== null) records.push(record);
+        continue;
+      }
+
+      if (provider === "grok") {
+        if (!mightCarryUsage(line, provider)) continue;
+        records.push(...parseGrokLine(line));
         continue;
       }
 

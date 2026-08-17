@@ -1,20 +1,21 @@
 # Review usage
 
-The Usage page combines Claude Code, Codex, Cursor, and OpenCode activity from your
-connected environments. It shows API-equivalent token cost, processed tokens,
-cache savings, provider shares, and model breakdowns. Subscription billing is
-separate from the raw token cost shown here.
+The Usage page combines Claude Code, Codex, Cursor, Grok, and OpenCode activity
+from your connected environments. It shows API-equivalent token cost, processed
+tokens, cache savings, provider shares, and model breakdowns. Subscription
+billing is separate from the raw token cost shown here.
 
 | Provider    | Source                                                                                |
 | ----------- | ------------------------------------------------------------------------------------- |
 | Claude Code | Local Claude session transcripts under the Claude home                                |
 | Codex       | Local Codex session transcripts under the Codex home                                  |
+| Grok        | Local Grok Build session transcripts under the Grok home                              |
 | Cursor      | Cursor dashboard usage export (requires Cursor desktop signed in on that environment) |
 | OpenCode    | Local OpenCode SQLite databases under the OpenCode data directory                     |
 
 Totals include work done outside T3 Code when the provider writes its own
-session history (Claude, Codex, and OpenCode) or when Cursor reports usage for
-the signed-in desktop account.
+session history (Claude, Codex, Grok, and OpenCode) or when Cursor reports
+usage for the signed-in desktop account.
 
 Prompt text, responses, and tool output are not sent to the client; environments
 return only aggregated usage totals. When a provider records a cost, T3 Code uses
@@ -46,10 +47,15 @@ installed and signed in. That uses the desktop session on the machine running
 the T3 Code server — the same host-trust model as scanning Claude or Codex
 homes. Any client paired to that environment can see the resulting usage.
 Environments without that desktop login show Cursor as uncovered and still
-report Claude, Codex, and OpenCode normally.
+report Claude, Codex, Grok, and OpenCode normally.
 
 ## OpenCode coverage
 
 For OpenCode, T3 Code honors `OPENCODE_DB` and discovers databases created by
 channel installs in OpenCode's data directory. In-memory OpenCode databases
 cannot be inspected by another process.
+
+## Grok coverage
+
+Grok Build writes session updates to `~/.grok/sessions/**/updates.jsonl`. Set
+`GROK_HOME` to scan a non-default Grok home directory.

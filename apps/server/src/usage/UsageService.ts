@@ -20,6 +20,7 @@ import {
   type UsageSummaryInput,
   UsageReadError,
 } from "@t3tools/contracts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -33,6 +34,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
+import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
@@ -120,6 +122,11 @@ const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeScanCacheFile = Schema.encodeEffect(ScanCacheJson);
 
+export function readGrokHomeOverride(environment: NodeJS.ProcessEnv): string | undefined {
+  const value = environment["GROK_HOME"]?.trim();
+  return value === "" ? undefined : value;
+}
+
 export class UsageService extends Context.Service<
   UsageService,
   {
@@ -155,6 +162,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
+  const hostEnvironment = yield* HostProcessEnvironment;
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
 
@@ -281,6 +289,9 @@ export const make = Effect.gen(function* () {
     const openCodeVolumeDir = openCodeDatabasePaths[0]
       ? path.dirname(openCodeDatabasePaths[0])
       : openCodeDataDir;
+    const grokHome = path.resolve(
+      expandHomePath(readGrokHomeOverride(hostEnvironment) ?? path.join(NodeOS.homedir(), ".grok")),
+    );
 
     return [
       {
@@ -291,6 +302,11 @@ export const make = Effect.gen(function* () {
       {
         provider: "codex" as const satisfies TranscriptProviderKind,
         dir: path.join(codexLayout.sharedHomePath, "sessions"),
+        kind: "jsonl" as const,
+      },
+      {
+        provider: "grok" as const satisfies TranscriptProviderKind,
+        dir: path.join(grokHome, "sessions"),
         kind: "jsonl" as const,
       },
       {
@@ -516,7 +532,7 @@ export const make = Effect.gen(function* () {
       }
 
       walkedRoots.push(dir);
-      const files = yield* Effect.promise(() => listTranscriptFiles(dir, windowStartMs));
+      const files = yield* Effect.promise(() => listTranscriptFiles(dir, windowStartMs, provider));
       let scannedFiles = 0;
       let skippedFiles = 0;
       // Distinct per directory. Buckets carry per-cell session counts, but a
