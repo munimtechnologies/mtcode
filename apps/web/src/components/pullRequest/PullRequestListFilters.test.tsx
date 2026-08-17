@@ -3,7 +3,11 @@ import { CircleIcon } from "lucide-react";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { PullRequestFiltersMenu, pullRequestProjectKey } from "./PullRequestListFilters";
+import {
+  PullRequestFiltersMenu,
+  pullRequestProjectKey,
+  SORT_OPTIONS,
+} from "./PullRequestListFilters";
 
 function findValueChange(
   node: ReactNode,
@@ -56,6 +60,7 @@ function menu(overrides: Partial<Parameters<typeof PullRequestFiltersMenu>[0]>) 
     filters: {},
     onFilters: () => undefined,
     sort: "updated" as const,
+    sortOptions: SORT_OPTIONS,
     onSort: () => undefined,
     host: undefined,
     hostOptions: [],

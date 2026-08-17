@@ -3413,7 +3413,7 @@ it.effect("reads the repository a project's own repository was forked from", () 
       ],
     });
 
-    const result = yield* service.list({ state: "open", includeUpstream: true });
+    const result = yield* service.list({ state: "open", upstream: "include" });
 
     assert.deepStrictEqual(asked.toSorted(), ["pingdotgg/t3code", "sheehanmunim/t3code"]);
     // The upstream row is carried by the fork's project — that is the checkout it was read
@@ -3485,7 +3485,7 @@ it.effect("does not repeat an upstream the workspace already has a project for",
       ],
     });
 
-    yield* service.list({ state: "open", includeUpstream: true });
+    yield* service.list({ state: "open", upstream: "include" });
 
     assert.deepStrictEqual(asked.toSorted(), ["pingdotgg/t3code", "sheehanmunim/t3code"]);
   }),
@@ -3565,5 +3565,40 @@ it.effect("still refuses a repository the project has nothing to do with", () =>
 
     assert.strictEqual(error._tag, "PullRequestOperationError");
     assert.include(error.message, "does not belong to the selected project");
+  }),
+);
+
+it.effect("reads only the upstream when that is all that was asked for", () =>
+  Effect.gen(function* () {
+    const asked: string[] = [];
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "p1",
+          title: "t3code",
+          workspaceRoot: "/a",
+          repository: "sheehanmunim/t3code",
+        }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getUpstreamRepository: () => Effect.succeed("pingdotgg/t3code"),
+          listChangeRequests: ({ repository }) => {
+            asked.push(repository);
+            return Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            });
+          },
+        }),
+      ],
+    });
+
+    const result = yield* service.list({ state: "open", upstream: "only" });
+
+    // The fork's own repository is not read at all, so the slice is the upstream's alone.
+    assert.deepStrictEqual(asked, ["pingdotgg/t3code"]);
+    assert.isTrue(result.entries.every((entry) => entry.isUpstream === true));
   }),
 );

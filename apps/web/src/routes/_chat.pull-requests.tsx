@@ -16,6 +16,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
   EyeIcon,
+  GitForkIcon,
   MonitorIcon,
   ServerIcon,
   GitMergeIcon,
@@ -59,8 +60,10 @@ import {
   type PullRequestSortOrder,
 } from "../components/pullRequest/pullRequestList.logic";
 import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
-import { useClientSettings } from "~/hooks/useSettings";
-import { createModelSelection } from "@t3tools/shared/model";
+import { useAtomValue } from "@effect/atom-react";
+import { usePrimarySettings } from "~/hooks/useSettings";
+import { resolveAppModelSelectionState } from "~/modelSelection";
+import { primaryServerProvidersAtom } from "~/state/server";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
   PullRequestFiltersMenu,
@@ -69,6 +72,8 @@ import {
   pullRequestProjectKey,
   type PullRequestExpectedHost,
   type PullRequestFilterOption,
+  RECENCY_ONLY_SORT_OPTIONS,
+  SORT_OPTIONS,
 } from "../components/pullRequest/PullRequestListFilters";
 import { PullRequestListEmptyState } from "../components/pullRequest/PullRequestListEmptyState";
 import { PullRequestListGhost } from "../components/pullRequest/PullRequestGhosts";
@@ -110,7 +115,7 @@ import { getSourceControlPresentationForKind } from "~/sourceControlPresentation
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 export interface PullRequestsSearch {
-  readonly involvement: PullRequestInvolvement;
+  readonly involvement: PullRequestFeed;
   readonly state: PullRequestListState;
   /**
    * What each section is ordered by. Optional so a link written before there was a choice — and
@@ -150,11 +155,21 @@ export interface PullRequestsSearch {
 }
 
 // The state filters wear the same glyphs the rows do, so the two read as one vocabulary.
+/**
+ * The upstream view sits on the involvement control because that is where the reader already
+ * chooses whose work they are looking at — but it is a repository scope rather than an
+ * involvement, so it carries its own value and is unfolded into the two fields the server takes.
+ */
+const UPSTREAM_FEED = "upstream";
+
+type PullRequestFeed = PullRequestInvolvement | typeof UPSTREAM_FEED;
+
 const INVOLVEMENT_TABS = [
   { value: "all", label: "All", Icon: LayersIcon },
   { value: "reviewing", label: "Reviewing", Icon: EyeIcon },
   { value: "authored", label: "Authored", Icon: PenLineIcon },
-] as const satisfies ReadonlyArray<PullRequestFilterOption<PullRequestInvolvement>>;
+  { value: UPSTREAM_FEED, label: "Upstream", Icon: GitForkIcon },
+] as const satisfies ReadonlyArray<PullRequestFilterOption<PullRequestFeed>>;
 
 const STATE_TABS = [
   { value: "all", label: "All", Icon: LayersIcon },
@@ -197,7 +212,11 @@ const EMPTY_PENDING_SURFACES = new Set<string>();
 export const Route = createFileRoute("/_chat/pull-requests")({
   validateSearch: (raw: Record<string, unknown>): PullRequestsSearch => ({
     involvement:
-      raw.involvement === "reviewing" || raw.involvement === "authored" ? raw.involvement : "all",
+      raw.involvement === "reviewing" ||
+      raw.involvement === "authored" ||
+      raw.involvement === UPSTREAM_FEED
+        ? raw.involvement
+        : "all",
     state:
       raw.state === "closed" || raw.state === "merged" || raw.state === "all" ? raw.state : "open",
     sort: isPullRequestSortOrder(raw.sort) ? raw.sort : "updated",
@@ -458,15 +477,15 @@ function PullRequestsRouteView() {
     selectedProjectId: undefined,
     selectedEnvironmentId: undefined,
   };
-  // Ranking runs on whichever agent the reader has put first in their favourites: they already
-  // chose a model there, and a page with no composer has nowhere else to ask.
-  const rankingFavorite = useClientSettings((settings) => settings.favorites?.[0]);
+  // The same model the rest of the app generates text with — commit messages, change request
+  // titles — rather than whatever happens to sit first in the composer's favourites. That one is
+  // chosen for writing code and is the reader's scarcest quota; ranking is bulk classification
+  // over titles, and it is configurable in Settings for anyone who wants it to be something else.
+  const rankingSettings = usePrimarySettings();
+  const rankingProviders = useAtomValue(primaryServerProvidersAtom);
   const rankingModel = useMemo(
-    () =>
-      rankingFavorite === undefined
-        ? null
-        : createModelSelection(rankingFavorite.provider, rankingFavorite.model, []),
-    [rankingFavorite],
+    () => resolveAppModelSelectionState(rankingSettings, rankingProviders),
+    [rankingSettings, rankingProviders],
   );
 
   const updateListScope = (patch: {
@@ -482,6 +501,12 @@ function PullRequestsRouteView() {
   // Searching asks the hosts, which takes a round trip, so the text is held for a moment before
   // it is sent. Until it lands, the rows already on screen are narrowed locally: the answer is
   // late but the page is not.
+  // The upstream view is not an involvement the hosts understand: it reads everybody's work on
+  // one other repository, so it asks for `all` and narrows by repository instead.
+  const upstreamFeed = search.involvement === UPSTREAM_FEED;
+  const involvement: PullRequestInvolvement = upstreamFeed ? "all" : search.involvement;
+  const upstreamMode = upstreamFeed ? ("only" as const) : undefined;
+
   const typedQuery = (search.q ?? "").trim();
   const sentQuery = useDebouncedValue(typedQuery, SEARCH_DEBOUNCE_MS);
   const querySettled = typedQuery === sentQuery;
@@ -622,7 +647,7 @@ function PullRequestsRouteView() {
               // The hosts narrow by involvement themselves — GitHub by author and review
               // request, and so on — so asking them is the difference between a page of results
               // and a page of everything with the answer somewhere further down it.
-              involvement: search.involvement,
+              involvement,
               limit: pageSize,
               ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
               ...(projectIds ? { projectIds } : {}),
@@ -630,10 +655,7 @@ function PullRequestsRouteView() {
               ...(hasFilters ? { filters } : {}),
               ...(sentParsed.text ? { query: sentParsed.text } : {}),
               ...(cursors === undefined ? {} : { cursors }),
-              // Only for the grouped view: the Authored and Reviewing tabs are about the reader,
-              // and reading somebody else's repository for them would cost a slice per fork to
-              // fill a section neither tab shows.
-              ...(search.involvement === "all" ? { includeUpstream: true } : {}),
+              ...(upstreamMode === undefined ? {} : { upstream: upstreamMode }),
             } satisfies PullRequestListInput,
           },
         ];
@@ -670,13 +692,13 @@ function PullRequestsRouteView() {
         environmentId,
         input: {
           state: search.state,
-          involvement: search.involvement,
+          involvement,
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
-          ...(search.involvement === "all" ? { includeUpstream: true } : {}),
+          ...(upstreamMode === undefined ? {} : { upstream: upstreamMode }),
         } satisfies PullRequestListInput,
       })),
     [
@@ -685,7 +707,7 @@ function PullRequestsRouteView() {
       environmentQueries,
       scopedProjectId,
       search.host,
-      search.involvement,
+      involvement,
       search.state,
     ],
   );
@@ -1026,7 +1048,7 @@ function PullRequestsRouteView() {
 
   const entries = useMemo(() => {
     const known = ordered?.key === filterKey ? ordered.entries : (listData?.entries ?? []);
-    const involvementEntries = filterPullRequestsByInvolvement(known, viewers, search.involvement);
+    const involvementEntries = filterPullRequestsByInvolvement(known, viewers, involvement);
     // The hosts search more than the row shows — a body, a review, a commit message — so once
     // their answer is in, narrowing it again here would throw away matches the reader asked for.
     // The local pass stands in for the answer that has not arrived yet, and for the hosts that
@@ -1127,7 +1149,7 @@ function PullRequestsRouteView() {
   // agent needs no reads of its own. Every candidate goes in — the server splits a long set across
   // prompts rather than taking the first few — so a section reordered by this is reordered whole.
   const rankTargets = useMemo(() => {
-    if (search.sort !== "useful" || rankingModel === null) return NO_RANK_TARGETS;
+    if (search.sort !== "useful") return NO_RANK_TARGETS;
     const byRepository = new Map<
       string,
       {
@@ -1164,7 +1186,9 @@ function PullRequestsRouteView() {
     }
     return [...byRepository.values()];
   }, [entries, rankingModel, search.sort]);
-  const { usefulness } = usePullRequestUsefulness(rankTargets);
+  const { usefulness, error: rankingErrorRaw } = usePullRequestUsefulness(rankTargets);
+  // Only worth saying when an order that depends on it was asked for.
+  const rankingError = search.sort === "useful" ? rankingErrorRaw : null;
 
   const groups = useMemo(() => {
     if (search.involvement !== "all") return [{ key: "others" as const, label: "", entries }];
@@ -1477,6 +1501,14 @@ function PullRequestsRouteView() {
         </div>
       )}
 
+      {rankingError !== null ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+          {/* Named rather than swallowed: ranking is a model call, and the usual reason it does
+              not answer is a limit on the model doing the judging — which the reader can only act
+              on if they are told. The rows are still shown, in the order they came in. */}
+          <span>Could not rank these pull requests. {rankingError}</span>
+        </div>
+      ) : null}
       {listQuery.error && listData !== null ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
           <span>The latest request failed. Showing the last pull requests loaded.</span>
@@ -1534,12 +1566,15 @@ function PullRequestsRouteView() {
       onState={(state) => updateListScope({ state })}
       involvement={search.involvement}
       involvementOptions={INVOLVEMENT_TABS}
-      onInvolvement={(involvement) => updateListScope({ involvement })}
+      onInvolvement={(involvement) =>
+        updateListScope({ involvement: involvement as PullRequestFeed })
+      }
       filters={menuFilters}
       onFilters={(next) =>
         updateListScope({ draft: next.draft, review: next.review, checks: next.checks })
       }
-      sort={search.sort ?? "updated"}
+      sort={upstreamFeed ? (search.sort ?? "updated") : "updated"}
+      sortOptions={upstreamFeed ? SORT_OPTIONS : RECENCY_ONLY_SORT_OPTIONS}
       onSort={(sort) => updateListScope({ sort })}
       host={search.host}
       hostOptions={hostMenuOptions}
@@ -1569,7 +1604,8 @@ function PullRequestsRouteView() {
     state: search.state,
     host: search.host,
     hostMenuOptions,
-    onInvolvement: (involvement: PullRequestInvolvement) => updateListScope({ involvement }),
+    onInvolvement: (involvement: string) =>
+      updateListScope({ involvement: involvement as PullRequestFeed }),
     onState: (state: PullRequestListState) => updateListScope({ state }),
     onHost: (host: string | undefined) => updateListScope({ host }),
     searchInput,
@@ -1850,11 +1886,11 @@ function PullRequestsColumn({
   refreshing: boolean;
   onRefresh: () => void;
   searchValue: string;
-  involvement: PullRequestInvolvement;
+  involvement: PullRequestFeed;
   state: PullRequestListState;
   host: string | undefined;
   hostMenuOptions: ReadonlyArray<PullRequestFilterOption<string>>;
-  onInvolvement: (involvement: PullRequestInvolvement) => void;
+  onInvolvement: (involvement: string) => void;
   onState: (state: PullRequestListState) => void;
   onHost: (host: string | undefined) => void;
   searchInput: ReactNode;

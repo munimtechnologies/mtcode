@@ -580,11 +580,15 @@ export const PullRequestListInput = Schema.Struct({
    */
   query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /**
-   * Also read the repository each project's own repository was forked from. Off by default: it
-   * costs a repository lookup per project and an extra slice per fork, and a workspace of
-   * non-forks would pay both for nothing.
+   * How the repositories each project's own repository was forked from are treated. Absent leaves
+   * them out, which is the default: the lookup costs a request per project and the read costs a
+   * slice per fork, and a workspace of non-forks would pay both for nothing.
+   *
+   * `only` reads them instead of the workspace's own repositories rather than as well, so an
+   * upstream view has the whole slice to itself — an upstream is usually far busier than the fork
+   * watching it, and sharing one budget is how it crowds everything else out.
    */
-  includeUpstream: Schema.optional(Schema.Boolean),
+  upstream: Schema.optional(Schema.Literals(["include", "only"])),
 });
 export type PullRequestListInput = typeof PullRequestListInput.Type;
 

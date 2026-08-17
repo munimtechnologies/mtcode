@@ -874,9 +874,9 @@ export const make = Effect.gen(function* () {
         viewerRoots,
       } = yield* listWorkspaceProjects(input);
       const projects =
-        input.includeUpstream === true
-          ? yield* withUpstreamProjects(workspaceProjects)
-          : workspaceProjects;
+        input.upstream === undefined
+          ? workspaceProjects
+          : yield* withUpstreamProjects(workspaceProjects, input.upstream);
       // Counted over the workspace's own projects rather than the read set: an upstream is a
       // repository this listing reads, not a project the reader has, and counting it would
       // overstate the host in the switcher.
@@ -1232,6 +1232,7 @@ export const make = Effect.gen(function* () {
    */
   const withUpstreamProjects = (
     supported: ReadonlyArray<SupportedProject>,
+    mode: "include" | "only",
   ): Effect.Effect<ReadonlyArray<SupportedProject>> =>
     Effect.forEach(supported, (project) => resolveUpstream(project), {
       concurrency: REPOSITORY_CONCURRENCY,
@@ -1249,6 +1250,7 @@ export const make = Effect.gen(function* () {
           seen.add(key);
           added.push({ ...project, repository: upstream, isUpstream: true });
         }
+        if (mode === "only") return added;
         return added.length === 0 ? supported : [...supported, ...added];
       }),
     );
@@ -2034,7 +2036,7 @@ export const make = Effect.gen(function* () {
         limit,
         query,
         cursorEntries,
-        includeUpstream,
+        upstream,
       ] = JSON.parse(key) as [
         number,
         string,
@@ -2046,7 +2048,7 @@ export const make = Effect.gen(function* () {
         number | null,
         string | null,
         ReadonlyArray<[string, string]> | null,
-        boolean | null,
+        string | null,
       ];
       return listUncached({
         state,
@@ -2058,7 +2060,7 @@ export const make = Effect.gen(function* () {
         ...(limit === null ? {} : { limit }),
         ...(query === null ? {} : { query }),
         ...(cursorEntries === null ? {} : { cursors: Object.fromEntries(cursorEntries) }),
-        ...(includeUpstream === null ? {} : { includeUpstream }),
+        ...(upstream === null ? {} : { upstream }),
       } as PullRequestListInput);
     },
     {
@@ -2095,7 +2097,7 @@ export const make = Effect.gen(function* () {
       input.cursors === undefined
         ? null
         : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
-      input.includeUpstream ?? null,
+      input.upstream ?? null,
     ]);
     return staleList(key, Cache.get(listCache, key));
   };

@@ -127,10 +127,13 @@ const DRAFT_OPTIONS = [
   { value: "hide", label: "Hide drafts", Icon: EyeOffIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
 
-const SORT_OPTIONS = [
+export const SORT_OPTIONS = [
   { value: "updated", label: "Latest", Icon: ClockIcon },
   { value: "useful", label: "Most useful", Icon: SparklesIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
+
+/** Without ranking there is one order, so the group shows the one it is already on. */
+export const RECENCY_ONLY_SORT_OPTIONS = [SORT_OPTIONS[0]] as const;
 
 const REVIEW_OPTIONS = [
   { value: UNFILTERED_VALUE, label: "All", Icon: LayersIcon },
@@ -205,6 +208,7 @@ export function PullRequestFiltersMenu({
   filters,
   onFilters,
   sort,
+  sortOptions,
   onSort,
   host,
   hostOptions,
@@ -221,14 +225,25 @@ export function PullRequestFiltersMenu({
   state: PullRequestListState;
   stateOptions: ReadonlyArray<PullRequestFilterOption<PullRequestListState>>;
   onState: (state: PullRequestListState) => void;
-  involvement: PullRequestInvolvement;
-  involvementOptions: ReadonlyArray<PullRequestFilterOption<PullRequestInvolvement>>;
-  onInvolvement: (involvement: PullRequestInvolvement) => void;
+  /**
+   * Widened past `PullRequestInvolvement` because the page hangs one more view off this control:
+   * the upstream feed is a repository scope rather than an involvement, and the page unfolds it
+   * into the fields the server takes. The menu itself only ever shows options and reports back.
+   */
+  involvement: string;
+  involvementOptions: ReadonlyArray<PullRequestFilterOption<string>>;
+  onInvolvement: (involvement: string) => void;
   /** The narrowings beyond state and involvement; an absent field is that group unfiltered. */
   filters: PullRequestListFilters;
   onFilters: (filters: PullRequestListFilters) => void;
   /** What each section is ordered by. */
   sort: PullRequestSortOrder;
+  /**
+   * Which orders to offer. Ranking asks an agent what is worth porting, which is a question only
+   * the upstream view can answer — so the page leaves that option out elsewhere rather than
+   * offering an order that would quietly do nothing.
+   */
+  sortOptions: ReadonlyArray<PullRequestFilterOption<string>>;
   onSort: (sort: PullRequestSortOrder) => void;
   host: string | undefined;
   /**
@@ -319,7 +334,7 @@ export function PullRequestFiltersMenu({
         <PullRequestFilterRadioGroup
           label="Sort"
           value={sort}
-          options={SORT_OPTIONS}
+          options={sortOptions}
           onChange={(next) => onSort(isPullRequestSortOrder(next) ? next : "updated")}
         />
         <MenuSeparator />
