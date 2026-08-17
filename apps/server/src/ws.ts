@@ -81,6 +81,9 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
+import { importHermesSessionsWithSettings } from "./provider/hermesImport.ts";
+import { importLocalChatsWithSettings } from "./provider/localChatImport.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -298,9 +301,32 @@ export function isThreadDetailEvent(
   event: OrchestrationEvent,
 ): event is Extract<
   OrchestrationEvent,
+<<<<<<< HEAD
   { type: (typeof THREAD_DETAIL_STREAM_EVENT_TYPES)[number] }
 > {
   return (THREAD_DETAIL_STREAM_EVENT_TYPES as ReadonlyArray<string>).includes(event.type);
+=======
+  {
+    type:
+      | "thread.message-sent"
+      | "thread.history-imported"
+      | "thread.proposed-plan-upserted"
+      | "thread.activity-appended"
+      | "thread.turn-diff-completed"
+      | "thread.reverted"
+      | "thread.session-set";
+  }
+> {
+  return (
+    event.type === "thread.message-sent" ||
+    event.type === "thread.history-imported" ||
+    event.type === "thread.proposed-plan-upserted" ||
+    event.type === "thread.activity-appended" ||
+    event.type === "thread.turn-diff-completed" ||
+    event.type === "thread.reverted" ||
+    event.type === "thread.session-set"
+  );
+>>>>>>> pr-7160
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
@@ -383,6 +409,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      yield* ProviderSessionDirectory.ProviderSessionDirectory;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -1498,6 +1525,22 @@ const makeWsRpcLayer = (
               ? providerRegistry.refreshInstance(input.instanceId)
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverImportHermesSessions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverImportHermesSessions,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) => importHermesSessionsWithSettings(settings, input)),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverImportLocalChats]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverImportLocalChats,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) => importLocalChatsWithSettings(settings, input)),
+            ),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>

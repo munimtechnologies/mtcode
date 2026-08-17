@@ -856,6 +856,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.message-sent":
+        case "thread.history-imported":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
         case "thread.approval-response-requested":
@@ -1074,6 +1075,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+<<<<<<< HEAD
         case "thread.turn-queued": {
           yield* projectionThreadMessageRepository.setDeliveryState({
             messageId: event.payload.messageId,
@@ -1100,6 +1102,26 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           attachmentSideEffects.prunedThreadRelativePaths.set(
             event.payload.threadId,
             collectThreadAttachmentRelativePaths(event.payload.threadId, keptRows),
+=======
+        case "thread.history-imported": {
+          yield* Effect.forEach(
+            event.payload.messages,
+            (message) =>
+              projectionThreadMessageRepository.upsert({
+                messageId: message.id,
+                threadId: event.payload.threadId,
+                turnId: message.turnId,
+                role: message.role,
+                text: message.text,
+                ...(message.attachments !== undefined
+                  ? { attachments: [...message.attachments] }
+                  : {}),
+                isStreaming: false,
+                createdAt: message.createdAt,
+                updatedAt: message.updatedAt,
+              }),
+            { concurrency: 16, discard: true },
+>>>>>>> pr-7160
           );
           return;
         }
@@ -1270,6 +1292,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             createdAt: event.payload.activity.createdAt,
           });
+          return;
+
+        case "thread.history-imported":
+          yield* Effect.forEach(
+            event.payload.activities,
+            (activity) =>
+              projectionThreadActivityRepository.upsert({
+                activityId: activity.id,
+                threadId: event.payload.threadId,
+                turnId: activity.turnId,
+                tone: activity.tone,
+                kind: activity.kind,
+                summary: activity.summary,
+                payload: activity.payload,
+                ...(activity.sequence !== undefined ? { sequence: activity.sequence } : {}),
+                createdAt: activity.createdAt,
+              }),
+            { concurrency: 16, discard: true },
+          );
           return;
 
         case "thread.reverted": {

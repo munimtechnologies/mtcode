@@ -129,7 +129,13 @@ export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const ThreadTurnDeliveryMode = Schema.Literals(["immediate", "after-current"]);
 export type ThreadTurnDeliveryMode = typeof ThreadTurnDeliveryMode.Type;
-export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
+export const ProviderRequestKind = Schema.Literals([
+  "command",
+  "file-read",
+  "file-change",
+  "tool",
+  "permissions",
+]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
 export type AssistantDeliveryMode = typeof AssistantDeliveryMode.Type;
@@ -1025,6 +1031,31 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadMessageImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+
+const ThreadHistoryImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.history.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messages: Schema.Array(
+    Schema.Struct({
+      messageId: MessageId,
+      role: Schema.Literals(["user", "assistant"]),
+      text: Schema.String,
+      createdAt: IsoDateTime,
+    }),
+  ),
+  activities: Schema.Array(OrchestrationThreadActivity),
+});
+
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
   type: Schema.Literal("thread.proposed-plan.upsert"),
   commandId: CommandId,
@@ -1076,6 +1107,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageImportCommand,
+  ThreadHistoryImportCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
@@ -1109,9 +1142,13 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
+<<<<<<< HEAD
   "thread.turn-queued",
   "thread.queued-turn-dispatched",
   "thread.queued-turn-cancelled",
+=======
+  "thread.history-imported",
+>>>>>>> pr-7160
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -1282,6 +1319,13 @@ export const ThreadMessageSentPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ThreadHistoryImportedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messages: Schema.Array(OrchestrationMessage),
+  activities: Schema.Array(OrchestrationThreadActivity),
+  updatedAt: IsoDateTime,
+});
+
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
@@ -1377,6 +1421,9 @@ export const OrchestrationEventMetadata = Schema.Struct({
   adapterKey: Schema.optional(TrimmedNonEmptyString),
   requestId: Schema.optional(ApprovalRequestId),
   ingestedAt: Schema.optional(IsoDateTime),
+  // Historical imports must project like ordinary messages without
+  // triggering live-turn side effects such as checkpoint capture.
+  importedHistory: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationEventMetadata = typeof OrchestrationEventMetadata.Type;
 
@@ -1485,6 +1532,7 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+<<<<<<< HEAD
     type: Schema.Literal("thread.turn-queued"),
     payload: ThreadTurnQueuedPayload,
   }),
@@ -1497,6 +1545,10 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.queued-turn-cancelled"),
     payload: ThreadQueuedTurnCancelledPayload,
+=======
+    type: Schema.Literal("thread.history-imported"),
+    payload: ThreadHistoryImportedPayload,
+>>>>>>> pr-7160
   }),
   Schema.Struct({
     ...EventBaseFields,

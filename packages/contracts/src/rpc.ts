@@ -68,6 +68,12 @@ import {
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
+  HermesImportSessionsError,
+  HermesImportSessionsInput,
+  HermesImportSessionsResult,
+} from "./hermes.ts";
+import { LocalChatImportError, LocalChatImportInput, LocalChatImportResult } from "./chatImport.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestCommentInput,
@@ -275,6 +281,8 @@ export const WS_METHODS = {
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverImportHermesSessions: "server.importHermesSessions",
+  serverImportLocalChats: "server.importLocalChats",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -382,6 +390,22 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   }),
   success: ServerProviderUpdatedPayload,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsServerImportHermesSessionsRpc = Rpc.make(WS_METHODS.serverImportHermesSessions, {
+  payload: HermesImportSessionsInput,
+  success: HermesImportSessionsResult,
+  error: Schema.Union([
+    HermesImportSessionsError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsServerImportLocalChatsRpc = Rpc.make(WS_METHODS.serverImportLocalChats, {
+  payload: LocalChatImportInput,
+  success: LocalChatImportResult,
+  error: Schema.Union([LocalChatImportError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
@@ -1096,6 +1120,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerImportHermesSessionsRpc,
+  WsServerImportLocalChatsRpc,
   WsServerUpdateProviderRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,

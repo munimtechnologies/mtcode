@@ -89,6 +89,7 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = Schema.Struct({
   ...ProjectionThread.fields,
   modelSelection: Schema.fromJsonString(ModelSelection),
+  goal: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadGoal)),
   hasQueuedTurns: Schema.optional(Schema.Number),
 });
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(

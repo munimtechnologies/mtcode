@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
+  ThreadHistoryImportedPayload,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
@@ -674,6 +675,7 @@ export function projectEvent(
         };
       });
 
+<<<<<<< HEAD
     case "thread.turn-queued": {
       const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
       if (!thread) {
@@ -725,6 +727,30 @@ export function projectEvent(
         }),
       });
     }
+=======
+    case "thread.history-imported":
+      return decodeForEvent(
+        ThreadHistoryImportedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: [...thread.messages, ...payload.messages].slice(-MAX_THREAD_MESSAGES),
+              activities: [...thread.activities, ...payload.activities]
+                .toSorted(compareThreadActivities)
+                .slice(-500),
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
+      );
+>>>>>>> pr-7160
 
     case "thread.session-set":
       return Effect.gen(function* () {
