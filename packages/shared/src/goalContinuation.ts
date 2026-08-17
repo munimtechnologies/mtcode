@@ -21,7 +21,9 @@ const CONTINUATION_TEMPLATE = [
 ].join("\n");
 
 export function buildGoalContinuationPrompt(objective: string): string {
-  return CONTINUATION_TEMPLATE.replace(OBJECTIVE_PLACEHOLDER, objective);
+  // Function replacer: a string replacement would let `$&`-style tokens in the
+  // Objective rewrite the prompt.
+  return CONTINUATION_TEMPLATE.replace(OBJECTIVE_PLACEHOLDER, () => objective);
 }
 
 export function goalContinuationCommandId(input: {

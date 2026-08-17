@@ -22,6 +22,13 @@ describe("buildGoalContinuationPrompt", () => {
     expect(prompt.toLowerCase()).not.toContain("/goal");
     expect(prompt.toLowerCase()).not.toContain("slash goal");
   });
+
+  it("interpolates replacement-token characters in the Objective literally", () => {
+    const objective = "Replace $& with $` and $' plus $1";
+    const prompt = buildGoalContinuationPrompt(objective);
+    expect(prompt).toContain(objective);
+    expect(prompt).not.toContain("Continue working toward this Objective until $1");
+  });
 });
 
 describe("goalContinuationCommandId", () => {
