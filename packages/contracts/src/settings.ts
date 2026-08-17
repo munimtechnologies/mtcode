@@ -634,6 +634,9 @@ export const ComputerHistorySettings = Schema.Struct({
 export type ComputerHistorySettings = typeof ComputerHistorySettings.Type;
 
 export const ServerSettings = Schema.Struct({
+  environmentLabel: TrimmedString.check(Schema.isMaxLength(40)).pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+  ),
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
   // including prior opt-ins, resets to the buffered default.
@@ -830,6 +833,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
 
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
+  environmentLabel: Schema.optionalKey(TrimmedString.check(Schema.isMaxLength(40))),
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
