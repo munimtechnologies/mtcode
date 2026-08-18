@@ -39,6 +39,8 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     ServerProvider,
     ServerSettingsError | ProviderProbeTimeoutError
   >;
+  /** Run immediately before a manual or periodic refresh check. */
+  readonly beforeRefresh?: Effect.Effect<void>;
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
@@ -229,8 +231,13 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     refreshSemaphore.withPermits(1)(applySnapshotBase(nextSettings, options));
 
   const refreshSnapshot = Effect.fn("refreshSnapshot")(function* () {
-    const nextSettings = yield* input.getSettings;
-    return yield* applySnapshot(nextSettings, { forceRefresh: true });
+    return yield* refreshSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        yield* input.beforeRefresh ?? Effect.void;
+        const nextSettings = yield* input.getSettings;
+        return yield* applySnapshotBase(nextSettings, { forceRefresh: true });
+      }),
+    );
   });
 
   const hasProviderStatusDemand = Effect.gen(function* () {
