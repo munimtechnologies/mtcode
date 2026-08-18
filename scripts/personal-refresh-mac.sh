@@ -16,8 +16,17 @@ echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh start ===="
 
 cd "$REPO"
 git fetch "$PERSONAL_REMOTE" personal
+# Never rewrite local work (policy set 2026-08-18): fast-forward only, and leave a dirty or
+# diverged checkout alone — an agent session may be mid-task in this tree.
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "checkout is dirty (uncommitted work in progress) — skipping this run" >&2
+  exit 0
+fi
 git checkout personal
-git reset --hard "$PERSONAL_REMOTE/personal"
+if ! git merge --ff-only "$PERSONAL_REMOTE/personal"; then
+  echo "local personal has diverged from ${PERSONAL_REMOTE}/personal — not resetting; reconcile by hand" >&2
+  exit 0
+fi
 echo "HEAD=$(git rev-parse --short HEAD) $(git log -1 --oneline)"
 
 # Bake T3 Connect public client config into desktop artifacts (gitignored .env).
