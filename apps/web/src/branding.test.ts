@@ -8,6 +8,7 @@ const originalWindow = globalThis.window;
 
 afterEach(() => {
   vi.resetModules();
+  vi.unstubAllEnvs();
 
   if (originalWindow === undefined) {
     Reflect.deleteProperty(globalThis, "window");
@@ -37,6 +38,18 @@ describe("branding", () => {
     expect(branding.APP_BASE_NAME).toBe("T3 Code");
     expect(branding.APP_STAGE_LABEL).toBe("Nightly");
     expect(branding.APP_DISPLAY_NAME).toBe("T3 Code (Nightly)");
+  });
+
+  it("applies stage label and display name env overrides", async () => {
+    vi.stubEnv("VITE_APP_BASE_NAME", "MT Code");
+    vi.stubEnv("VITE_APP_STAGE_LABEL", "Nightly");
+    vi.stubEnv("VITE_APP_DISPLAY_NAME", "MT Code");
+
+    const branding = await import("./branding");
+
+    expect(branding.APP_BASE_NAME).toBe("MT Code");
+    expect(branding.APP_STAGE_LABEL).toBe("Nightly");
+    expect(branding.APP_DISPLAY_NAME).toBe("MT Code");
   });
 
   it("normalizes hosted app channel metadata", async () => {
