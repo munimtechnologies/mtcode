@@ -454,28 +454,30 @@
       }
 
       /* Brands that ship a wordmark (see resolveWebIconOverrides) swap it in for
-         the app icon. It is painted as a mask tinted with the boot foreground so
-         one black asset reads correctly on both light and dark boot backgrounds. */
-      #boot-shell-wordmark-probe {
+         the app icon. The image is black-on-transparent; invert it in dark mode
+         so the same asset reads on both boot backgrounds, like the Motes splash. */
+      #boot-shell-wordmark {
         display: none;
+        width: min(32.5rem, 52vw);
+        height: auto;
+        object-fit: contain;
       }
 
       html.boot-has-wordmark #boot-shell-logo {
         display: none;
       }
 
-      html.boot-has-wordmark #boot-shell-card {
-        width: 200px;
-        height: 56px;
+      html.boot-has-wordmark #boot-shell-wordmark {
+        display: block;
       }
 
-      html.boot-has-wordmark #boot-shell-card::after {
-        content: "";
-        width: 200px;
-        height: 56px;
-        background-color: var(--boot-foreground);
-        -webkit-mask: url("/boot-wordmark.png") center / contain no-repeat;
-        mask: url("/boot-wordmark.png") center / contain no-repeat;
+      html.boot-has-wordmark #boot-shell-card {
+        width: auto;
+        height: auto;
+      }
+
+      html.dark.boot-has-wordmark #boot-shell-wordmark {
+        filter: invert(1);
       }
     </style>
     <title>T3 Code (Alpha)</title>
@@ -483,16 +485,24 @@
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3 Code splash screen">
+        <div id="boot-shell-card" aria-label="App splash screen">
           <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="" />
           <img
-            id="boot-shell-wordmark-probe"
+            id="boot-shell-wordmark"
             src="/boot-wordmark.png"
             alt=""
-            aria-hidden="true"
             onload="document.documentElement.classList.add('boot-has-wordmark')"
+            onerror="this.remove()"
           />
         </div>
+        <script>
+          (function () {
+            var wordmark = document.getElementById("boot-shell-wordmark");
+            if (wordmark && wordmark.complete && wordmark.naturalWidth > 0) {
+              document.documentElement.classList.add("boot-has-wordmark");
+            }
+          })();
+        </script>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

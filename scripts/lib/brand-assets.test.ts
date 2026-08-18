@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  applyMunimBootWordmarkClass,
   BRAND_ASSET_PATHS,
   DEVELOPMENT_ICON_OVERRIDES,
   DEVELOPMENT_PUBLIC_ICON_OVERRIDES,
@@ -71,6 +72,30 @@ describe("brand-assets", () => {
       sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
       targetRelativePath: "apps/web/dist/favicon.ico",
     });
+  });
+
+  it("ships a boot wordmark only for the Munim brand", () => {
+    expect(resolveWebIconOverrides("munim", "apps/server/dist/client")).toContainEqual({
+      sourceRelativePath: BRAND_ASSET_PATHS.munimWebWordmarkPng,
+      targetRelativePath: "apps/server/dist/client/boot-wordmark.png",
+    });
+    expect(
+      resolveWebIconOverrides("production", "apps/server/dist/client").some((override) =>
+        override.targetRelativePath.endsWith("/boot-wordmark.png"),
+      ),
+    ).toBe(false);
+  });
+
+  it("stamps the Munim boot wordmark class onto the html root", () => {
+    expect(applyMunimBootWordmarkClass('<html lang="en">')).toBe(
+      '<html class="boot-has-wordmark" lang="en">',
+    );
+    expect(applyMunimBootWordmarkClass('<html class="dark" lang="en">')).toBe(
+      '<html class="dark boot-has-wordmark" lang="en">',
+    );
+    expect(applyMunimBootWordmarkClass('<html class="boot-has-wordmark" lang="en">')).toBe(
+      '<html class="boot-has-wordmark" lang="en">',
+    );
   });
 
   it("maps hosted release channels to web asset brands", () => {

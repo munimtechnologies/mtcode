@@ -129,6 +129,28 @@ export function resolveWebIconOverrides(
   ];
 }
 
+const BOOT_HAS_WORDMARK_CLASS = "boot-has-wordmark";
+
+/**
+ * Munim builds ship `boot-wordmark.png`. Stamp the class onto the boot HTML so
+ * the splash shows that wordmark on first paint instead of waiting for a probe
+ * image to load (or falling back to the app icon).
+ */
+export function applyMunimBootWordmarkClass(html: string): string {
+  return html.replace(/<html\b([^>]*)>/, (full, attrs: string) => {
+    const classMatch = /\sclass=(["'])([^"']*)\1/.exec(attrs);
+    if (classMatch) {
+      const classes = classMatch[2]?.split(/\s+/).filter(Boolean) ?? [];
+      if (classes.includes(BOOT_HAS_WORDMARK_CLASS)) {
+        return full;
+      }
+      const next = `${classes.join(" ")} ${BOOT_HAS_WORDMARK_CLASS}`.trim();
+      return `<html${attrs.replace(classMatch[0], ` class=${classMatch[1]}${next}${classMatch[1]}`)}>`;
+    }
+    return `<html class="${BOOT_HAS_WORDMARK_CLASS}"${attrs}>`;
+  });
+}
+
 export const DEVELOPMENT_ICON_OVERRIDES = resolveWebIconOverrides("development", "dist/client");
 
 export const DEVELOPMENT_PUBLIC_ICON_OVERRIDES = resolveWebIconOverrides(

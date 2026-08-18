@@ -8,6 +8,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import {
+  applyMunimBootWordmarkClass,
   resolveWebAssetBrandForChannel,
   resolveWebIconOverrides,
   WEB_ASSET_CHANNELS,
@@ -38,6 +39,21 @@ export const applyWebBrandAssets = Effect.fn("applyWebBrandAssets")(function* (
       ),
     { concurrency: "unbounded" },
   );
+
+  if (brand !== "munim") {
+    return;
+  }
+
+  const indexPath = path.join(repoRoot, targetDirectory, "index.html");
+  if (!(yield* fs.exists(indexPath))) {
+    return;
+  }
+
+  const indexHtml = yield* fs.readFileString(indexPath);
+  const nextHtml = applyMunimBootWordmarkClass(indexHtml);
+  if (nextHtml !== indexHtml) {
+    yield* fs.writeFileString(indexPath, nextHtml);
+  }
 });
 
 export const applyWebBrandAssetsCommand = Command.make(
