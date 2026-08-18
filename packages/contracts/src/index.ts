@@ -9,6 +9,7 @@ export * from "./remoteAccess.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";
 export * from "./provider.ts";
+export * from "./providerAccountLogin.ts";
 export * from "./providerInstance.ts";
 export * from "./providerRuntime.ts";
 export * from "./model.ts";

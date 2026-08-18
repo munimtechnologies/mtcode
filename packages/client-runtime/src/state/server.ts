@@ -1,5 +1,7 @@
 import {
   type EnvironmentId,
+  type ProviderAccountLoginEvent,
+  type ProviderAccountLoginInput,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
@@ -28,6 +30,7 @@ import {
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
   createRuntimeCommand,
+  runInEnvironment,
   scheduleAtomCommandEffect,
 } from "./runtime.ts";
 import { EnvironmentRegistry } from "../connection/registry.ts";
@@ -790,6 +793,59 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverRefreshProviders,
       concurrency: {
         mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
+    // Interactive account sign-in: the command stays in flight for the whole
+    // browser/code exchange, forwarding each server event to the caller and
+    // tearing the server-side flow down when `abortSignal` fires (the race
+    // interrupts the stream, which cancels the RPC and closes the CLI
+    // process behind it).
+    loginProviderAccount: createRuntimeCommand(runtime, {
+      label: "environment-data:server:login-provider-account",
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }: { environmentId: string; input: { instanceId: string } }) =>
+          `${environmentId}:${input.instanceId}`,
+      },
+      execute: (target: {
+        readonly environmentId: EnvironmentId;
+        readonly input: ProviderAccountLoginInput;
+        readonly onEvent: (event: ProviderAccountLoginEvent) => void;
+        readonly abortSignal?: AbortSignal;
+      }) =>
+        runInEnvironment(
+          target.environmentId,
+          Effect.gen(function* () {
+            const consume = runStream(WS_METHODS.serverLoginProviderAccount, target.input).pipe(
+              Stream.runForEach((event) => Effect.sync(() => target.onEvent(event))),
+            );
+            const abortSignal = target.abortSignal;
+            if (abortSignal === undefined) {
+              return yield* consume;
+            }
+            const aborted = Effect.callback<void>((resume) => {
+              if (abortSignal.aborted) {
+                resume(Effect.void);
+                return;
+              }
+              const onAbort = () => resume(Effect.void);
+              abortSignal.addEventListener("abort", onAbort, { once: true });
+              return Effect.sync(() => abortSignal.removeEventListener("abort", onAbort));
+            });
+            return yield* Effect.race(consume, aborted);
+          }),
+        ),
+    }),
+    submitProviderLoginCode: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:submit-provider-login-code",
+      tag: WS_METHODS.serverSubmitProviderLoginCode,
+    }),
+    logoutProviderAccount: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:logout-provider-account",
+      tag: WS_METHODS.serverLogoutProviderAccount,
+      concurrency: {
+        mode: "serial",
         key: ({ environmentId }) => environmentId,
       },
     }),

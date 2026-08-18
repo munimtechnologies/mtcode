@@ -88,6 +88,7 @@ import {
   observeRpcStream as instrumentRpcStream,
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
+import { ProviderAccountLoginRunner } from "./provider/Services/ProviderAccountLoginRunner.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
@@ -393,6 +394,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerAccountLogin = yield* ProviderAccountLoginRunner;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -1521,6 +1523,26 @@ const makeWsRpcLayer = (
               ? providerRegistry.refreshInstance(input.instanceId)
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverLoginProviderAccount]: (input) =>
+          observeRpcStream(
+            WS_METHODS.serverLoginProviderAccount,
+            providerAccountLogin.login(input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.serverSubmitProviderLoginCode]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSubmitProviderLoginCode,
+            providerAccountLogin.submitCode(input),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverLogoutProviderAccount]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverLogoutProviderAccount,
+            providerAccountLogin.logout(input),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverListProviderWorkspaceCapabilities]: (input) =>

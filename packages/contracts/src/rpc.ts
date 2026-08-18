@@ -67,6 +67,13 @@ import {
   OrchestrationRpcSchemas,
   OrchestrationGetWorkflowScriptError,
 } from "./orchestration.ts";
+import {
+  ProviderAccountLoginError,
+  ProviderAccountLoginEvent,
+  ProviderAccountLoginInput,
+  ProviderAccountLogoutInput,
+  ProviderLoginCodeInput,
+} from "./providerAccountLogin.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   PullRequestActionInput,
@@ -294,6 +301,9 @@ export const WS_METHODS = {
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverLoginProviderAccount: "server.loginProviderAccount",
+  serverSubmitProviderLoginCode: "server.submitProviderLoginCode",
+  serverLogoutProviderAccount: "server.logoutProviderAccount",
   serverListProviderWorkspaceCapabilities: "server.listProviderWorkspaceCapabilities",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
@@ -416,6 +426,28 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   }),
   success: ServerProviderUpdatedPayload,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsServerLoginProviderAccountRpc = Rpc.make(WS_METHODS.serverLoginProviderAccount, {
+  payload: ProviderAccountLoginInput,
+  success: ProviderAccountLoginEvent,
+  error: Schema.Union([ProviderAccountLoginError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsServerSubmitProviderLoginCodeRpc = Rpc.make(
+  WS_METHODS.serverSubmitProviderLoginCode,
+  {
+    payload: ProviderLoginCodeInput,
+    success: Schema.Struct({}),
+    error: Schema.Union([ProviderAccountLoginError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsServerLogoutProviderAccountRpc = Rpc.make(WS_METHODS.serverLogoutProviderAccount, {
+  payload: ProviderAccountLogoutInput,
+  success: ServerProviderUpdatedPayload,
+  error: Schema.Union([ProviderAccountLoginError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerListProviderWorkspaceCapabilitiesRpc = Rpc.make(
@@ -1245,6 +1277,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerLoginProviderAccountRpc,
+  WsServerSubmitProviderLoginCodeRpc,
+  WsServerLogoutProviderAccountRpc,
   WsServerListProviderWorkspaceCapabilitiesRpc,
   WsServerUpdateProviderRpc,
   WsServerUpdateServerRpc,

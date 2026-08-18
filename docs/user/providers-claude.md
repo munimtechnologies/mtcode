@@ -20,6 +20,10 @@ Log in with Claude Code normally:
 claude auth login
 ```
 
+You can also add another Claude account from Settings → Providers: **Add provider**, pick Claude,
+then sign in from the card (browser, device code, or paste-back). ChatGPT/Codex works the same
+way, and you can store an API key on a second instance instead of a subscription login.
+
 In T3 Code Settings, your Claude provider can stay like this:
 
 ```text
