@@ -16,6 +16,10 @@ const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
+  splitInlineVisualizations,
+  stripInlineVisualizations,
+} from "@t3tools/shared/inlineVisualization";
+import {
   createContext,
   Fragment,
   memo,
@@ -73,6 +77,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { InlineVisualization } from "./InlineVisualization";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -559,7 +564,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="mx-auto w-full max-w-3xl min-w-0 overflow-x-clip has-[[data-inline-visualization-mode=wide]]:overflow-x-visible"
+        data-timeline-root="true"
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -581,42 +589,44 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
         <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
-          <LegendList<MessagesTimelineRow>
-            ref={listRef}
-            data={rows}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={contentInsetEndAdjustment}
-            maintainScrollAtEnd={
-              anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
-                ? false
-                : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={maintainVisibleContentPosition}
-            onScroll={handleScroll}
-            className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
-            )}
-            ListHeaderComponent={
-              loadEarlier !== null ? (
-                <TimelineLoadEarlierHeader
-                  loading={loadEarlier.loading}
-                  onLoadEarlier={loadEarlier.onLoadEarlier}
-                  fade={topFadeEnabled}
-                />
-              ) : topFadeEnabled ? (
-                TIMELINE_LIST_FADE_HEADER
-              ) : (
-                TIMELINE_LIST_HEADER
-              )
-            }
-            ListFooterComponent={TIMELINE_LIST_FOOTER}
-          />
+          <div className="h-full min-h-0 [container-type:inline-size]">
+            <LegendList<MessagesTimelineRow>
+              ref={listRef}
+              data={rows}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={contentInsetEndAdjustment}
+              maintainScrollAtEnd={
+                anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
+                  ? false
+                  : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={maintainVisibleContentPosition}
+              onScroll={handleScroll}
+              className={cn(
+                "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={
+                loadEarlier !== null ? (
+                  <TimelineLoadEarlierHeader
+                    loading={loadEarlier.loading}
+                    onLoadEarlier={loadEarlier.onLoadEarlier}
+                    fade={topFadeEnabled}
+                  />
+                ) : topFadeEnabled ? (
+                  TIMELINE_LIST_FADE_HEADER
+                ) : (
+                  TIMELINE_LIST_HEADER
+                )
+              }
+              ListFooterComponent={TIMELINE_LIST_FOOTER}
+            />
+          </div>
           <TimelineMinimap
             items={minimapItems}
             hasPersistentGutter={minimapHasPersistentGutter}
@@ -694,7 +704,7 @@ function resolveFinalAssistantTextForTurn(
       break;
     }
     if (row.message.role === "assistant") {
-      finalAssistantText = row.message.text ?? null;
+      finalAssistantText = row.message.text ? stripInlineVisualizations(row.message.text) : null;
     }
   }
   return finalAssistantText;
@@ -1183,18 +1193,34 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
   const pdfs = (row.message.attachments ?? []).filter((attachment) => attachment.type === "pdf");
+  const messageParts = useMemo(() => splitInlineVisualizations(messageText), [messageText]);
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <ChatMarkdown
-          text={messageText}
-          cwd={ctx.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
-          isStreaming={Boolean(row.message.streaming)}
-          lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-          skills={ctx.skills}
-        />
+        {messageParts.map((part) =>
+          part.kind === "markdown" ? (
+            part.text.trim() ? (
+              <ChatMarkdown
+                key={part.key}
+                text={part.text}
+                cwd={ctx.markdownCwd}
+                threadRef={ctx.threadRef ?? undefined}
+                isStreaming={Boolean(row.message.streaming)}
+                lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+                skills={ctx.skills}
+              />
+            ) : null
+          ) : ctx.threadRef ? (
+            <InlineVisualization
+              key={part.key}
+              environmentId={ctx.activeThreadEnvironmentId}
+              reference={part}
+              theme={ctx.resolvedTheme}
+              threadRef={ctx.threadRef}
+            />
+          ) : null,
+        )}
         {pdfs.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-2">
             {pdfs.map((pdf) => (

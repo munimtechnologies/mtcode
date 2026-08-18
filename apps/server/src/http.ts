@@ -55,6 +55,11 @@ const TRANSCRIPTION_MODELS_PATH = "/api/transcription/models";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+const INERT_TEXT_HEADERS = {
+  "Cache-Control": "private, max-age=3600",
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
 
 export function assetResponseHeaders(filePath: string): Record<string, string> {
   return {
@@ -345,6 +350,9 @@ export const assetRouteLayer = HttpRouter.add(
     );
     if (!asset) {
       return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    if (asset.kind === "text") {
+      return HttpServerResponse.text(asset.body, { status: 200, headers: INERT_TEXT_HEADERS });
     }
     return yield* HttpServerResponse.file(asset.path, {
       status: 200,
