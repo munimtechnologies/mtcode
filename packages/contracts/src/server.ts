@@ -19,6 +19,7 @@ import {
 } from "./keybindings.ts";
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
+import { ProviderAccountLoginMode } from "./providerAccountLogin.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerSettings } from "./settings.ts";
 
@@ -60,6 +61,17 @@ export const ServerProviderAuth = Schema.Struct({
   email: Schema.optional(TrimmedNonEmptyString),
 });
 export type ServerProviderAuth = typeof ServerProviderAuth.Type;
+
+/**
+ * In-app sign-in support advertised by the driver behind this instance.
+ * Absent when the driver (or an older server) cannot run a login flow, in
+ * which case clients fall back to directing the user to the provider CLI.
+ */
+export const ServerProviderAccountLogin = Schema.Struct({
+  modes: Schema.Array(ProviderAccountLoginMode),
+  supportsLogout: Schema.Boolean,
+});
+export type ServerProviderAccountLogin = typeof ServerProviderAccountLogin.Type;
 
 export const ServerProviderModel = Schema.Struct({
   slug: TrimmedNonEmptyString,
@@ -257,6 +269,8 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** In-app sign-in modes supported by this instance's driver. */
+  accountLogin: Schema.optionalKey(ServerProviderAccountLogin),
   /** Live account and rate-limit data returned by Codex app-server. */
   codexStatus: Schema.optionalKey(ServerProviderCodexStatus),
   /** Live plan rate-limit data returned by Claude Code's Agent SDK. */

@@ -379,6 +379,7 @@ export function EnvironmentProviderSettings({
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [addInstanceDriver, setAddInstanceDriver] = useState<ProviderDriverKind | undefined>();
   const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
     ReadonlySet<ProviderDriverKind>
   >(() => new Set());
@@ -672,7 +673,10 @@ export function EnvironmentProviderSettings({
                       <Button
                         size="icon-micro"
                         variant="ghost-muted"
-                        onClick={() => setIsAddInstanceDialogOpen(true)}
+                        onClick={() => {
+                          setAddInstanceDriver(undefined);
+                          setIsAddInstanceDialogOpen(true);
+                        }}
                         aria-label="Add provider instance"
                       >
                         <PlusIcon className="size-3" />
@@ -826,6 +830,7 @@ export function EnvironmentProviderSettings({
             return (
               <ProviderInstanceCard
                 key={row.instanceId}
+                environmentId={environmentId}
                 instanceId={row.instanceId}
                 instance={row.instance}
                 driverOption={driverOption}
@@ -851,6 +856,18 @@ export function EnvironmentProviderSettings({
                   }
                 }}
                 onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
+                onAddAccount={
+                  readOnly
+                    ? undefined
+                    : () => {
+                        if (isProviderDriverKind(row.driver)) {
+                          setAddInstanceDriver(row.driver);
+                        } else {
+                          setAddInstanceDriver(undefined);
+                        }
+                        setIsAddInstanceDialogOpen(true);
+                      }
+                }
                 headerAction={headerAction}
                 hiddenModels={modelPreferences.hiddenModels}
                 favoriteModels={favoriteModels}

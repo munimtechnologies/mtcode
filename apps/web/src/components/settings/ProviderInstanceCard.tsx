@@ -15,6 +15,7 @@ import * as Result from "effect/Result";
 import { useState, type ReactNode } from "react";
 import {
   isProviderDriverKind,
+  type EnvironmentId,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
   type ProviderInstanceId,
@@ -42,6 +43,7 @@ import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
+import { ProviderAccountSignIn } from "./ProviderAccountSignIn";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import {
   getProviderVersionAdvisoryPresentation,
@@ -319,6 +321,7 @@ function ProviderEnvironmentSection(props: {
 }
 
 interface ProviderInstanceCardProps {
+  readonly environmentId: EnvironmentId;
   readonly instanceId: ProviderInstanceId;
   readonly instance: ProviderInstanceConfig;
   readonly driverOption: DriverOption | undefined;
@@ -335,6 +338,11 @@ interface ProviderInstanceCardProps {
    * `{ onDelete: undefined }` are treated as distinct shapes.
    */
   readonly onDelete?: (() => void) | undefined;
+  /**
+   * Opens the add-instance wizard so this driver can gain another account.
+   * Omitted when the settings surface cannot create instances (read-only).
+   */
+  readonly onAddAccount?: (() => void) | undefined;
   /**
    * Optional outer reset button rendered next to the driver icon. Built-in
    * default slots supply a reset-to-factory control here; custom instances
@@ -376,6 +384,7 @@ interface ProviderInstanceCardProps {
  *     flows through the envelope.
  */
 export function ProviderInstanceCard({
+  environmentId,
   instanceId,
   instance,
   driverOption,
@@ -384,6 +393,7 @@ export function ProviderInstanceCard({
   onExpandedChange,
   onUpdate,
   onDelete,
+  onAddAccount,
   headerAction,
   hiddenModels,
   favoriteModels,
@@ -705,6 +715,21 @@ export function ProviderInstanceCard({
               {titleTailNode}
             </div>
             {authRowNode}
+            {liveProvider?.accountLogin ? (
+              <ProviderAccountSignIn
+                environmentId={environmentId}
+                instanceId={instanceId}
+                driver={String(instance.driver)}
+                accountLogin={liveProvider.accountLogin}
+                trailingActions={
+                  onAddAccount ? (
+                    <Button type="button" size="xs" variant="outline" onClick={onAddAccount}>
+                      Add account
+                    </Button>
+                  ) : null
+                }
+              />
+            ) : null}
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             <Button

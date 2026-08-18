@@ -22,6 +22,9 @@
  * @module provider/ProviderDriver
  */
 import type {
+  ProviderAccountLoginError,
+  ProviderAccountLoginEvent,
+  ProviderAccountLoginMode,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -30,6 +33,7 @@ import type {
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
+import type * as Stream from "effect/Stream";
 
 import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
@@ -75,6 +79,33 @@ export interface ProviderInstance {
   readonly listWorkspaceCapabilities?: (
     cwd: string,
   ) => Effect.Effect<ServerProviderWorkspaceCapabilities>;
+  readonly accountLogin?: ProviderAccountLoginSupport;
+}
+
+/**
+ * One in-flight sign-in owned by a driver. `events` stays open until the
+ * flow succeeds or fails; closing the surrounding scope aborts the flow and
+ * releases the CLI process behind it. `submitCode` is present only for
+ * paste-back flows (Claude's `setup-token`).
+ */
+export interface ProviderAccountLoginFlow {
+  readonly events: Stream.Stream<ProviderAccountLoginEvent, ProviderAccountLoginError>;
+  readonly submitCode?: (code: string) => Effect.Effect<void, ProviderAccountLoginError>;
+}
+
+/**
+ * In-app sign-in support captured per instance at `create` time, alongside
+ * the other instance closures. Drivers that cannot log in omit the field
+ * and clients fall back to directing the user at the provider CLI.
+ */
+export interface ProviderAccountLoginSupport {
+  readonly modes: ReadonlyArray<ProviderAccountLoginMode>;
+  readonly supportsLogout: boolean;
+  readonly start: (input: {
+    readonly mode: ProviderAccountLoginMode;
+    readonly apiKey?: string;
+  }) => Effect.Effect<ProviderAccountLoginFlow, ProviderAccountLoginError, Scope.Scope>;
+  readonly logout?: Effect.Effect<void, ProviderAccountLoginError>;
 }
 
 export interface ProviderContinuationIdentity {

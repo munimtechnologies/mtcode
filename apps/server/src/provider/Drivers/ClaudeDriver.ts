@@ -27,6 +27,7 @@ import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGenerat
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { PtyAdapter } from "../../terminal/PtyAdapter.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import {
@@ -54,7 +55,12 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
-import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
+import { makeClaudeAccountLogin } from "./ClaudeAccountLogin.ts";
+import {
+  makeClaudeCapabilitiesCacheKey,
+  makeClaudeContinuationGroupKey,
+  makeClaudeEnvironment,
+} from "./ClaudeHome.ts";
 import { discoverClaudeSkills } from "./ClaudeSkills.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
@@ -90,8 +96,14 @@ export type ClaudeDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers
+  | PtyAdapter
   | ServerConfig
   | ServerSettingsService;
+
+const CLAUDE_ACCOUNT_LOGIN_ADVERTISEMENT = {
+  modes: ["oauth", "apiKey"],
+  supportsLogout: true,
+} as const;
 
 const withInstanceIdentity =
   (input: {
@@ -102,6 +114,7 @@ const withInstanceIdentity =
   }) =>
   (snapshot: ServerProviderDraft): ServerProvider => ({
     ...snapshot,
+    accountLogin: CLAUDE_ACCOUNT_LOGIN_ADVERTISEMENT,
     instanceId: input.instanceId,
     driver: DRIVER_KIND,
     ...(input.displayName ? { displayName: input.displayName } : {}),
@@ -125,6 +138,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const { cwd } = yield* ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
+      const ptyAdapter = yield* PtyAdapter;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
@@ -246,6 +260,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         adapter,
         textGeneration,
         listWorkspaceCapabilities,
+        accountLogin: makeClaudeAccountLogin({
+          instanceId,
+          config: effectiveConfig,
+          environment: yield* makeClaudeEnvironment(effectiveConfig, processEnv),
+          pty: ptyAdapter,
+          settings: serverSettings,
+        }),
       } satisfies ProviderInstance;
     }),
 };

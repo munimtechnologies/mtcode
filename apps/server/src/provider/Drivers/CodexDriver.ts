@@ -52,6 +52,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
+import { makeCodexAccountLogin } from "./CodexAccountLogin.ts";
 import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
@@ -89,6 +90,11 @@ export type CodexDriverEnv =
  * `providerSnapshot.ts` is widened to accept `instanceId`/`driver`, this
  * wrapper disappears.
  */
+const CODEX_ACCOUNT_LOGIN_ADVERTISEMENT = {
+  modes: ["oauth", "deviceCode", "apiKey"],
+  supportsLogout: true,
+} as const;
+
 const withInstanceIdentity =
   (input: {
     readonly instanceId: ProviderInstance["instanceId"];
@@ -98,6 +104,7 @@ const withInstanceIdentity =
   }) =>
   (snapshot: ServerProviderDraft): ServerProvider => ({
     ...snapshot,
+    accountLogin: CODEX_ACCOUNT_LOGIN_ADVERTISEMENT,
     instanceId: input.instanceId,
     driver: DRIVER_KIND,
     ...(input.displayName ? { displayName: input.displayName } : {}),
@@ -208,6 +215,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         snapshot,
         adapter,
         textGeneration,
+        accountLogin: makeCodexAccountLogin({
+          instanceId,
+          config: effectiveConfig,
+          environment: processEnv,
+          spawner,
+        }),
       } satisfies ProviderInstance;
     }),
 };
