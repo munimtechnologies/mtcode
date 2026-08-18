@@ -5,6 +5,7 @@ import {
   claudeUsageSnapshotFromUnknown,
   claudeWindowFromRateLimitEvent,
   codexSnapshotFromUnknown,
+  cursorSnapshotFromUnknown,
   isPrimaryCodexLimit,
   windowHasTraffic,
 } from "./accountLimitsNormalize.ts";
@@ -183,6 +184,88 @@ describe("codexSnapshotFromUnknown", () => {
     expect(isPrimaryCodexLimit(snapshot?.limitId ?? null)).toBe(false);
     expect(isPrimaryCodexLimit("codex")).toBe(true);
     expect(isPrimaryCodexLimit(null)).toBe(true);
+  });
+});
+
+describe("cursorSnapshotFromUnknown", () => {
+  it("maps the usage-summary monthly pools and included-spend cap", () => {
+    const snapshot = cursorSnapshotFromUnknown({
+      billingCycleStart: "2026-08-08T18:35:08.000Z",
+      billingCycleEnd: "2026-09-08T18:35:08.000Z",
+      membershipType: "ultra",
+      isUnlimited: false,
+      individualUsage: {
+        plan: {
+          enabled: true,
+          used: 40000,
+          limit: 40000,
+          autoPercentUsed: 60.76,
+          apiPercentUsed: 100,
+          totalPercentUsed: 68.64,
+        },
+        onDemand: { enabled: false, used: 0, limit: null },
+      },
+    });
+
+    expect(snapshot?.plan).toBe("Ultra");
+    expect(
+      snapshot?.windows.map((window) => [window.id, window.label, window.usedPercent]),
+    ).toEqual([
+      ["plan", "Month", 100],
+      ["auto", "Auto", 60.76],
+      ["api", "API", 100],
+    ]);
+    expect(snapshot?.windows[0]?.resetsAt).toBe("2026-09-08T18:35:08.000Z");
+    expect(snapshot?.windows[0]?.windowMinutes).toBe(31 * 24 * 60);
+  });
+
+  it("maps the dashboard planUsage payload with unix-ms cycle timestamps", () => {
+    const snapshot = cursorSnapshotFromUnknown({
+      billingCycleStart: "1786214108000",
+      billingCycleEnd: "1788892508000",
+      planUsage: {
+        includedSpend: 20000,
+        limit: 40000,
+        autoPercentUsed: 12.5,
+        apiPercentUsed: 40,
+      },
+    });
+
+    expect(snapshot?.windows.map((window) => [window.id, window.usedPercent])).toEqual([
+      ["plan", 50],
+      ["auto", 12.5],
+      ["api", 40],
+    ]);
+    expect(snapshot?.windows[0]?.resetsAt).toBe(
+      DateTime.formatIso(DateTime.makeUnsafe(1_788_892_508_000)),
+    );
+  });
+
+  it("surfaces an on-demand cap when the dashboard reports one", () => {
+    const snapshot = cursorSnapshotFromUnknown({
+      billingCycleEnd: "2026-09-08T18:35:08.000Z",
+      individualUsage: {
+        plan: { autoPercentUsed: 10, apiPercentUsed: 20 },
+        onDemand: { enabled: true, used: 25, limit: 100 },
+      },
+    });
+    expect(snapshot?.windows.map((window) => window.id)).toEqual(["auto", "api", "on_demand"]);
+    expect(snapshot?.windows[2]).toMatchObject({ label: "On-demand", usedPercent: 25 });
+  });
+
+  it("returns empty windows for unlimited accounts", () => {
+    expect(
+      cursorSnapshotFromUnknown({
+        membershipType: "ultra",
+        isUnlimited: true,
+        individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 0 } },
+      })?.windows,
+    ).toEqual([]);
+  });
+
+  it("rejects shapes that are not a Cursor usage summary", () => {
+    expect(cursorSnapshotFromUnknown({ rateLimits: {} })).toBeNull();
+    expect(cursorSnapshotFromUnknown({ rate_limits: {} })).toBeNull();
   });
 });
 

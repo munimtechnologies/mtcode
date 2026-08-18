@@ -6,8 +6,8 @@ import { visibleLimitsProviders } from "./usageProviders";
 const row = (windows: readonly unknown[]) => ({ snapshot: { windows } });
 
 describe("visibleLimitsProviders", () => {
-  it("always shows Codex and Claude, even with empty windows", () => {
-    expect(visibleLimitsProviders(new Map())).toEqual(["codex", "claude"]);
+  it("always shows Codex, Claude, and Cursor, even with empty windows", () => {
+    expect(visibleLimitsProviders(new Map())).toEqual(["codex", "claude", "cursor"]);
   });
 
   it("adds other providers only once they report a window", () => {
@@ -15,10 +15,10 @@ describe("visibleLimitsProviders", () => {
       UsageProviderKind,
       ReadonlyArray<{ readonly snapshot: { readonly windows: readonly unknown[] } }>
     >([
-      ["grok", [row([])]],
-      ["cursor", [row([{ id: "week" }])]],
+      ["grok", [row([{ id: "week" }])]],
+      ["cursor", [row([])]],
     ]);
 
-    expect(visibleLimitsProviders(byProvider)).toEqual(["codex", "claude", "cursor"]);
+    expect(visibleLimitsProviders(byProvider)).toEqual(["codex", "claude", "cursor", "grok"]);
   });
 });

@@ -10,6 +10,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
@@ -72,6 +74,15 @@ const instanceRoster = (): Partial<ServerSettings> => ({
   },
 });
 
+const SilentHttpClientLive = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(request, new Response("unavailable", { status: 503 })),
+    ),
+  ),
+);
+
 const makeLayer = (overrides: Partial<ServerSettings> = instanceRoster()) =>
   AccountLimitsServiceModule.layer.pipe(
     Layer.provideMerge(ServerSettingsModule.layerTest(overrides)),
@@ -82,12 +93,14 @@ const makeLayer = (overrides: Partial<ServerSettings> = instanceRoster()) =>
         }),
       ),
     ),
+    Layer.provideMerge(SilentHttpClientLive),
   );
 
 const makeLayerAt = (baseDir: string, overrides: Partial<ServerSettings> = instanceRoster()) =>
   AccountLimitsServiceModule.layer.pipe(
     Layer.provideMerge(ServerSettingsModule.layerTest(overrides)),
     Layer.provideMerge(Layer.fresh(ServerConfig.layerTest(process.cwd(), baseDir))),
+    Layer.provideMerge(SilentHttpClientLive),
   );
 
 it.layer(NodeServices.layer)("account limits service", (it) => {
@@ -151,6 +164,19 @@ it.layer(NodeServices.layer)("account limits service", (it) => {
       });
       const summary = yield* service.readSummary();
       expect(summary.snapshots.map((snapshot) => snapshot.instanceId)).toEqual(["codex"]);
+    }).pipe(Effect.provide(makeLayer())),
+  );
+
+  it.effect("does not treat Cursor runtime events as Codex limits", () =>
+    Effect.gen(function* () {
+      const service = yield* AccountLimitsServiceModule.AccountLimitsService;
+      yield* service.ingest({
+        provider: "cursor",
+        payload: codexPayload(90),
+        createdAt: "2026-08-15T12:00:00.000Z",
+      });
+      const summary = yield* service.readSummary();
+      expect(summary.snapshots).toEqual([]);
     }).pipe(Effect.provide(makeLayer())),
   );
 

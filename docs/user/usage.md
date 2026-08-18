@@ -32,6 +32,12 @@ The **7 days**, **30 days**, and **90 days** ranges use daily resolution.
 toggles update both the headline and chart, and refreshing rescans every
 connected environment.
 
+The **Limits** strip (and the Usage button hover) shows remaining subscription
+windows when a provider reports them: Claude Code's 5-hour and weekly buckets,
+Codex's rolling windows, and Cursor's monthly Auto / API pools plus the
+included-spend cap. Cursor limits use the same signed-in desktop session as
+the usage export.
+
 Cost figures are API-equivalent estimates from provider-reported dollars when
 present, otherwise from a shared model rate table. They are not subscription
 charges. Cursor rows billed as included on the plan still contribute tokens and
@@ -52,7 +58,8 @@ installed and signed in. That uses the desktop session on the machine running
 the T3 Code server — the same host-trust model as scanning Claude or Codex
 homes. Any client paired to that environment can see the resulting usage.
 Environments without that desktop login show Cursor as uncovered and still
-report Claude, Codex, Grok, and OpenCode normally.
+report Claude, Codex, Grok, and OpenCode normally. The Limits strip also stays
+empty for Cursor on those environments until a desktop session is available.
 
 ## OpenCode coverage
 

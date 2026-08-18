@@ -2,7 +2,8 @@
  * Account rate-limit contract.
  *
  * Providers meter subscription usage in rolling windows (Claude: 5-hour and
- * weekly; Codex: weekly today, 5-hour whenever OpenAI turns it back on). Each
+ * weekly; Codex: weekly today, 5-hour whenever OpenAI turns it back on;
+ * Cursor: monthly Auto / API pools plus the included-spend cap). Each
  * environment folds whatever the provider streams into one snapshot per
  * provider instance and serves it here; the client keeps one row per
  * (environment, provider, instance) and never merges across environments -

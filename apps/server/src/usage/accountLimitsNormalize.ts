@@ -14,6 +14,10 @@
  *   camelCase).
  * - Codex, transcript: the `rate_limits` object Codex writes beside every
  *   `token_count` line in its session files (same snapshot, snake_case).
+ * - Cursor, dashboard: `GET /api/usage-summary` (and the equivalent
+ *   `planUsage` payload from `get-current-period-usage`), authenticated with
+ *   the desktop session from `state.vscdb`. Monthly Auto / API pools plus
+ *   the included-spend cap.
  *
  * Everything folds into the `AccountLimitsWindow` contract shape here so the
  * service and clients never see a provider-specific field name.
@@ -51,8 +55,24 @@ function isoFromUnixSeconds(value: number): string {
  * scoped windows.
  */
 export function sortWindows(windows: readonly AccountLimitsWindow[]): AccountLimitsWindow[] {
-  const rank = (window: AccountLimitsWindow): number =>
-    window.id === "five_hour" ? 0 : window.id === "seven_day" ? 1 : 2;
+  const rank = (window: AccountLimitsWindow): number => {
+    switch (window.id) {
+      case "five_hour":
+        return 0;
+      case "seven_day":
+        return 1;
+      case "plan":
+        return 2;
+      case "auto":
+        return 3;
+      case "api":
+        return 4;
+      case "on_demand":
+        return 5;
+      default:
+        return 6;
+    }
+  };
   return [...windows].sort(
     (a, b) => rank(a) - rank(b) || (a.windowMinutes ?? 0) - (b.windowMinutes ?? 0),
   );
@@ -328,4 +348,142 @@ function codexWindowFromSlot(
     resetsAt,
     windowMinutes: effectiveMinutes,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Cursor
+// ---------------------------------------------------------------------------
+
+export interface CursorRateLimitsSnapshot {
+  readonly plan: string | null;
+  readonly windows: AccountLimitsWindow[];
+}
+
+/**
+ * Cursor meters two monthly pools (Auto / API) plus an included-spend cap
+ * for the billing cycle. The dashboard ships that as either:
+ *
+ * - `GET /api/usage-summary` (`individualUsage.plan`, ISO cycle timestamps)
+ * - `POST /api/dashboard/get-current-period-usage` (`planUsage`, unix-ms)
+ *
+ * Both fold into the same windows here. Unlimited accounts return an empty
+ * window list so the service does not persist a fake 0% strip.
+ */
+export function cursorSnapshotFromUnknown(value: unknown): CursorRateLimitsSnapshot | null {
+  if (!isRecord(value)) return null;
+  if (value.isUnlimited === true) {
+    return { plan: readPlanName(value), windows: [] };
+  }
+
+  const planUsage = isRecord(value.individualUsage) ? value.individualUsage.plan : value.planUsage;
+  const onDemand = isRecord(value.individualUsage)
+    ? value.individualUsage.onDemand
+    : isRecord(value.spendLimitUsage)
+      ? value.spendLimitUsage
+      : null;
+  if (!isRecord(planUsage) && !isRecord(onDemand)) return null;
+
+  const resetsAt = isoFromUnknownTimestamp(value.billingCycleEnd);
+  const windowMinutes = windowMinutesFromCycle(value.billingCycleStart, value.billingCycleEnd);
+
+  const windows: AccountLimitsWindow[] = [];
+  if (isRecord(planUsage)) {
+    const includedUsed = readNumber(planUsage.includedSpend ?? planUsage.used);
+    const includedLimit = readNumber(planUsage.limit);
+    if (includedUsed !== null && includedLimit !== null && includedLimit > 0) {
+      windows.push({
+        id: "plan",
+        label: "Month",
+        usedPercent: clampPercent((includedUsed / includedLimit) * 100),
+        resetsAt,
+        windowMinutes,
+      });
+    }
+
+    const autoPercent = readNumber(planUsage.autoPercentUsed);
+    if (autoPercent !== null) {
+      windows.push({
+        id: "auto",
+        label: "Auto",
+        usedPercent: clampPercent(autoPercent),
+        resetsAt,
+        windowMinutes,
+      });
+    }
+
+    const apiPercent = readNumber(planUsage.apiPercentUsed);
+    if (apiPercent !== null) {
+      windows.push({
+        id: "api",
+        label: "API",
+        usedPercent: clampPercent(apiPercent),
+        resetsAt,
+        windowMinutes,
+      });
+    }
+
+    if (windows.length === 0) {
+      const totalPercent = readNumber(planUsage.totalPercentUsed);
+      if (totalPercent !== null) {
+        windows.push({
+          id: "plan",
+          label: "Month",
+          usedPercent: clampPercent(totalPercent),
+          resetsAt,
+          windowMinutes,
+        });
+      }
+    }
+  }
+
+  if (isRecord(onDemand) && onDemand.enabled !== false) {
+    const used = readNumber(onDemand.individualUsed ?? onDemand.used);
+    const limit = readNumber(onDemand.individualLimit ?? onDemand.limit);
+    if (used !== null && limit !== null && limit > 0) {
+      windows.push({
+        id: "on_demand",
+        label: "On-demand",
+        usedPercent: clampPercent((used / limit) * 100),
+        resetsAt,
+        windowMinutes,
+      });
+    }
+  }
+
+  if (windows.length === 0 && readPlanName(value) === null) return null;
+  return { plan: readPlanName(value), windows: sortWindows(windows) };
+}
+
+function readPlanName(value: Record<string, unknown>): string | null {
+  const membership = readString(value.membershipType);
+  if (membership !== null) return membership.replace(/^./, (c) => c.toUpperCase());
+  const planInfo = isRecord(value.planInfo) ? value.planInfo : null;
+  return planInfo === null ? null : readString(planInfo.planName);
+}
+
+function isoFromUnknownTimestamp(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    if (/^\d+$/.test(trimmed)) return isoFromUnixMs(Number(trimmed));
+    const parsed = Date.parse(trimmed);
+    return Number.isNaN(parsed) ? null : DateTime.formatIso(DateTime.makeUnsafe(parsed));
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return isoFromUnixMs(value);
+  }
+  return null;
+}
+
+function isoFromUnixMs(value: number): string {
+  const ms = value < 1e12 ? value * 1000 : value;
+  return DateTime.formatIso(DateTime.makeUnsafe(ms));
+}
+
+function windowMinutesFromCycle(start: unknown, end: unknown): number | null {
+  const startIso = isoFromUnknownTimestamp(start);
+  const endIso = isoFromUnknownTimestamp(end);
+  if (startIso === null || endIso === null) return null;
+  const minutes = Math.round((Date.parse(endIso) - Date.parse(startIso)) / 60_000);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
 }

@@ -183,6 +183,7 @@ const UsageLayerLive = UsageService.layer.pipe(Layer.provide(ServerSettingsLayer
 
 const AccountLimitsLayerLive = AccountLimitsService.layer.pipe(
   Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(FetchHttpClient.layer),
 );
 
 const ResourceDiagnosticsLayerLive = Layer.mergeAll(

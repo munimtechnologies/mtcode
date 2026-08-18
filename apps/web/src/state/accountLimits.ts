@@ -87,7 +87,7 @@ export interface AccountLimitsRow {
 
 /** What an unkeyed (pre-instance-attribution) snapshot always meant. */
 export const legacyInstanceIdFor = (provider: UsageProviderKind): string =>
-  provider === "claude" ? "claudeAgent" : "codex";
+  provider === "claude" ? "claudeAgent" : provider;
 
 /**
  * Pure merge, exported for tests: dedupe freshest-wins per instance WITHIN

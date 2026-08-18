@@ -44,8 +44,8 @@ export const PROVIDER_PRESENTATION = {
 /** Stable provider reading order across charts, summaries, tables, and hover rows. */
 export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProviderKind[];
 
-/** Claude and Codex are the only providers with subscription rate-limit windows today. */
-export const LIMITS_PROVIDER_ORDER: readonly UsageProviderKind[] = ["codex", "claude"];
+/** Claude, Codex, and Cursor are the providers with subscription rate-limit windows today. */
+export const LIMITS_PROVIDER_ORDER: readonly UsageProviderKind[] = ["codex", "claude", "cursor"];
 
 export function providerHasLimitWindows(
   rows: ReadonlyArray<{ readonly snapshot: { readonly windows: readonly unknown[] } }> | undefined,
@@ -53,7 +53,7 @@ export function providerHasLimitWindows(
   return (rows ?? []).some((row) => row.snapshot.windows.length > 0);
 }
 
-/** Always Codex/Claude; other providers only once they actually report windows. */
+/** Always Codex/Claude/Cursor; other providers only once they actually report windows. */
 export function visibleLimitsProviders(
   byProvider: ReadonlyMap<
     UsageProviderKind,

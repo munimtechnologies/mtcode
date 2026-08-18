@@ -31,9 +31,28 @@ const CURSOR_USAGE_CSV_URL =
 /** Skip a network refresh when the on-disk CSV is newer than this. */
 const CURSOR_EXPORT_FRESHNESS_MS = 5 * 60 * 1000;
 
-interface CursorExportAuth {
+/** Cursor's export and dashboard endpoints reject non-browser clients without a UA. */
+const CURSOR_DASHBOARD_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+export interface CursorExportAuth {
   readonly userId: string;
   readonly sessionToken: string;
+}
+
+/** Cookie + browser headers shared by the CSV export and the usage-summary pull. */
+export function withCursorDashboardAuth(
+  request: HttpClientRequest.HttpClientRequest,
+  sessionToken: string,
+): HttpClientRequest.HttpClientRequest {
+  return request.pipe(
+    HttpClientRequest.setHeader("Accept", "*/*"),
+    HttpClientRequest.setHeader("Accept-Language", "en-US,en;q=0.9"),
+    HttpClientRequest.setHeader("Cookie", `WorkosCursorSessionToken=${sessionToken}`),
+    HttpClientRequest.setHeader("Origin", "https://cursor.com"),
+    HttpClientRequest.setHeader("Referer", "https://www.cursor.com/settings"),
+    HttpClientRequest.setHeader("User-Agent", CURSOR_DASHBOARD_USER_AGENT),
+  );
 }
 
 export type CursorExportLoadResult =
@@ -147,7 +166,7 @@ export function sessionTokenFromAccessToken(accessToken: string): CursorExportAu
   };
 }
 
-function readLocalCursorExportAuth(homeDir?: string): CursorExportAuth | null {
+export function readLocalCursorExportAuth(homeDir?: string): CursorExportAuth | null {
   const dbPath = findCursorStateDb(homeDir);
   if (dbPath === null) return null;
   const accessToken = readAccessTokenFromStateDb(dbPath);
@@ -368,16 +387,9 @@ export function loadCursorUsageRecords(options: {
       };
     }
 
-    const request = HttpClientRequest.get(CURSOR_USAGE_CSV_URL).pipe(
-      HttpClientRequest.setHeader("Accept", "*/*"),
-      HttpClientRequest.setHeader("Accept-Language", "en-US,en;q=0.9"),
-      HttpClientRequest.setHeader("Cookie", `WorkosCursorSessionToken=${auth.sessionToken}`),
-      HttpClientRequest.setHeader("Referer", "https://www.cursor.com/settings"),
-      // Cursor's export endpoint rejects non-browser clients without a UA.
-      HttpClientRequest.setHeader(
-        "User-Agent",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      ),
+    const request = withCursorDashboardAuth(
+      HttpClientRequest.get(CURSOR_USAGE_CSV_URL),
+      auth.sessionToken,
     );
 
     const fetched = yield* httpClient.execute(request).pipe(

@@ -151,6 +151,16 @@ describe("mergeEnvironmentLimits", () => {
     expect(rows[0]?.snapshot.asOf).toBe("2026-08-15T12:00:00.000Z");
   });
 
+  it("does not treat an unkeyed Cursor snapshot as a Codex account", () => {
+    const merged = mergeEnvironmentLimits([
+      status("laptop", {
+        snapshots: [snapshot("cursor"), snapshot("codex")],
+      }),
+    ]);
+    expect(merged.get("cursor")).toHaveLength(1);
+    expect(merged.get("codex")).toHaveLength(1);
+  });
+
   it("collapses byte-identical rows reported by two environments on one machine", () => {
     const twin = snapshot("codex", {
       instanceId: "codex_a" as never,

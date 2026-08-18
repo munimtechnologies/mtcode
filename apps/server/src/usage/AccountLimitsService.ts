@@ -7,7 +7,9 @@
  * nothing while sessions run. When asked and Codex has no live snapshot, the
  * newest transcript snapshot is recovered from disk. Claude has no disk
  * fallback: its limits exist only on the live stream, which is why snapshots
- * are persisted across restarts.
+ * are persisted across restarts. Cursor does not stream rate-limit events;
+ * its monthly Auto / API pools are pulled from the dashboard with the same
+ * desktop session the usage export already uses.
  *
  * One snapshot per (provider, instance). Limits belong to provider
  * *accounts*, and the instance is the closest identity every event already
@@ -41,6 +43,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import { HttpClient } from "effect/unstable/http";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
@@ -50,6 +53,7 @@ import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { loadCursorAccountLimits } from "./accountLimitsCursor.ts";
 import {
   claudeUsageSnapshotFromUnknown,
   claudeWindowFromRateLimitEvent,
@@ -61,6 +65,9 @@ import { readLatestCodexRateLimits } from "./accountLimitsTranscripts.ts";
 
 /** Failed or empty transcript scans are not retried more often than this. */
 const CODEX_SEED_MIN_INTERVAL_MS = 60_000;
+
+/** Dashboard pulls share the CSV export's freshness window. */
+const CURSOR_SEED_MIN_INTERVAL_MS = 5 * 60_000;
 
 /** On-disk shape of the snapshot cache: the contract array, JSON-encoded. */
 const LimitsCacheFile = Schema.Array(AccountLimitsSnapshot);
@@ -111,7 +118,12 @@ export const layerTest = Layer.succeed(
 function providerFromDriver(driver: string): UsageProviderKind | null {
   if (driver === "claudeAgent") return "claude";
   if (driver === "codex") return "codex";
+  if (driver === "cursor") return "cursor";
   return null;
+}
+
+function driverKindForUsageProvider(provider: UsageProviderKind): string {
+  return provider === "claude" ? "claudeAgent" : provider;
 }
 
 /**
@@ -121,9 +133,7 @@ function providerFromDriver(driver: string): UsageProviderKind | null {
  * not a guess - it is what that data always meant.
  */
 function defaultInstanceIdForProvider(provider: UsageProviderKind): ProviderInstanceId {
-  return defaultInstanceIdForDriver(
-    ProviderDriverKind.make(provider === "claude" ? "claudeAgent" : "codex"),
-  );
+  return defaultInstanceIdForDriver(ProviderDriverKind.make(driverKindForUsageProvider(provider)));
 }
 
 /**
@@ -182,9 +192,11 @@ export const make = Effect.gen(function* () {
    * shown as a ghost account forever.
    */
   const hostEnvironment = yield* HostProcessEnvironment;
+  const httpClient = yield* HttpClient.HttpClient;
   const migratedSlots = new Set<string>();
   const cachePath = path.join(config.stateDir, "account-limits.json");
   let lastCodexSeedAttemptAtMs = 0;
+  let lastCursorSeedAttemptAtMs = 0;
 
   // Restarts must not lose the Claude snapshot (stream-only, no disk source),
   // so the cache is persisted. Same Effect.cached trick as the usage scan
@@ -336,7 +348,7 @@ export const make = Effect.gen(function* () {
         if (existing !== undefined && input.createdAt < existing.asOf) return;
         if (provider === "claude") {
           yield* ingestClaude(input.payload, input.createdAt, instanceId);
-        } else {
+        } else if (provider === "codex") {
           yield* ingestCodex(input.payload, input.createdAt, instanceId);
         }
       }),
@@ -429,6 +441,48 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  /**
+   * Pulls Cursor's monthly pools from the dashboard when the desktop session
+   * is available. Limits belong to the signed-in Cursor account, not a T3
+   * provider instance — several Cursor instances on one machine share that
+   * account, so they collapse onto the default instance. Adapter-disabled
+   * still seeds: usage export already reports that desktop account.
+   */
+  const maybeSeedCursorFromDashboard = Effect.fn("AccountLimitsService.seedCursor")(function* (
+    nowMs: number,
+  ) {
+    if (nowMs - lastCursorSeedAttemptAtMs < CURSOR_SEED_MIN_INTERVAL_MS) return;
+    lastCursorSeedAttemptAtMs = nowMs;
+
+    const instanceId = defaultInstanceIdForProvider("cursor");
+    const existing = snapshots.get(slotKey("cursor", instanceId));
+    if (existing !== undefined && nowMs - Date.parse(existing.asOf) < CURSOR_SEED_MIN_INTERVAL_MS) {
+      return;
+    }
+
+    const homeDir =
+      hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || undefined;
+    const loaded = yield* loadCursorAccountLimits({ homeDir }).pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+    );
+    if (loaded.status !== "ok" || loaded.snapshot.windows.length === 0) return;
+    const asOf = DateTime.formatIso(DateTime.makeUnsafe(nowMs));
+    yield* stateLock.withPermits(1)(
+      Effect.gen(function* () {
+        const current = snapshots.get(slotKey("cursor", instanceId));
+        if (current !== undefined && current.asOf >= asOf) return;
+        yield* store({
+          provider: "cursor",
+          instanceId,
+          plan: loaded.snapshot.plan ?? current?.plan ?? null,
+          windows: loaded.snapshot.windows,
+          asOf,
+          source: "live",
+        });
+      }),
+    );
+  });
+
   const readSummary = Effect.fn("AccountLimitsService.readSummary")(function* () {
     yield* ensureLoaded;
     const nowMs = yield* Clock.currentTimeMillis;
@@ -439,6 +493,7 @@ export const make = Effect.gen(function* () {
     yield* maybeSeedCodexFromTranscripts(nowMs, configMap).pipe(
       Effect.catchCause(() => Effect.void),
     );
+    yield* maybeSeedCursorFromDashboard(nowMs).pipe(Effect.catchCause(() => Effect.void));
     // A deleted instance takes its rows with it - anything else leaves a
     // ghost account forcing the captioned multi-row UI forever. A merely
     // disabled instance keeps its cache (re-enabling restores it) but stays
@@ -452,6 +507,10 @@ export const make = Effect.gen(function* () {
             const instanceId =
               snapshot.instanceId ?? defaultInstanceIdForProvider(snapshot.provider);
             const entry = configMap[instanceId];
+            // Cursor limits come from the desktop account, not a T3 instance
+            // that can be deleted or reassigned. Keep the row even when the
+            // Cursor adapter is off or missing from settings.
+            if (snapshot.provider === "cursor") continue;
             // Gone entirely, or reconfigured to a different driver: either
             // way the row's data belongs to an account this id no longer
             // names, and a stale row would be captioned with the NEW
@@ -468,6 +527,8 @@ export const make = Effect.gen(function* () {
     }
     const visible = [...snapshots.values()].filter((snapshot) => {
       if (configMap === null) return true;
+      // Desktop-account limits, independent of whether the Cursor adapter is on.
+      if (snapshot.provider === "cursor") return true;
       const instanceId = snapshot.instanceId ?? defaultInstanceIdForProvider(snapshot.provider);
       return configMap[instanceId]?.enabled !== false;
     });
