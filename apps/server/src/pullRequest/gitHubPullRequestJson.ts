@@ -374,6 +374,11 @@ const RawDetailSchema = Schema.Struct({
   autoMergeRequest: Schema.optional(Schema.NullOr(Schema.Unknown)),
 });
 
+const RawPullRequestDiffRevisionSchema = Schema.Struct({
+  baseRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
 const RawActivitySchema = Schema.Struct({
   author: Schema.optional(Schema.NullOr(RawActorSchema)),
   comments: Schema.optional(Schema.Array(RawCommentSchema)),
@@ -601,7 +606,7 @@ export function decodeActorAvatarsJson(
 export const PULL_REQUEST_LIST_JSON_FIELDS =
   "number,title,url,author,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,createdAt,updatedAt,mergedAt,reviewRequests,labels,statusCheckRollup";
 
-export const PULL_REQUEST_DETAIL_JSON_FIELDS = `${PULL_REQUEST_LIST_JSON_FIELDS},body,changedFiles,closedAt,headRepositoryOwner,baseRefOid,headRefOid,autoMergeRequest`;
+export const PULL_REQUEST_DETAIL_JSON_FIELDS = `${PULL_REQUEST_LIST_JSON_FIELDS},body,changedFiles,closedAt,headRepositoryOwner,autoMergeRequest`;
 export const PULL_REQUEST_ACTIVITY_JSON_FIELDS = "author,comments,reviews,commits";
 
 /** GitHub's own ceiling on a connection page, which is what both thread reads ask for. */
@@ -1397,6 +1402,7 @@ const decodeSearch = decodeJsonResult(RawSearchSchema);
 const decodeSearchItem = Schema.decodeUnknownExit(RawSearchItemSchema);
 const decodeStats = decodeJsonResult(RawStatsSchema);
 const decodeDetail = decodeJsonResult(RawDetailSchema);
+const decodePullRequestDiffRevision = decodeJsonResult(RawPullRequestDiffRevisionSchema);
 const decodeActivity = decodeJsonResult(RawActivitySchema);
 const decodeFileEntry = Schema.decodeUnknownExit(RawPullRequestFileSchema);
 const decodeRepositoryAccess = decodeJsonResult(RawRepositoryAccessSchema);
@@ -1555,6 +1561,16 @@ export function decodePullRequestDetailJson(
   return Result.isSuccess(decoded)
     ? Result.succeed(toDetail(decoded.success))
     : Result.fail(decoded.failure);
+}
+
+export function decodePullRequestDiffRevisionJson(
+  raw: string,
+): Result.Result<{ readonly baseOid: string; readonly headOid: string } | null, DecodeFailure> {
+  const decoded = decodePullRequestDiffRevision(raw);
+  if (!Result.isSuccess(decoded)) return Result.fail(decoded.failure);
+  const baseOid = trimmed(decoded.success.baseRefOid);
+  const headOid = trimmed(decoded.success.headRefOid);
+  return Result.succeed(baseOid === null || headOid === null ? null : { baseOid, headOid });
 }
 
 export function decodePullRequestActivityJson(

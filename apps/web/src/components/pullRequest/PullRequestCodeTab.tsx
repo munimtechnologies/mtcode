@@ -297,7 +297,7 @@ export function PullRequestCodeTab({
   /** Cohesive detail and first-page diff; null until the aggregate bootstrap is complete. */
   snapshot: PullRequestCodeSnapshot | null;
   bootstrapError: string | null;
-  onBootstrapRetry: () => void;
+  onBootstrapRetry: () => void | Promise<void>;
   /** Commit whose diff is open. Null keeps the whole pull-request diff selected. */
   selectedCommitOid: string | null;
   onSelectedCommitChange: (oid: string | null) => void;
@@ -313,6 +313,15 @@ export function PullRequestCodeTab({
   // live detail supplies the same toolbar chrome without allowing any diff request to start here.
   const detail = snapshot?.detail ?? liveDetail;
   const hasSnapshot = snapshot !== null;
+  const [bootstrapRetryPending, setBootstrapRetryPending] = useState(false);
+  const retryBootstrap = useCallback(async () => {
+    setBootstrapRetryPending(true);
+    try {
+      await onBootstrapRetry();
+    } finally {
+      setBootstrapRetryPending(false);
+    }
+  }, [onBootstrapRetry]);
   const snapshotVersion = snapshot?.version ?? 0;
   const firstPageDiff = snapshot?.firstPageDiff ?? null;
   const { resolvedTheme } = useTheme();
@@ -1382,7 +1391,7 @@ export function PullRequestCodeTab({
     <div className="flex h-full min-h-0 flex-col">
       {toolbar}
       {hasSnapshot && bootstrapError !== null ? (
-        <PullRequestCodeRefreshFailure error={bootstrapError} onRetry={onBootstrapRetry} />
+        <PullRequestCodeRefreshFailure error={bootstrapError} onRetry={retryBootstrap} />
       ) : null}
       {/* The overlay is anchored to this wrapper, not the scroller: absolute positioning
           inside an overflowing element tracks the content's bottom edge, which would carry
@@ -1396,7 +1405,10 @@ export function PullRequestCodeTab({
 
   if (!hasSnapshot) {
     return withReviewBar(
-      <PullRequestCodeBootstrapBody error={bootstrapError} onRetry={onBootstrapRetry} />,
+      <PullRequestCodeBootstrapBody
+        error={bootstrapRetryPending ? null : bootstrapError}
+        onRetry={retryBootstrap}
+      />,
     );
   }
 
@@ -1474,6 +1486,9 @@ export function PullRequestCodeTab({
     <DiffWorkerPoolProvider>
       <div className="flex h-full min-h-0 flex-col">
         {toolbar}
+        {bootstrapError !== null ? (
+          <PullRequestCodeRefreshFailure error={bootstrapError} onRetry={retryBootstrap} />
+        ) : null}
         {/* Above the code, closed, and counted: these belong to the change rather than to any
             line of it, and in the stream they read as cards dropped into the patch. */}
         {orphanFiles.size > 0 ? (
