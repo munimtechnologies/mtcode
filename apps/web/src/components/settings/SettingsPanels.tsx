@@ -64,7 +64,11 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  getClientSettings,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -82,10 +86,6 @@ import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../.
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import {
-  listVoiceTranscriptionModels,
-  readVoiceTranscriptionEnvironmentStatus,
-} from "../../lib/voiceTranscription";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -130,6 +130,7 @@ import {
   formatDiagnosticsDescription,
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
+  hasChangedVoiceTranscriptionSettings,
   normalizeIntervalSeconds,
   PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
   hasChangedBackgroundActivitySettings,
@@ -138,6 +139,8 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
+  shouldRestoreVoiceTranscriptionDefaults,
+  voiceTranscriptionModelOptions,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -150,6 +153,10 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { DesktopNotificationsSettings } from "./DesktopNotificationsSettings";
+import {
+  listVoiceTranscriptionModels,
+  readVoiceTranscriptionEnvironmentStatus,
+} from "../../lib/voiceTranscription";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -490,6 +497,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.desktopNotifications.events.completion ||
     settings.desktopNotifications.events.failure !==
       DEFAULT_UNIFIED_SETTINGS.desktopNotifications.events.failure;
+  const isVoiceTranscriptionDirty = hasChangedVoiceTranscriptionSettings(settings);
 
   const changedSettingLabels = useMemo(
     () => [
@@ -557,6 +565,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
+      ...(isVoiceTranscriptionDirty ? ["Voice dictation"] : []),
     ],
     [
       isTextGenerationModelDirty,
@@ -568,6 +577,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserAutoShowFloatingPreview,
       settings.enableAgentBrowserAccess,
       settings.confirmQuit,
+      isVoiceTranscriptionDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
@@ -608,6 +618,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       { variant: "destructive" },
     );
     if (!confirmed) return;
+
+    const shouldResetVoiceTranscription = shouldRestoreVoiceTranscriptionDefaults({
+      wasIncludedInConfirmation: isVoiceTranscriptionDirty,
+      liveSettings: getClientSettings(),
+    });
 
     // Only touch the theme keys that are actually dirty, so a theme-storage
     // failure cannot block restoring unrelated settings. Preferences are
@@ -684,6 +699,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+      ...(shouldResetVoiceTranscription
+        ? {
+            voiceTranscriptionEnabled: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionEnabled,
+            voiceTranscriptionProvider: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionProvider,
+            voiceTranscriptionApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionApiKey,
+            voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
+          }
+        : {}),
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -705,6 +728,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   }, [
     changedSettingLabels,
     clearThemeHalves,
+    isVoiceTranscriptionDirty,
     onRestored,
     setFollowSystem,
     setTheme,
@@ -1918,6 +1942,207 @@ function AutoSettleDaysInput({
   );
 }
 
+function VoiceDictationSettingsSection() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const [environmentApiKeys, setEnvironmentApiKeys] = useState({ openai: false, groq: false });
+  const [environmentStatusLoading, setEnvironmentStatusLoading] = useState(true);
+  const [environmentStatusError, setEnvironmentStatusError] = useState<string | null>(null);
+  const [environmentStatusAttempt, setEnvironmentStatusAttempt] = useState(0);
+  const [models, setModels] = useState<readonly string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const provider = settings.voiceTranscriptionProvider;
+  const apiKey = settings.voiceTranscriptionApiKey;
+  const model = settings.voiceTranscriptionModel;
+  const selectableModels = voiceTranscriptionModelOptions(models, model);
+
+  useEffect(() => {
+    let active = true;
+    setEnvironmentStatusLoading(true);
+    setEnvironmentStatusError(null);
+    void readVoiceTranscriptionEnvironmentStatus()
+      .then((status) => {
+        if (!active) return;
+        setEnvironmentApiKeys(status);
+        setEnvironmentStatusLoading(false);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setEnvironmentStatusLoading(false);
+        setEnvironmentStatusError(
+          cause instanceof Error ? cause.message : "Could not check server transcription keys.",
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [environmentStatusAttempt]);
+
+  const providerLabel = provider === "openai" ? "OpenAI" : "Groq";
+  const environmentVariable = TRANSCRIPTION_API_KEY_ENV[provider];
+  const hasEnvironmentApiKey = environmentApiKeys[provider];
+  const hasApiKey = apiKey.trim().length > 0 || hasEnvironmentApiKey;
+
+  useEffect(() => {
+    if (!hasApiKey) {
+      setModels([]);
+      setModelsLoading(false);
+      setModelsError(null);
+      return;
+    }
+
+    let active = true;
+    setModelsLoading(true);
+    setModelsError(null);
+    const timeout = window.setTimeout(
+      () => {
+        void listVoiceTranscriptionModels({ provider, apiKey })
+          .then((nextModels) => {
+            if (!active) return;
+            setModels(nextModels);
+            setModelsLoading(false);
+          })
+          .catch((cause: unknown) => {
+            if (!active) return;
+            setModels([]);
+            setModelsLoading(false);
+            setModelsError(
+              cause instanceof Error ? cause.message : "Could not load transcription models.",
+            );
+          });
+      },
+      apiKey.trim() ? 400 : 0,
+    );
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [apiKey, hasApiKey, provider]);
+
+  const modelDescription = !hasApiKey
+    ? environmentStatusLoading
+      ? `Checking the connected server for ${environmentVariable}…`
+      : environmentStatusError
+        ? `${environmentStatusError} Add a client key or retry the server check.`
+        : `Save an API key to load ${providerLabel} transcription models.`
+    : modelsLoading
+      ? `Loading models available from ${providerLabel}…`
+      : modelsError
+        ? modelsError
+        : models.length === 0
+          ? `${providerLabel} did not return any models.`
+          : model && !models.includes(model)
+            ? "The saved model was not returned by the provider. Keep it or choose another model."
+            : "Choose a model. The microphone appears in the composer after that.";
+
+  return (
+    <SettingsSection title="Voice dictation">
+      <SettingsRow
+        {...searchableSetting("voice-dictation")}
+        description="Codex-style dictation: cancel, insert into the end of the draft, or transcribe and send."
+        control={
+          <Select
+            value={provider}
+            onValueChange={(value) =>
+              updateSettings({
+                voiceTranscriptionProvider: value as VoiceTranscriptionProvider,
+                voiceTranscriptionApiKey: "",
+                voiceTranscriptionModel: "",
+                voiceTranscriptionEnabled: false,
+              })
+            }
+          >
+            <SelectTrigger className="w-full sm:w-44" aria-label="Transcription provider">
+              <SelectValue>{providerLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="openai">
+                OpenAI
+              </SelectItem>
+              <SelectItem hideIndicator value="groq">
+                Groq
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+      <SettingsRow
+        title={`${providerLabel} API key`}
+        description={
+          environmentStatusLoading
+            ? `Checking whether ${environmentVariable} is configured on the connected server.`
+            : environmentStatusError
+              ? `${environmentStatusError} You can still enter a client key.`
+              : hasEnvironmentApiKey
+                ? `${environmentVariable} is configured on the connected server. A client key overrides it.`
+                : `Stored in this client's settings. You can also set ${environmentVariable} on the server.`
+        }
+        control={
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <Input
+              type="password"
+              autoComplete="off"
+              className="w-full sm:w-64"
+              value={apiKey}
+              onChange={(event) =>
+                updateSettings({
+                  voiceTranscriptionApiKey: event.target.value,
+                  voiceTranscriptionModel: "",
+                  voiceTranscriptionEnabled: false,
+                })
+              }
+              placeholder={hasEnvironmentApiKey ? `Using ${environmentVariable}` : "Required"}
+              aria-label={`${providerLabel} transcription API key`}
+            />
+            {environmentStatusError ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setEnvironmentStatusAttempt((attempt) => attempt + 1)}
+              >
+                Retry
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
+      <SettingsRow
+        title="Transcription model"
+        description={modelDescription}
+        control={
+          <Select
+            value={model}
+            disabled={modelsLoading || selectableModels.length === 0}
+            onValueChange={(value) => {
+              if (value !== null) {
+                updateSettings({
+                  voiceTranscriptionModel: value,
+                  voiceTranscriptionEnabled: true,
+                });
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-64" aria-label="Transcription model">
+              <SelectValue>
+                {model || (modelsLoading ? "Loading models…" : "Select model")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {selectableModels.map((availableModel) => (
+                <SelectItem hideIndicator key={availableModel} value={availableModel}>
+                  {availableModel}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 // The legacy rows sit behind the fold, so a settings-search jump has to
 // expand the section before its target can mount and scroll.
 const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
@@ -2617,6 +2842,7 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <DesktopNotificationsSettings />
+      <VoiceDictationSettingsSection />
 
       <SettingsSection title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (

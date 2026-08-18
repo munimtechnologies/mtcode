@@ -47,6 +47,10 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import {
+  activeMobileVoiceTranscriptionConfig,
+  useMobileVoiceTranscriptionSettings,
+} from "../voice-dictation/voiceTranscriptionSettings";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -535,10 +539,22 @@ function GeneralSettingsSection() {
     preferencesResult.value.autoSettleOnMerge !== false;
   const steerActiveTurns =
     !AsyncResult.isSuccess(preferencesResult) || preferencesResult.value.steerActiveTurns !== false;
+  const voiceTranscription = useMobileVoiceTranscriptionSettings();
+  const voiceTranscriptionConfig = activeMobileVoiceTranscriptionConfig(voiceTranscription);
 
   return (
     <SettingsSection title="General">
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+      <SettingsRow
+        icon="mic"
+        label="Voice Dictation"
+        value={
+          voiceTranscription.loaded && voiceTranscriptionConfig.apiKey.trim().length > 0
+            ? "Enabled"
+            : "Set up"
+        }
+        target="SettingsVoiceDictation"
+      />
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
         label="Auto-settle merged threads"

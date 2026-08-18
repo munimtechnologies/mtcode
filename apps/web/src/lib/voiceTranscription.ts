@@ -1,7 +1,9 @@
 import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
-import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
+import { runPrimaryRawHttp } from "./runtime";
 
 export interface VoiceTranscriptionConfig {
   readonly provider: VoiceTranscriptionProvider;
@@ -39,81 +41,91 @@ function voiceTranscriptionProviderHeaders(
   };
 }
 
-export async function readVoiceTranscriptionEnvironmentStatus(): Promise<VoiceTranscriptionEnvironmentStatus> {
-  const bearerToken = await readDesktopPrimaryBearerToken();
-  const response = await globalThis.fetch(resolvePrimaryEnvironmentHttpUrl("/api/transcription"), {
-    method: "GET",
-    credentials: bearerToken ? "omit" : "include",
-    ...(bearerToken ? { headers: { authorization: `Bearer ${bearerToken}` } } : {}),
-  });
-  if (!response.ok) throw new Error("Could not read transcription provider settings.");
+async function executeVoiceTranscriptionJsonRequest(
+  request: HttpClientRequest.HttpClientRequest,
+  failureMessage: string,
+): Promise<{ readonly status: number; readonly payload: unknown }> {
+  try {
+    return await runPrimaryRawHttp(
+      HttpClient.execute(request).pipe(
+        Effect.flatMap((response) =>
+          response.json.pipe(
+            Effect.orElseSucceed(() => null),
+            Effect.map((payload) => ({ status: response.status, payload })),
+          ),
+        ),
+      ),
+    );
+  } catch (cause) {
+    throw new Error(failureMessage, { cause });
+  }
+}
 
-  const payload = (await response.json()) as { readonly openai?: unknown; readonly groq?: unknown };
+export async function readVoiceTranscriptionEnvironmentStatus(): Promise<VoiceTranscriptionEnvironmentStatus> {
+  const { status, payload } = await executeVoiceTranscriptionJsonRequest(
+    HttpClientRequest.get(resolvePrimaryEnvironmentHttpUrl("/api/transcription")),
+    "Could not read transcription provider settings.",
+  );
+  if (status < 200 || status >= 300) {
+    throw new Error("Could not read transcription provider settings.");
+  }
+  const value = payload as { readonly openai?: unknown; readonly groq?: unknown } | null;
   return {
-    openai: payload.openai === true,
-    groq: payload.groq === true,
+    openai: value?.openai === true,
+    groq: value?.groq === true,
   };
 }
 
 export async function listVoiceTranscriptionModels(
   config: VoiceTranscriptionProviderConfig,
 ): Promise<readonly string[]> {
-  const bearerToken = await readDesktopPrimaryBearerToken();
-  const response = await globalThis.fetch(
+  const request = HttpClientRequest.get(
     resolvePrimaryEnvironmentHttpUrl("/api/transcription/models"),
-    {
-      method: "GET",
-      credentials: bearerToken ? "omit" : "include",
-      headers: {
-        ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
-        ...voiceTranscriptionProviderHeaders(config),
-      },
-    },
+  ).pipe(HttpClientRequest.setHeaders(voiceTranscriptionProviderHeaders(config)));
+  const { status, payload } = await executeVoiceTranscriptionJsonRequest(
+    request,
+    "Could not load transcription models.",
   );
-  const payload = (await response.json().catch(() => null)) as {
+  const value = payload as {
     readonly models?: unknown;
     readonly error?: unknown;
   } | null;
-  if (!response.ok) {
+  if (status < 200 || status >= 300) {
     throw new Error(
-      typeof payload?.error === "string" ? payload.error : "Could not load transcription models.",
+      typeof value?.error === "string" ? value.error : "Could not load transcription models.",
     );
   }
-  if (
-    !Array.isArray(payload?.models) ||
-    !payload.models.every((model) => typeof model === "string")
-  ) {
+  if (!Array.isArray(value?.models) || !value.models.every((model) => typeof model === "string")) {
     throw new Error("The transcription model response was invalid.");
   }
-  return payload.models;
+  return value.models;
 }
 
 export async function transcribeVoiceRecording(
   audio: Blob,
   config: VoiceTranscriptionConfig,
 ): Promise<string> {
-  const bearerToken = await readDesktopPrimaryBearerToken();
-  const response = await globalThis.fetch(resolvePrimaryEnvironmentHttpUrl("/api/transcription"), {
-    method: "POST",
-    credentials: bearerToken ? "omit" : "include",
-    headers: {
-      ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
-      ...voiceTranscriptionRequestHeaders(audio.type || "audio/webm", config),
-    },
-    body: audio,
-  });
-
-  const payload = (await response.json().catch(() => null)) as {
+  const contentType = audio.type || "audio/webm";
+  const audioBytes = new Uint8Array(await audio.arrayBuffer());
+  const request = HttpClientRequest.post(
+    resolvePrimaryEnvironmentHttpUrl("/api/transcription"),
+  ).pipe(
+    HttpClientRequest.bodyUint8Array(audioBytes, contentType),
+    HttpClientRequest.setHeaders(voiceTranscriptionRequestHeaders(contentType, config)),
+  );
+  const { status, payload } = await executeVoiceTranscriptionJsonRequest(
+    request,
+    "Voice transcription failed.",
+  );
+  const value = payload as {
     readonly text?: unknown;
     readonly error?: unknown;
   } | null;
-  if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string" ? payload.error : "Voice transcription failed.",
-    );
+  if (status < 200 || status >= 300) {
+    throw new Error(typeof value?.error === "string" ? value.error : "Voice transcription failed.");
   }
-  if (typeof payload?.text !== "string") {
+  if (typeof value?.text !== "string") {
     throw new Error("The transcription response did not contain text.");
   }
-  return payload.text.trim();
+  return value.text.trim();
 }

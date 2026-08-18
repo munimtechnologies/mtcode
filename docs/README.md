@@ -9,6 +9,7 @@
 - [Messaging between threads](./user/thread-messaging.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)
+- [Voice dictation](./user/voice-dictation.md)
 - [Remote access](./user/remote-access.md)
 - [Keeping app and server in sync](./user/updating.md)
 - [Source control integrations](./user/source-control.md)
