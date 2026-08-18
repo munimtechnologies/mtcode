@@ -1,0 +1,12 @@
+// Hosted MT Code web app: static assets Worker bound to mtcode.munimtech.com.
+// Workers custom domains auto-create the DNS record (Pages custom domains
+// cannot with wrangler's OAuth scopes). Deployed by personal-publish-web.sh.
+{
+  "name": "mtcode-web",
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "../apps/web/dist",
+    "not_found_handling": "single-page-application",
+  },
+  "routes": [{ "pattern": "mtcode.munimtech.com", "custom_domain": true }],
+}
