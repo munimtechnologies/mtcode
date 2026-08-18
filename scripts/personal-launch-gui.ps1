@@ -29,7 +29,7 @@ function Find-T3Exe {
   $found = @("$env:LOCALAPPDATA\Programs", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
     Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
     ForEach-Object {
-      Get-ChildItem -LiteralPath $_ -Filter "T3 Code*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue
+      Get-ChildItem -LiteralPath $_ -Include "T3 Code*.exe", "MT Code*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue
     } |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1

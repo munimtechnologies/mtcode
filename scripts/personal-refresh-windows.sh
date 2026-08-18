@@ -39,10 +39,10 @@ ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass -Fi
 # the others: reaching Dell used to be the last thing that could kill the run outright.
 refresh_dell() {
   mkdir -p /tmp/t3-personal-installer || return 1
-  scp -o BatchMode=yes -o ConnectTimeout=30 blade:dev/T3-Code-personal-x64.exe \
-    /tmp/t3-personal-installer/T3-Code-personal-x64.exe || return 1
-  scp -o BatchMode=yes -o ConnectTimeout=30 /tmp/t3-personal-installer/T3-Code-personal-x64.exe \
-    dell:dev/T3-Code-personal-x64.exe || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 blade:dev/MT-Code-personal-x64.exe \
+    /tmp/t3-personal-installer/MT-Code-personal-x64.exe || return 1
+  scp -o BatchMode=yes -o ConnectTimeout=30 /tmp/t3-personal-installer/MT-Code-personal-x64.exe \
+    dell:dev/MT-Code-personal-x64.exe || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-refresh-dell.ps1" \
     dell:dev/personal-refresh-dell.ps1 || return 1
   scp -o BatchMode=yes -o ConnectTimeout=30 "$REPO/scripts/personal-launch-gui.ps1" \

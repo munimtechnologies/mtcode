@@ -1,7 +1,7 @@
 # Refresh Blade to latest personal fork (upstream nightly + CU/History).
 # Clone remote "origin" here is github.com/sheehanmunim/t3code (personal branch).
-# Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork while
-# product name stays "T3 Code".
+# Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork.
+# The fleet ships the MT Code brand on every machine, same as the Mac.
 param(
   [string]$DesktopVersion = "",
   [string]$ForceRebuild = ""
@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 if ($DesktopVersion) { $env:T3CODE_DESKTOP_VERSION = $DesktopVersion }
 if ($ForceRebuild) { $env:T3_FORCE_REBUILD = $ForceRebuild }
+$env:T3CODE_DESKTOP_DISTRO = "munim"
 
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
   [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" +
@@ -42,7 +43,7 @@ if (Test-Path $stateFile) {
 }
 Log "origin/personal=$new previously=$old"
 
-$staged = Join-Path $env:USERPROFILE "dev\T3-Code-personal-x64.exe"
+$staged = Join-Path $env:USERPROFILE "dev\MT-Code-personal-x64.exe"
 $force = [string]$env:T3_FORCE_REBUILD
 if (($new -eq $old) -and ($force -ne "1")) {
   if (Test-Path $staged) {
@@ -96,26 +97,29 @@ if ($buildExit -ne 0) {
 # The stamp is build input only; keep the clone clean.
 git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 
-$installerPath = Get-ChildItem (Join-Path $repo "release\T3-Code-*-x64.exe") |
+$installerPath = Get-ChildItem (Join-Path $repo "release\MT-Code-*-x64.exe") |
   Sort-Object LastWriteTime -Descending |
   Select-Object -First 1 -ExpandProperty FullName
 Copy-Item $installerPath $staged -Force
 Log "staged installer $staged"
 
-Log "stopping T3"
-Get-Process | Where-Object { $_.ProcessName -like "*T3*" } |
+Log "stopping T3 / MT Code"
+Get-Process | Where-Object { $_.ProcessName -like "*T3*" -or $_.ProcessName -like "*MT Code*" } |
   Stop-Process -Force -ErrorAction SilentlyContinue
 
 Log "uninstalling previous installs if present"
 try {
   winget uninstall --id T3Tools.T3Code --silent --disable-interactivity 2>&1 | Out-String | ForEach-Object { Log $_ }
 } catch {}
-foreach ($name in @(
-  "Uninstall T3 Code (Nightly).exe",
-  "Uninstall T3 Code (Alpha).exe",
-  "Uninstall T3 Code.exe"
+# Both brands: the fleet used to ship the plain T3 Code identity, so its uninstaller
+# lingers on machines that have not been wiped since the MT Code switch.
+foreach ($entry in @(
+  @{ Dir = "t3code"; Name = "Uninstall T3 Code (Nightly).exe" },
+  @{ Dir = "t3code"; Name = "Uninstall T3 Code (Alpha).exe" },
+  @{ Dir = "t3code"; Name = "Uninstall T3 Code.exe" },
+  @{ Dir = "mtcode"; Name = "Uninstall MT Code.exe" }
 )) {
-  $uninst = Join-Path $env:LOCALAPPDATA "Programs\t3code\$name"
+  $uninst = Join-Path $env:LOCALAPPDATA ("Programs\{0}\{1}" -f $entry.Dir, $entry.Name)
   if (Test-Path $uninst) {
     Start-Process -FilePath $uninst -ArgumentList "/S" -Wait
   }
@@ -124,7 +128,7 @@ foreach ($name in @(
 Log "installing $installerPath"
 Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
 Start-Sleep 2
-$exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\t3code\T3 Code*.exe") |
+$exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\mtcode\MT Code*.exe") |
   Where-Object { $_.Name -notlike "Uninstall*" } |
   Select-Object -First 1
 if ($exe) {

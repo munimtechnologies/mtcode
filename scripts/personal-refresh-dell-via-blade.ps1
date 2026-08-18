@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $dellHost = if ($env:T3_DELL_HOST) { $env:T3_DELL_HOST } else { "DESKTOP-6ILJVR4" }
 $dellUser = if ($env:T3_DELL_USER) { $env:T3_DELL_USER } else { "busin" }
 $key = Join-Path $env:USERPROFILE ".ssh\codex_ed25519"
-$installer = Join-Path $env:USERPROFILE "dev\T3-Code-personal-x64.exe"
+$installer = Join-Path $env:USERPROFILE "dev\MT-Code-personal-x64.exe"
 $script = Join-Path $env:USERPROFILE "dev\personal-refresh-dell.ps1"
 $launcher = Join-Path $env:USERPROFILE "dev\personal-launch-gui.ps1"
 
@@ -26,7 +26,7 @@ $sshArgs = @("-i", $key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"
 
 Write-Output "DELL_VIA_BLADE_START $target"
 
-& scp @sshArgs $installer "${target}:dev/T3-Code-personal-x64.exe"
+& scp @sshArgs $installer "${target}:dev/MT-Code-personal-x64.exe"
 if ($LASTEXITCODE -ne 0) { throw "could not copy the installer to $target" }
 
 & scp @sshArgs $script "${target}:dev/personal-refresh-dell.ps1"
