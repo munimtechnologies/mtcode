@@ -452,6 +452,31 @@
         height: 64px;
         object-fit: contain;
       }
+
+      /* Brands that ship a wordmark (see resolveWebIconOverrides) swap it in for
+         the app icon. It is painted as a mask tinted with the boot foreground so
+         one black asset reads correctly on both light and dark boot backgrounds. */
+      #boot-shell-wordmark-probe {
+        display: none;
+      }
+
+      html.boot-has-wordmark #boot-shell-logo {
+        display: none;
+      }
+
+      html.boot-has-wordmark #boot-shell-card {
+        width: 200px;
+        height: 56px;
+      }
+
+      html.boot-has-wordmark #boot-shell-card::after {
+        content: "";
+        width: 200px;
+        height: 56px;
+        background-color: var(--boot-foreground);
+        -webkit-mask: url("/boot-wordmark.png") center / contain no-repeat;
+        mask: url("/boot-wordmark.png") center / contain no-repeat;
+      }
     </style>
     <title>T3 Code (Alpha)</title>
   </head>
@@ -459,7 +484,14 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="T3 Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="" />
+          <img
+            id="boot-shell-wordmark-probe"
+            src="/boot-wordmark.png"
+            alt=""
+            aria-hidden="true"
+            onload="document.documentElement.classList.add('boot-has-wordmark')"
+          />
         </div>
       </div>
     </div>

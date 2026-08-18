@@ -28,6 +28,7 @@ export const BRAND_ASSET_PATHS = {
   munimWebFavicon16Png: "assets/munim/munim-web-favicon-16x16.png",
   munimWebFavicon32Png: "assets/munim/munim-web-favicon-32x32.png",
   munimWebAppleTouchIconPng: "assets/munim/munim-web-apple-touch-180.png",
+  munimWebWordmarkPng: "assets/munim/munim-web-wordmark.png",
   munimLinuxIconPng: "assets/munim/munim-universal-1024.png",
   munimWindowsIconIco: "assets/munim/munim-windows.ico",
 
@@ -114,6 +115,17 @@ export function resolveWebIconOverrides(
       sourceRelativePath: sourcePaths.appleTouchIconPng,
       targetRelativePath: `${targetDirectory}/${WEB_ICON_TARGET_FILENAMES.appleTouchIconPng}`,
     },
+    // Only the Munim brand ships a wordmark. The boot shell probes for this file
+    // and falls back to the app icon when it is absent, so other brands are
+    // unaffected by its absence.
+    ...(brand === "munim"
+      ? [
+          {
+            sourceRelativePath: BRAND_ASSET_PATHS.munimWebWordmarkPng,
+            targetRelativePath: `${targetDirectory}/boot-wordmark.png`,
+          },
+        ]
+      : []),
   ];
 }
 
