@@ -1834,8 +1834,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         .pipe(
           Effect.flatMap((stateRow) =>
             Stream.runForEach(
+              // Bootstrap has to reach the head of the log, so ask for the whole
+              // tail rather than inheriting the store's default page limit — a
+              // projector further behind than one page would otherwise stop
+              // mid-replay and pin the snapshot sequence there forever. The
+              // stream still reads in fixed-size pages.
               eventStore.readFromSequence(
                 Option.isSome(stateRow) ? stateRow.value.lastAppliedSequence : 0,
+                Number.MAX_SAFE_INTEGER,
               ),
               (event) => runProjectorForEvent(projector, event),
             ),
