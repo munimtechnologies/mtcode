@@ -292,7 +292,9 @@ export function useLegacySidebarEnabled(): boolean {
 export function useTabsEnabled(): boolean {
   const settingsHydrated = useClientSettingsHydrated();
   const tabsEnabled = useClientSettingsValue().tabsEnabled;
-  return !settingsHydrated || tabsEnabled;
+  // Wait for hydration so the pre-hydrate schema snapshot cannot flash the
+  // tab strip for users who have not opted in (default is off).
+  return settingsHydrated && tabsEnabled;
 }
 
 /** Read current settings for one environment, merged with client-local preferences. */
