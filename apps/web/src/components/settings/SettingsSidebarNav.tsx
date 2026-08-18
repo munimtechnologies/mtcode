@@ -305,8 +305,10 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       </SidebarContent>
       <SidebarFooter className="p-[var(--sidebar-content-inset)]">
         <T3ConnectSidebarSignIn />
-        <div className="flex items-center gap-1">
-          <SidebarMenu className="shrink-0">
+        <div className="flex min-w-0 items-center gap-1">
+          {/* Back gives up width before the avatar does, so a narrow sidebar
+              truncates the label instead of pushing the avatar past its edge. */}
+          <SidebarMenu className="min-w-0">
             <SidebarMenuItem>
               <SidebarMenuButton onClick={handleBackClick}>
                 <ArrowLeftIcon />
@@ -317,7 +319,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           <div className="min-w-0 flex-1">
             <SidebarUtilityMenu />
           </div>
-          <T3ConnectSidebarAvatar />
+          <div className="shrink-0">
+            <T3ConnectSidebarAvatar />
+          </div>
         </div>
       </SidebarFooter>
     </>

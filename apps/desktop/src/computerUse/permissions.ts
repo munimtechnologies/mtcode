@@ -279,6 +279,20 @@ export async function openComputerUsePrivacySettings(
     }
   }
 
+  // Screen Recording has no prompt API, and macOS only lists an app once it has
+  // actually asked to capture — so an app that never asks can never be toggled
+  // on. Requesting one tiny source registers this app with TCC first.
+  if (pane === "screenRecording") {
+    try {
+      await Electron.desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 1, height: 1 },
+      });
+    } catch {
+      // Still open Settings even if the request fails.
+    }
+  }
+
   try {
     await Electron.shell.openExternal(privacySettingsUrl(pane));
     return true;

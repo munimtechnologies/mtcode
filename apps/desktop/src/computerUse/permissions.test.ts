@@ -13,6 +13,9 @@ vi.mock("electron", () => ({
   shell: {
     openExternal: vi.fn(async () => undefined),
   },
+  desktopCapturer: {
+    getSources: vi.fn(async () => []),
+  },
 }));
 
 import * as Electron from "electron";
