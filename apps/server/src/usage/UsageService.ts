@@ -591,7 +591,9 @@ export const make = Effect.gen(function* () {
       }
 
       walkedRoots.push(dir);
-      const files = yield* Effect.promise(() => listTranscriptFiles(dir, windowStartMs, provider));
+      const files = yield* Effect.promise(() =>
+        listTranscriptFiles(dir, windowStartMs, source.provider),
+      );
       let scannedFiles = 0;
       let skippedFiles = 0;
       // Distinct per directory. Buckets carry per-cell session counts, but a
@@ -600,7 +602,7 @@ export const make = Effect.gen(function* () {
 
       for (const file of files) {
         livePaths.add(file.path);
-        const records = yield* readFileRecords(file.path, file.size, file.mtimeMs, provider);
+        const records = yield* readFileRecords(file.path, file.size, file.mtimeMs, source.provider);
         if (records.length === 0) {
           skippedFiles += 1;
           continue;

@@ -36,10 +36,12 @@ import {
   type ProjectFileFailure,
   type ProjectFileOperation,
   ProjectListEntriesError,
+  PullRequestOperationError,
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
+  PullRequestStackError,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
   type ServerSelfUpdateError,
@@ -99,6 +101,8 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as UpstreamTake from "./pullRequest/UpstreamTake.ts";
+import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -110,8 +114,10 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
+import * as GitHubPullRequestStackService from "./pullRequestStack/GitHubPullRequestStackService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -274,28 +280,31 @@ function projectSetupScriptCompatibilityDetail(
   }
 }
 
-export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
+/** Event types delivered on subscribeThread; keep ProjectionSnapshotQuery watermark in sync. */
+export const THREAD_DETAIL_STREAM_EVENT_TYPES = [
+  "thread.message-sent",
+  "thread.history-imported",
+  "thread.proposed-plan-upserted",
+  "thread.activity-appended",
+  "thread.turn-diff-completed",
+  "thread.reverted",
+  "thread.session-set",
+  "thread.goal-set",
+  "thread.goal-paused",
+  "thread.goal-resumed",
+  "thread.goal-cleared",
+  "thread.goal-completed",
+  "thread.goal-blocked",
+  "thread.goal-usage-limited",
+] as const satisfies ReadonlyArray<OrchestrationEvent["type"]>;
+
+export function isThreadDetailEvent(
+  event: OrchestrationEvent,
+): event is Extract<
   OrchestrationEvent,
-  {
-    type:
-      | "thread.message-sent"
-      | "thread.history-imported"
-      | "thread.proposed-plan-upserted"
-      | "thread.activity-appended"
-      | "thread.turn-diff-completed"
-      | "thread.reverted"
-      | "thread.session-set";
-  }
+  { type: (typeof THREAD_DETAIL_STREAM_EVENT_TYPES)[number] }
 > {
-  return (
-    event.type === "thread.message-sent" ||
-    event.type === "thread.history-imported" ||
-    event.type === "thread.proposed-plan-upserted" ||
-    event.type === "thread.activity-appended" ||
-    event.type === "thread.turn-diff-completed" ||
-    event.type === "thread.reverted" ||
-    event.type === "thread.session-set"
-  );
+  return (THREAD_DETAIL_STREAM_EVENT_TYPES as ReadonlyArray<string>).includes(event.type);
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
@@ -369,6 +378,8 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const pullRequestRanking = yield* PullRequestRanking.PullRequestRankingService;
+      const upstreamTake = yield* UpstreamTake.UpstreamTakeService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -418,12 +429,14 @@ const makeWsRpcLayer = (
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
+      const pullRequestStacks = yield* GitHubPullRequestStackService.GitHubPullRequestStackService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
+      const accountLimits = yield* AccountLimitsService.AccountLimitsService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -1045,6 +1058,38 @@ const makeWsRpcLayer = (
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
+      const resolveStackProject = (projectId: ProjectId) =>
+        projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new PullRequestStackError({
+                operation: "pullRequestStacks.resolveProject",
+                projectId,
+                detail: "Could not read this project.",
+                cause,
+              }),
+          ),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new PullRequestStackError({
+                    operation: "pullRequestStacks.resolveProject",
+                    projectId,
+                    detail: "Project was not found.",
+                  }),
+                ),
+              onSome: (project) => {
+                const host = project.repositoryIdentity?.canonicalKey.split("/")[0];
+                return Effect.succeed({
+                  cwd: project.workspaceRoot,
+                  ...(host === undefined ? {} : { host }),
+                });
+              },
+            }),
+          ),
+        );
+
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -1596,6 +1641,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetAccountLimits]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetAccountLimits, accountLimits.readSummary(), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
@@ -1673,6 +1722,106 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pullRequestsListStats, pullRequests.listStats(input), {
             "rpc.aggregate": "pull-requests",
           }),
+        [WS_METHODS.pullRequestsRank]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsRank,
+            // Resolved first, so a client cannot have an agent read a repository the project it
+            // named has nothing to do with.
+            pullRequests
+              .resolveRef({
+                projectId: input.projectId,
+                repository: input.repository,
+                number: input.candidates[0]?.number ?? 1,
+              })
+              .pipe(
+                Effect.flatMap((project) =>
+                  pullRequestRanking
+                    .rank({
+                      cwd: project.workspaceRoot,
+                      repository: project.repository,
+                      intoRepository: project.projectTitle,
+                      candidates: input.candidates,
+                      modelSelection: input.modelSelection,
+                    })
+                    .pipe(
+                      Effect.map((rankings) => ({
+                        host: project.host,
+                        repository: project.repository,
+                        rankings,
+                      })),
+                    ),
+                ),
+              ),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsCherryPick]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsCherryPick,
+            // Resolved first, as ranking is: the repository the commits are taken from has to be
+            // one this project reads — its own or its upstream — rather than one a client named.
+            // The detail read alongside it answers the rest, and is the one the page just made.
+            pullRequests.resolveRef(input).pipe(
+              Effect.flatMap((project) =>
+                pullRequests.detail(input).pipe(
+                  Effect.flatMap((detail) =>
+                    upstreamTake.cherryPick({
+                      cwd: project.workspaceRoot,
+                      provider: detail.provider,
+                      host: project.host,
+                      repository: project.repository,
+                      number: input.number,
+                      baseBranch: detail.baseBranch,
+                      ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+                    }),
+                  ),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsUpstreamRelease]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsUpstreamRelease,
+            // Only the release itself crosses the wire: where to take it and which tags exist are
+            // for the merge below to re-read, not for a page to hold and hand back.
+            pullRequests
+              .upstreamRelease(input)
+              .pipe(Effect.map((view) => ({ release: view?.release ?? null }))),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsMergeUpstreamRelease]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsMergeUpstreamRelease,
+            // The upstream is resolved here rather than named by the client, and the tag is
+            // checked against what that upstream has actually published: it reaches a refspec,
+            // and a page can be stale or lying.
+            pullRequests.upstreamRelease({ projectId: input.projectId }).pipe(
+              Effect.flatMap((view) =>
+                view === null
+                  ? Effect.fail(
+                      new PullRequestOperationError({
+                        operation: "mergeUpstreamRelease",
+                        detail: "This project has no upstream releases to take.",
+                      }),
+                    )
+                  : !view.publishedTags.includes(input.tagName)
+                    ? Effect.fail(
+                        new PullRequestOperationError({
+                          operation: "mergeUpstreamRelease",
+                          detail: `${view.release.repository} has not published \`${input.tagName}\` lately. Reload the page and take the release it shows.`,
+                        }),
+                      )
+                    : upstreamTake.mergeRelease({
+                        cwd: view.workspaceRoot,
+                        host: view.host,
+                        repository: view.release.repository,
+                        tagName: input.tagName,
+                        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+                      }),
+              ),
+            ),
+            { "rpc.aggregate": "pull-requests" },
+          ),
         [WS_METHODS.pullRequestsDetail]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsDetail, pullRequests.detail(input), {
             "rpc.aggregate": "pull-requests",
@@ -1681,6 +1830,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pullRequestsActivity, pullRequests.activity(input), {
             "rpc.aggregate": "pull-requests",
           }),
+        [WS_METHODS.pullRequestsThreadComments]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsThreadComments,
+            pullRequests.threadComments(input),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsDiffFileContents,
@@ -1742,6 +1899,32 @@ const makeWsRpcLayer = (
             WS_METHODS.pullRequestsRequestReviewers,
             pullRequests.requestReviewers(input),
             { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestStacksList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestStacksList,
+            resolveStackProject(input.projectId).pipe(
+              Effect.flatMap((project) => pullRequestStacks.list(project)),
+            ),
+            { "rpc.aggregate": "pull-request-stacks" },
+          ),
+        [WS_METHODS.pullRequestStacksCurrent]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestStacksCurrent, pullRequestStacks.current(input), {
+            "rpc.aggregate": "pull-request-stacks",
+          }),
+        [WS_METHODS.pullRequestStacksRunAction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestStacksRunAction,
+            pullRequestStacks.runAction(input),
+            { "rpc.aggregate": "pull-request-stacks" },
+          ),
+        [WS_METHODS.pullRequestStacksMerge]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestStacksMerge,
+            resolveStackProject(input.projectId).pipe(
+              Effect.flatMap((project) => pullRequestStacks.merge({ ...input, cwd: project.cwd })),
+            ),
+            { "rpc.aggregate": "pull-request-stacks" },
           ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
@@ -2213,11 +2396,26 @@ const makeWsRpcLayer = (
                 Stream.debounce(Duration.millis(PROVIDER_STATUS_DEBOUNCE_MS)),
               );
               const settingsUpdates = serverSettings.streamChanges.pipe(
-                Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
                 Stream.map((settings) => ({
                   version: 1 as const,
                   type: "settingsUpdated" as const,
-                  payload: { settings },
+                  payload: {
+                    settings: ServerSettings.redactServerSettingsForClient(settings),
+                  },
+                })),
+              );
+              const environmentLabelUpdates = serverSettings.streamChanges.pipe(
+                Stream.map((settings) => settings.environmentLabel),
+                Stream.changes,
+                Stream.mapEffect((environmentLabel) =>
+                  serverEnvironment
+                    .setEnvironmentLabel(environmentLabel)
+                    .pipe(Effect.andThen(serverEnvironment.getDescriptor)),
+                ),
+                Stream.map((environment) => ({
+                  version: 1 as const,
+                  type: "environmentLabelUpdated" as const,
+                  payload: { label: environment.label },
                 })),
               );
 
@@ -2227,7 +2425,10 @@ const makeWsRpcLayer = (
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
-                Stream.merge(providerStatuses, settingsUpdates),
+                Stream.merge(
+                  providerStatuses,
+                  Stream.merge(settingsUpdates, environmentLabelUpdates),
+                ),
               );
 
               return Stream.concat(
@@ -2317,6 +2518,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const pullRequestStacks = yield* GitHubPullRequestStackService.GitHubPullRequestStackService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2343,6 +2545,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(
+                Layer.succeed(
+                  GitHubPullRequestStackService.GitHubPullRequestStackService,
+                  pullRequestStacks,
+                ),
+              ),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

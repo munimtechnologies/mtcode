@@ -19,10 +19,17 @@ import * as NodePath from "node:path";
 
 import type { ServerSettings, UsageProviderKind } from "@t3tools/contracts";
 
+/**
+ * Providers whose usage lives in JSONL transcript homes that instances can
+ * relocate. Cursor exports CSV, Grok resolves through `GROK_HOME`, and
+ * OpenCode reads its SQLite database, so only these two scan homes here.
+ */
+type HomeScanProvider = Extract<UsageProviderKind, "claude" | "codex">;
+
 const DRIVER_BY_PROVIDER = {
   claude: "claudeAgent",
   codex: "codex",
-} as const satisfies Record<UsageProviderKind, keyof ServerSettings["providers"]>;
+} as const satisfies Record<HomeScanProvider, keyof ServerSettings["providers"]>;
 
 /**
  * The provider's home environment variable. An instance can configure its
@@ -32,7 +39,7 @@ const DRIVER_BY_PROVIDER = {
 const HOME_VARIABLE_BY_PROVIDER = {
   claude: "CLAUDE_CONFIG_DIR",
   codex: "CODEX_HOME",
-} as const satisfies Record<UsageProviderKind, string>;
+} as const satisfies Record<HomeScanProvider, string>;
 
 export interface UsageHomeCandidate {
   /** Raw (undecoded) driver config blob for one configured instance. */
@@ -62,7 +69,7 @@ function usableHomePath(value: string | undefined): string | null {
  */
 export function listProviderHomeCandidates(
   settings: ServerSettings,
-  provider: UsageProviderKind,
+  provider: HomeScanProvider,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): ReadonlyArray<UsageHomeCandidate> {
   const driver = DRIVER_BY_PROVIDER[provider];

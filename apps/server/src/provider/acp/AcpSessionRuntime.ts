@@ -72,6 +72,7 @@ export interface AcpSessionRuntimeOptions {
     readonly version: string;
   };
   readonly authMethodId: string;
+  readonly skipAuthenticate?: boolean;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -556,7 +557,7 @@ export const make = (
       );
 
       const authMethodId = resolveAcpAuthMethodId(options.authMethodId, initializeResult);
-      if (authMethodId) {
+      if (authMethodId && !options.skipAuthenticate) {
         const authenticatePayload = {
           methodId: authMethodId,
         } satisfies EffectAcpSchema.AuthenticateRequest;

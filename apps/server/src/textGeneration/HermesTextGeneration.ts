@@ -7,7 +7,8 @@ type TextGenerationOperation =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "rankPullRequests";
 
 const unsupported = (operation: TextGenerationOperation) =>
   Effect.fail(
@@ -22,4 +23,5 @@ export const makeHermesTextGeneration = (): TextGenerationShape => ({
   generatePrContent: () => unsupported("generatePrContent"),
   generateBranchName: () => unsupported("generateBranchName"),
   generateThreadTitle: () => unsupported("generateThreadTitle"),
+  rankPullRequests: () => unsupported("rankPullRequests"),
 });

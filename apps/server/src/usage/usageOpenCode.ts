@@ -224,6 +224,7 @@ function decodeOpenCodeUsageRow(value: unknown): OpenCodeUsageRowParse {
         outputTokens,
         reasoningTokens,
       },
+      recordCount: 1,
       reportedCostUsd: finiteNonNegative(row.costUsd),
       dedupeKey: `opencode:${row.messageId}`,
     },

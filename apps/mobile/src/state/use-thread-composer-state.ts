@@ -12,7 +12,13 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
+import { Alert } from "react-native";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
@@ -21,6 +27,7 @@ import {
   pickComposerImages,
 } from "../lib/composerImages";
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
+import { interceptGoalComposerCommand } from "../lib/goalComposerIntercept";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildThreadFeed } from "../lib/threadActivity";
 import { appAtomRegistry } from "../state/atom-registry";
@@ -38,9 +45,12 @@ import {
   useComposerDraft,
 } from "./use-composer-drafts";
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
+import { useEnvironmentServerConfig } from "../state/entities";
 import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
+import { threadEnvironment } from "./threads";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
+import { useAtomCommand } from "./use-atom-command";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
 import { mobilePreferencesAtom } from "./preferences";
 
@@ -150,6 +160,67 @@ export function useThreadComposerState() {
     const text = draft.text.trim();
     const attachments = draft.attachments;
     if (text.length === 0 && attachments.length === 0) {
+      return null;
+    }
+
+    const intercept = interceptGoalComposerCommand({
+      text,
+      supportsGoal: selectedEnvironmentServerConfig?.environment.capabilities.threadGoal === true,
+      allowLifecycleCommands: true,
+      goal: selectedThreadDetail?.goal ?? selectedThreadShell.goal,
+    });
+    if (intercept.kind !== "none") {
+      // Reports the failure and returns whether the command succeeded, so the
+      // draft survives a failed Objective command and can be retried.
+      const reportGoalCommandFailure = (result: AtomCommandResult<unknown, unknown>): boolean => {
+        const succeeded = result._tag === "Success";
+        if (!succeeded && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          Alert.alert(
+            "Could not update Objective",
+            error instanceof Error ? error.message : "Failed to update the Objective.",
+          );
+        }
+        return succeeded;
+      };
+      if (intercept.kind === "alert") {
+        Alert.alert(intercept.title, intercept.message);
+        return null;
+      }
+      const environmentId = selectedThreadShell.environmentId;
+      const threadId = selectedThreadShell.id;
+      if (intercept.kind === "clear") {
+        const result = await clearThreadGoal({ environmentId, input: { threadId } });
+        if (reportGoalCommandFailure(result)) {
+          clearComposerDraftContent(threadKey);
+        }
+        return null;
+      }
+      if (intercept.kind === "pause") {
+        const result = await pauseThreadGoal({ environmentId, input: { threadId } });
+        if (reportGoalCommandFailure(result)) {
+          clearComposerDraftContent(threadKey);
+        }
+        return null;
+      }
+      if (intercept.kind === "resume") {
+        const result = await resumeThreadGoal({ environmentId, input: { threadId } });
+        if (reportGoalCommandFailure(result)) {
+          clearComposerDraftContent(threadKey);
+        }
+        return null;
+      }
+      const result = await setThreadGoal({
+        environmentId,
+        input: {
+          threadId,
+          objective: intercept.objective,
+          messageId: MessageId.make(makeQueuedMessageMetadata().messageId),
+        },
+      });
+      if (reportGoalCommandFailure(result)) {
+        clearComposerDraftContent(threadKey);
+      }
       return null;
     }
 

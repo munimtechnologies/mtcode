@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - pre-ready distro resolution reads the packaged package.json synchronously before app services exist.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 

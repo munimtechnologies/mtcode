@@ -11,6 +11,7 @@ import {
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
+  OrchestrationThreadGoal,
   ProjectScript,
   TurnId,
   type OrchestrationCheckpointSummary,

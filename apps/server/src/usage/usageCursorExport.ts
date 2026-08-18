@@ -290,6 +290,7 @@ export function parseCursorUsageCsv(csv: string, userId: string): readonly Usage
       // count every event as its own session. Collapse to the calendar day.
       sessionId: `cursor-${userId}-${dateStr.slice(0, 10)}`,
       totals,
+      recordCount: 1,
       // Numeric Cost only. Included / "-" stay null so LiteLLM prices them.
       reportedCostUsd: costUsd,
       dedupeKey: `cursor:${userId}:${dateStr}:${model}:${lineIndex}`,

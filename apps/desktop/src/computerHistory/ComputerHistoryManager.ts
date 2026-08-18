@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalDate:off
+// @effect-diagnostics globalTimers:off - daemon kill timeouts run in imperative Promise helpers, off the Effect runtime
 import { spawn, type ChildProcess } from "node:child_process";
 import * as NodeFs from "node:fs";
 import * as NodePath from "node:path";
@@ -130,7 +131,7 @@ export class ComputerHistoryManager extends Context.Service<
     ) => Effect.Effect<boolean, ComputerHistoryOperationError>;
     readonly currentRoot: () => Effect.Effect<string | null>;
   }
->()("ComputerHistoryManager") {}
+>()("@t3tools/desktop/computerHistory/ComputerHistoryManager") {}
 
 const runDaemonOp = (
   operation: "ensureDaemon" | "stopDaemon",

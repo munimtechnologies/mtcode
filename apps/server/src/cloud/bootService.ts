@@ -700,7 +700,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         kind: "systemd",
         unitPath,
         logPath,
-      };
+      } satisfies BootServiceStatus;
     }
     const base = { kind: detectedManager.kind, unitPath, logPath } as const;
     if (!(yield* fs.exists(unitPath))) {
