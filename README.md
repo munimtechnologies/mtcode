@@ -32,15 +32,46 @@ MT Code drives agents you already have. Install and sign in to at least one prov
 
 Your existing subscriptions are used directly — MT Code sells nothing and adds no accounts of its own.
 
-## What MT Code adds over T3 Code
+## MT Code vs T3 Code Nightly
 
-- **Resume on restart** — threads and agents that were running when the app closed automatically pick up where they left off at the next launch.
-- **Cross-thread references** — type `#` in the composer to reference another thread; the agent can read that thread's transcript.
-- **Thread-to-thread messaging** — agents can list sibling threads and send messages between them, so parallel work can coordinate.
-- **Better "Open in editor" on macOS** — detects Cursor, VS Code Insiders, VSCodium, Trae, Kiro, and JetBrains IDEs by their app bundles, even when their CLI shims aren't installed.
-- **Installs alongside official T3 Code** — its own bundle ID (`com.munim.t3code`) and its own isolated data directory, so it never touches the official app's settings or sessions.
+Compared to [T3 Code](https://github.com/pingdotgg/t3code) Nightly (`pingdotgg/t3code` `main`). MT Code tracks those nightlies and regularly merges them. Some rows started as unmerged upstream PRs that MT Code ships today; others were built here. **In progress** means it is in another MT Code thread/worktree and is not on the downloadable build yet.
 
-Everything upstream T3 Code does — multi-provider agent control, checkpoints and diffs, remote access from the [web](https://app.t3.codes) and [mobile apps](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), Connect tunnels — works here too.
+| Feature                                                                                                                                                                               |   MT Code   |           T3 Code Nightly            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------: | :----------------------------------: |
+| **Computer Use** — agents click, type, screenshot, and drive browser tabs on your desktop                                                                                             |     Yes     |                  —                   |
+| **Computer History** — opt-in activity timeline (not screenshots) that agents can reference                                                                                           |     Yes     |                  —                   |
+| **Agent-chosen computers** — `computer_list` / `computer_send` start a task on another connected machine (this Mac, SSH, T3 Connect, or a paired backend) without changing **Run on** | In progress |                  —                   |
+| **Resume on restart** — running threads and agents pick up after the app closes                                                                                                       |     Yes     |                  —                   |
+| **Cross-thread references** — type `#` to cite another thread; the agent can read it                                                                                                  |     Yes     |                  —                   |
+| **Thread-to-thread messaging** — agents list sibling threads and send work between them                                                                                               |     Yes     |                  —                   |
+| **Agent-created threads** — `thread_create` / `thread_archive` so an agent can spawn and tidy sibling chats in the same project                                                       | In progress |                  —                   |
+| **Goals** — `/goal` keeps a thread working until the objective is met                                                                                                                 |     Yes     |                  —                   |
+| **Plugin marketplace** — browse and install Codex, Claude Code, and Cursor plugins                                                                                                    |     Yes     |                  —                   |
+| **Skills manager** — cross-harness skills in Settings                                                                                                                                 |     Yes     |                  —                   |
+| **Voice dictation** — Codex-style mic in the composer (OpenAI or Groq)                                                                                                                |     Yes     |                  —                   |
+| **Agent notifications** — desktop/browser alerts for approvals, questions, finish, and failure                                                                                        |     Yes     |                  —                   |
+| **PDF attachments** — paste or drop PDFs in chat (Claude, Cursor, Grok, OpenCode)                                                                                                     |     Yes     |                  —                   |
+| **Stacked pull requests** — GitHub PR stacks in the source-control UI                                                                                                                 |     Yes     |                  —                   |
+| **Browser cookie import** — pull cookies from Chrome, Edge, Brave, Safari, Firefox, and others into a preview profile                                                                 |     Yes     |                  —                   |
+| **Full-text sidebar search** — search message content, not just titles                                                                                                                |     Yes     |                  —                   |
+| **Sort threads by last user message**                                                                                                                                                 |     Yes     |                  —                   |
+| **Recent-threads switcher** — Ctrl/Cmd+Tab                                                                                                                                            |     Yes     |                  —                   |
+| **Live tool activity grouping**                                                                                                                                                       |     Yes     |                  —                   |
+| **Composer state drawers**                                                                                                                                                            |     Yes     |                  —                   |
+| **LaTeX math** in chat                                                                                                                                                                |     Yes     |                  —                   |
+| **Codex visualizations** rendered inline                                                                                                                                              |     Yes     |                  —                   |
+| **Reasoning cycle keybindings**                                                                                                                                                       |     Yes     |                  —                   |
+| **Grok reasoning-effort picker**                                                                                                                                                      |     Yes     |                  —                   |
+| **OpenCode context-window usage**                                                                                                                                                     |     Yes     |                  —                   |
+| **Rename environments**                                                                                                                                                               |     Yes     |                  —                   |
+| **Preview viewport + mute browser tab**                                                                                                                                               |     Yes     |                  —                   |
+| **Reveal chat file chips** in Finder / Explorer                                                                                                                                       |     Yes     |                  —                   |
+| **`t3 .` opens a folder** in the desktop app or a running server                                                                                                                      |     Yes     |                  —                   |
+| **Better Open in editor on macOS** — finds Cursor, VS Code Insiders, VSCodium, Trae, Kiro, Zed, and JetBrains by app bundle, even without CLI shims                                   |     Yes     |                  —                   |
+| **Installs alongside T3 Code** — own bundle ID (`com.munim.t3code`) and data directory (`~/.mt`)                                                                                      |     Yes     |                  —                   |
+| **Hosted web app** at [mtcode.munimtech.com](https://mtcode.munimtech.com)                                                                                                            |     Yes     | [app.t3.codes](https://app.t3.codes) |
+
+Everything else T3 Code Nightly does — multi-provider agent control, checkpoints and diffs, remote access from the [web](https://app.t3.codes) and [mobile apps](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), Connect tunnels — works here too.
 
 ## Documentation
 
@@ -50,6 +81,10 @@ Full docs live in [docs/](./docs):
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Desktop notifications](./docs/user/desktop-notifications.md)
+- [Goals](./docs/user/goals.md)
+- [Plugins](./docs/user/plugins.md)
+- [Voice dictation](./docs/user/voice-dictation.md)
+- [Attachments](./docs/user/attachments.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Thread messaging](./docs/user/thread-messaging.md)
 - [Keeping app and server in sync](./docs/user/updating.md)
