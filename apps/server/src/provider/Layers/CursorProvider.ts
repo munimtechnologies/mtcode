@@ -20,6 +20,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -47,6 +48,11 @@ import {
 } from "../providerMaintenance.ts";
 import * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts";
+import {
+  cursorAboutTimeoutMs,
+  cursorAcpModelDiscoveryTimeoutMs,
+  resolveProviderProbeCwd,
+} from "../providerProbeTimeouts.ts";
 
 const decodeCursorListAvailableModelsResponse = Schema.decodeUnknownEffect(
   CursorListAvailableModelsResponse,
@@ -66,7 +72,6 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 
-const CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 const CURSOR_PARAMETERIZED_MODEL_PICKER_MIN_VERSION_DATE = 2026_04_08;
 const CURSOR_CLI_INSTALLATION_DOCS_URL = "https://cursor.com/docs/cli/installation";
 const CURSOR_ACP_MODEL_DISCOVERY_FAILED_MESSAGE = [
@@ -413,6 +418,7 @@ const makeCursorAcpProbeRuntime = (
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
     const acpContext = yield* Layer.build(
       AcpSessionRuntime.layer({
         spawn: {
@@ -421,10 +427,10 @@ const makeCursorAcpProbeRuntime = (
             ...(cursorSettings.apiEndpoint ? (["-e", cursorSettings.apiEndpoint] as const) : []),
             "acp",
           ],
-          cwd: process.cwd(),
+          cwd: probeCwd,
           ...(environment ? { env: environment } : {}),
         },
-        cwd: process.cwd(),
+        cwd: probeCwd,
         clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
         authMethodId: "cursor_login",
         skipAuthenticate: hasCursorApiKey(environment),
@@ -585,8 +591,6 @@ export function getCursorFallbackModels(
   return providerModelsFromSettings([], cursorSettings.customModels, EMPTY_CAPABILITIES);
 }
 
-/** Timeout for `agent about` — it's slower than a simple `--version` probe. */
-const ABOUT_TIMEOUT_MS = 8_000;
 const CURSOR_FORWARDER_INSPECTION_MAX_BYTES = 64n * 1024n;
 const CURSOR_DESKTOP_FORWARDER_MESSAGE = [
   "The configured Cursor Agent command forwards to the Cursor desktop launcher, which cannot provide ACP and may open editor windows.",
@@ -1018,17 +1022,21 @@ const runCursorCommand = (
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
     const spawnCommand = yield* resolveSpawnCommand(
       cursorSettings.binaryPath,
       args,
       environment ? { env: environment } : {},
     );
     const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      cwd: probeCwd,
       ...(environment ? { env: environment } : { extendEnv: true }),
       shell: spawnCommand.shell,
     });
 
     const child = yield* spawner.spawn(command);
+    // Non-interactive probes (about/status) hang on Windows if stdin stays open.
+    yield* Stream.run(Stream.empty, child.stdin).pipe(Effect.ignore);
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         collectStreamAsString(child.stdout),
@@ -1098,8 +1106,9 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   }
 
   // Single `agent about` probe: returns version + auth status in one call.
+  const aboutTimeoutMs = yield* cursorAboutTimeoutMs;
   const aboutProbe = yield* runCursorAboutCommand(cursorSettings, environment).pipe(
-    Effect.timeoutOption(ABOUT_TIMEOUT_MS),
+    Effect.timeoutOption(aboutTimeoutMs),
     Effect.result,
   );
 
@@ -1129,7 +1138,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
     return yield* new ProviderProbeTimeoutError({
       provider: "Cursor Agent",
       probe: "agent about",
-      timeoutMs: ABOUT_TIMEOUT_MS,
+      timeoutMs: aboutTimeoutMs,
       installed: true,
     });
   }
@@ -1165,9 +1174,10 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   let discoveredModels = Option.none<ReadonlyArray<ServerProviderModel>>();
   let discoveryWarning: string | undefined;
   if (parsed.auth.status !== "unauthenticated") {
+    const acpDiscoveryTimeoutMs = yield* cursorAcpModelDiscoveryTimeoutMs;
     const discoveryExit = yield* Effect.exit(
       discoverCursorModelsViaAcp(cursorSettings, environment).pipe(
-        Effect.timeoutOption(CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS),
+        Effect.timeoutOption(acpDiscoveryTimeoutMs),
       ),
     );
     if (Exit.isFailure(discoveryExit)) {
@@ -1176,7 +1186,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       });
       discoveryWarning = CURSOR_ACP_MODEL_DISCOVERY_FAILED_MESSAGE;
     } else if (Option.isNone(discoveryExit.value)) {
-      discoveryWarning = `Cursor ACP model discovery timed out after ${CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms.`;
+      discoveryWarning = `Cursor ACP model discovery timed out after ${acpDiscoveryTimeoutMs}ms.`;
     } else if (discoveryExit.value.value.length === 0) {
       discoveryWarning = "Cursor ACP model discovery returned no built-in models.";
     } else {
