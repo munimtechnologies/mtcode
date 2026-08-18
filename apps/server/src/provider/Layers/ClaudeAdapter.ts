@@ -260,6 +260,14 @@ interface ToolInFlight {
   readonly parentToolUseId?: string;
 }
 
+/** Force-completed by completeTurn before the matching SDK tool_result arrived. */
+interface FinalizedToolAwaitingResult {
+  readonly tool: ToolInFlight;
+  readonly turnId: TurnId;
+}
+
+const MAX_FINALIZED_TOOLS_AWAITING_RESULT = 64;
+
 interface ClaudeTaskState {
   readonly id: string;
   subject: string;
@@ -308,6 +316,8 @@ interface ClaudeSessionContext {
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<ClaudeCompletedTurn>;
   readonly inFlightTools: Map<number, ToolInFlight>;
+  /** Late tool_result lookup after completeTurn drains inFlightTools. */
+  readonly finalizedToolsAwaitingResult: Map<string, FinalizedToolAwaitingResult>;
   readonly claudeTasks: Map<string, ClaudeTaskState>;
   readonly taskAgents: Map<string, ClaudeTaskAgentState>;
   /**
@@ -1658,6 +1668,33 @@ function toolResultStreamKind(itemType: CanonicalItemType): ClaudeToolResultStre
   }
 }
 
+function claudeToolEventData(
+  tool: Pick<ToolInFlight, "itemId" | "toolName" | "input">,
+  extra?: { readonly result?: Record<string, unknown> },
+): Record<string, unknown> {
+  return {
+    toolName: tool.toolName,
+    input: tool.input,
+    toolCallId: tool.itemId,
+    ...(extra?.result !== undefined ? { result: extra.result } : {}),
+  };
+}
+
+function rememberFinalizedToolAwaitingResult(
+  tools: Map<string, FinalizedToolAwaitingResult>,
+  entry: FinalizedToolAwaitingResult,
+): void {
+  tools.delete(entry.tool.itemId);
+  tools.set(entry.tool.itemId, entry);
+  while (tools.size > MAX_FINALIZED_TOOLS_AWAITING_RESULT) {
+    const oldestKey = tools.keys().next().value;
+    if (oldestKey === undefined) {
+      return;
+    }
+    tools.delete(oldestKey);
+  }
+}
+
 function toolResultBlocksFromUserMessage(message: SDKMessage): Array<{
   readonly toolUseId: string;
   readonly block: Record<string, unknown>;
@@ -2413,6 +2450,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       readonly toolUseId: string;
       readonly rawMethod: string;
       readonly rawPayload: unknown;
+      readonly turnId?: TurnId;
     },
   ) {
     const plan = planStepsFromClaudeTasks(context.claudeTasks);
@@ -2420,6 +2458,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
+    const planTurnId = input.turnId ?? context.turnState?.turnId;
     const stamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
       type: "turn.plan.updated",
@@ -2427,7 +2466,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       provider: PROVIDER,
       createdAt: stamp.createdAt,
       threadId: context.session.threadId,
-      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      ...(planTurnId ? { turnId: asCanonicalTurnId(planTurnId) } : {}),
       payload: {
         explanation: "Claude Tasks",
         plan,
@@ -2548,7 +2587,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
-    for (const [index, tool] of context.inFlightTools.entries()) {
+    for (const tool of context.inFlightTools.values()) {
       const toolStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
         type: "item.completed",
@@ -2563,10 +2602,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: status === "completed" ? "completed" : "failed",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
-          data: {
-            toolName: tool.toolName,
-            input: tool.input,
-          },
+          data: claudeToolEventData(tool),
         },
         providerRefs: nativeProviderRefs(context, {
           providerItemId: tool.itemId,
@@ -2577,7 +2613,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           payload: result ?? { status },
         },
       });
-      context.inFlightTools.delete(index);
+      rememberFinalizedToolAwaitingResult(context.finalizedToolsAwaitingResult, {
+        tool,
+        turnId: turnState.turnId,
+      });
     }
     // Clear any remaining stale entries (e.g. from interrupted content blocks)
     context.inFlightTools.clear();
@@ -2826,10 +2865,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(nextTool.detail ? { detail: nextTool.detail } : {}),
             ...(nextTool.agentId ? { agentId: nextTool.agentId } : {}),
             ...(nextTool.parentToolUseId ? { parentToolUseId: nextTool.parentToolUseId } : {}),
-            data: {
-              toolName: nextTool.toolName,
-              input: nextTool.input,
-            },
+            data: claudeToolEventData(nextTool),
           },
           providerRefs: nativeProviderRefs(context, {
             providerItemId: nextTool.itemId,
@@ -2933,10 +2969,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(tool.detail ? { detail: tool.detail } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
           ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
-          data: {
-            toolName: tool.toolName,
-            input: toolInput,
-          },
+          data: claudeToolEventData(tool),
         },
         providerRefs: nativeProviderRefs(context, {
           providerItemId: tool.itemId,
@@ -2984,18 +3017,28 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const toolEntry = Array.from(context.inFlightTools.entries()).find(
         ([, tool]) => tool.itemId === toolResult.toolUseId,
       );
-      if (!toolEntry) {
+      const finalized = toolEntry
+        ? undefined
+        : context.finalizedToolsAwaitingResult.get(toolResult.toolUseId);
+      const tool = toolEntry?.[1] ?? finalized?.tool;
+      if (!tool) {
+        yield* Effect.logWarning("claude.tool_result.unknown-tool-use", {
+          threadId: context.session.threadId,
+          toolUseId: toolResult.toolUseId,
+        });
         continue;
       }
 
-      const [index, tool] = toolEntry;
+      const index = toolEntry?.[0];
+      const alreadyCompleted = finalized !== undefined;
+      const eventTurnId = toolEntry
+        ? context.turnState
+          ? asCanonicalTurnId(context.turnState.turnId)
+          : undefined
+        : finalized?.turnId;
       const itemStatus = toolResult.isError ? "failed" : "completed";
       const toolUseResult = readClaudeToolUseResult(message);
-      const toolData = {
-        toolName: tool.toolName,
-        input: tool.input,
-        result: toolResult.block,
-      };
+      const toolData = claudeToolEventData(tool, { result: toolResult.block });
 
       const updatedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -3004,11 +3047,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         provider: PROVIDER,
         createdAt: updatedStamp.createdAt,
         threadId: context.session.threadId,
-        ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+        ...(eventTurnId ? { turnId: eventTurnId } : {}),
         itemId: asRuntimeItemId(tool.itemId),
         payload: {
           itemType: tool.itemType,
-          status: toolResult.isError ? "failed" : "inProgress",
+          status: alreadyCompleted || toolResult.isError ? itemStatus : "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
@@ -3026,7 +3069,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
 
       const streamKind = toolResultStreamKind(tool.itemType);
-      if (streamKind && toolResult.text.length > 0 && context.turnState) {
+      if (streamKind && toolResult.text.length > 0 && eventTurnId) {
         const deltaStamp = yield* makeEventStamp();
         yield* offerRuntimeEvent({
           type: "content.delta",
@@ -3034,7 +3077,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           provider: PROVIDER,
           createdAt: deltaStamp.createdAt,
           threadId: context.session.threadId,
-          turnId: context.turnState.turnId,
+          turnId: eventTurnId,
           itemId: asRuntimeItemId(tool.itemId),
           payload: {
             streamKind,
@@ -3051,33 +3094,35 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
-      const completedStamp = yield* makeEventStamp();
-      yield* offerRuntimeEvent({
-        type: "item.completed",
-        eventId: completedStamp.eventId,
-        provider: PROVIDER,
-        createdAt: completedStamp.createdAt,
-        threadId: context.session.threadId,
-        ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-        itemId: asRuntimeItemId(tool.itemId),
-        payload: {
-          itemType: tool.itemType,
-          status: itemStatus,
-          title: tool.title,
-          ...(tool.detail ? { detail: tool.detail } : {}),
-          ...(tool.agentId ? { agentId: tool.agentId } : {}),
-          ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
-          data: toolData,
-        },
-        providerRefs: nativeProviderRefs(context, {
-          providerItemId: tool.itemId,
-        }),
-        raw: {
-          source: "claude.sdk.message",
-          method: "claude/user",
-          payload: message,
-        },
-      });
+      if (!alreadyCompleted) {
+        const completedStamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "item.completed",
+          eventId: completedStamp.eventId,
+          provider: PROVIDER,
+          createdAt: completedStamp.createdAt,
+          threadId: context.session.threadId,
+          ...(eventTurnId ? { turnId: eventTurnId } : {}),
+          itemId: asRuntimeItemId(tool.itemId),
+          payload: {
+            itemType: tool.itemType,
+            status: itemStatus,
+            title: tool.title,
+            ...(tool.detail ? { detail: tool.detail } : {}),
+            ...(tool.agentId ? { agentId: tool.agentId } : {}),
+            ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
+            data: toolData,
+          },
+          providerRefs: nativeProviderRefs(context, {
+            providerItemId: tool.itemId,
+          }),
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/user",
+            payload: message,
+          },
+        });
+      }
 
       // The Workflow tool's result carries the run handles (runId, scriptPath,
       // transcriptDir, sessionUrl). Attach them to the workflow's task agent so
@@ -3124,10 +3169,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           toolUseId: tool.itemId,
           rawMethod: "claude/user",
           rawPayload: message,
+          ...(eventTurnId ? { turnId: eventTurnId } : {}),
         });
       }
 
-      context.inFlightTools.delete(index);
+      if (index !== undefined) {
+        context.inFlightTools.delete(index);
+      }
+      context.finalizedToolsAwaitingResult.delete(tool.itemId);
     }
   });
 
@@ -4069,6 +4118,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
+    context.finalizedToolsAwaitingResult.clear();
     sessions.delete(context.session.threadId);
   });
 
@@ -4303,6 +4353,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
       const inFlightTools = new Map<number, ToolInFlight>();
+      const finalizedToolsAwaitingResult = new Map<string, FinalizedToolAwaitingResult>();
       const claudeTasks = new Map<string, ClaudeTaskState>();
       const taskAgents = new Map<string, ClaudeTaskAgentState>();
       const workflowMemberFingerprints = new Map<string, string>();
@@ -4821,6 +4872,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         pendingUserInputs,
         turns: [],
         inFlightTools,
+        finalizedToolsAwaitingResult,
         claudeTasks,
         taskAgents,
         workflowMemberFingerprints,
