@@ -13,7 +13,8 @@ the sender's identity.
 Thread messages do not share provider conversation context or expose another thread's transcript.
 They also do not wait for the recipient, merge worktrees, or create new threads. Include the context
 the recipient needs in the message, and use the source thread ID in the attribution if a reply is
-useful.
+useful. To let an agent read another thread's transcript, reference that thread with `#` in the
+composer instead; the agent can then fetch it with the read-only `thread_read` tool.
 
 Delivery is limited to active sibling threads in the same project. A thread cannot message itself.
 `thread_send` returning `accepted` means T3 durably accepted the target turn; it does not mean the

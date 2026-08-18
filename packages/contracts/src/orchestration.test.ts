@@ -9,7 +9,6 @@ import {
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
-  ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
