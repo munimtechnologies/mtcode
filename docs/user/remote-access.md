@@ -122,6 +122,11 @@ npx t3 serve --tailscale-serve --tailscale-serve-port 8443
 Once paired, add projects normally: open the Command Palette and choose **Add Project**, then pick
 the environment the project lives on. Every saved environment is offered, not only the local one.
 
+Agents can also send work to another connected computer without you changing **Run on**. The
+`computer_list` and `computer_send` tools start a new thread on a local, SSH, T3 Connect, or
+paired environment. The current chat stays put. Keep the desktop or web app open so it can
+broker the send.
+
 ### Option 3: Desktop-Managed SSH Launch
 
 Use this when you want the desktop app to start or reuse T3 Code on another machine over SSH.

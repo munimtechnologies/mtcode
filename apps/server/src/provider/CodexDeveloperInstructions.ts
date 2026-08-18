@@ -28,6 +28,15 @@ const T3_CODE_THREAD_REFERENCE_INSTRUCTIONS = `
 The user may reference another chat with a \`t3-thread\` link. Do not treat the link as a web URL and do not assume its contents. Use the read-only \`thread_read\` tool from the \`t3-code\` MCP server. For \`t3-thread:///ENVIRONMENT_ID/THREAD_ID\`, pass the final \`THREAD_ID\` path segment as \`threadId\`; the tool also accepts the full link. Follow \`nextCursor\` until you have read as much of the transcript as the task requires.
 `;
 
+const T3_CODE_COMPUTER_TOOL_INSTRUCTIONS = `
+
+## T3 Code computers
+
+You are running on one T3 Code environment (one computer). Other computers the user has connected — this machine, SSH hosts, T3 Connect, or paired LAN environments — are available through the \`t3-code\` MCP tools \`computer_list\` and \`computer_send\`.
+
+If the task needs another computer's desktop, OS, files, GPU, or a machine that is already linked in T3 Code, call \`computer_list\` and then \`computer_send\` instead of asking the user to switch the Run on picker. Include the full task in \`message\`; the other computer does not receive this transcript. Use \`computer\` set to an id, label, SSH host, or \`this\`.
+`;
+
 export const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
 ): string => `<collaboration_mode># Plan Mode (Conversational)
@@ -160,6 +169,7 @@ Only produce at most one \`<proposed_plan>\` block per turn, and only when you a
 If the user stays in Plan mode and asks for revisions after a prior \`<proposed_plan>\`, any new \`<proposed_plan>\` must be a complete replacement. If the user indicates that the prior plan is not acceptable but does not provide enough information to produce a complete replacement, address the concern and continue planning without producing a \`<proposed_plan>\` block. If the follow-up neither requires changes nor calls the plan into question (e.g. clarifying question), answer it before the block, then reproduce the prior \`<proposed_plan>\` unchanged.
 ${browserToolInstructions(browserToolsAvailable)}
 ${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}
+${T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
 export const codexDefaultModeDeveloperInstructions = (
@@ -177,6 +187,7 @@ Use the \`request_user_input\` tool only when it is listed in the available tool
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 ${browserToolInstructions(browserToolsAvailable)}
 ${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}
+${T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
 export interface CodexRuntimeInfo {

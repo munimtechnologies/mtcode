@@ -179,6 +179,18 @@ import {
   PreviewAutomationStreamEvent,
 } from "./previewAutomation.ts";
 import {
+  ComputerTaskError,
+  ComputerTaskHost,
+  ComputerTaskResponse,
+  ComputerTaskStreamEvent,
+} from "./computers.ts";
+import {
+  ComputerViewError,
+  ComputerViewInput,
+  ComputerViewStreamEvent,
+  ComputerViewStreamInput,
+} from "./computerView.ts";
+import {
   ServerConfigStreamEvent,
   ServerConfig,
   ServerProviderUpdateError,
@@ -296,6 +308,11 @@ export const WS_METHODS = {
   previewAutomationConnect: "previewAutomation.connect",
   previewAutomationRespond: "previewAutomation.respond",
   previewAutomationFocusHost: "previewAutomation.focusHost",
+  computersConnect: "computers.connect",
+  computersSync: "computers.sync",
+  computersRespond: "computers.respond",
+  computerViewStream: "computerView.stream",
+  computerViewInput: "computerView.input",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1140,6 +1157,35 @@ export const WsPreviewAutomationFocusHostRpc = Rpc.make(WS_METHODS.previewAutoma
   error: EnvironmentAuthorizationError,
 });
 
+export const WsComputersConnectRpc = Rpc.make(WS_METHODS.computersConnect, {
+  payload: ComputerTaskHost,
+  success: ComputerTaskStreamEvent,
+  error: Schema.Union([ComputerTaskError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsComputersSyncRpc = Rpc.make(WS_METHODS.computersSync, {
+  payload: ComputerTaskHost,
+  error: Schema.Union([ComputerTaskError, EnvironmentAuthorizationError]),
+});
+
+export const WsComputersRespondRpc = Rpc.make(WS_METHODS.computersRespond, {
+  payload: ComputerTaskResponse,
+  error: Schema.Union([ComputerTaskError, EnvironmentAuthorizationError]),
+});
+
+export const WsComputerViewStreamRpc = Rpc.make(WS_METHODS.computerViewStream, {
+  payload: ComputerViewStreamInput,
+  success: ComputerViewStreamEvent,
+  error: Schema.Union([ComputerViewError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsComputerViewInputRpc = Rpc.make(WS_METHODS.computerViewInput, {
+  payload: ComputerViewInput,
+  error: Schema.Union([ComputerViewError, EnvironmentAuthorizationError]),
+});
+
 export const WsSubscribePreviewEventsRpc = Rpc.make(WS_METHODS.subscribePreviewEvents, {
   payload: Schema.Struct({}),
   success: PreviewEvent,
@@ -1385,6 +1431,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationConnectRpc,
   WsPreviewAutomationRespondRpc,
   WsPreviewAutomationFocusHostRpc,
+  WsComputersConnectRpc,
+  WsComputersSyncRpc,
+  WsComputersRespondRpc,
+  WsComputerViewStreamRpc,
+  WsComputerViewInputRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeServerConfigRpc,

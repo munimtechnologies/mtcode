@@ -55,6 +55,14 @@
       "types": "./src/state/connections.ts",
       "default": "./src/state/connections.ts"
     },
+    "./state/computers": {
+      "types": "./src/state/computers.ts",
+      "default": "./src/state/computers.ts"
+    },
+    "./computers": {
+      "types": "./src/computers/index.ts",
+      "default": "./src/computers/index.ts"
+    },
     "./state/entities": {
       "types": "./src/state/entities.ts",
       "default": "./src/state/entities.ts"
