@@ -2276,6 +2276,9 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
+  if (resolveDesktopDistroId() === "munim") {
+    return "munim";
+  }
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 

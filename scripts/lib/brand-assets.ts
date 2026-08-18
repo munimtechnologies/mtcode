@@ -24,6 +24,10 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
 
   munimMacIconPng: "assets/munim/munim-macos-1024.png",
+  munimWebFaviconIco: "assets/munim/munim-web-favicon.ico",
+  munimWebFavicon16Png: "assets/munim/munim-web-favicon-16x16.png",
+  munimWebFavicon32Png: "assets/munim/munim-web-favicon-32x32.png",
+  munimWebAppleTouchIconPng: "assets/munim/munim-web-apple-touch-180.png",
   munimLinuxIconPng: "assets/munim/munim-universal-1024.png",
   munimWindowsIconIco: "assets/munim/munim-windows.ico",
 
@@ -35,7 +39,7 @@ export const BRAND_ASSET_PATHS = {
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
 
-export type WebAssetBrand = "development" | "nightly" | "production";
+export type WebAssetBrand = "development" | "nightly" | "production" | "munim";
 
 export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;
 
@@ -79,6 +83,12 @@ const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
     favicon16Png: BRAND_ASSET_PATHS.productionWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.productionWebFavicon32Png,
     appleTouchIconPng: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
+  },
+  munim: {
+    faviconIco: BRAND_ASSET_PATHS.munimWebFaviconIco,
+    favicon16Png: BRAND_ASSET_PATHS.munimWebFavicon16Png,
+    favicon32Png: BRAND_ASSET_PATHS.munimWebFavicon32Png,
+    appleTouchIconPng: BRAND_ASSET_PATHS.munimWebAppleTouchIconPng,
   },
 } as const satisfies Record<WebAssetBrand, Record<keyof typeof WEB_ICON_TARGET_FILENAMES, string>>;
 
