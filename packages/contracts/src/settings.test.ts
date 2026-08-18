@@ -106,7 +106,7 @@ describe("ClientSettings sidebar", () => {
     expect(settings.tabsEnabled).toBe(true);
     expect(settings.sidebarAutoSettleAfterDays).toBe(3);
     expect(settings.sidebarAutoSettleOnMerge).toBe(true);
-    expect(settings.sidebarActiveThreadSortOrder).toBe("created_at");
+    expect(settings.sidebarActiveThreadSortOrder).toBe("updated_at");
   });
 
   it("accepts an active thread sort preference", () => {

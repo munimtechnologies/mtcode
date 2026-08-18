@@ -23,7 +23,7 @@ describe("ComposerCommandMenu", () => {
     expect(markup).not.toContain("dropdown-glass");
   });
 
-  it("renders commands without a category heading or invented icons", () => {
+  it("groups built-in slash commands without inventing icons", () => {
     const markup = renderToStaticMarkup(
       <ComposerCommandMenu
         items={[
@@ -46,7 +46,7 @@ describe("ComposerCommandMenu", () => {
 
     expect(markup).toContain("/model");
     expect(markup).toContain("Switch response model for this thread");
-    expect(markup).not.toContain("Built-in");
+    expect(markup).toContain("Built-in");
     expect(markup).not.toContain("<svg");
     expect(markup).toContain("font-sans text-xs font-medium");
     expect(markup).not.toContain("font-mono");

@@ -113,6 +113,7 @@ import {
   pullRequestHandoffLabels,
   readableFailure,
   resolveBaseFreshness,
+  shouldRefreshPullRequestActivity,
   type PullRequestFinding,
 } from "./pullRequestDetail.logic";
 import { canEditPullRequestChangeRequest } from "./pullRequestEditing.logic";
@@ -573,6 +574,18 @@ export function PullRequestDetailPanel({
     appliedForcedToken.current = forcedRefreshToken;
     void refreshFromHost();
   }, [forcedRefreshToken, refreshFromHost]);
+  // Live detail refresh already pulls a newer updatedAt. The code tab still
+  // needs its own reread: conversation timestamps can move without replacing
+  // the applied diff unless we bump this token.
+  const lastDetailRevisionRef = useRef<{ key: string; updatedAt: string } | null>(null);
+  useEffect(() => {
+    if (!detail) return;
+    const next = { key: pullRequestKey, updatedAt: detail.updatedAt };
+    if (shouldRefreshPullRequestActivity(lastDetailRevisionRef.current, next)) {
+      setRefreshToken((token) => token + 1);
+    }
+    lastDetailRevisionRef.current = next;
+  }, [detail, pullRequestKey]);
   const runAction = useAtomCommand(pullRequestEnvironment.runAction, { reportFailure: false });
   const mergeStack = useAtomCommand(pullRequestEnvironment.mergeStack, { reportFailure: false });
   // Which action is in flight, not merely that one is: every control here is disabled while any

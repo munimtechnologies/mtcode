@@ -47,6 +47,27 @@ export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProvide
 /** Claude and Codex are the only providers with subscription rate-limit windows today. */
 export const LIMITS_PROVIDER_ORDER: readonly UsageProviderKind[] = ["codex", "claude"];
 
+export function providerHasLimitWindows(
+  rows: ReadonlyArray<{ readonly snapshot: { readonly windows: readonly unknown[] } }> | undefined,
+): boolean {
+  return (rows ?? []).some((row) => row.snapshot.windows.length > 0);
+}
+
+/** Always Codex/Claude; other providers only once they actually report windows. */
+export function visibleLimitsProviders(
+  byProvider: ReadonlyMap<
+    UsageProviderKind,
+    ReadonlyArray<{ readonly snapshot: { readonly windows: readonly unknown[] } }>
+  >,
+): readonly UsageProviderKind[] {
+  const extras = PROVIDER_ORDER.filter(
+    (provider) =>
+      !LIMITS_PROVIDER_ORDER.includes(provider) &&
+      providerHasLimitWindows(byProvider.get(provider)),
+  );
+  return [...LIMITS_PROVIDER_ORDER, ...extras];
+}
+
 export const PROVIDER_LABEL = Object.fromEntries(
   Object.entries(PROVIDER_PRESENTATION).map(([provider, presentation]) => [
     provider,

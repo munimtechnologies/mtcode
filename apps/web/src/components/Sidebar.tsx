@@ -149,6 +149,7 @@ import {
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortActiveThreadsForSidebar,
+  sortSidebarSearchResults,
   type SidebarThreadContentMatch,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
@@ -2191,8 +2192,11 @@ export default function Sidebar() {
   );
   const threadSearchResults = useMemo(
     () =>
-      mergeSidebarThreadSearchResults(searchableThreads, threadSearchQuery, threadSearch.matches),
-    [searchableThreads, threadSearchQuery, threadSearch.matches],
+      sortSidebarSearchResults(
+        mergeSidebarThreadSearchResults(searchableThreads, threadSearchQuery, threadSearch.matches),
+        sidebarActiveThreadSortOrder,
+      ),
+    [searchableThreads, sidebarActiveThreadSortOrder, threadSearchQuery, threadSearch.matches],
   );
   const threadSearchResultOrderKey = threadSearchResults
     .map((result) => scopedThreadKey(scopeThreadRef(result.thread.environmentId, result.thread.id)))
@@ -3880,7 +3884,7 @@ export default function Sidebar() {
                     setActiveSearchResultIndex(0);
                   }}
                   onKeyDown={handleThreadSearchKeyDown}
-                  placeholder="Search"
+                  placeholder="Search threads"
                   aria-label="Search threads"
                   role="combobox"
                   aria-autocomplete="list"
@@ -4162,7 +4166,7 @@ export default function Sidebar() {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No threads found
+                {threadSearch.isPending ? "Searching messages…" : "No threads found"}
               </p>
             )
           ) : null}

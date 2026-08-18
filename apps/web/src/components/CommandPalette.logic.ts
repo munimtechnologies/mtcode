@@ -201,6 +201,7 @@ export type BuildThreadActionItemsThread = Pick<
 > & {
   updatedAt: string;
   latestUserMessageAt?: string | null;
+  goal?: { readonly status: string } | null | undefined;
 };
 
 export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
@@ -232,6 +233,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
 
     if (projectTitle) {
       descriptionParts.push(projectTitle);
+    }
+    if (thread.goal?.status === "active") {
+      descriptionParts.push("Active");
     }
     if (thread.branch) {
       descriptionParts.push(`#${thread.branch}`);

@@ -3,7 +3,7 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 
-import { detectNewTurnCompletions } from "./useTurnCompletionSound";
+import { detectNewTurnCompletions, shouldPlayTurnCompletionChime } from "./useTurnCompletionSound";
 
 const envId = EnvironmentId.make("environment-local");
 const projId = ProjectId.make("project-1");
@@ -101,6 +101,7 @@ describe("detectNewTurnCompletions", () => {
 
     const result = detectNewTurnCompletions([thread], previous);
     expect(result.hasNewCompletion).toBe(true);
+    expect(result.completedThreadKeys).toEqual([key]);
     expect(result.nextCompletions[key]).toBe("2026-08-15T07:02:00.000Z");
   });
 
@@ -170,5 +171,21 @@ describe("detectNewTurnCompletions", () => {
     );
     expect(unarchivedResult.hasNewCompletion).toBe(false);
     expect(unarchivedResult.nextCompletions[key]).toBe("2026-08-15T07:06:00.000Z");
+  });
+});
+
+describe("shouldPlayTurnCompletionChime", () => {
+  it("stays quiet when the only completed thread is the one being viewed", () => {
+    expect(shouldPlayTurnCompletionChime(["env:thread-1"], "env:thread-1")).toBe(false);
+  });
+
+  it("chimes when a background thread finishes, even if the viewed thread also finished", () => {
+    expect(shouldPlayTurnCompletionChime(["env:thread-1", "env:thread-2"], "env:thread-1")).toBe(
+      true,
+    );
+  });
+
+  it("chimes when nothing is being viewed", () => {
+    expect(shouldPlayTurnCompletionChime(["env:thread-1"], null)).toBe(true);
   });
 });

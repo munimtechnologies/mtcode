@@ -48,7 +48,7 @@ describe("ComposerPendingApprovalPanel", () => {
       />,
     );
 
-    expect(markup).toContain("File read approval");
+    expect(markup).toContain("File-read approval requested");
   });
 
   it("labels permission requests clearly", () => {
@@ -64,7 +64,7 @@ describe("ComposerPendingApprovalPanel", () => {
       />,
     );
 
-    expect(markup).toContain("Permission requested");
+    expect(markup).toContain("Allow Computer Use to view and control the desktop");
     expect(markup).toContain('aria-label="Requested permissions"');
   });
 
@@ -81,7 +81,7 @@ describe("ComposerPendingApprovalPanel", () => {
       />,
     );
 
-    expect(markup).toContain("Tool approval requested");
+    expect(markup).toContain("Allow node_repl to run?");
     expect(markup).toContain('aria-label="Tool request"');
     expect(markup).not.toContain("Permission requested");
   });

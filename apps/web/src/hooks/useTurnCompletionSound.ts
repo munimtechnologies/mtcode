@@ -1,5 +1,7 @@
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { useMatches } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { playTurnCompletionSound } from "~/audio/turnChime";
@@ -12,10 +14,11 @@ export function detectNewTurnCompletions(
   previousCompletions: Readonly<Record<string, string>>,
 ): {
   readonly hasNewCompletion: boolean;
+  readonly completedThreadKeys: readonly string[];
   readonly nextCompletions: Record<string, string>;
 } {
   const nextCompletions: Record<string, string> = { ...previousCompletions };
-  let hasNewCompletion = false;
+  const completedThreadKeys: string[] = [];
 
   for (const thread of threads) {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -47,27 +50,56 @@ export function detectNewTurnCompletions(
 
     if (previousState !== completedAt) {
       nextCompletions[threadKey] = completedAt;
-      hasNewCompletion = true;
+      completedThreadKeys.push(threadKey);
     }
   }
 
-  return { hasNewCompletion, nextCompletions };
+  return {
+    hasNewCompletion: completedThreadKeys.length > 0,
+    completedThreadKeys,
+    nextCompletions,
+  };
+}
+
+/** Chime for background finishes. The open thread already has the transcript. */
+export function shouldPlayTurnCompletionChime(
+  completedThreadKeys: readonly string[],
+  viewedThreadKey: string | null,
+): boolean {
+  return completedThreadKeys.some((threadKey) => threadKey !== viewedThreadKey);
+}
+
+function useViewedThreadKey(): string | null {
+  const matches = useMatches();
+  for (const match of matches) {
+    const params = match.params as { environmentId?: string; threadId?: string };
+    if (params.environmentId && params.threadId) {
+      return scopedThreadKey(
+        scopeThreadRef(EnvironmentId.make(params.environmentId), ThreadId.make(params.threadId)),
+      );
+    }
+  }
+  return null;
 }
 
 export function useTurnCompletionSound(): void {
   const settings = useClientSettings();
   const threads = useThreadShells();
+  const viewedThreadKey = useViewedThreadKey();
   const knownCompletionsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
-    const { hasNewCompletion, nextCompletions } = detectNewTurnCompletions(
+    const { completedThreadKeys, nextCompletions } = detectNewTurnCompletions(
       threads,
       knownCompletionsRef.current,
     );
     knownCompletionsRef.current = nextCompletions;
 
-    if (hasNewCompletion && settings.soundNotificationsEnabled) {
+    if (
+      settings.soundNotificationsEnabled &&
+      shouldPlayTurnCompletionChime(completedThreadKeys, viewedThreadKey)
+    ) {
       playTurnCompletionSound();
     }
-  }, [threads, settings.soundNotificationsEnabled]);
+  }, [threads, settings.soundNotificationsEnabled, viewedThreadKey]);
 }

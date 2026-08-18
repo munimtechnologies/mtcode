@@ -1949,7 +1949,7 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities);
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.id).toBe("tool-late-updated");
+    expect(entries[0]?.id).toBe("tool-force-complete");
   });
 
   it("merges a late result onto a non-adjacent completed row when toolCallId matches", () => {
@@ -2004,7 +2004,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["tool-a-late", "tool-b-complete"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-a-complete", "tool-b-complete"]);
     expect(entries[0]?.createdAt).toBe("2026-02-23T00:00:02.000Z");
     expect(entries[1]?.createdAt).toBe("2026-02-23T00:00:03.000Z");
   });

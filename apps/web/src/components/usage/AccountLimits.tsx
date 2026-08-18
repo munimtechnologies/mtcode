@@ -28,7 +28,12 @@ import {
   useAccountLimits,
 } from "../../state/accountLimits";
 import { formatAgo, formatResetAt } from "@t3tools/shared/limitsFormat";
-import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
+import {
+  PROVIDER_COLOR,
+  PROVIDER_LABEL,
+  PROVIDER_MARK,
+  visibleLimitsProviders,
+} from "./usageProviders";
 
 /** Age past which a snapshot stops being "current" and earns a caption. */
 const STALE_AFTER_MS = 15 * 60_000;
@@ -161,6 +166,7 @@ function HoverWindowRow({
 export function AccountLimitsHoverCard() {
   const { byProvider, reportingEnvironments, isPending, isSettling } = useAccountLimits();
   const nowMs = useNowMs();
+  const providers = visibleLimitsProviders(byProvider);
 
   if (isPending && byProvider.size === 0) {
     return <p className="px-1 py-2 text-xs text-muted-foreground">Loading limits…</p>;
@@ -168,7 +174,7 @@ export function AccountLimitsHoverCard() {
 
   return (
     <div className="flex w-64 flex-col gap-2.5 p-1.5">
-      {PROVIDER_ORDER.map((provider) => {
+      {providers.map((provider) => {
         const rows = byProvider.get(provider) ?? [];
         const only = rows.length === 1 ? rows[0] : undefined;
         const Mark = PROVIDER_MARK[provider];
@@ -270,12 +276,13 @@ function SectionWindowRow({
 export function AccountLimitsSection() {
   const { byProvider, reportingEnvironments, isSettling } = useAccountLimits();
   const nowMs = useNowMs();
+  const providers = visibleLimitsProviders(byProvider);
 
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-sm font-medium text-foreground">Limits</h2>
       <div className="grid gap-x-12 gap-y-4 sm:grid-cols-2">
-        {PROVIDER_ORDER.map((provider) => {
+        {providers.map((provider) => {
           const rows = byProvider.get(provider) ?? [];
           const only = rows.length === 1 ? rows[0] : undefined;
           const Mark = PROVIDER_MARK[provider];

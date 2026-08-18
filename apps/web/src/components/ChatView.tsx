@@ -6441,6 +6441,11 @@ function ChatViewContent(props: ChatViewProps) {
 
         <ThreadErrorBanner
           error={visibleThreadError}
+          copyContext={{
+            title: activeThread?.title ?? null,
+            provider: activeThread?.session?.providerName ?? null,
+            threadId: activeThread?.id ?? null,
+          }}
           key={threadErrorBannerKey}
           onDismiss={() => {
             setThreadError(activeThread.id, null);

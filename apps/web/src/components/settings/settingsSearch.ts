@@ -177,7 +177,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "sound-notifications",
-    title: "Turn completion chime",
+    title: "Background turn chime",
     to: "/settings/general",
   },
   {

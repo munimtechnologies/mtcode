@@ -28,7 +28,11 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
       ? "Command"
       : approval.requestKind === "file-read"
         ? "File to read"
-        : "File change";
+        : approval.requestKind === "file-change"
+          ? "File change"
+          : approval.requestKind === "tool"
+            ? "Tool request"
+            : "Requested permissions";
 
   return (
     <div

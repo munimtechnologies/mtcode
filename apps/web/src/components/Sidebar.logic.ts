@@ -584,6 +584,7 @@ export interface SidebarThreadContentMatch {
 
 export interface SidebarSearchResult<T> {
   readonly thread: T;
+  readonly matchedTitle: boolean;
   readonly contentMatch?: SidebarThreadContentMatch | undefined;
 }
 
@@ -627,6 +628,7 @@ export function mergeSidebarThreadSearchResults<
     const contentMatch = contentMatchByThreadKey.get(key);
     results.push({
       thread,
+      matchedTitle: true,
       contentMatch: contentMatch
         ? {
             source: contentMatch.source,
@@ -645,6 +647,7 @@ export function mergeSidebarThreadSearchResults<
     seenKeys.add(key);
     results.push({
       thread,
+      matchedTitle: false,
       contentMatch: {
         source: match.source,
         snippet: match.snippet,
@@ -654,6 +657,37 @@ export function mergeSidebarThreadSearchResults<
   }
 
   return results;
+}
+
+/** Title hits stay first. Within each group, reuse the active-thread sort so
+    search does not dump recently-talked threads under old title matches. */
+export function sortSidebarSearchResults<
+  T extends {
+    readonly id: string;
+    readonly environmentId?: string | undefined;
+    readonly createdAt: string;
+    readonly latestUserMessageAt: string | null;
+  },
+>(
+  results: readonly SidebarSearchResult<T>[],
+  sortOrder: SidebarThreadSortOrder,
+): SidebarSearchResult<T>[] {
+  const threadKey = (thread: T) => `${thread.environmentId ?? ""}:${thread.id}`;
+  const sortGroup = (group: readonly SidebarSearchResult<T>[]) => {
+    const byKey = new Map(group.map((result) => [threadKey(result.thread), result]));
+    return sortActiveThreadsForSidebar(
+      group.map((result) => result.thread),
+      sortOrder,
+    ).flatMap((thread) => {
+      const result = byKey.get(threadKey(thread));
+      return result === undefined ? [] : [result];
+    });
+  };
+
+  return [
+    ...sortGroup(results.filter((result) => result.matchedTitle)),
+    ...sortGroup(results.filter((result) => !result.matchedTitle)),
+  ];
 }
 
 type SettledTimestampInput = Pick<

@@ -32,6 +32,7 @@ import {
   planPinnedReorder,
   sortPinnedThreadsForSidebar,
   sortActiveThreadsForSidebar,
+  sortSidebarSearchResults,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   shouldCreateNewThreadInCurrentProject,
@@ -772,6 +773,7 @@ describe("mergeSidebarThreadSearchResults", () => {
     expect(results).toEqual([
       {
         thread: threads[0],
+        matchedTitle: true,
         contentMatch: undefined,
       },
     ]);
@@ -792,6 +794,7 @@ describe("mergeSidebarThreadSearchResults", () => {
     expect(results).toEqual([
       {
         thread: threads[2],
+        matchedTitle: true,
         contentMatch: {
           source: "user",
           snippet: "Need to refactor the search engine",
@@ -824,6 +827,7 @@ describe("mergeSidebarThreadSearchResults", () => {
     expect(results).toEqual([
       {
         thread: threads[0],
+        matchedTitle: true,
         contentMatch: {
           source: "user",
           snippet: "Let's test search functionality",
@@ -832,6 +836,7 @@ describe("mergeSidebarThreadSearchResults", () => {
       },
       {
         thread: threads[1],
+        matchedTitle: false,
         contentMatch: {
           source: "assistant",
           snippet: "Here is the search result for providers",
@@ -858,6 +863,55 @@ describe("mergeSidebarThreadSearchResults", () => {
 
   it("returns empty array for empty query", () => {
     expect(mergeSidebarThreadSearchResults(threads, "   ", [])).toEqual([]);
+  });
+});
+
+describe("sortSidebarSearchResults", () => {
+  it("keeps title matches first and sorts each group by last user message", () => {
+    const results = [
+      {
+        thread: {
+          id: "old-title",
+          environmentId: "env-1",
+          createdAt: "2026-03-09T08:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T09:00:00.000Z",
+        },
+        matchedTitle: true as const,
+      },
+      {
+        thread: {
+          id: "new-title",
+          environmentId: "env-1",
+          createdAt: "2026-03-09T07:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T12:00:00.000Z",
+        },
+        matchedTitle: true as const,
+      },
+      {
+        thread: {
+          id: "old-content",
+          environmentId: "env-1",
+          createdAt: "2026-03-09T10:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T10:00:00.000Z",
+        },
+        matchedTitle: false as const,
+        contentMatch: { source: "user" as const, snippet: "needle", query: "needle" },
+      },
+      {
+        thread: {
+          id: "new-content",
+          environmentId: "env-1",
+          createdAt: "2026-03-09T06:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T13:00:00.000Z",
+        },
+        matchedTitle: false as const,
+        contentMatch: { source: "assistant" as const, snippet: "needle", query: "needle" },
+      },
+    ];
+
+    expect(
+      sortSidebarSearchResults(results, "updated_at").map((result) => result.thread.id),
+    ).toEqual(["new-title", "old-title", "new-content", "old-content"]);
   });
 });
 

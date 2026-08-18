@@ -562,7 +562,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Quit confirmation"]
         : []),
       ...(settings.soundNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled
-        ? ["Turn completion chime"]
+        ? ["Background turn chime"]
         : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
       ...getChangedBrowserSettingLabels(settings),
@@ -2798,12 +2798,12 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("sound-notifications")}
-          description="Play a subtle sound when an agent completes a turn."
+          description="Play a chime when a background thread finishes a turn. The thread you are looking at stays quiet."
           resetAction={
             settings.soundNotificationsEnabled !==
             DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled ? (
               <SettingResetButton
-                label="turn completion chime"
+                label="background turn chime"
                 onClick={() =>
                   updateSettings({
                     soundNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.soundNotificationsEnabled,
@@ -2818,7 +2818,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ soundNotificationsEnabled: Boolean(checked) })
               }
-              aria-label="Play sound when agent completes a turn"
+              aria-label="Play a chime when a background thread finishes a turn"
             />
           }
         />

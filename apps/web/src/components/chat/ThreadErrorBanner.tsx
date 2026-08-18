@@ -8,6 +8,22 @@ import { anchoredToastManager } from "../ui/toast";
 
 const COPY_FEEDBACK_TIMEOUT_MS = 1000;
 
+export function formatThreadErrorClipboardText(input: {
+  readonly error: string;
+  readonly title?: string | null;
+  readonly provider?: string | null;
+  readonly threadId?: string | null;
+}): string {
+  const header: string[] = [];
+  const title = input.title?.trim();
+  const provider = input.provider?.trim();
+  const threadId = input.threadId?.trim();
+  if (title) header.push(`Thread: ${title}`);
+  if (provider) header.push(`Provider: ${provider}`);
+  if (threadId) header.push(`Thread ID: ${threadId}`);
+  return header.length === 0 ? input.error : `${header.join("\n")}\n\n${input.error}`;
+}
+
 export function showThreadErrorCopyFailure(
   anchor: HTMLButtonElement | null,
   copyError: Error,
@@ -22,7 +38,7 @@ export function showThreadErrorCopyFailure(
   });
 }
 
-function ThreadErrorCopyButton({ error }: { error: string }) {
+function ThreadErrorCopyButton({ clipboardText }: { clipboardText: string }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "error-message",
@@ -39,7 +55,7 @@ function ThreadErrorCopyButton({ error }: { error: string }) {
             variant="ghost"
             size="icon-xs"
             aria-label={copyLabel}
-            onClick={() => copyToClipboard(error)}
+            onClick={() => copyToClipboard(clipboardText)}
             ref={buttonRef}
             type="button"
           />
@@ -83,12 +99,19 @@ export function isThreadErrorBannerDismissedForSession(bannerKey: string | null)
 
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
+  copyContext,
   onDismiss,
 }: {
   error: string | null;
+  copyContext?: {
+    readonly title?: string | null;
+    readonly provider?: string | null;
+    readonly threadId?: string | null;
+  };
   onDismiss?: () => void;
 }) {
   if (!error) return null;
+  const clipboardText = formatThreadErrorClipboardText({ error, ...copyContext });
 
   return (
     <div className="mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
@@ -103,7 +126,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           </Tooltip>
         </AlertDescription>
         <AlertAction>
-          <ThreadErrorCopyButton error={error} />
+          <ThreadErrorCopyButton clipboardText={clipboardText} />
           {onDismiss && (
             <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
               <XIcon className="text-destructive" />

@@ -521,7 +521,12 @@ function ReviewVerdictEvent({
           {/* An approval usually carries no words. When it does they are the review, so they stay
               visible rather than being folded away with the ordinary conversation. */}
           {event.body ? (
-            <TimelineBody body={event.body} markdown={event.markdown} cwd={cwd} />
+            <TimelineBody
+              body={event.body}
+              markdown={event.markdown}
+              cwd={cwd}
+              environmentId={reactions.environmentId}
+            />
           ) : null}
         </div>
         <OpenOnHostButton url={event.url} onOpen={onOpen} />

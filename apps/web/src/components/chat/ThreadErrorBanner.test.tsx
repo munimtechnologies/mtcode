@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   dismissThreadErrorBannerForSession,
+  formatThreadErrorClipboardText,
   getThreadErrorBannerKey,
   isThreadErrorBannerDismissedForSession,
   showThreadErrorCopyFailure,
@@ -116,5 +117,24 @@ describe("ThreadErrorBanner", () => {
       title: "Failed to copy",
       description: "Clipboard access was denied.",
     });
+  });
+});
+
+describe("formatThreadErrorClipboardText", () => {
+  it("copies the error alone when there is no thread context", () => {
+    expect(formatThreadErrorClipboardText({ error: "Aborted" })).toBe("Aborted");
+  });
+
+  it("prefixes title, provider, and thread id for paste into a report", () => {
+    expect(
+      formatThreadErrorClipboardText({
+        error: "Provider crashed",
+        title: "Fix sidebar search",
+        provider: "Claude Code",
+        threadId: "thread-123",
+      }),
+    ).toBe(
+      "Thread: Fix sidebar search\nProvider: Claude Code\nThread ID: thread-123\n\nProvider crashed",
+    );
   });
 });
