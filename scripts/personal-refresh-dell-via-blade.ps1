@@ -1,7 +1,7 @@
 # Install the personal build on Dell from Blade, over the local network.
 #
 # Dell is normally reached from the Mac through a Cloudflare tunnel. That tunnel is the least
-# reliable part of the fleet — when it is down the Mac cannot see Dell at all, and Dell silently
+# reliable part of the fleet -- when it is down the Mac cannot see Dell at all, and Dell silently
 # falls behind every refresh. Blade sits on the same LAN and already holds the same key, so it can
 # reach Dell directly when the tunnel cannot.
 #

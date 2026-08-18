@@ -1,5 +1,5 @@
 # Munim T3 Connect client configuration loader for Windows build hosts.
-# PowerShell mirror of scripts/lib/personal-munim-connect-env.sh — see that
+# PowerShell mirror of scripts/lib/personal-munim-connect-env.sh - see that
 # file for the activation model. Dot-source this from the repo clone after
 # checkout, then call Import-MunimConnectEnv -Repo <clone path>.
 #
@@ -44,14 +44,14 @@ function Import-MunimConnectEnv {
   $required = @("T3CODE_CLERK_PUBLISHABLE_KEY", "T3CODE_CLERK_JWT_TEMPLATE", "T3CODE_RELAY_URL")
   $missing = @($required | Where-Object { -not $values[$_] })
   if ($missing.Count -gt 0) {
-    Write-Warning "munim-connect: $($script:MunimConnectEnvFile) is missing $($missing -join ', ') — building without Munim Connect"
+    Write-Warning "munim-connect: $($script:MunimConnectEnvFile) is missing $($missing -join ', ') - building without Munim Connect"
     return $false
   }
 
   if (($values["T3CODE_CLERK_PUBLISHABLE_KEY"] -eq $script:MunimConnectT3Pk) -or
     ($values["T3CODE_RELAY_URL"] -like "*$($script:MunimConnectT3RelayHost)*") -or
     ($values["T3CODE_CLERK_CLI_OAUTH_CLIENT_ID"] -eq $script:MunimConnectT3OAuthId)) {
-    throw "munim-connect: $($script:MunimConnectEnvFile) contains T3/pingdotgg production values — refusing to build with them"
+    throw "munim-connect: $($script:MunimConnectEnvFile) contains T3/pingdotgg production values - refusing to build with them"
   }
 
   foreach ($name in $script:MunimConnectVarNames) {
@@ -80,7 +80,7 @@ function Write-MunimConnectRepoEnv {
       return
     }
   }
-  $lines = @("# munim-connect: managed — regenerated from $($script:MunimConnectEnvFile) by scripts/lib/personal-munim-connect-env.ps1")
+  $lines = @("# munim-connect: managed - regenerated from $($script:MunimConnectEnvFile) by scripts/lib/personal-munim-connect-env.ps1")
   foreach ($name in $script:MunimConnectVarNames) {
     $item = Get-Item -Path ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
     if ($item -and $item.Value) { $lines += "$name=$($item.Value)" }
