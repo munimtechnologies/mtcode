@@ -373,7 +373,10 @@ export const make = (options?: StartupOptions) =>
           yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
           // Settle sessions orphaned by the previous shutdown before the
           // command gate opens, so queued user messages never wait behind a
-          // turn whose provider process no longer exists.
+          // turn whose provider process no longer exists. ProviderCommandReactor
+          // subscribes to the domain stream during start() and only delays
+          // processing until activation, so the resume turn.start below is not
+          // dropped from the live PubSub.
           yield* sessionStartupReconciler.reconcile();
         }),
       );

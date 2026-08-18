@@ -34,7 +34,7 @@ Your existing subscriptions are used directly — MT Code sells nothing and adds
 
 ## MT Code vs T3 Code
 
-Compared to [T3 Code](https://github.com/pingdotgg/t3code). MT Code tracks upstream and regularly merges it. Some rows started as unmerged upstream PRs that MT Code ships today; others were built here. 🚧 means it is in another MT Code thread/worktree and is not on the downloadable build yet.
+Compared to [T3 Code](https://github.com/pingdotgg/t3code). MT Code started as a fork. Upstream is merged only when you ask an agent to do it — nothing pulls `pingdotgg/t3code` automatically. Some rows started as unmerged upstream PRs that MT Code ships today; others were built here. 🚧 means it is in another MT Code thread/worktree and is not on the downloadable build yet.
 
 | Feature                                                                                                                                                                               |                         MT Code                         |                 T3 Code                 |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-----------------------------------------------------: | :-------------------------------------: |
@@ -96,6 +96,6 @@ Building from source? Start at [docs/internals/overview.md](./docs/internals/ove
 
 ## Relationship to upstream
 
-MT Code tracks [pingdotgg/t3code](https://github.com/pingdotgg/t3code) nightlies and regularly merges upstream. Features built here are offered upstream as PRs when they fit; some MT Code features started as unmerged upstream PRs we adopted. Bug reports about MT Code builds belong on [this repo's issues](https://github.com/sheehanmunim/mtcode/issues) — please don't file MT Code problems upstream.
+MT Code does not auto-merge [pingdotgg/t3code](https://github.com/pingdotgg/t3code). Upstream lands only when you explicitly ask an agent to merge it. Features built here are offered upstream as PRs when they fit; some MT Code features started as unmerged upstream PRs we adopted. Bug reports about MT Code builds belong on [this repo's issues](https://github.com/sheehanmunim/mtcode/issues) — please don't file MT Code problems upstream.
 
 MT Code exists because T3 Code is truly open. Credit and thanks to the T3 team.
