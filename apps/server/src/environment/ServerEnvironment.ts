@@ -15,6 +15,7 @@ import { readAgentActivityPublishingActive } from "../cloud/config.ts";
 import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
+import { resolveDesktopMcpPath } from "../desktopControl/desktopMcpBinary.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
@@ -133,6 +134,10 @@ export const make = Effect.gen(function* () {
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
   const launcher = yield* resolveServiceLauncherMode();
+  // Binary presence, not the Computer Use settings toggle: the capability says
+  // the machine can serve a live view at all. The stream RPC still fails
+  // closed when desktop control is disabled in settings.
+  const desktopMcpPath = yield* resolveDesktopMcpPath().pipe(Effect.orElseSucceed(() => undefined));
   const serverSelfUpdate = resolveServerSelfUpdateCapability({
     desktopManaged: serverConfig.mode === "desktop",
     launcherManaged: launcher.managed,
@@ -162,6 +167,7 @@ export const make = Effect.gen(function* () {
       providerHandoff: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
+      ...(desktopMcpPath === undefined ? {} : { computerView: true }),
     },
   };
 

@@ -98,6 +98,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
+import * as ComputerViewBroker from "./desktopControl/ComputerViewBroker.ts";
 import * as ComputerTaskBroker from "./mcp/ComputerTaskBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -376,6 +377,7 @@ const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   computerTaskBroker: ComputerTaskBroker.ComputerTaskBroker["Service"],
+  computerViewBroker: ComputerViewBroker.ComputerViewBroker["Service"],
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -2604,6 +2606,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.computersRespond, computerTaskBroker.respond(input), {
             "rpc.aggregate": "computers",
           }),
+        [WS_METHODS.computerViewStream]: (input) =>
+          observeRpcStream(WS_METHODS.computerViewStream, computerViewBroker.stream(input), {
+            "rpc.aggregate": "computer-view",
+          }),
+        [WS_METHODS.computerViewInput]: (input) =>
+          observeRpcEffect(WS_METHODS.computerViewInput, computerViewBroker.input(input), {
+            "rpc.aggregate": "computer-view",
+          }),
         [WS_METHODS.subscribePreviewEvents]: (_input) =>
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
@@ -2786,6 +2796,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const computerTaskBroker = yield* ComputerTaskBroker.ComputerTaskBroker;
+    const computerViewBroker = yield* ComputerViewBroker.ComputerViewBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const pullRequestStacks = yield* GitHubPullRequestStackService.GitHubPullRequestStackService;
@@ -2808,7 +2819,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker, computerTaskBroker).pipe(
+            makeWsRpcLayer(
+              session,
+              previewAutomationBroker,
+              computerTaskBroker,
+              computerViewBroker,
+            ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
