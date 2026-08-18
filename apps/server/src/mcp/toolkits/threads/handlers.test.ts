@@ -57,6 +57,8 @@ function makeThread(
   };
 }
 
+const idleThreadId = ThreadId.make("thread-idle");
+
 const source = makeThread(sourceThreadId);
 const target = makeThread(targetThreadId, {
   branch: "feat/parser",
@@ -64,6 +66,7 @@ const target = makeThread(targetThreadId, {
   updatedAt: "2026-01-01T00:00:01.000Z",
   backgroundLiveness: "working",
 });
+const idleSibling = makeThread(idleThreadId, { title: "Idle Agent" });
 
 const snapshot = {
   snapshotSequence: 10,
@@ -92,11 +95,19 @@ const client = McpSchema.McpServerClient.of({
   getClient: Effect.die("unused"),
 });
 
-function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
+function makeTestLayer(
+  dispatched: Array<OrchestrationCommand>,
+  options: {
+    readonly threads?: ReadonlyArray<OrchestrationThreadShell>;
+    readonly failDispatchOf?: OrchestrationCommand["type"];
+  } = {},
+) {
+  const threads = options.threads ?? snapshot.threads;
+  const shellSnapshot = { ...snapshot, threads: [...threads] };
   const query = {
-    getShellSnapshot: () => Effect.succeed(snapshot),
+    getShellSnapshot: () => Effect.succeed(shellSnapshot),
     getThreadShellById: (threadId: ThreadId) => {
-      const thread = snapshot.threads.find(({ id }) => id === threadId);
+      const thread = threads.find(({ id }) => id === threadId);
       return Effect.succeed(thread === undefined ? Option.none() : Option.some(thread));
     },
   } as unknown as ProjectionSnapshotQuery["Service"];
@@ -105,7 +116,9 @@ function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
     readEvents: () => Stream.empty,
     dispatch: (command) => {
       dispatched.push(command);
-      return Effect.succeed({ sequence: 11 });
+      return command.type === options.failDispatchOf
+        ? Effect.fail(new Error(`dispatch of ${command.type} rejected`) as never)
+        : Effect.succeed({ sequence: 11 });
     },
     streamDomainEvents: Stream.empty,
     latestSequence: Effect.succeed(10),
@@ -181,4 +194,107 @@ it.effect("lists siblings and durably dispatches attributed thread messages", ()
       });
     }),
   ).pipe(Effect.provide(makeTestLayer(dispatched)));
+});
+
+const callTool = (name: string, args: Record<string, unknown>) =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    return yield* server
+      .callTool({ name, arguments: args })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+  });
+
+it.effect("creates an attributed sibling thread and starts its first turn", () => {
+  const dispatched: Array<OrchestrationCommand> = [];
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const created = yield* callTool("thread_create", {
+        title: "Parser fixes",
+        message: "Fix the parser crash on empty input.",
+      });
+      expect(created.isError).toBe(false);
+      expect(created.structuredContent).toMatchObject({ status: "accepted", sequence: 11 });
+
+      expect(dispatched.map(({ type }) => type)).toEqual(["thread.create", "thread.turn.start"]);
+      const create = dispatched[0] as Extract<OrchestrationCommand, { type: "thread.create" }>;
+      expect(create).toMatchObject({
+        projectId,
+        title: "Parser fixes",
+        modelSelection: source.modelSelection,
+        runtimeMode: source.runtimeMode,
+        interactionMode: source.interactionMode,
+        branch: source.branch,
+        worktreePath: source.worktreePath,
+      });
+      expect(dispatched[1]).toMatchObject({
+        type: "thread.turn.start",
+        threadId: create.threadId,
+        message: { role: "user", text: "Fix the parser crash on empty input." },
+        sourceThreadMessage: { threadId: sourceThreadId },
+      });
+      expect((created.structuredContent as { threadId: string }).threadId).toBe(create.threadId);
+
+      const untitled = yield* callTool("thread_create", { message: "Second delegated task." });
+      expect(untitled.isError).toBe(false);
+      const untitledCreate = dispatched[2] as Extract<
+        OrchestrationCommand,
+        { type: "thread.create" }
+      >;
+      expect(untitledCreate.title).toBe("New thread");
+    }),
+  ).pipe(Effect.provide(makeTestLayer(dispatched)));
+});
+
+it.effect("refuses thread_create while too many project threads are working", () => {
+  const dispatched: Array<OrchestrationCommand> = [];
+  const busySiblings = Array.from({ length: 8 }, (_, index) =>
+    makeThread(ThreadId.make(`thread-busy-${index}`), { backgroundLiveness: "working" }),
+  );
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const result = yield* callTool("thread_create", { message: "One more task." });
+      expect(result.isError).toBe(true);
+      expect(dispatched).toHaveLength(0);
+    }),
+  ).pipe(Effect.provide(makeTestLayer(dispatched, { threads: [source, ...busySiblings] })));
+});
+
+it.effect("rolls back thread creation when the first turn cannot start", () => {
+  const dispatched: Array<OrchestrationCommand> = [];
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const result = yield* callTool("thread_create", { message: "Doomed first turn." });
+      expect(result.isError).toBe(true);
+      expect(dispatched.map(({ type }) => type)).toEqual([
+        "thread.create",
+        "thread.turn.start",
+        "thread.delete",
+      ]);
+      const create = dispatched[0] as Extract<OrchestrationCommand, { type: "thread.create" }>;
+      expect(dispatched[2]).toMatchObject({ type: "thread.delete", threadId: create.threadId });
+    }),
+  ).pipe(Effect.provide(makeTestLayer(dispatched, { failDispatchOf: "thread.turn.start" })));
+});
+
+it.effect("archives idle siblings only", () => {
+  const dispatched: Array<OrchestrationCommand> = [];
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const archived = yield* callTool("thread_archive", { threadId: idleThreadId });
+      expect(archived.isError).toBe(false);
+      expect(archived.structuredContent).toEqual({ threadId: idleThreadId, status: "archived" });
+      expect(dispatched.map(({ type }) => type)).toEqual(["thread.archive"]);
+
+      const busy = yield* callTool("thread_archive", { threadId: targetThreadId });
+      expect(busy.isError).toBe(true);
+
+      const self = yield* callTool("thread_archive", { threadId: sourceThreadId });
+      expect(self.isError).toBe(true);
+
+      expect(dispatched).toHaveLength(1);
+    }),
+  ).pipe(Effect.provide(makeTestLayer(dispatched, { threads: [source, target, idleSibling] })));
 });

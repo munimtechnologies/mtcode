@@ -9,6 +9,8 @@ import { ProjectionSnapshotQuery } from "../../../orchestration/Services/Project
 
 export const THREAD_RELAY_MESSAGE_MAX_CHARS = 8_000;
 export const THREAD_RELAY_LIST_LIMIT = 50;
+export const THREAD_CREATE_TITLE_MAX_CHARS = 200;
+export const THREAD_CREATE_MAX_WORKING_SIBLINGS = 8;
 
 export class ThreadRelayError extends Schema.TaggedErrorClass<ThreadRelayError>()(
   "ThreadRelayError",
@@ -17,7 +19,10 @@ export class ThreadRelayError extends Schema.TaggedErrorClass<ThreadRelayError>(
       "source_unavailable",
       "target_not_found",
       "self_send",
+      "self_archive",
       "cross_project",
+      "spawn_limit",
+      "target_busy",
       "query_failed",
       "dispatch_failed",
     ]),
@@ -58,6 +63,29 @@ const ThreadSendResult = Schema.Struct({
   sequence: Schema.Number,
 });
 
+const ThreadCreateInput = Schema.Struct({
+  title: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(THREAD_CREATE_TITLE_MAX_CHARS)),
+  ),
+  message: TrimmedNonEmptyString.check(Schema.isMaxLength(THREAD_RELAY_MESSAGE_MAX_CHARS)),
+});
+
+const ThreadCreateResult = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  status: Schema.Literal("accepted"),
+  sequence: Schema.Number,
+});
+
+const ThreadArchiveInput = Schema.Struct({
+  threadId: ThreadId,
+});
+
+const ThreadArchiveResult = Schema.Struct({
+  threadId: ThreadId,
+  status: Schema.Literal("archived"),
+});
+
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   ProjectionSnapshotQuery,
@@ -91,4 +119,35 @@ export const ThreadSendTool = Tool.make("thread_send", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false);
 
-export const ThreadRelayToolkit = Toolkit.make(ThreadListTool, ThreadSendTool);
+export const ThreadCreateTool = Tool.make("thread_create", {
+  description:
+    "Create a new sibling T3 thread in this thread's project and durably start its first turn with the given message. The new thread inherits this thread's provider, model, and workspace, then runs independently; its first message is attributed to this thread. It shares no provider context with this thread, so include all context it needs in the message. Omit title to let T3 name the thread from the message. Monitor it with thread_list; it can reply with thread_send.",
+  parameters: ThreadCreateInput,
+  success: ThreadCreateResult,
+  failure: ThreadRelayError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Create sibling thread")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false);
+
+export const ThreadArchiveTool = Tool.make("thread_archive", {
+  description:
+    "Archive a finished sibling T3 thread in this thread's project, removing it from the active thread list. A thread cannot archive itself, and targets that are working or waiting on the user are refused. The user can restore archived threads.",
+  parameters: ThreadArchiveInput,
+  success: ThreadArchiveResult,
+  failure: ThreadRelayError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Archive sibling thread")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, false);
+
+export const ThreadRelayToolkit = Toolkit.make(
+  ThreadListTool,
+  ThreadSendTool,
+  ThreadCreateTool,
+  ThreadArchiveTool,
+);
