@@ -81,9 +81,6 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
-import { importHermesSessionsWithSettings } from "./provider/hermesImport.ts";
-import { importLocalChatsWithSettings } from "./provider/localChatImport.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -283,7 +280,6 @@ function projectSetupScriptCompatibilityDetail(
 /** Event types delivered on subscribeThread; keep ProjectionSnapshotQuery watermark in sync. */
 export const THREAD_DETAIL_STREAM_EVENT_TYPES = [
   "thread.message-sent",
-  "thread.history-imported",
   "thread.proposed-plan-upserted",
   "thread.activity-appended",
   "thread.turn-diff-completed",
@@ -387,7 +383,6 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
-      yield* ProviderSessionDirectory.ProviderSessionDirectory;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -1503,22 +1498,6 @@ const makeWsRpcLayer = (
               ? providerRegistry.refreshInstance(input.instanceId)
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
-            { "rpc.aggregate": "server" },
-          ),
-        [WS_METHODS.serverImportHermesSessions]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.serverImportHermesSessions,
-            serverSettings.getSettings.pipe(
-              Effect.flatMap((settings) => importHermesSessionsWithSettings(settings, input)),
-            ),
-            { "rpc.aggregate": "server" },
-          ),
-        [WS_METHODS.serverImportLocalChats]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.serverImportLocalChats,
-            serverSettings.getSettings.pipe(
-              Effect.flatMap((settings) => importLocalChatsWithSettings(settings, input)),
-            ),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>

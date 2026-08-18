@@ -35,8 +35,6 @@ export * from "./browserImport.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
 export * from "./accountLimits.ts";
-export * from "./hermes.ts";
-export * from "./chatImport.ts";
 export * from "./pluginMarketplace.ts";
 export * from "./skillInventory.ts";
 export * from "./rpc.ts";

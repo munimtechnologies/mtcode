@@ -61,9 +61,6 @@ export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
   readonly resumeSessionId?: string;
-  /** Hermes may print a short banner before beginning its JSON-RPC stream. */
-  readonly discardNonJsonStdoutLines?: boolean;
-  readonly sessionCreateTimeout?: Duration.Input;
   readonly sessionLoadTimeout?: Duration.Input;
   readonly sessionLoadReplayIdleGap?: Duration.Input;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
@@ -364,12 +361,8 @@ export const make = (
         ),
       );
 
-    const acpChild = options.discardNonJsonStdoutLines
-      ? { ...child, stdout: discardNonJsonStdoutLines(child.stdout) }
-      : child;
-
     const acpContext = yield* Layer.build(
-      EffectAcpClient.layerChildProcess(acpChild, {
+      EffectAcpClient.layerChildProcess(child, {
         ...(options.protocolLogging?.logIncoming !== undefined
           ? { logIncoming: options.protocolLogging.logIncoming }
           : {}),
@@ -653,30 +646,11 @@ export const make = (
           cwd: options.cwd,
           mcpServers: options.mcpServers ?? [],
         } satisfies EffectAcpSchema.NewSessionRequest;
-        const createSession = runLoggedRequest(
+        const created = yield* runLoggedRequest(
           "session/new",
           createPayload,
           acp.agent.createSession(createPayload),
         );
-        const created = yield* options.sessionCreateTimeout === undefined
-          ? createSession
-          : createSession.pipe(
-              Effect.timeoutOption(options.sessionCreateTimeout),
-              Effect.flatMap(
-                Option.match({
-                  onNone: () =>
-                    Effect.fail(
-                      new EffectAcpErrors.AcpTransportError({
-                        operation: "call-rpc",
-                        method: "session/new",
-                        detail: "session/new timed out waiting for the agent to initialize",
-                        cause: undefined,
-                      }),
-                    ),
-                  onSome: Effect.succeed,
-                }),
-              ),
-            );
         sessionId = created.sessionId;
         sessionSetupResult = created;
       }
@@ -974,38 +948,6 @@ function shouldEmitToolCallUpdate(
     return false;
   }
   return previous === undefined || previous.title !== next.title || previous.detail !== next.detail;
-}
-
-const stdoutDecoder = new TextDecoder();
-const stdoutEncoder = new TextEncoder();
-
-function discardNonJsonStdoutLines<E>(
-  stream: Stream.Stream<Uint8Array, E>,
-): Stream.Stream<Uint8Array, E> {
-  return Stream.unwrap(
-    Effect.gen(function* () {
-      const pendingRef = yield* Ref.make("");
-      return stream.pipe(
-        Stream.mapEffect((chunk) =>
-          Ref.modify(pendingRef, (pending) => {
-            const text = pending + stdoutDecoder.decode(chunk, { stream: true });
-            const lines = text.split(/\r?\n/g);
-            const nextPending = lines.pop() ?? "";
-            const filtered = lines
-              .filter((line) => {
-                const trimmed = line.trimStart();
-                return trimmed.startsWith("{") || trimmed.startsWith("[");
-              })
-              .map((line) => `${line}\n`)
-              .join("");
-            return [filtered, nextPending] as const;
-          }),
-        ),
-        Stream.filter((chunk) => chunk.length > 0),
-        Stream.map((chunk) => stdoutEncoder.encode(chunk)),
-      );
-    }),
-  );
 }
 
 const assistantItemId = (sessionId: string, runtimeId: string, segmentIndex: number) =>

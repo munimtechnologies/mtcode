@@ -636,9 +636,6 @@ const make = Effect.gen(function* () {
     >,
   ) {
     if (event.type === "thread.message-sent") {
-      if (event.metadata.importedHistory === true) {
-        return;
-      }
       if (
         event.payload.role !== "user" ||
         event.payload.streaming ||

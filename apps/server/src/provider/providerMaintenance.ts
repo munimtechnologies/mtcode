@@ -40,13 +40,7 @@ const readCommandLookupEnv = CommandLookupEnvConfig.pipe(Effect.orElseSucceed(()
 export interface ProviderMaintenanceCapabilities {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
-  readonly latestVersionSource?: ProviderLatestVersionSource;
   readonly update: ProviderMaintenanceCommandAction | null;
-}
-
-export interface ProviderLatestVersionSource {
-  readonly kind: "github-release";
-  readonly repository: string;
 }
 
 export interface ProviderMaintenanceCommandAction {
@@ -95,9 +89,6 @@ export const ProviderVersionCache = Context.Reference<Map<string, ProviderVersio
 const NpmLatestVersionResponse = Schema.Struct({
   version: Schema.optional(Schema.String),
 });
-const GitHubLatestReleaseResponse = Schema.Struct({
-  name: Schema.optional(Schema.String),
-});
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -137,28 +128,6 @@ export function makeManualOnlyProviderMaintenanceCapabilities(input: {
     updateArgs: [],
     updateLockKey: null,
   });
-}
-
-export function makeGitHubReleaseProviderMaintenanceCapabilities(input: {
-  readonly provider: ProviderDriverKind;
-  readonly repository: string;
-  readonly updateExecutable: string;
-  readonly updateArgs: ReadonlyArray<string>;
-  readonly updateLockKey: string;
-}): ProviderMaintenanceCapabilities {
-  return {
-    ...makeProviderMaintenanceCapabilities({
-      provider: input.provider,
-      packageName: null,
-      updateExecutable: input.updateExecutable,
-      updateArgs: input.updateArgs,
-      updateLockKey: input.updateLockKey,
-    }),
-    latestVersionSource: {
-      kind: "github-release",
-      repository: input.repository,
-    },
-  };
 }
 
 function makeNpmGlobalProviderMaintenanceCapabilities(
@@ -484,58 +453,23 @@ const fetchNpmLatestVersion = Effect.fn("fetchNpmLatestVersion")(function* (pack
   return payload ? nonEmptyString(payload.version) : null;
 });
 
-const fetchGitHubLatestReleaseVersion = Effect.fn("fetchGitHubLatestReleaseVersion")(function* (
-  repository: string,
-) {
-  const client = yield* HttpClient.HttpClient;
-  const request = HttpClientRequest.get(
-    `https://api.github.com/repos/${repository}/releases/latest`,
-  ).pipe(
-    HttpClientRequest.setHeader("accept", "application/vnd.github+json"),
-    HttpClientRequest.setHeader("user-agent", "t3-code"),
-  );
-  const response = yield* client.execute(request).pipe(
-    Effect.timeoutOption(LATEST_VERSION_TIMEOUT_MS),
-    Effect.orElseSucceed(() => Option.none()),
-  );
-  if (Option.isNone(response)) {
-    return null;
-  }
-  const httpResponse = response.value;
-  if (httpResponse.status < 200 || httpResponse.status >= 300) {
-    return null;
-  }
-  const payload = yield* httpResponse.json.pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(GitHubLatestReleaseResponse)),
-    Effect.orElseSucceed(() => null),
-  );
-  const releaseName = payload ? nonEmptyString(payload.name) : null;
-  return releaseName?.match(/\bv?(\d+\.\d+\.\d+)\b/)?.[1] ?? null;
-});
-
 export const resolveLatestProviderVersion = Effect.fn("resolveLatestProviderVersion")(function* (
   maintenanceCapabilities: ProviderMaintenanceCapabilities,
 ) {
-  const latestVersionSource = maintenanceCapabilities.latestVersionSource;
   const packageName = maintenanceCapabilities.packageName;
-  const cacheKey = latestVersionSource
-    ? `${latestVersionSource.kind}:${latestVersionSource.repository}`
-    : packageName;
-  if (!cacheKey) {
+  if (!packageName) {
     return null;
   }
 
   const latestVersionCache = yield* ProviderVersionCache;
-  const cached = latestVersionCache.get(cacheKey);
+  const cached = latestVersionCache.get(packageName);
   const now = DateTime.toEpochMillis(yield* DateTime.now);
   if (cached && cached.expiresAt > now) {
     return cached.version;
   }
 
-  const version = latestVersionSource
-    ? yield* fetchGitHubLatestReleaseVersion(latestVersionSource.repository)
-    : yield* fetchNpmLatestVersion(cacheKey);
-  latestVersionCache.set(cacheKey, {
+  const version = yield* fetchNpmLatestVersion(packageName);
+  latestVersionCache.set(packageName, {
     expiresAt: now + LATEST_VERSION_CACHE_TTL_MS,
     version,
   });
