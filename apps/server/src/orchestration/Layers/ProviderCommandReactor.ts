@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  isCorrectionMessage,
   type ModelSelection,
   type OrchestrationEvent,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -110,10 +111,16 @@ type ThreadTitleMessage = {
   readonly role: "user" | "assistant" | "system";
   readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  readonly correction?:
+    | {
+        readonly targetMessageId: string;
+        readonly replacementText: string;
+      }
+    | undefined;
 };
 
 function formatThreadTitleSection(message: ThreadTitleMessage): string | undefined {
-  if (message.role === "system") {
+  if (message.role === "system" || isCorrectionMessage(message)) {
     return undefined;
   }
   const text = message.text.trim();
@@ -1142,8 +1149,13 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    // First-turn work (worktree branch, title generation) belongs to the
+    // first REAL user message: corrections never count, and with queued
+    // messages present the turn must be for that first message specifically.
     const isFirstUserMessageTurn =
-      thread.messages.find((entry) => entry.role === "user")?.id === event.payload.messageId;
+      !isCorrectionMessage(message) &&
+      thread.messages.find((entry) => entry.role === "user" && !isCorrectionMessage(entry))?.id ===
+        event.payload.messageId;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =

@@ -71,6 +71,7 @@ export function shouldPublishAgentAwarenessEvent(event: OrchestrationEvent): boo
     case "thread.turn-queued":
     case "thread.queued-turn-dispatched":
     case "thread.queued-turn-cancelled":
+    case "thread.message-corrected":
     case "thread.turn-start-requested":
       // These events express intent to start work, but the shell still contains
       // the previous turn's terminal state until the provider acknowledges the

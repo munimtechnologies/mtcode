@@ -165,6 +165,7 @@ export const make = Effect.gen(function* () {
       threadTitleRegeneration: true,
       sourceControlSshPasswordPrompts: true,
       providerHandoff: true,
+      threadMessageCorrection: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
       ...(desktopMcpPath === undefined ? {} : { computerView: true }),

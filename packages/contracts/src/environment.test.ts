@@ -39,4 +39,14 @@ describe("ExecutionEnvironmentDescriptor", () => {
       }).capabilities.providerHandoff,
     ).toBe(true);
   });
+
+  it("treats message correction as an explicit version-skew capability", () => {
+    expect(decodeDescriptor(descriptor).capabilities.threadMessageCorrection).toBeUndefined();
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, threadMessageCorrection: true },
+      }).capabilities.threadMessageCorrection,
+    ).toBe(true);
+  });
 });

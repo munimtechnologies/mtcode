@@ -1,6 +1,8 @@
 import {
+  buildThreadMessageCorrectionProviderText,
   EventId,
   MessageId,
+  getThreadMessageCorrectionEligibility,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -1715,6 +1717,114 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       return [...lifecycleResetEvents, userMessageEvent, turnIntentEvent];
+    }
+
+    case "thread.message.correct": {
+      const targetThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const eligibility = getThreadMessageCorrectionEligibility({
+        thread: targetThread,
+        targetMessageId: command.targetMessageId,
+        occurredAt: command.createdAt,
+        replacementText: command.replacementText,
+      });
+      if (!eligibility.eligible) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: eligibility.detail,
+        });
+      }
+      if (targetThread.messages.some((message) => message.id === command.correctionMessageId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The correction message ID is already in use.",
+        });
+      }
+      const targetMessage = targetThread.messages.find(
+        (message) => message.id === command.targetMessageId,
+      );
+      if (targetMessage?.text !== command.expectedText) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The target message changed before the correction was saved.",
+        });
+      }
+
+      const correctionEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.message-corrected",
+        payload: {
+          threadId: command.threadId,
+          targetMessageId: command.targetMessageId,
+          correctionMessageId: command.correctionMessageId,
+          replacementText: command.replacementText,
+          providerText: buildThreadMessageCorrectionProviderText(command.replacementText),
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        causationEventId: correctionEvent.eventId,
+        type: "thread.turn-start-requested",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.correctionMessageId,
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
+            : {}),
+          runtimeMode: targetThread.runtimeMode,
+          interactionMode: targetThread.interactionMode,
+          createdAt: command.createdAt,
+        },
+      };
+      const lifecycleResetEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      if (targetThread.settledOverride !== null) {
+        lifecycleResetEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.unsettled",
+          payload: {
+            threadId: command.threadId,
+            reason: "activity",
+            updatedAt: command.createdAt,
+          },
+        });
+      }
+      if (targetThread.snoozedUntil != null) {
+        lifecycleResetEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.unsnoozed",
+          payload: {
+            threadId: command.threadId,
+            reason: "activity",
+            updatedAt: command.createdAt,
+          },
+        });
+      }
+      return [...lifecycleResetEvents, correctionEvent, turnStartRequestedEvent];
     }
 
     case "thread.queued-turn.cancel": {
