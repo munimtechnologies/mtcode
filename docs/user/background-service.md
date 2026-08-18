@@ -32,7 +32,9 @@ Stop it and remove it from startup:
 npx t3@latest service uninstall
 ```
 
-Updating restarts T3 Code briefly. Let active agent work and terminal commands finish first.
+Updating restarts T3 Code briefly. Threads with an agent mid-turn are interrupted and resume
+automatically once the server is back, continuing from where they left off. Terminal commands the
+agent was running are still cut, so let long-running commands finish first.
 If a remote update is already in progress, wait for it to finish before retrying a local update.
 
 The service runs a small stable launcher. Exact T3 Code versions are installed separately, so a
@@ -93,7 +95,8 @@ Windows differs from Linux in ways worth knowing before you rely on it:
 - **Windows Explorer must be your shell.** That is the default. If you replaced it, Startup folder
   entries may never run, and `t3 service install` warns you about that.
 
-Let agent work finish before running `update` on Windows, because the stop is not graceful.
+Interrupted agent threads resume automatically after the restart, but because the stop is not
+graceful on Windows, let terminal commands the agent is running finish before `update`.
 
 ## Using It with T3 Connect
 
