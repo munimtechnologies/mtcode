@@ -1860,7 +1860,7 @@ function PullRequestsColumn({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <header
         className={cn(
-          "workspace-topbar drag-region gap-1.5 px-3 sm:px-5",
+          "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1.5 px-3 sm:px-5",
           // A closed right panel leaves this column full-width, so its header runs
           // underneath the native window controls on Windows; reserve the inset the
           // way Settings and the chat view do. While the panel is open the column
