@@ -111,6 +111,12 @@ const PROVIDER = ProviderDriverKind.make("claudeAgent");
  * start often enough that fetching on every init would hammer it.
  */
 const ACCOUNT_USAGE_MIN_INTERVAL_MS = 3 * 60_000;
+// SDK setModel / setPermissionMode wait forever for a control reply. After an
+// idle restart the CLI may not answer until system/init, or at all. A timed-out
+// call can still apply later, so sendTurn forgets the cached mode/model and
+// re-issues on the next turn instead of treating the last request as current.
+const QUERY_READY_TIMEOUT = "5 seconds";
+const QUERY_CONTROL_TIMEOUT = "5 seconds";
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -290,6 +296,7 @@ interface ClaudeSessionContext {
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
   currentPermissionMode: PermissionMode | undefined;
+  queryReady: Deferred.Deferred<void>;
   currentApiModelId: string | undefined;
   /** Effective effort for the session's turns; subagents without an explicit
    * effort override inherit this. */
@@ -3242,6 +3249,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     switch (message.subtype) {
       case "init":
+        yield* markQueryReady(context);
         yield* offerRuntimeEvent({
           ...base,
           type: "session.configured",
@@ -3844,6 +3852,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) return;
 
     context.stopped = true;
+    yield* markQueryReady(context);
 
     for (const [requestId, pending] of context.pendingApprovals) {
       yield* Deferred.succeed(pending.decision, "cancel");
@@ -4071,11 +4080,41 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context.queryOptions = nextOptions;
     context.lastAssistantUuid = pinnedLastAssistantUuid;
     context.pinResumeSessionAt = pinnedLastAssistantUuid !== undefined;
+    context.queryReady = yield* Deferred.make<void>();
     yield* updateResumeCursor(context);
 
     const runtimeContext = yield* Effect.context<never>();
     forkSdkStream(context, Effect.runForkWith(runtimeContext));
   });
+
+  const markQueryReady = (context: ClaudeSessionContext) =>
+    Deferred.succeed(context.queryReady, undefined).pipe(Effect.asVoid);
+
+  const awaitQueryReady = (context: ClaudeSessionContext) =>
+    Deferred.await(context.queryReady).pipe(
+      Effect.timeoutOption(QUERY_READY_TIMEOUT),
+      Effect.map((ready) => Option.isSome(ready) && !context.stopped),
+    );
+
+  const applyQueryControl = Effect.fn("applyQueryControl")(function* (
+    threadId: ThreadId,
+    method: string,
+    run: () => Promise<void>,
+  ) {
+    const completed = yield* Effect.tryPromise({
+      try: run,
+      catch: (cause) => toRequestError(threadId, method, cause),
+    }).pipe(Effect.timeoutOption(QUERY_CONTROL_TIMEOUT));
+    if (Option.isSome(completed)) {
+      return true;
+    }
+    yield* Effect.logWarning("claude.turn.query-control-timeout", {
+      threadId,
+      method,
+    });
+    return false;
+  });
+
 
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
@@ -4114,6 +4153,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
       const sessionId = existingResumeSessionId ?? newSessionId;
+      const queryReady = yield* Deferred.make<void>();
+      // Fresh sessions can accept control RPCs immediately. Resume sessions
+      // must wait for system/init — setPermissionMode hangs until then.
+      if (existingResumeSessionId === undefined) {
+        yield* Deferred.succeed(queryReady, undefined);
+      }
 
       const runtimeContext = yield* Effect.context<never>();
       const runFork = Effect.runForkWith(runtimeContext);
@@ -4613,7 +4658,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
-        currentPermissionMode: permissionMode,
+        currentPermissionMode: permissionMode ?? "default",
+        queryReady,
         currentApiModelId: apiModelId,
         currentEffort: effectiveEffort ?? undefined,
         resumeSessionId: sessionId,
@@ -4713,19 +4759,78 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* completeTurn(context, "completed");
     }
 
-    if (modelSelection?.model) {
-      const apiModelId = resolveClaudeApiModelId(modelSelection);
-      if (context.currentApiModelId !== apiModelId) {
-        yield* Effect.tryPromise({
-          try: () => context.query.setModel(apiModelId),
-          catch: (cause) => toRequestError(input.threadId, "turn/setModel", cause),
+    const nextApiModelId =
+      modelSelection?.model !== undefined ? resolveClaudeApiModelId(modelSelection) : undefined;
+    const needsModelUpdate =
+      nextApiModelId !== undefined && context.currentApiModelId !== nextApiModelId;
+    // "plan" maps to the SDK's plan permission mode; "default" restores the
+    // session's original mode. Absent interactionMode leaves the mode as-is.
+    const desiredPermissionMode =
+      input.interactionMode === "plan"
+        ? "plan"
+        : input.interactionMode === "default"
+          ? (context.basePermissionMode ?? "default")
+          : undefined;
+    const needsPermissionUpdate =
+      desiredPermissionMode !== undefined &&
+      desiredPermissionMode !== context.currentPermissionMode;
+
+    if (needsModelUpdate || needsPermissionUpdate) {
+      const queryReady = yield* awaitQueryReady(context);
+      if (context.stopped) {
+        return yield* new ProviderAdapterSessionClosedError({
+          provider: PROVIDER,
+          threadId: input.threadId,
         });
-        context.currentApiModelId = apiModelId;
       }
-      context.queryOptions = {
-        ...context.queryOptions,
-        model: apiModelId,
-      };
+      if (queryReady) {
+        if (needsModelUpdate && nextApiModelId !== undefined) {
+          const applied = yield* applyQueryControl(input.threadId, "turn/setModel", () =>
+            context.query.setModel(nextApiModelId),
+          );
+          context.currentApiModelId = applied ? nextApiModelId : undefined;
+          if (applied && nextApiModelId !== undefined) {
+            context.queryOptions = {
+              ...context.queryOptions,
+              model: nextApiModelId,
+            };
+          }
+        }
+        if (needsPermissionUpdate && desiredPermissionMode !== undefined) {
+          const applied = yield* applyQueryControl(input.threadId, "turn/setPermissionMode", () =>
+            context.query.setPermissionMode(desiredPermissionMode),
+          );
+          context.currentPermissionMode = applied ? desiredPermissionMode : undefined;
+          if (applied) {
+            context.queryOptions = {
+              ...context.queryOptions,
+              permissionMode: desiredPermissionMode,
+              ...(desiredPermissionMode === "bypassPermissions"
+                ? { allowDangerouslySkipPermissions: true }
+                : {}),
+            };
+          }
+        }
+      } else {
+        yield* Effect.logWarning("claude.turn.query-not-ready", {
+          threadId: input.threadId,
+          needsModelUpdate,
+          needsPermissionUpdate,
+        });
+      }
+    }
+
+    if (input.interactionMode === "plan") {
+      context.inPlanMode = true;
+    } else if (input.interactionMode === "default") {
+      context.inPlanMode = false;
+    }
+
+    const modelAppliedOnCli =
+      modelSelection?.model === undefined ||
+      !needsModelUpdate ||
+      context.currentApiModelId === nextApiModelId;
+    if (modelSelection?.model && modelAppliedOnCli) {
       context.session = {
         ...context.session,
         model: modelSelection.model,
@@ -4739,36 +4844,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         getEffectiveClaudeAgentEffort(turnEffort ?? null, modelSelection.model) ?? undefined;
     }
 
-    // Apply interaction mode by switching the SDK's permission mode.
-    // "plan" maps directly to the SDK's "plan" permission mode;
-    // "default" restores the session's original permission mode.
-    // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan") {
-      yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode("plan"),
-        catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
+    if (context.stopped) {
+      return yield* new ProviderAdapterSessionClosedError({
+        provider: PROVIDER,
+        threadId: input.threadId,
       });
-      context.inPlanMode = true;
-      context.currentPermissionMode = "plan";
-      context.queryOptions = {
-        ...context.queryOptions,
-        permissionMode: "plan",
-      };
-    } else if (input.interactionMode === "default") {
-      const restoredPermissionMode = context.basePermissionMode ?? "default";
-      yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode(restoredPermissionMode),
-        catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
-      });
-      context.inPlanMode = false;
-      context.currentPermissionMode = restoredPermissionMode;
-      context.queryOptions = {
-        ...context.queryOptions,
-        permissionMode: restoredPermissionMode,
-        ...(restoredPermissionMode === "bypassPermissions"
-          ? { allowDangerouslySkipPermissions: true }
-          : {}),
-      };
     }
 
     const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);
@@ -4800,7 +4880,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         createdAt: turnStartedStamp.createdAt,
         threadId: context.session.threadId,
         turnId,
-        payload: modelSelection?.model ? { model: modelSelection.model } : {},
+        payload: context.session.model ? { model: context.session.model } : {},
         providerRefs: {},
       });
     }
