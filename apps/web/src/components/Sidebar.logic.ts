@@ -533,24 +533,40 @@ export function firstValidTimestamp(
   return null;
 }
 
-/** Orders active, unpinned sidebar threads by the selected user-controlled
-    timestamp. Last-user-message mode falls back directly to creation time so
-    metadata and background status updates never move a row. */
+/** Orders active, unpinned sidebar threads. User-arranged activeOrderKey
+    values win when present; keyless threads keep the selected timestamp
+    sort underneath so mixed-version fleets stay stable. */
 export function sortActiveThreadsForSidebar<
   T extends {
     readonly id: string;
     readonly createdAt: string;
     readonly latestUserMessageAt: string | null;
+    readonly activeOrderKey?: string | null | undefined;
+    readonly environmentId?: string | undefined;
   },
 >(threads: readonly T[], sortOrder: SidebarThreadSortOrder): T[] {
   const timestamp = (thread: T) =>
     sortOrder === "updated_at"
       ? firstValidTimestampMs(thread.latestUserMessageAt, thread.createdAt)
       : parseTimestampMs(thread.createdAt);
+  const identityTiebreak = (left: T, right: T) =>
+    left.id.localeCompare(right.id) ||
+    (left.environmentId ?? "").localeCompare(right.environmentId ?? "");
 
-  return [...threads].toSorted(
-    (left, right) => timestamp(right) - timestamp(left) || left.id.localeCompare(right.id),
+  const keyed: T[] = [];
+  const keyless: T[] = [];
+  for (const thread of threads) {
+    (thread.activeOrderKey != null ? keyed : keyless).push(thread);
+  }
+  keyed.sort((left, right) => {
+    const leftKey = left.activeOrderKey!;
+    const rightKey = right.activeOrderKey!;
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : identityTiebreak(left, right);
+  });
+  keyless.sort(
+    (left, right) => timestamp(right) - timestamp(left) || identityTiebreak(left, right),
   );
+  return [...keyed, ...keyless];
 }
 
 // Pinned-reorder key math and the keyed sort live in client-runtime

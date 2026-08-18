@@ -1774,6 +1774,7 @@ export default function Sidebar() {
     pinThread,
     unpinThread,
     reorderPinnedThread,
+    reorderActiveThread,
     archiveThread,
     deleteThread,
   } = useThreadActions();
@@ -2075,6 +2076,7 @@ export default function Sidebar() {
     pinnedThreads,
     reorderablePinnedKeys,
     activeThreads,
+    reorderableActiveKeys,
     snoozedThreads,
     settledThreads,
     snoozeNow,
@@ -2152,6 +2154,15 @@ export default function Sidebar() {
           .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
       ),
       activeThreads: sortActiveThreadsForSidebar(active, sidebarActiveThreadSortOrder),
+      reorderableActiveKeys: new Set(
+        active
+          .filter(
+            (thread) =>
+              serverConfigs.get(thread.environmentId)?.environment.capabilities
+                .threadActiveReorder === true,
+          )
+          .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+      ),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -2732,6 +2743,56 @@ export default function Sidebar() {
       ),
     [orderedPinnedThreads],
   );
+  const [optimisticActiveOrder, setOptimisticActiveOrder] = useState<{
+    readonly order: readonly string[];
+    readonly keysAtDrop: ReadonlyMap<string, string | null>;
+    readonly assignedKeys: ReadonlyMap<string, string>;
+  } | null>(null);
+  const orderedActiveThreads = useMemo(() => {
+    if (optimisticActiveOrder === null) return activeThreads;
+    return orderItemsByPreferredIds({
+      items: activeThreads,
+      preferredIds: optimisticActiveOrder.order,
+      getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    });
+  }, [optimisticActiveOrder, activeThreads]);
+  const orderedActiveKeys = useMemo(
+    () =>
+      orderedActiveThreads.map((thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      ),
+    [orderedActiveThreads],
+  );
+  useEffect(() => {
+    if (optimisticActiveOrder === null) return;
+    const canonical = activeThreads.filter((thread) =>
+      reorderableActiveKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+    );
+    const canonicalKeys = new Map(
+      canonical.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread.activeOrderKey ?? null,
+      ]),
+    );
+    const assigned = [...optimisticActiveOrder.assignedKeys.entries()];
+    const allLanded = assigned.every(([id, key]) => canonicalKeys.get(id) === key);
+    const foreignWrite = [...canonicalKeys.entries()].some(([id, key]) => {
+      const baseline = optimisticActiveOrder.keysAtDrop.get(id);
+      const weWrote = optimisticActiveOrder.assignedKeys.get(id);
+      return baseline !== undefined && key !== baseline && weWrote !== key;
+    });
+    const membershipChanged =
+      canonical.length !== optimisticActiveOrder.keysAtDrop.size ||
+      canonical.some(
+        (thread) =>
+          !optimisticActiveOrder.keysAtDrop.has(
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ),
+      );
+    if (allLanded || foreignWrite || membershipChanged) {
+      setOptimisticActiveOrder(null);
+    }
+  }, [optimisticActiveOrder, activeThreads, reorderableActiveKeys]);
   useEffect(() => {
     if (optimisticPinnedOrder === null) return;
     const canonical = pinnedThreads.filter((thread) =>
@@ -3007,6 +3068,62 @@ export default function Sidebar() {
         return;
       }
 
+      if (activeSection === "active" && overSection === "active") {
+        const reorderable = orderedActiveThreads.filter((thread) =>
+          reorderableActiveKeys.has(
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ),
+        );
+        const keys = reorderable.map((thread) =>
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        );
+        const fromIndex = keys.indexOf(activeKey);
+        const toIndex = keys.indexOf(overKey);
+        if (fromIndex === -1 || toIndex === -1) return;
+        const newOrder = arrayMove([...keys], fromIndex, toIndex);
+        const threadByKey = new Map(reorderable.map((thread, index) => [keys[index]!, thread]));
+        const keysAtDrop = new Map(
+          reorderable.map((thread, index) => [keys[index]!, thread.activeOrderKey ?? null]),
+        );
+        const assignments = planPinnedReorder({
+          orderedIds: newOrder,
+          keysById: keysAtDrop,
+          movedId: activeKey,
+        });
+        if (assignments.length === 0) return;
+        setOptimisticActiveOrder({
+          order: newOrder,
+          keysAtDrop,
+          assignedKeys: new Map(
+            assignments.map((assignment) => [assignment.id, assignment.orderKey]),
+          ),
+        });
+        void (async () => {
+          for (const assignment of assignments) {
+            const thread = threadByKey.get(assignment.id);
+            if (thread === undefined) continue;
+            const result = await reorderActiveThread(
+              scopeThreadRef(thread.environmentId, thread.id),
+              assignment.orderKey,
+            );
+            if (result._tag === "Failure") {
+              setOptimisticActiveOrder(null);
+              if (isAtomCommandInterrupted(result)) return;
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to reorder threads",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+              return;
+            }
+          }
+        })();
+        return;
+      }
+
       if (overSection === "settled") {
         if (activeSection !== "settled") {
           void (async () => {
@@ -3208,9 +3325,12 @@ export default function Sidebar() {
       interruptThreadTurn,
       stopThreadSession,
       orderedPinnedThreads,
+      orderedActiveThreads,
       pinThread,
       pinnedThreads,
+      reorderActiveThread,
       reorderPinnedThread,
+      reorderableActiveKeys,
       reorderablePinnedKeys,
       searchableThreads,
       settledThreads,
@@ -4242,19 +4362,36 @@ export default function Sidebar() {
                         />,
                       );
                     }
-                    if (activeThreads.length === 0 && activeDragKey !== null) {
+                    if (orderedActiveThreads.length === 0 && activeDragKey !== null) {
                       items.push(
                         <DroppableThreadZone key="active-drop-zone" id="active-drop-zone" />,
                       );
                     }
-                    for (const thread of activeThreads) {
-                      const threadKey = scopedThreadKey(
-                        scopeThreadRef(thread.environmentId, thread.id),
-                      );
+                    if (orderedActiveThreads.length > 0) {
                       items.push(
-                        <DraggableThreadRow key={threadKey} id={threadKey}>
-                          {(bag) => renderThreadRow(thread, "active", bag)}
-                        </DraggableThreadRow>,
+                        <SortableContext
+                          key="active-sortable-context"
+                          items={orderedActiveKeys}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {orderedActiveThreads.map((thread) => {
+                            const threadKey = scopedThreadKey(
+                              scopeThreadRef(thread.environmentId, thread.id),
+                            );
+                            if (reorderableActiveKeys.has(threadKey)) {
+                              return (
+                                <SortablePinnedThreadRow key={threadKey} id={threadKey}>
+                                  {(bag) => renderThreadRow(thread, "active", bag)}
+                                </SortablePinnedThreadRow>
+                              );
+                            }
+                            return (
+                              <DraggableThreadRow key={threadKey} id={threadKey}>
+                                {(bag) => renderThreadRow(thread, "active", bag)}
+                              </DraggableThreadRow>
+                            );
+                          })}
+                        </SortableContext>,
                       );
                     }
                     if (snoozedThreads.length > 0 || activeDragKey !== null) {
