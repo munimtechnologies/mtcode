@@ -47,12 +47,14 @@ Compared to [T3 Code](https://github.com/pingdotgg/t3code). MT Code started as a
 | **Agent-created threads** — `thread_create` / `thread_archive` so an agent can spawn and tidy sibling chats in the same project                                                       |                           ✅                            |                   ❌                    |
 | **Drag to reorder active threads** — same fractional-key order as pins, synced across clients                                                                                         |                           ✅                            |                   ❌                    |
 | **Sign in extra Claude/Codex accounts** from Settings without leaving the app                                                                                                         |                           ✅                            |                   ❌                    |
+| **Provider handoff** — continue a thread with another provider or account from the model picker; native history when possible, otherwise a bounded handoff of recent work             |                           ✅                            |                   ❌                    |
 | **Forgejo** as a git host alongside GitHub/GitLab/Bitbucket                                                                                                                           |                           ✅                            |                   ❌                    |
 | **Cursor on by default** with real permission-option mapping                                                                                                                          |                           ✅                            |                   ❌                    |
 | **Goals** — `/goal` keeps a thread working until the objective is met                                                                                                                 |                           ✅                            |                   ❌                    |
 | **Plugin marketplace** — browse and install Codex, Claude Code, and Cursor plugins                                                                                                    |                           ✅                            |                   ❌                    |
 | **Skills manager** — cross-harness skills in Settings                                                                                                                                 |                           ✅                            |                   ❌                    |
 | **Voice dictation** — Codex-style mic in the composer (OpenAI or Groq)                                                                                                                |                           ✅                            |                   ❌                    |
+| **Realtime voice** — persistent OpenAI Realtime panel so you can talk with the agent, not only dictate                                                                                |                           ✅                            |                   ❌                    |
 | **Agent notifications** — desktop/browser alerts for approvals, questions, finish, and failure                                                                                        |                           ✅                            |                   ❌                    |
 | **PDF attachments** — paste or drop PDFs in chat (Claude, Cursor, Grok, OpenCode)                                                                                                     |                           ✅                            |                   ❌                    |
 | **Stacked pull requests** — GitHub PR stacks in the source-control UI                                                                                                                 |                           ✅                            |                   ❌                    |
@@ -92,6 +94,7 @@ Full docs live in [docs/](./docs):
 - [Attachments](./docs/user/attachments.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Thread messaging](./docs/user/thread-messaging.md)
+- [Continue a thread with another provider](./docs/user/provider-handoff.md)
 - [Sending work to another computer](./docs/user/computer-routing.md)
 - [Keeping app and server in sync](./docs/user/updating.md)
 - [Source control integrations](./docs/user/source-control.md)

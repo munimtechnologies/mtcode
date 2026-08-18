@@ -16,7 +16,7 @@ export function SplashScreen() {
         ) : (
           <img
             alt=""
-            className="h-auto w-[min(32.5rem,52vw)] object-contain dark:invert"
+            className="h-auto w-[min(13.75rem,22vw)] object-contain dark:invert"
             src="/boot-wordmark.png"
             onError={() => setWordmarkFailed(true)}
           />
