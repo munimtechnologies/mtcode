@@ -15,6 +15,7 @@ import {
   ExternalLauncherUnknownEditorError,
   ExternalLauncherUnsupportedEditorError,
   type EditorId,
+  type FileManagerRevealKind,
   type LaunchEditorInput,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -99,6 +100,8 @@ const BrowserLaunchEnvConfig = Config.all({
   SSH_CONNECTION: Config.string("SSH_CONNECTION").pipe(Config.option),
   SSH_TTY: Config.string("SSH_TTY").pipe(Config.option),
   container: Config.string("container").pipe(Config.option),
+  DISPLAY: Config.string("DISPLAY").pipe(Config.option),
+  WAYLAND_DISPLAY: Config.string("WAYLAND_DISPLAY").pipe(Config.option),
 }).pipe(Config.map(compactEnv));
 
 const CommandLookupEnvConfig = Config.all({
@@ -228,7 +231,7 @@ function resolveWslPowerShellPath(): string {
   return "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 }
 
-function shouldUseWindowsBrowserFromWsl(
+function shouldUseWindowsHostFromWsl(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv = {},
 ): boolean {
@@ -258,15 +261,44 @@ function resolveWindowsBrowserLaunch(target: string, command: string): ProcessLa
   };
 }
 
-function fileManagerCommandForPlatform(platform: NodeJS.Platform): string {
+function hasGraphicalLinuxSession(env: NodeJS.ProcessEnv): boolean {
+  return [env.DISPLAY, env.WAYLAND_DISPLAY].some(
+    (value) => value !== undefined && value.trim().length > 0,
+  );
+}
+
+function fileManagerRevealKindForPlatform(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): FileManagerRevealKind | undefined {
+  if (platform === "darwin") return "finder";
+  if (platform === "win32") return "file-explorer";
+  if (shouldUseWindowsHostFromWsl(platform, env)) {
+    return env.WSL_DISTRO_NAME?.trim() ? "file-explorer" : undefined;
+  }
+  return hasGraphicalLinuxSession(env) ? "files" : undefined;
+}
+
+function fileManagerCommandForPlatform(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
   switch (platform) {
     case "darwin":
       return "open";
     case "win32":
       return "explorer";
     default:
-      return "xdg-open";
+      if (shouldUseWindowsHostFromWsl(platform, env)) {
+        return env.WSL_DISTRO_NAME?.trim() ? "explorer.exe" : undefined;
+      }
+      return hasGraphicalLinuxSession(env) ? "xdg-open" : undefined;
   }
+}
+
+function resolveWslFileManagerPath(target: string, distroName: string): string {
+  const relativePath = target.replace(/^\/+/, "").replaceAll("/", "\\");
+  return `\\\\wsl.localhost\\${distroName}${relativePath.length > 0 ? `\\${relativePath}` : ""}`;
 }
 
 function buildBrowserLaunch(
@@ -286,7 +318,7 @@ function buildBrowserLaunch(
     return resolveWindowsBrowserLaunch(target, resolvePowerShellPath(env));
   }
 
-  if (shouldUseWindowsBrowserFromWsl(platform, env)) {
+  if (shouldUseWindowsHostFromWsl(platform, env)) {
     return resolveWindowsBrowserLaunch(target, resolveWslPowerShellPath());
   }
 
@@ -306,8 +338,8 @@ const buildAvailableEditors = Effect.fn("externalLauncher.buildAvailableEditors"
 
   for (const editor of EDITORS) {
     if (editor.commands === null) {
-      const command = fileManagerCommandForPlatform(platform);
-      if (yield* isCommandAvailable(command, { env })) {
+      const command = fileManagerCommandForPlatform(platform, env);
+      if (command !== undefined && (yield* isCommandAvailable(command, { env }))) {
         available.push(editor.id);
       }
       continue;
@@ -349,10 +381,18 @@ const resolveBrowserLaunch = Effect.fn("externalLauncher.resolveBrowserLaunch")(
 
 const resolveAvailableEditors = Effect.fn("externalLauncher.resolveAvailableEditors")(function* () {
   const platform = yield* HostProcessPlatform;
-  const env = yield* readCommandLookupEnv;
+  const env = { ...(yield* readBrowserLaunchEnv), ...(yield* readCommandLookupEnv) };
   const macEnv = platform === "darwin" ? yield* readMacAppLookupEnv : {};
   return yield* buildAvailableEditors(platform, env, macEnv);
 });
+
+const resolveFileManagerRevealKind = Effect.fn("externalLauncher.resolveFileManagerRevealKind")(
+  function* () {
+    const platform = yield* HostProcessPlatform;
+    const env = yield* readBrowserLaunchEnv;
+    return fileManagerRevealKindForPlatform(platform, env);
+  },
+);
 
 // Editor discovery walks PATH for every known editor and runs for every
 // client connect (the server config embeds the available editors). Memoize
@@ -383,6 +423,7 @@ export class ExternalLauncher extends Context.Service<
   ExternalLauncher,
   {
     readonly resolveAvailableEditors: () => Effect.Effect<ReadonlyArray<EditorId>>;
+    readonly resolveFileManagerRevealKind: () => Effect.Effect<FileManagerRevealKind | undefined>;
     /** Launch a URL target in the default browser. */
     readonly launchBrowser: (target: string) => Effect.Effect<void, ExternalLauncherError>;
     /**
@@ -402,7 +443,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   input: LaunchEditorInput,
 ): Effect.fn.Return<EditorLaunch, ExternalLauncherError, FileSystem.FileSystem | Path.Path> {
   const platform = yield* HostProcessPlatform;
-  const env = yield* readCommandLookupEnv;
+  const env = { ...(yield* readBrowserLaunchEnv), ...(yield* readCommandLookupEnv) };
   yield* Effect.annotateCurrentSpan({
     "externalLauncher.editor": input.editor,
     "externalLauncher.cwd": input.cwd,
@@ -492,12 +533,57 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* new ExternalLauncherUnsupportedEditorError({ editor: input.editor });
   }
 
+  const command = fileManagerCommandForPlatform(platform, env);
+  if (command === undefined) {
+    return yield* new ExternalLauncherUnsupportedEditorError({ editor: input.editor });
+  }
+
+  if (input.reveal === true) {
+    return yield* resolveFileManagerRevealLaunch(input.cwd, platform, env);
+  }
+
   return {
     editor: editorDef.id,
     target: input.cwd,
-    command: fileManagerCommandForPlatform(platform),
-    args: [input.cwd],
+    command,
+    args:
+      command === "explorer.exe" && env.WSL_DISTRO_NAME !== undefined
+        ? [resolveWslFileManagerPath(input.cwd, env.WSL_DISTRO_NAME)]
+        : [input.cwd],
   };
+});
+
+const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch")(function* (
+  target: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): Effect.fn.Return<EditorLaunch, never, Path.Path> {
+  if (platform === "darwin") {
+    return { editor: "file-manager", target, command: "open", args: ["-R", target] };
+  }
+
+  if (platform === "win32") {
+    return {
+      editor: "file-manager",
+      target,
+      command: "explorer",
+      args: ["/select,", target],
+    };
+  }
+
+  if (shouldUseWindowsHostFromWsl(platform, env) && env.WSL_DISTRO_NAME !== undefined) {
+    return {
+      editor: "file-manager",
+      target,
+      command: "explorer.exe",
+      args: ["/select,", resolveWslFileManagerPath(target, env.WSL_DISTRO_NAME)],
+    };
+  }
+
+  // Linux file managers have no portable "select this file" flag, so open
+  // the containing directory instead.
+  const path = yield* Path.Path;
+  return { editor: "file-manager", target, command: "xdg-open", args: [path.dirname(target)] };
 });
 
 const launchAndUnref = Effect.fn("externalLauncher.launchAndUnref")(function* (
@@ -605,6 +691,7 @@ export const make = Effect.gen(function* () {
 
   return ExternalLauncher.of({
     resolveAvailableEditors: () => cachedAvailableEditors,
+    resolveFileManagerRevealKind,
     launchBrowser: (target) =>
       launchBrowser(target).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
