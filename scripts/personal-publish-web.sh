@@ -5,7 +5,11 @@
 # Run from a checkout WITHOUT a repo-root .env: vite.config merges .env
 # underneath the process env, and the main dev checkout's .env carries T3's
 # production Clerk/relay keys, which must not be baked into this bundle.
-# The hosted app runs in pure pairing mode (no Connect/Clerk).
+#
+# Connect: without ~/.mt/munim-connect.env the hosted app runs in pure pairing
+# mode (no Connect/Clerk). When that file provides the Munim-owned Clerk +
+# relay identifiers, they are exported into the process env below and baked in
+# (see scripts/lib/personal-munim-connect-env.sh).
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -16,6 +20,14 @@ cd "$REPO"
 if [[ -f .env || -f .env.local ]]; then
   echo "refusing to build: $REPO has a repo-root .env(.local); use a clean worktree" >&2
   exit 1
+fi
+
+# Munim-owned T3 Connect config (public identifiers only), if present.
+# shellcheck source=lib/personal-munim-connect-env.sh
+source "$REPO/scripts/lib/personal-munim-connect-env.sh"
+munim_connect_load
+if [[ "$MUNIM_CONNECT_ACTIVE" != 1 ]]; then
+  echo "building in pure pairing mode (no ~/.mt/munim-connect.env)"
 fi
 
 # Match the desktop munim distro: Nightly stage (sidebar artwork) with a plain

@@ -56,9 +56,18 @@ if (($new -eq $old) -and ($force -ne "1")) {
 git checkout personal
 git reset --hard origin/personal
 
-# Bake T3 Connect public client config into desktop artifacts (gitignored .env).
+# Bake Connect public client config into desktop artifacts (gitignored .env).
 # Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
-if (-not (Test-Path ".env")) {
+# %USERPROFILE%\.mt\munim-connect.env (Munim-owned identifiers, synced from
+# the Mac) wins when present; otherwise T3's .env.example defaults as before.
+$munimConnect = $false
+$munimConnectLib = Join-Path $repo "scripts\lib\personal-munim-connect-env.ps1"
+if (Test-Path $munimConnectLib) {
+  . $munimConnectLib
+  $munimConnect = Import-MunimConnectEnv -Repo $repo
+  if ($munimConnect) { Log "munim-connect: building with Munim Connect config (relay: $($env:T3CODE_RELAY_URL))" }
+}
+if (-not $munimConnect -and -not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"
   Log "created .env from .env.example for T3 Connect"
 }

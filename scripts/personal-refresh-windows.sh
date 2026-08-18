@@ -24,6 +24,11 @@ echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
 # --- Blade (build + install) ---
 echo "-- refreshing Blade --"
+# Mirror the Mac's Munim Connect config (public identifiers only) so Blade's
+# clone bakes the same values; absent file means unchanged T3 defaults.
+# shellcheck source=lib/personal-munim-connect-env.sh
+source "$REPO/scripts/lib/personal-munim-connect-env.sh"
+munim_connect_sync_to_windows_host blade
 scp -o BatchMode=yes "$REPO/scripts/personal-refresh-win.ps1" blade:dev/personal-refresh-win.ps1
 # Beside it: both Windows machines launch through this, so that the app lands in the logged-on
 # user's session rather than in session 0, where it runs with no window on any screen.

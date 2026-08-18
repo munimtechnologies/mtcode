@@ -32,7 +32,16 @@ git fetch origin personal
 git checkout personal
 git reset --hard origin/personal
 
-if (-not (Test-Path ".env")) {
+# Munim-owned Connect identifiers (synced from the Mac) win when present;
+# otherwise T3's .env.example defaults as before.
+$munimConnect = $false
+$munimConnectLib = Join-Path $repo "scripts\lib\personal-munim-connect-env.ps1"
+if (Test-Path $munimConnectLib) {
+  . $munimConnectLib
+  $munimConnect = Import-MunimConnectEnv -Repo $repo
+  if ($munimConnect) { Log "munim-connect: building with Munim Connect config (relay: $($env:T3CODE_RELAY_URL))" }
+}
+if (-not $munimConnect -and -not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"
   Log "created .env from .env.example"
 }

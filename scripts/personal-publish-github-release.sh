@@ -34,6 +34,16 @@ export T3CODE_DESKTOP_DISTRO=munim
 export T3CODE_DESKTOP_UPDATE_REPOSITORY="$RELEASE_REPO"
 export GITHUB_REPOSITORY="$RELEASE_REPO"
 
+# Munim-owned T3 Connect config (public identifiers only), if present. The Mac
+# build below reads it from the process env; the Blade build reads the copy
+# synced to %USERPROFILE%\.mt\munim-connect.env.
+# shellcheck source=lib/personal-munim-connect-env.sh
+source "$REPO/scripts/lib/personal-munim-connect-env.sh"
+munim_connect_load
+if [[ "$MUNIM_CONNECT_ACTIVE" == 1 ]]; then
+  munim_connect_write_repo_env "$REPO"
+fi
+
 SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
 # Full T3CODE_DESKTOP_SIGNED enables passkey provisioning which this machine may
 # not have. Ship unsigned Mac DMGs for now; Gatekeeper needs right-click → Open.
@@ -89,6 +99,7 @@ xattr -cr "$MAC_DMG" 2>/dev/null || true
 
 # --- Windows x64 via Blade (PS1 file avoids nested $env escaping bugs) ---
 echo "-- building Munim Windows x64 on Blade --"
+munim_connect_sync_to_windows_host blade
 scp -o BatchMode=yes "$REPO/scripts/personal-publish-munim-win.ps1" blade:dev/personal-publish-munim-win.ps1
 ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File C:/Users/muhha/dev/personal-publish-munim-win.ps1 \
