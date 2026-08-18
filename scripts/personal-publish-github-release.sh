@@ -122,16 +122,15 @@ for y in "$REPO"/release/latest.yml "$REPO"/release/nightly.yml "$REPO"/release/
   [[ -f "$y" ]] && ASSETS+=("$y")
 done
 
-# Deduplicate
+# Deduplicate (no associative arrays: macOS ships bash 3.2)
 UNIQUE_ASSETS=()
-declare -A SEEN=()
+SEEN=" "
 for a in "${ASSETS[@]}"; do
   [[ -f "$a" ]] || continue
   key=$(basename "$a")
-  if [[ -z "${SEEN[$key]:-}" ]]; then
-    SEEN[$key]=1
-    UNIQUE_ASSETS+=("$a")
-  fi
+  case "$SEEN" in *" $key "*) continue ;; esac
+  SEEN="$SEEN$key "
+  UNIQUE_ASSETS+=("$a")
 done
 
 NOTES=$(cat <<EOF
