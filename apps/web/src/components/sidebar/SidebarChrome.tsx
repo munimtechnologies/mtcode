@@ -281,7 +281,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
         </>
       )}
-      <SidebarUpdatePill />
+      {/* Footer pages show Back instead of the utility items; the update pill
+          belongs with those items, not next to a lone Back. */}
+      {currentFooterPage ? null : <SidebarUpdatePill />}
     </SidebarMenu>
   );
 });
