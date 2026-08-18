@@ -16,6 +16,10 @@ Builds are currently unsigned:
 
 The app auto-updates from this repository, so you get new MT Code features and fixes as they ship.
 
+### Use it in the browser
+
+[mtcode.munimtech.com](https://mtcode.munimtech.com) hosts the MT Code web app. Run the desktop app (or `npx t3@latest`) on your machine, generate a pairing link from Settings → Connections, and control your agents from any browser — including your phone. The backend must be reachable over HTTPS (Tailscale Serve or a tunnel work well); see [remote access](./docs/user/remote-access.md).
+
 ## Before you start
 
 MT Code drives agents you already have. Install and sign in to at least one provider CLI:
