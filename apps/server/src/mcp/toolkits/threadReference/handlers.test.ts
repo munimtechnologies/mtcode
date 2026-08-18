@@ -73,13 +73,14 @@ const invocation = {
 };
 const mcpServerClient = {
   clientId: 1,
+  protocolVersion: "2025-06-18",
   initializePayload: {
-    protocolVersion: "2025-03-26",
+    protocolVersion: "2025-06-18",
     capabilities: {},
     clientInfo: { name: "test", version: "1" },
   },
   getClient: Effect.die("unused"),
-};
+} as const;
 const projectionQueryFor = (sourceThread: OrchestrationThread) =>
   ({
     getThreadDetailById: (threadId: ThreadId) =>
