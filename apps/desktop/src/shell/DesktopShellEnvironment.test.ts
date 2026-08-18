@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { WindowsPersistentPath } from "@t3tools/shared/shell";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -90,6 +91,7 @@ function runShellEnvironment(input: {
     command: ChildProcess.Command,
   ) => string | ChildProcessSpawner.ChildProcessHandle;
   readonly failure?: PlatformError.PlatformError;
+  readonly persistentPath?: string;
 }) {
   const environmentLayer = Layer.succeed(
     DesktopEnvironment.DesktopEnvironment,
@@ -105,11 +107,13 @@ function runShellEnvironment(input: {
       return Effect.succeed(typeof result === "string" ? makeProcess(result) : result);
     }),
   );
+  const persistentPathLayer = Layer.succeed(WindowsPersistentPath, () => input.persistentPath);
 
   const program = Effect.gen(function* () {
     const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
     yield* shellEnvironment.installIntoProcess;
   }).pipe(
+    Effect.provide(persistentPathLayer),
     Effect.provide(
       DesktopShellEnvironment.layer.pipe(
         Layer.provide(Layer.mergeAll(environmentLayer, NodeServices.layer, spawnerLayer)),
@@ -400,6 +404,7 @@ describe("DesktopShellEnvironment", () => {
           "C:\\Users\\testuser\\AppData\\Local\\Programs\\nodejs",
           "C:\\Users\\testuser\\AppData\\Local\\Volta\\bin",
           "C:\\Users\\testuser\\AppData\\Local\\pnpm",
+          "C:\\Users\\testuser\\AppData\\Local\\cursor-agent",
           "C:\\Users\\testuser\\.local\\bin",
           "C:\\Users\\testuser\\.bun\\bin",
           "C:\\Users\\testuser\\scoop\\shims",
@@ -411,6 +416,32 @@ describe("DesktopShellEnvironment", () => {
         env.FNM_MULTISHELL_PATH,
         "C:\\Users\\testuser\\AppData\\Local\\fnm_multishells\\123",
       );
+    }),
+  );
+
+  it.effect("merges persistent User PATH when PowerShell only returns a stale process PATH", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = {
+        PATH: "C:\\Windows\\System32",
+        APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
+        LOCALAPPDATA: "C:\\Users\\testuser\\AppData\\Local",
+        USERPROFILE: "C:\\Users\\testuser",
+      };
+
+      yield* runShellEnvironment({
+        env,
+        platform: "win32",
+        persistentPath: [
+          "C:\\Users\\testuser\\AppData\\Local\\Microsoft\\WinGet\\Links",
+          "C:\\Users\\testuser\\AppData\\Local\\cursor-agent",
+        ].join(";"),
+        handler: () => envOutput({ PATH: "C:\\Windows\\System32" }),
+      });
+
+      assert.ok(
+        env.PATH?.includes("C:\\Users\\testuser\\AppData\\Local\\Microsoft\\WinGet\\Links"),
+      );
+      assert.ok(env.PATH?.includes("C:\\Users\\testuser\\AppData\\Local\\cursor-agent"));
     }),
   );
 
