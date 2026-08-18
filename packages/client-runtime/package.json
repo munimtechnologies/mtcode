@@ -59,6 +59,10 @@
       "types": "./src/state/computers.ts",
       "default": "./src/state/computers.ts"
     },
+    "./state/computerView": {
+      "types": "./src/state/computerView.ts",
+      "default": "./src/state/computerView.ts"
+    },
     "./computers": {
       "types": "./src/computers/index.ts",
       "default": "./src/computers/index.ts"

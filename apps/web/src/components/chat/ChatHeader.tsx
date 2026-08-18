@@ -11,10 +11,11 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestStateLike } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, MonitorIcon } from "lucide-react";
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -23,6 +24,7 @@ import {
 } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import ProjectScriptsControl, {
@@ -31,7 +33,10 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { onToggleComputerView } from "../../computerViewBus";
+import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
+import { ComputerViewDialog } from "../computers/ComputerViewDialog";
+import { shortcutLabelForCommand } from "../../keybindings";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { threadEnvironment } from "../../state/threads";
@@ -142,6 +147,17 @@ export const ChatHeader = memo(function ChatHeader({
     activeProjectScripts ? activeProjectCwd : null,
   );
   const remoteOpenState = useRemoteOpenState(activeThreadEnvironmentId);
+  const threadEnvironmentPresentation = useEnvironment(activeThreadEnvironmentId);
+  // Gated on the environment's descriptor: the capability is only advertised
+  // when the server ships the computerView RPCs and the machine has the
+  // desktop-control binary to serve them.
+  const supportsComputerView =
+    threadEnvironmentPresentation?.serverConfig?.environment.capabilities.computerView === true;
+  const [computerViewOpen, setComputerViewOpen] = useState(false);
+  useEffect(() => {
+    if (!supportsComputerView) return undefined;
+    return onToggleComputerView(() => setComputerViewOpen((open) => !open));
+  }, [supportsComputerView]);
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -347,6 +363,29 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        {supportsComputerView && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="View this thread's computer"
+                  onClick={() => setComputerViewOpen(true)}
+                />
+              }
+            >
+              <MonitorIcon className="size-4" />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              {`View computer${
+                shortcutLabelForCommand(keybindings, "computerView.toggle")
+                  ? ` (${shortcutLabelForCommand(keybindings, "computerView.toggle")})`
+                  : ""
+              }`}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
@@ -377,6 +416,14 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
       </div>
+      {computerViewOpen && supportsComputerView && (
+        <ComputerViewDialog
+          environmentId={activeThreadEnvironmentId}
+          environmentLabel={threadEnvironmentPresentation?.label ?? "this computer"}
+          keybindings={keybindings}
+          onClose={() => setComputerViewOpen(false)}
+        />
+      )}
     </div>
   );
 });

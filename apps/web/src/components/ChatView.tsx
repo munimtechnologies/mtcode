@@ -120,6 +120,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isComputerViewOpen, toggleComputerView } from "../computerViewBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -4714,6 +4715,11 @@ function ChatViewContent(props: ChatViewProps) {
       if (!activeThreadId || isCommandPaletteOpen()) {
         return;
       }
+      // The computer-view dialog owns the keyboard while open: keys forward
+      // to the remote machine (or close the dialog), never the composer.
+      if (isComputerViewOpen()) {
+        return;
+      }
       const terminalFocusOwner = getTerminalFocusOwner();
       if (event.defaultPrevented && terminalFocusOwner === null) {
         return;
@@ -4820,6 +4826,13 @@ function ChatViewContent(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
+        return;
+      }
+
+      if (command === "computerView.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleComputerView();
         return;
       }
 
