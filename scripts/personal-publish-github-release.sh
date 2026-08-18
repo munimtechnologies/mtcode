@@ -53,7 +53,13 @@ elif [[ -f "$EXPECTED_MAC" && "${T3_MUNIM_FORCE_MAC:-}" != "1" ]]; then
   echo "-- reusing existing Munim Mac DMG (set T3_MUNIM_FORCE_MAC=1 to rebuild) --"
 else
   echo "-- building Munim Mac arm64 --"
+  # Align package versions like upstream's release workflow, so the bundled
+  # server and web report this nightly version (else nightly-track clients
+  # show "Server update available").
+  node scripts/update-release-package-versions.ts "$T3CODE_DESKTOP_VERSION"
   pnpm dist:desktop:dmg:arm64
+  # The stamp is build input only; keep the checkout clean.
+  git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 fi
 
 MAC_DMG=$(ls -t "$REPO"/release/MT-Code-*-arm64.dmg 2>/dev/null | head -1 || true)

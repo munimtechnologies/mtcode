@@ -34,7 +34,15 @@ fi
 export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
+# Align package versions like upstream's release workflow, so the bundled
+# server and web report this nightly version instead of the stale package.json
+# one (else nightly-track clients show "Server update available").
+node scripts/update-release-package-versions.ts "$T3CODE_DESKTOP_VERSION"
+
 pnpm dist:desktop:dmg:arm64
+
+# The stamp is build input only; keep the checkout clean.
+git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 
 /bin/bash "$REPO/scripts/personal-install-relaunch-mac.sh"
 

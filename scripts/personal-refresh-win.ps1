@@ -78,6 +78,14 @@ Log ("HEAD=" + (git rev-parse --short HEAD) + " " + (git log -1 --oneline))
 # pnpm writes progress to stderr; with Stop that becomes a terminating error.
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
+# Align package versions like upstream's release workflow, so the bundled
+# server and web report this nightly version instead of the stale package.json
+# one (else nightly-track clients show "Server update available").
+& node scripts/update-release-package-versions.ts $env:T3CODE_DESKTOP_VERSION *>> $log
+if ($LASTEXITCODE -ne 0) {
+  Log "version stamp failed exit=$LASTEXITCODE"
+  exit $LASTEXITCODE
+}
 & pnpm dist:desktop:win:x64 *>> $log
 $buildExit = $LASTEXITCODE
 $ErrorActionPreference = $prevEap
@@ -85,6 +93,8 @@ if ($buildExit -ne 0) {
   Log "build failed exit=$buildExit"
   exit $buildExit
 }
+# The stamp is build input only; keep the clone clean.
+git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 
 $installerPath = Get-ChildItem (Join-Path $repo "release\T3-Code-*-x64.exe") |
   Sort-Object LastWriteTime -Descending |

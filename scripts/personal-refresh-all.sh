@@ -81,9 +81,18 @@ fi
 export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
+# Align package versions like upstream's release workflow, so the bundled
+# server and web report this nightly version instead of the stale package.json
+# one. Without this, every nightly-track client (app.t3.codes → Settings →
+# Update track: Nightly) shows "Server update available" against our servers.
+node scripts/update-release-package-versions.ts "$T3CODE_DESKTOP_VERSION"
+
 # --- Mac ---
 echo "-- building Mac --"
 pnpm dist:desktop:dmg:arm64
+
+# The stamp is build input only; keep the checkout clean for the merge/push flow.
+git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 
 # The build is the review. An upstream merge only becomes the fork's history once it has compiled
 # here — pushed before Blade builds, because Blade builds from the fork rather than from this

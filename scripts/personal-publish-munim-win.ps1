@@ -49,9 +49,16 @@ $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 pnpm install
 if ($LASTEXITCODE -ne 0) { throw "pnpm install failed: $LASTEXITCODE" }
+# Align package versions like upstream's release workflow, so the bundled
+# server and web report this nightly version (else nightly-track clients
+# show "Server update available").
+node scripts/update-release-package-versions.ts $env:T3CODE_DESKTOP_VERSION
+if ($LASTEXITCODE -ne 0) { throw "version stamp failed: $LASTEXITCODE" }
 pnpm dist:desktop:win:x64
 if ($LASTEXITCODE -ne 0) { throw "pnpm dist:desktop:win:x64 failed: $LASTEXITCODE" }
 $ErrorActionPreference = $prevEap
+# The stamp is build input only; keep the clone clean.
+git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 
 $exe = Get-ChildItem (Join-Path $repo "release\T3-Code-Munim-*-x64.exe") |
   Sort-Object LastWriteTime -Descending |
