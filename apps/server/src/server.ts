@@ -439,7 +439,11 @@ const RuntimeDomainDependenciesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  // ClaudeDriver.create() yields PtyAdapter at boot for account login. The
+  // adapter is otherwise only provided into TerminalManager, so hydration
+  // must receive it explicitly or the backend dies with
+  // "Service not found: t3/terminal/PtyAdapter" and the app never opens.
+  Layer.provideMerge(ProviderInstanceRegistryHydrationLive.pipe(Layer.provide(PtyAdapterLive))),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).
