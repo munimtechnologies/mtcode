@@ -28,6 +28,7 @@ import { useAtomCommand } from "./use-atom-command";
 import { useEnvironmentQuery } from "./query";
 import { pullRequestEnvironment } from "./pullRequests";
 import { serverEnvironment } from "./server";
+import { sshPasswordPromptBroker } from "../components/sshPasswordPromptBroker";
 import { showGitActionResult } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
@@ -335,10 +336,17 @@ export function useSelectedThreadGitActions() {
       "pull",
       "Pulling latest changes",
       async ({ thread, cwd }) => {
-        const result = await pull({
-          environmentId: thread.environmentId,
-          input: { cwd },
-        });
+        const sshPasswordPrompts = sshPasswordPromptBroker.createSession();
+        let result;
+        try {
+          result = await pull({
+            environmentId: thread.environmentId,
+            input: { cwd },
+            onSshPasswordPrompt: sshPasswordPrompts.request,
+          });
+        } finally {
+          sshPasswordPrompts.cancel();
+        }
         if (AsyncResult.isFailure(result)) {
           return result;
         }
@@ -366,13 +374,20 @@ export function useSelectedThreadGitActions() {
             currentStack !== null &&
             !input.featureBranch &&
             shouldSubmitStackAfterGitAction(input.action);
-          const result = await runStackedAction({
-            actionId,
-            action: submittedStack ? prepareGitActionForStackSubmit(input.action) : input.action,
-            ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
-            ...(input.featureBranch ? { featureBranch: input.featureBranch } : {}),
-            ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
-          });
+          const sshPasswordPrompts = sshPasswordPromptBroker.createSession();
+          let result;
+          try {
+            result = await runStackedAction({
+              actionId,
+              action: submittedStack ? prepareGitActionForStackSubmit(input.action) : input.action,
+              onSshPasswordPrompt: sshPasswordPrompts.request,
+              ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
+              ...(input.featureBranch ? { featureBranch: input.featureBranch } : {}),
+              ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
+            });
+          } finally {
+            sshPasswordPrompts.cancel();
+          }
           if (AsyncResult.isFailure(result)) {
             return result;
           }

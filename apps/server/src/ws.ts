@@ -21,6 +21,7 @@ import {
   type EditorId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
+  type GitCommandError,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
@@ -47,6 +48,9 @@ import {
   type RelayClientInstallProgressEvent,
   type ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
+  type SourceControlPublishRepositoryEvent,
+  type SourceControlCloneRepositoryEvent,
+  type SourceControlRepositoryError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
   AssetWorkspaceContextNotFoundError,
@@ -59,10 +63,12 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  type VcsPullEvent,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { SshPasswordPrompt } from "@t3tools/ssh/auth";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -119,6 +125,7 @@ import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as GitHubPullRequestStackService from "./pullRequestStack/GitHubPullRequestStackService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
+import * as SourceControlSshPasswordPrompts from "./sourceControl/SourceControlSshPasswordPrompts.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -425,6 +432,8 @@ const makeWsRpcLayer = (
       );
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const sourceControlSshPasswordPrompts =
+        yield* SourceControlSshPasswordPrompts.SourceControlSshPasswordPrompts;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestStacks = yield* GitHubPullRequestStackService.GitHubPullRequestStackService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
@@ -1976,6 +1985,33 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "source-control",
             },
           ),
+        [WS_METHODS.sourceControlCloneRepositoryWithPrompts]: (input) =>
+          observeRpcStream(
+            WS_METHODS.sourceControlCloneRepositoryWithPrompts,
+            Stream.callback<SourceControlCloneRepositoryEvent, SourceControlRepositoryError>(
+              (queue) => {
+                const prompt = sourceControlSshPasswordPrompts.makePrompt((request) =>
+                  Queue.offer(queue, {
+                    _tag: "ssh_password_prompt",
+                    request,
+                  }).pipe(Effect.asVoid),
+                );
+                return sourceControlRepositories.cloneRepository(input).pipe(
+                  Effect.provideService(SshPasswordPrompt, prompt),
+                  Effect.flatMap((result) =>
+                    Queue.offer(queue, {
+                      _tag: "complete",
+                      result,
+                    }),
+                  ),
+                  Effect.andThen(Queue.end(queue)),
+                  Effect.catchCause((cause) => Queue.failCause(queue, cause)),
+                  Effect.forkScoped,
+                );
+              },
+            ),
+            { "rpc.aggregate": "source-control" },
+          ),
         [WS_METHODS.sourceControlPublishRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlPublishRepository,
@@ -1985,6 +2021,40 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "source-control",
             },
+          ),
+        [WS_METHODS.sourceControlPublishRepositoryWithPrompts]: (input) =>
+          observeRpcStream(
+            WS_METHODS.sourceControlPublishRepositoryWithPrompts,
+            Stream.callback<SourceControlPublishRepositoryEvent, SourceControlRepositoryError>(
+              (queue) => {
+                const prompt = sourceControlSshPasswordPrompts.makePrompt((request) =>
+                  Queue.offer(queue, {
+                    _tag: "ssh_password_prompt",
+                    request,
+                  }).pipe(Effect.asVoid),
+                );
+                return sourceControlRepositories.publishRepository(input).pipe(
+                  Effect.provideService(SshPasswordPrompt, prompt),
+                  Effect.tap(() => refreshGitStatus(input.cwd)),
+                  Effect.flatMap((result) =>
+                    Queue.offer(queue, {
+                      _tag: "complete",
+                      result,
+                    }),
+                  ),
+                  Effect.andThen(Queue.end(queue)),
+                  Effect.catchCause((cause) => Queue.failCause(queue, cause)),
+                  Effect.forkScoped,
+                );
+              },
+            ),
+            { "rpc.aggregate": "source-control" },
+          ),
+        [WS_METHODS.sourceControlResolveSshPasswordPrompt]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sourceControlResolveSshPasswordPrompt,
+            sourceControlSshPasswordPrompts.resolve(input),
+            { "rpc.aggregate": "source-control" },
           ),
         [WS_METHODS.projectsSearchEntries]: (input) =>
           observeRpcEffect(
@@ -2199,6 +2269,31 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.vcsPullWithPrompts]: (input) =>
+          observeRpcStream(
+            WS_METHODS.vcsPullWithPrompts,
+            Stream.callback<VcsPullEvent, GitCommandError>((queue) => {
+              const prompt = sourceControlSshPasswordPrompts.makePrompt((request) =>
+                Queue.offer(queue, {
+                  _tag: "ssh_password_prompt",
+                  request,
+                }).pipe(Effect.asVoid),
+              );
+              return gitWorkflow.pullCurrentBranch(input.cwd).pipe(
+                Effect.provideService(SshPasswordPrompt, prompt),
+                Effect.flatMap((result) =>
+                  refreshGitStatus(input.cwd).pipe(
+                    Effect.ignore({ log: true }),
+                    Effect.andThen(Queue.offer(queue, { _tag: "complete", result })),
+                  ),
+                ),
+                Effect.andThen(Queue.end(queue)),
+                Effect.catchCause((cause) => Queue.failCause(queue, cause)),
+                Effect.forkScoped,
+              );
+            }),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.gitRunStackedAction]: (input) =>
           observeRpcStream(
             WS_METHODS.gitRunStackedAction,
@@ -2220,6 +2315,39 @@ const makeWsRpcLayer = (
                   }),
                 ),
             ),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.gitRunStackedActionWithPrompts]: (input) =>
+          observeRpcStream(
+            WS_METHODS.gitRunStackedActionWithPrompts,
+            Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) => {
+              const prompt = sourceControlSshPasswordPrompts.makePrompt((request) =>
+                Queue.offer(queue, {
+                  kind: "ssh_password_prompt",
+                  actionId: input.actionId,
+                  cwd: input.cwd,
+                  action: input.action,
+                  request,
+                }).pipe(Effect.asVoid),
+              );
+              return gitWorkflow
+                .runStackedAction(input, {
+                  actionId: input.actionId,
+                  progressReporter: {
+                    publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
+                  },
+                })
+                .pipe(
+                  Effect.provideService(SshPasswordPrompt, prompt),
+                  Effect.matchCauseEffect({
+                    onFailure: (cause) => Queue.failCause(queue, cause),
+                    onSuccess: () =>
+                      refreshGitStatus(input.cwd).pipe(
+                        Effect.andThen(Queue.end(queue).pipe(Effect.asVoid)),
+                      ),
+                  }),
+                );
+            }),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) =>
@@ -2559,6 +2687,10 @@ const makeWsRpcLayer = (
           ),
       });
     }),
+  ).pipe(
+    // makeWsRpcLayer runs once per authenticated WebSocket, so pending prompts and their
+    // resolution handlers stay scoped to the connection that started the operation.
+    Layer.provide(SourceControlSshPasswordPrompts.layer),
   );
 
 export const websocketRpcRouteLayer = Layer.unwrap(
