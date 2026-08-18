@@ -1,8 +1,10 @@
 import {
+  type EnvironmentId,
   type ProjectEntry,
   type ProviderDriverKind,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
 
@@ -50,6 +52,15 @@ export type ComposerCommandItem =
       skill: ServerProviderSkill;
       label: string;
       description: string;
+    }
+  | {
+      id: string;
+      type: "thread";
+      environmentId: EnvironmentId;
+      threadId: ThreadId;
+      title: string;
+      label: string;
+      description: string;
     };
 
 type ComposerCommandGroup = {
@@ -65,6 +76,9 @@ function groupCommandItems(
 ): ComposerCommandGroup[] {
   if (triggerKind === "skill") {
     return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
+  }
+  if (triggerKind === "thread") {
+    return items.length > 0 ? [{ id: "threads", label: "Threads", items }] : [];
   }
   if (triggerKind !== "slash-command" || !groupSlashCommandSections) {
     return [{ id: "default", label: null, items }];
@@ -155,13 +169,17 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {props.isLoading
                 ? props.triggerKind === "skill"
                   ? "Searching workspace skills..."
-                  : "Searching workspace files..."
+                  : props.triggerKind === "thread"
+                    ? "Searching threads..."
+                    : "Searching workspace files..."
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
                     ? "No skills found. Try / to browse provider commands."
-                    : props.triggerKind === "path"
-                      ? "No matching files or folders."
-                      : "No matching command."))}
+                    : props.triggerKind === "thread"
+                      ? "No matching threads."
+                      : props.triggerKind === "path"
+                        ? "No matching files or folders."
+                        : "No matching command."))}
             </p>
           </div>
         )}

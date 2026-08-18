@@ -9,11 +9,20 @@ import {
   Maximize2Icon,
   MessageSquareWarningIcon,
   Minimize2Icon,
+  MessagesSquareIcon,
   OctagonAlertIcon,
   TriangleAlertIcon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ScopedThreadRef,
+  type ServerProviderSkill,
+  ThreadId,
+} from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { parseComposerThreadLink } from "@t3tools/shared/composerTrigger";
+import { useNavigate } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -106,6 +115,7 @@ import {
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
+import { buildThreadRouteParams } from "../threadRoutes";
 
 interface ChatMarkdownProps {
   text: string;
@@ -183,7 +193,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    href: [...(defaultSchema.protocols?.href ?? []), "file", "t3-thread"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
@@ -1363,6 +1373,7 @@ function ChatMarkdown({
   parseRawHtml = true,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
+  const navigate = useNavigate();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
   });
@@ -1414,6 +1425,7 @@ function ChatMarkdown({
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
   const markdownUrlTransform = useCallback((href: string) => {
+    if (parseComposerThreadLink(href)) return href;
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
   // Re-emit highlighted content as markdown so copying out of the rendered
@@ -1625,6 +1637,43 @@ function ChatMarkdown({
       },
       a({ node, href, children, title: _title, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
+        const threadReference = normalizedHref ? parseComposerThreadLink(normalizedHref) : null;
+        if (threadReference) {
+          const target = scopeThreadRef(
+            EnvironmentId.make(threadReference.environmentId),
+            ThreadId.make(threadReference.threadId),
+          );
+          const link = (
+            <a
+              {...props}
+              href={normalizedHref}
+              className={cn(
+                CHAT_FILE_TAG_CHIP_CLASS_NAME,
+                "cursor-pointer gap-1.5 transition-colors hover:bg-accent/70",
+              )}
+              data-markdown-copy={`[${plainHastText(node)}](${normalizedHref})`}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void navigate({
+                  to: "/$environmentId/$threadId",
+                  params: buildThreadRouteParams(target),
+                });
+              }}
+            >
+              <MessagesSquareIcon className="size-3.5 shrink-0" aria-hidden="true" />
+              <span>{children}</span>
+            </a>
+          );
+          return (
+            <Tooltip>
+              <TooltipTrigger render={link} />
+              <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight">
+                Open referenced thread
+              </TooltipPopup>
+            </Tooltip>
+          );
+        }
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
           const faviconHost = resolveExternalWebLinkHost(href);
@@ -1769,6 +1818,7 @@ function ChatMarkdown({
     inlineCodeFileLinkMetaByText,
     isStreaming,
     markdownFileLinkMetaByHref,
+    navigate,
     onTaskListChange,
     openFileInPanel,
     openInPreferredEditor,
