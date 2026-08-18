@@ -25,12 +25,12 @@ Log "munim win publish start"
 Log "DesktopVersion=$DesktopVersion UpdateRepository=$UpdateRepository"
 
 if (-not (Test-Path $repo)) {
-  git clone --branch personal --single-branch https://github.com/sheehanmunim/mtcode.git $repo
+  git clone --branch main --single-branch https://github.com/sheehanmunim/mtcode.git $repo
 }
 Set-Location $repo
-git fetch origin personal
-git checkout personal
-git reset --hard origin/personal
+git fetch origin main
+git checkout -B main origin/main
+git reset --hard origin/main
 
 # Munim-owned Connect identifiers (synced from the Mac) win when present;
 # otherwise T3's .env.example defaults as before.

@@ -1,5 +1,5 @@
-# Refresh Blade to latest personal fork (upstream nightly + CU/History).
-# Clone remote "origin" here is github.com/sheehanmunim/mtcode (personal branch).
+# Refresh Blade to latest MT Code (upstream nightly + CU/History).
+# Clone remote "origin" here is github.com/sheehanmunim/mtcode (main branch).
 # Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork.
 # The fleet ships the MT Code brand on every machine, same as the Mac.
 param(
@@ -32,16 +32,16 @@ Log "refresh start"
 Log ("args DesktopVersion=$DesktopVersion ForceRebuild=$ForceRebuild envVersion=$($env:T3CODE_DESKTOP_VERSION) envForce=$($env:T3_FORCE_REBUILD)")
 
 if (-not (Test-Path $repo)) {
-  git clone --branch personal --single-branch https://github.com/sheehanmunim/mtcode.git $repo
+  git clone --branch main --single-branch https://github.com/sheehanmunim/mtcode.git $repo
 }
 Set-Location $repo
-git fetch origin personal
-$new = (git rev-parse origin/personal).Trim()
+git fetch origin main
+$new = (git rev-parse origin/main).Trim()
 $old = ""
 if (Test-Path $stateFile) {
   $old = (Get-Content $stateFile -Raw).Trim()
 }
-Log "origin/personal=$new previously=$old"
+Log "origin/main=$new previously=$old"
 
 $staged = Join-Path $env:USERPROFILE "dev\MT-Code-x64.exe"
 $force = [string]$env:T3_FORCE_REBUILD
@@ -53,8 +53,8 @@ if (($new -eq $old) -and ($force -ne "1")) {
   Log "no changes but staged installer missing - rebuilding"
 }
 
-git checkout personal
-git reset --hard origin/personal
+git checkout -B main origin/main
+git reset --hard origin/main
 
 # Bake Connect public client config into desktop artifacts (gitignored .env).
 # Without this, hasCloudPublicConfig() is false and Connect UI is omitted.

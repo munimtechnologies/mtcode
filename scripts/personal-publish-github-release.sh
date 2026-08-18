@@ -145,7 +145,7 @@ for a in "${ASSETS[@]}"; do
 done
 
 NOTES=$(cat <<EOF
-MT Code — public build from \`sheehanmunim/mtcode@personal\`.
+MT Code — public build from \`sheehanmunim/mtcode@main\`.
 
 - App ID: \`com.munim.t3code\`
 - Downloads: https://munimtech.com/mt-code

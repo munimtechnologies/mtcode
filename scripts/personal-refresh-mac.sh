@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Refresh this Mac to latest personal fork, then push the same build to Blade + Dell.
-# Pulls sheehanmunim/mtcode personal via the "fork" remote, builds arm64 DMG,
+# Refresh this Mac to latest MT Code, then push the same build to Blade + Dell.
+# Pulls sheehanmunim/mtcode main via the "fork" remote, builds arm64 DMG,
 # installs, relaunches (verified), then refreshes Windows.
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
 PERSONAL_REMOTE="${T3_PERSONAL_REMOTE:-fork}"
+PRODUCT_BRANCH="${T3_PRODUCT_BRANCH:-main}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/refresh-$(date +%Y%m%d).log"
@@ -15,16 +16,16 @@ exec >>"$LOG" 2>&1
 echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh start ===="
 
 cd "$REPO"
-git fetch "$PERSONAL_REMOTE" personal
+git fetch "$PERSONAL_REMOTE" "$PRODUCT_BRANCH"
 # Never rewrite local work (policy set 2026-08-18): fast-forward only, and leave a dirty or
 # diverged checkout alone — an agent session may be mid-task in this tree.
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "checkout is dirty (uncommitted work in progress) — skipping this run" >&2
   exit 0
 fi
-git checkout personal
-if ! git merge --ff-only "$PERSONAL_REMOTE/personal"; then
-  echo "local personal has diverged from ${PERSONAL_REMOTE}/personal — not resetting; reconcile by hand" >&2
+git checkout "$PRODUCT_BRANCH"
+if ! git merge --ff-only "$PERSONAL_REMOTE/$PRODUCT_BRANCH"; then
+  echo "local $PRODUCT_BRANCH has diverged from ${PERSONAL_REMOTE}/$PRODUCT_BRANCH — not resetting; reconcile by hand" >&2
   exit 0
 fi
 echo "HEAD=$(git rev-parse --short HEAD) $(git log -1 --oneline)"
