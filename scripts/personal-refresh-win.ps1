@@ -43,7 +43,7 @@ if (Test-Path $stateFile) {
 }
 Log "origin/personal=$new previously=$old"
 
-$staged = Join-Path $env:USERPROFILE "dev\MT-Code-personal-x64.exe"
+$staged = Join-Path $env:USERPROFILE "dev\MT-Code-x64.exe"
 $force = [string]$env:T3_FORCE_REBUILD
 if (($new -eq $old) -and ($force -ne "1")) {
   if (Test-Path $staged) {

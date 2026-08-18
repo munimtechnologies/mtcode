@@ -25,11 +25,11 @@ foreach ($entry in @(
   }
 }
 
-$src = Join-Path $env:USERPROFILE "dev\MT-Code-personal-x64.exe"
+$src = Join-Path $env:USERPROFILE "dev\MT-Code-x64.exe"
 if (-not (Test-Path $src)) { throw "Missing installer at $src" }
 
 # Copy so Start-Process isn't blocked by a file lock on the scp target
-$installer = Join-Path $env:TEMP ("MT-Code-personal-{0}.exe" -f (Get-Date -Format "yyyyMMddHHmmss"))
+$installer = Join-Path $env:TEMP ("MT-Code-{0}.exe" -f (Get-Date -Format "yyyyMMddHHmmss"))
 Copy-Item -Force $src $installer
 Write-Output "installing $installer"
 Start-Process -FilePath $installer -ArgumentList "/S" -Wait
