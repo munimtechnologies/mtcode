@@ -232,6 +232,9 @@ export function createThreadEnvironmentAtoms<R, E>(
     cancelQueuedTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:cancel-queued-turn",
       execute: (input: CancelQueuedThreadTurnInput) => cancelQueuedThreadTurn(input),
+      scheduler,
+      concurrency,
+    }),
     correctMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:correct-message",
       execute: (input: CorrectThreadMessageInput) => correctThreadMessage(input),

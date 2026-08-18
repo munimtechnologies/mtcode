@@ -1774,6 +1774,9 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.queued-turn-cancelled"),
     payload: ThreadQueuedTurnCancelledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.message-corrected"),
     payload: ThreadMessageCorrectedPayload,
   }),

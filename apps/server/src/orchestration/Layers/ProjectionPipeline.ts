@@ -1108,6 +1108,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             event.payload.threadId,
             collectThreadAttachmentRelativePaths(event.payload.threadId, keptRows),
           );
+          return;
+        }
 
         case "thread.message-corrected": {
           const target = yield* projectionThreadMessageRepository.getByMessageId({
