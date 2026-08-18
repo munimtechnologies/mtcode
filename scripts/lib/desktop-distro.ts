@@ -43,7 +43,7 @@ const OFFICIAL: DesktopDistroIdentity = {
 
 const MUNIM: DesktopDistroIdentity = {
   id: "munim",
-  appId: "com.munim.t3code",
+  appId: "com.munim.mtcode",
   productName: "MT Code",
   packageName: "t3code-munim",
   artifactName: "MT-Code-${version}-${arch}.${ext}",

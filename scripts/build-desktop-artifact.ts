@@ -50,7 +50,11 @@ import * as Stream from "effect/Stream";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { resolveDesktopDistroIdentity, type DesktopDistroIdentity } from "./lib/desktop-distro.ts";
+import {
+  resolveDesktopDistroId,
+  resolveDesktopDistroIdentity,
+  type DesktopDistroIdentity,
+} from "./lib/desktop-distro.ts";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
@@ -2276,6 +2280,14 @@ export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
 }
 
 export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+  if (resolveDesktopDistroId() === "munim") {
+    return {
+      macIconPng: BRAND_ASSET_PATHS.munimMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.munimLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.munimWindowsIconIco,
+    };
+  }
+
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,

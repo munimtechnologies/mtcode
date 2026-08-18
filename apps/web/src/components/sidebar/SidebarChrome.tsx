@@ -10,6 +10,7 @@ import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { APP_BASE_NAME } from "../../branding";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import {
@@ -91,16 +92,52 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <T3Wordmark />
+      <BrandWordmark />
       <span
         className={cn(
           "-translate-y-px truncate text-sm font-medium tracking-tight",
           onBackdrop ? "text-white/70" : "text-muted-foreground",
         )}
       >
-        Code
+        {BRAND_LABEL}
       </span>
     </Link>
+  );
+}
+
+// The mark is the first word of the app name and the label is the rest, so a
+// rebranded distro ("MT Code") shows its own wordmark instead of T3's.
+const [BRAND_MARK = "T3", ...BRAND_REST] = APP_BASE_NAME.split(" ");
+const BRAND_LABEL = BRAND_REST.join(" ");
+
+function BrandWordmark() {
+  if (BRAND_MARK === "MT") {
+    return <MTWordmark />;
+  }
+  if (BRAND_MARK !== "T3") {
+    return (
+      <span aria-label={BRAND_MARK} className="shrink-0 text-sm font-semibold tracking-tight">
+        {BRAND_MARK}
+      </span>
+    );
+  }
+  return <T3Wordmark />;
+}
+
+function MTWordmark() {
+  return (
+    <svg
+      aria-label="MT"
+      className="h-2.5 w-auto shrink-0"
+      viewBox="15.5 37 95 56.96"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M15.5 93V37H28.5L38.75 63L49 37H62V93H50V56L43 76H34.5L27.5 56V93H15.5Z"
+        fill="currentColor"
+      />
+      <path d="M82.27 93V47.56H67V37H110.5V47.56H95.23V93H82.27Z" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -226,11 +263,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Settings"
             onClick={handleSettingsClick}
           />
-          <SidebarUtilityItem
-            icon={<BlocksIcon />}
-            label="Plugins"
-            onClick={handlePluginsClick}
-          />
+          <SidebarUtilityItem icon={<BlocksIcon />} label="Plugins" onClick={handlePluginsClick} />
           {pullRequestsSupported ? (
             <SidebarUtilityItem
               icon={<GitPullRequestIcon />}
