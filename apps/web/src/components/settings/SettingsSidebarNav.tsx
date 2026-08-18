@@ -19,6 +19,7 @@ import {
   PaletteIcon,
   SearchIcon,
   SparklesIcon,
+  Mic2Icon,
   Settings2Icon,
   XIcon,
 } from "lucide-react";
@@ -58,6 +59,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/skills": SparklesIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
+  "/settings/voice": Mic2Icon,
   "/settings/computer-use": MonitorIcon,
   "/settings/computer-history": HistoryIcon,
   "/settings/archived": ArchiveIcon,

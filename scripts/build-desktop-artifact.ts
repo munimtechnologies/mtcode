@@ -106,6 +106,7 @@ const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
 
 interface DesktopBuildIconAssets {
   readonly macIconPng: string;
+  readonly macIconIcns?: string;
   readonly linuxIconPng: string;
   readonly windowsIconIco: string;
 }
@@ -1108,6 +1109,8 @@ ${associatedDomains}
     <true/>
     <key>com.apple.security.automation.apple-events</key>
     <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>
 `;
@@ -2052,7 +2055,12 @@ function generateMacIconSet(
   });
 }
 
-function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: boolean) {
+function stageMacIcons(
+  stageResourcesDir: string,
+  sourcePng: string,
+  verbose: boolean,
+  sourceIcns?: string,
+) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -2075,7 +2083,17 @@ function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: bo
       verbose,
     });
 
-    yield* generateMacIconSet(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
+    if (sourceIcns) {
+      if (!(yield* fs.exists(sourceIcns))) {
+        return yield* new DesktopIconSourceMissingError({
+          platform: "mac",
+          sourcePath: sourceIcns,
+        });
+      }
+      yield* fs.copyFile(sourceIcns, iconIcnsPath);
+    } else {
+      yield* generateMacIconSet(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
+    }
   });
 }
 
@@ -2487,7 +2505,7 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
   verbose: boolean,
 ) {
   if (platform === "mac") {
-    yield* stageMacIcons(stageResourcesDir, iconAssets.macIconPng, verbose);
+    yield* stageMacIcons(stageResourcesDir, iconAssets.macIconPng, verbose, iconAssets.macIconIcns);
     return;
   }
 
