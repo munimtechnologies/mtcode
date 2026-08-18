@@ -55,6 +55,8 @@ const clientSettings: ClientSettings = {
   sidebarActiveThreadSortOrder: "updated_at",
   sidebarThreadPreviewCount: 6,
   legacySidebarEnabled: false,
+  soundNotificationsEnabled: true,
+  tabsEnabled: true,
   timestampFormat: "24-hour",
   voiceTranscriptionEnabled: true,
   voiceTranscriptionProvider: "openai",

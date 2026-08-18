@@ -456,7 +456,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         },
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
-      assert.deepStrictEqual(win.nsis, { differentialPackage: true });
+      assert.deepStrictEqual(win.nsis, {
+        differentialPackage: true,
+        shortcutName: "T3 Code",
+        uninstallDisplayName: "T3 Code",
+      });
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).extendInfo, {
         NSAppleEventsUsageDescription:
           "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",

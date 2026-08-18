@@ -484,7 +484,7 @@ describe("vcsActionState", () => {
           resolveSshPasswordPrompt: () =>
             Effect.sync(() => {
               promptCalls += 1;
-            }).pipe(Effect.zipRight(Effect.never)),
+            }).pipe(Effect.andThen(Effect.never)),
         },
       ).pipe(Effect.flip, Effect.timeout("1 second"));
 
