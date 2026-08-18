@@ -119,6 +119,7 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
 import * as CodexPluginMarketplace from "./plugins/CodexPluginMarketplace.ts";
 import { pluginMarketplaceHttpApiLayer } from "./plugins/http.ts";
+import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -406,7 +407,7 @@ const ProviderRuntimeLayerLive = Layer.mergeAll(
   SessionStartupReconcilerLive,
 ).pipe(Layer.provideMerge(ProviderLayerLive), Layer.provideMerge(OrchestrationLayerLive));
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeDomainDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
@@ -443,9 +444,13 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeDomainDependenciesLive.pipe(
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(VoiceSessionService.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(
     Layer.mergeAll(
       CloudCliTokenManager.layer.pipe(

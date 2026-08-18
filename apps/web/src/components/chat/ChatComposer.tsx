@@ -223,16 +223,18 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { useVoiceSession } from "../voice/VoiceSession";
 import {
+  AudioLinesIcon,
   BotIcon,
   CircleAlertIcon,
   PencilRulerIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  MicIcon,
   PenLineIcon,
   SparklesIcon,
-  MicIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -487,6 +489,12 @@ export interface ChatComposerHandle {
   focusAt: (cursor: number) => void;
   addDroppedFiles: (files: File[]) => void;
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
+  replaceTextRange: (input: {
+    rangeStart: number;
+    rangeEnd: number;
+    replacement: string;
+    expectedText?: string;
+  }) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
@@ -717,6 +725,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     typeof composerDraftTarget === "string"
       ? composerDraftTarget
       : scopedThreadKey(composerDraftTarget);
+  const voiceSession = useVoiceSession();
+
+  useEffect(
+    () =>
+      voiceSession.registerComposer({
+        environmentId,
+        threadRef: routeThreadRef,
+        composerDraftTarget,
+        composerRef,
+        title: activeThread?.title ?? "New task",
+      }),
+    [
+      activeThread?.title,
+      composerDraftTarget,
+      composerRef,
+      environmentId,
+      routeThreadRef,
+      voiceSession.registerComposer,
+    ],
+  );
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -2761,6 +2789,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer();
       },
       insertTextAtEnd: insertComposerTextAtEnd,
+      replaceTextRange: ({ rangeStart, rangeEnd, replacement, expectedText }) =>
+        applyPromptReplacement(rangeStart, rangeEnd, replacement, {
+          ...(expectedText !== undefined ? { expectedText } : {}),
+          focusEditorAfterReplace: false,
+        }),
       openModelPicker: () => {
         setIsComposerModelPickerOpen(true);
       },
@@ -3500,6 +3533,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           }
                         />
                         <TooltipPopup side="top">Start dictation</TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                    {!isComposerApprovalState && pendingUserInputs.length === 0 ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost-muted"
+                              className={cn(
+                                "rounded-full",
+                                voiceSession.active &&
+                                  "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+                              )}
+                              onPointerDown={
+                                isMobileViewport ? (event) => event.preventDefault() : undefined
+                              }
+                              onClick={voiceSession.start}
+                              aria-label={
+                                voiceSession.active
+                                  ? "Open active voice session"
+                                  : "Start voice session"
+                              }
+                            >
+                              <AudioLinesIcon className="size-4" />
+                            </Button>
+                          }
+                        />
+                        <TooltipPopup side="top">
+                          {voiceSession.active
+                            ? "Open active voice session"
+                            : "Start voice session"}
+                        </TooltipPopup>
                       </Tooltip>
                     ) : null}
                     <ComposerFooterPrimaryActions

@@ -246,6 +246,11 @@ function patchMainBundleInfoPlist(appBundlePath, iconPath, executableName) {
     "NSAppleEventsUsageDescription",
     "This app needs to control other apps to run Computer Use automations you approve.",
   );
+  setPlistString(
+    infoPlistPath,
+    "NSMicrophoneUsageDescription",
+    "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
+  );
   setPlistJson(infoPlistPath, "CFBundleURLTypes", [
     {
       CFBundleURLName: APP_BUNDLE_ID,
