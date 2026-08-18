@@ -49,7 +49,7 @@ export function resolveRuntimeDesktopDistro(input: {
   if (id === "munim") {
     return {
       id,
-      baseName: "T3 Code Munim",
+      baseName: "MT Code",
       userDataDirName: input.isDevelopment ? "t3code-munim-dev" : "t3code-munim",
       legacyUserDataDirName: input.isDevelopment ? "T3 Code Munim (Dev)" : "T3 Code Munim (Alpha)",
       defaultHomeDirName: ".t3-munim",

@@ -46,7 +46,7 @@ echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
 echo "UPDATE_REPO=$T3CODE_DESKTOP_UPDATE_REPOSITORY"
 
 # --- Mac arm64 ---
-EXPECTED_MAC="$REPO/release/T3-Code-Munim-${T3CODE_DESKTOP_VERSION}-arm64.dmg"
+EXPECTED_MAC="$REPO/release/MT-Code-${T3CODE_DESKTOP_VERSION}-arm64.dmg"
 if [[ "${T3_MUNIM_SKIP_MAC:-}" == "1" && -f "$EXPECTED_MAC" ]]; then
   echo "-- reusing existing Munim Mac DMG --"
 elif [[ -f "$EXPECTED_MAC" && "${T3_MUNIM_FORCE_MAC:-}" != "1" ]]; then
@@ -56,8 +56,8 @@ else
   pnpm dist:desktop:dmg:arm64
 fi
 
-MAC_DMG=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.dmg 2>/dev/null | head -1 || true)
-MAC_ZIP=$(ls -t "$REPO"/release/T3-Code-Munim-*-arm64.zip 2>/dev/null | head -1 || true)
+MAC_DMG=$(ls -t "$REPO"/release/MT-Code-*-arm64.dmg 2>/dev/null | head -1 || true)
+MAC_ZIP=$(ls -t "$REPO"/release/MT-Code-*-arm64.zip 2>/dev/null | head -1 || true)
 MAC_YML=""
 for candidate in "$REPO"/release/nightly-mac.yml "$REPO"/release/latest-mac.yml; do
   if [[ -f "$candidate" ]]; then
@@ -89,7 +89,7 @@ ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
   -UpdateRepository "$RELEASE_REPO"
 
-WIN_REMOTE=$(ssh -o BatchMode=yes blade 'powershell.exe -NoProfile -Command "Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/T3-Code-Munim-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName"')
+WIN_REMOTE=$(ssh -o BatchMode=yes blade 'powershell.exe -NoProfile -Command "Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/MT-Code-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName"')
 WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1)
 if [[ -z "$WIN_REMOTE" ]]; then
   echo "Windows exe not found on Blade" >&2
@@ -129,7 +129,7 @@ for a in "${ASSETS[@]}"; do
 done
 
 NOTES=$(cat <<EOF
-T3 Code Munim — public build from \`sheehanmunim/t3code@personal\`.
+MT Code — public build from \`sheehanmunim/t3code@personal\`.
 
 - App ID: \`com.munim.t3code\`
 - Downloads: https://munimtech.com/t3-code
@@ -146,7 +146,7 @@ if gh release view "$TAG" -R "$RELEASE_REPO" >/dev/null 2>&1; then
 else
   gh release create "$TAG" "${UNIQUE_ASSETS[@]}" \
     -R "$RELEASE_REPO" \
-    --title "T3 Code Munim ${T3CODE_DESKTOP_VERSION}" \
+    --title "MT Code ${T3CODE_DESKTOP_VERSION}" \
     --notes "$NOTES" \
     --prerelease
 fi
