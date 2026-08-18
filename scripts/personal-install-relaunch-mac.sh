@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Install a personal Mac DMG into /Applications and relaunch so the user does not
-# have to open T3 Code by hand. Prints MAC_GUI_VISIBLE when a *fresh* process is up.
+# have to open MT Code by hand. Prints MAC_GUI_VISIBLE when a *fresh* process is up.
 #
 # Why this is a detached worker:
-# Agents often run this *inside* T3 Code. Quitting the app then kills the installer
+# Agents often run this *inside* MT Code. Quitting the app then kills the installer
 # shell mid-copy, which leaves a white window and never relaunches. The outer
 # invocation always schedules a nohup worker that survives that quit, waits on a
 # done marker when the parent lives (launchd / terminal), and still finishes if
 # the parent dies with the app.
 #
-# Overwriting /Applications/T3 Code.app while it is still running is what leaves a
-# white window. The worker kills every T3 Code process first, swaps the bundle
-# only after they are gone, then opens a new instance.
+# Overwriting /Applications/MT Code.app while it is still running is what leaves a
+# white window. The worker kills every MT Code process first (and any legacy
+# T3 Code fleet install), swaps the bundle only after they are gone, then opens
+# a new instance.
 #
 # Usage:
 #   personal-install-relaunch-mac.sh [path-to.dmg]
@@ -21,9 +22,9 @@ REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
 mkdir -p "$LOG_DIR"
 
-APP_PATH="/Applications/T3 Code.app"
-APP_STAGING="/Applications/T3 Code.installing.app"
-APP_BACKUP="/Applications/T3 Code.previous.app"
+APP_PATH="/Applications/MT Code.app"
+APP_STAGING="/Applications/MT Code.installing.app"
+APP_BACKUP="/Applications/MT Code.previous.app"
 
 # --- outer: schedule worker and wait if we can ---
 if [[ "${T3_MAC_INSTALL_WORKER:-}" != "1" ]]; then
@@ -86,7 +87,7 @@ fail() {
 
 DMG="${1:-}"
 if [[ -z "$DMG" ]]; then
-  DMG=$(ls -1t "$REPO"/release/T3-Code-*-arm64.dmg 2>/dev/null | head -1 || true)
+  DMG=$(ls -1t "$REPO"/release/MT-Code-*-arm64.dmg 2>/dev/null | head -1 || true)
 fi
 if [[ -z "$DMG" || ! -f "$DMG" ]]; then
   fail "no arm64 DMG found to install"
@@ -96,7 +97,9 @@ echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) worker start ===="
 echo "Installing $DMG"
 
 t3_pids() {
-  pgrep -f '/Applications/T3 Code[^/]*\.app/' 2>/dev/null || true
+  # Legacy "T3 Code.app" fleet installs count too: a survivor would hold the
+  # port and the deleted bundle after the swap below removes it.
+  pgrep -f '/Applications/(MT|T3) Code[^/]*\.app/' 2>/dev/null || true
 }
 
 t3_running() {
@@ -104,11 +107,11 @@ t3_running() {
 }
 
 quit_t3() {
-  echo "Mac quitting existing T3 Code…"
+  echo "Mac quitting existing MT Code…"
 
   osascript >/dev/null 2>&1 <<'APPLESCRIPT' || true
 tell application "System Events"
-  set procs to every process whose name is "T3 Code" or name starts with "T3 Code Helper"
+  set procs to every process whose name is "MT Code" or name starts with "MT Code Helper" or name is "T3 Code" or name starts with "T3 Code Helper"
   repeat with p in procs
     try
       tell p to quit
@@ -118,7 +121,7 @@ end tell
 APPLESCRIPT
   osascript >/dev/null 2>&1 <<'APPLESCRIPT' || true
 try
-  tell application "T3 Code" to quit
+  tell application "MT Code" to quit
 end try
 APPLESCRIPT
 
@@ -179,6 +182,7 @@ swap_install() {
   fi
   mv "$APP_STAGING" "$APP_PATH"
   rm -rf "$APP_BACKUP" \
+    "/Applications/T3 Code.app" \
     "/Applications/T3 Code (Nightly).app" \
     "/Applications/T3 Code (Alpha).app"
 
@@ -209,9 +213,9 @@ relaunch_t3() {
 
   local i pid start_epoch
   for i in $(seq 1 80); do
-    pid=$(pgrep -n -f "$APP_PATH/Contents/MacOS/T3 Code$" 2>/dev/null || true)
+    pid=$(pgrep -n -f "$APP_PATH/Contents/MacOS/MT Code$" 2>/dev/null || true)
     if [[ -z "$pid" ]]; then
-      pid=$(pgrep -n -f "$APP_PATH/Contents/MacOS/T3 Code" 2>/dev/null || true)
+      pid=$(pgrep -n -f "$APP_PATH/Contents/MacOS/MT Code" 2>/dev/null || true)
     fi
     if [[ -n "$pid" ]]; then
       start_epoch=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs -I{} date -j -f "%a %b %d %T %Y" "{}" "+%s" 2>/dev/null || echo "")
@@ -226,9 +230,9 @@ relaunch_t3() {
       fi
       if osascript >/dev/null 2>&1 <<'APPLESCRIPT'
 tell application "System Events"
-  if not (exists process "T3 Code") then error "no process"
+  if not (exists process "MT Code") then error "no process"
 end tell
-tell application "T3 Code" to activate
+tell application "MT Code" to activate
 APPLESCRIPT
       then
         echo "MAC_GUI_VISIBLE $APP_PATH pid=$pid"
@@ -238,7 +242,7 @@ APPLESCRIPT
     sleep 0.25
   done
 
-  fail "Mac relaunch failed — no fresh T3 Code process after open"
+  fail "Mac relaunch failed — no fresh MT Code process after open"
 }
 
 quit_t3

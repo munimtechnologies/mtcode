@@ -34,6 +34,9 @@ fi
 export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
+# The fleet ships MT Code branding on every machine.
+export T3CODE_DESKTOP_DISTRO=munim
+
 # Align package versions like upstream's release workflow, so the bundled
 # server and web report this nightly version instead of the stale package.json
 # one (else nightly-track clients show "Server update available").

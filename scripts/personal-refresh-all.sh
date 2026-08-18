@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Keep personal fork apps current on Mac + Blade + Dell.
 # Source of truth: sheehanmunim/mtcode@personal (git remote "fork" on this Mac).
-# Builds with latest upstream nightly version so logo/artwork are Nightly,
-# but product name stays "T3 Code".
+# Builds the MT Code distro with the latest upstream nightly version string.
 #
 # Flow: push feature commits to fork/personal → this job (launchd every 3h, or
 # T3_FORCE_REBUILD=1) rebuilds Mac, builds Windows on Blade, installs on Dell.
@@ -80,6 +79,10 @@ if [[ -z "$NIGHTLY_TAG" ]]; then
 fi
 export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
+
+# The fleet ships MT Code branding on every machine (Windows side does the same
+# in personal-refresh-win.ps1).
+export T3CODE_DESKTOP_DISTRO=munim
 
 # Align package versions like upstream's release workflow, so the bundled
 # server and web report this nightly version instead of the stale package.json
