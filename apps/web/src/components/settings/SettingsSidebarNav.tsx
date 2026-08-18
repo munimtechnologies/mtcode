@@ -9,7 +9,6 @@ import {
 } from "react";
 import {
   ArchiveIcon,
-  ArrowLeftIcon,
   BlocksIcon,
   BotIcon,
   GitBranchIcon,
@@ -23,7 +22,7 @@ import {
   Settings2Icon,
   XIcon,
 } from "lucide-react";
-import { useCanGoBack, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -81,7 +80,6 @@ function SettingsSectionIcon({ to }: { to: SettingsPath }) {
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -186,17 +184,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     },
     [activeResultIndex, clearSearch, handleSearchResultClick, isSearching, results],
   );
-  const handleBackClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, isMobile, navigate, setOpenMobile]);
-
   return (
     <>
       <SidebarContent className="overflow-x-hidden">
@@ -306,16 +293,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       <SidebarFooter className="p-[var(--sidebar-content-inset)]">
         <T3ConnectSidebarSignIn />
         <div className="flex min-w-0 items-center gap-1">
-          {/* Back gives up width before the avatar does, so a narrow sidebar
-              truncates the label instead of pushing the avatar past its edge. */}
-          <SidebarMenu className="min-w-0">
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={handleBackClick}>
-                <ArrowLeftIcon />
-                <span>Back</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
           <div className="min-w-0 flex-1">
             <SidebarUtilityMenu />
           </div>
