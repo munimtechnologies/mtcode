@@ -30,6 +30,15 @@ if (isElectron) {
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
+// Autofill support makes clerk-js fire a passkey retrieval as soon as the
+// sign-in modal opens, which fails in the desktop shell and surfaces an error
+// banner before the user has done anything. Report it unsupported so passkeys
+// only run from the explicit "Use passkey instead" action.
+const manualOnlyPasskeys: typeof passkeys = {
+  ...passkeys,
+  isAutoFillSupported: () => Promise.resolve(false),
+};
+
 const app = <AppRoot router={router} />;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -39,7 +48,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <ElectronClerkProvider
           appearance={clerkAppearance}
           publishableKey={clerkPublishableKey}
-          passkeys={passkeys}
+          passkeys={manualOnlyPasskeys}
         >
           <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
         </ElectronClerkProvider>
