@@ -152,9 +152,11 @@ else
   gh release create "$TAG" "${UNIQUE_ASSETS[@]}" \
     -R "$RELEASE_REPO" \
     --title "MT Code ${T3CODE_DESKTOP_VERSION}" \
-    --notes "$NOTES" \
-    --prerelease
+    --notes "$NOTES"
 fi
+# Public download page: keep the newest installer release pinned as Latest so
+# github.com/<repo>/releases and /releases/latest point at it, not demo assets.
+gh release edit "$TAG" -R "$RELEASE_REPO" --prerelease=false --latest
 
 echo "PUBLISHED $TAG"
 echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) munim publish done ===="
