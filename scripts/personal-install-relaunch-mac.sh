@@ -201,7 +201,11 @@ relaunch_t3() {
     fail "Mac relaunch failed — could not clear old processes"
   fi
 
-  open "$APP_PATH" || fail "open $APP_PATH failed"
+  # Strip the worker markers before relaunching: the app inherits this environment,
+  # and an agent shell inside the relaunched app that runs this script would then
+  # skip the detach and die mid-install when the app quits (bit us 2026-08-17).
+  env -u T3_MAC_INSTALL_WORKER -u T3_MAC_INSTALL_DONE -u T3_MAC_INSTALL_FAIL \
+    open "$APP_PATH" || fail "open $APP_PATH failed"
 
   local i pid start_epoch
   for i in $(seq 1 80); do
@@ -215,7 +219,8 @@ relaunch_t3() {
         echo "Mac found stale PID $pid (started before install) — killing" >&2
         kill -KILL "$pid" 2>/dev/null || true
         sleep 0.25
-        open "$APP_PATH" || true
+        env -u T3_MAC_INSTALL_WORKER -u T3_MAC_INSTALL_DONE -u T3_MAC_INSTALL_FAIL \
+          open "$APP_PATH" || true
         sleep 0.25
         continue
       fi
