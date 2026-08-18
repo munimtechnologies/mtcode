@@ -94,6 +94,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server can publish repositories through an interactive stream and relay
       SSH key passphrase/password prompts to the initiating client. */
   sourceControlSshPasswordPrompts: Schema.optionalKey(Schema.Boolean),
+  /** The desktop-control MCP binary is present on this machine, so the server
+      can answer computerView.stream / computerView.input (live remote view).
+      Absent on older servers and on machines without the binary. */
+  computerView: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

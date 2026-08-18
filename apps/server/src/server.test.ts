@@ -118,6 +118,7 @@ import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
+import * as ProviderAccountLoginRunner from "./provider/Services/ProviderAccountLoginRunner.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -673,6 +674,9 @@ const buildAppUnderTest = (options?: {
           Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
             resolveTargets: () => Effect.succeed([]),
           }),
+          // Login RPCs are not exercised by the router tests; the mock keeps
+          // the fully-typed WS handler layer satisfiable without providers.
+          Layer.mock(ProviderAccountLoginRunner.ProviderAccountLoginRunner)({}),
         ),
       ),
       Layer.provide(

@@ -54,6 +54,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
+import * as ComputerViewBroker from "./desktopControl/ComputerViewBroker.ts";
 import * as ComputerTaskBroker from "./mcp/ComputerTaskBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -538,6 +539,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   Layer.provide(PullRequestStackServiceLive),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ComputerTaskBroker.layer),
+  // Settings intentionally stay an open requirement so the broker reads the
+  // same ServerSettings instance the rest of the runtime (and tests) provide.
+  Layer.provide(ComputerViewBroker.layer),
   Layer.provide(ServerSelfUpdate.layer),
   Layer.provide(commandReadinessLayer),
   Layer.provide(browserApiCorsLayer),
