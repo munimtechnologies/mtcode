@@ -509,7 +509,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           );
 
           yield* Effect.yieldNow;
-          yield* TestClock.adjust("11 seconds");
+          // providerAuthProbeTimeoutMs is platform-aware (15s non-Windows, 45s Windows).
+          // Advance past either bound so the timeout fires in CI on all platforms.
+          yield* TestClock.adjust("46 seconds");
           yield* Effect.yieldNow;
 
           // A timeout is reported as a failure rather than an `error` snapshot,

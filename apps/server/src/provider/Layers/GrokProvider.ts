@@ -37,6 +37,11 @@ import {
   makeGrokAcpRuntime,
   resolveGrokAcpBaseModelId,
 } from "../acp/GrokAcpSupport.ts";
+import {
+  grokAcpModelDiscoveryTimeoutMs,
+  providerVersionProbeTimeoutMs,
+  resolveProviderProbeCwd,
+} from "../providerProbeTimeouts.ts";
 
 const GROK_PRESENTATION = {
   displayName: "Grok",
@@ -47,9 +52,6 @@ const GROK_PRESENTATION = {
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
-
-const VERSION_PROBE_TIMEOUT_MS = 4_000;
-const GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 
 const GROK_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
@@ -156,11 +158,12 @@ const discoverGrokModelsViaAcp = (
 ) =>
   Effect.gen(function* () {
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
     const acp = yield* makeGrokAcpRuntime({
       grokSettings,
       environment,
       childProcessSpawner,
-      cwd: process.cwd(),
+      cwd: probeCwd,
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
     const started = yield* acp.start();
@@ -173,12 +176,14 @@ const runGrokVersionCommand = (
 ) =>
   Effect.gen(function* () {
     const command = grokSettings.binaryPath || "grok";
+    const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
     const spawnCommand = yield* resolveSpawnCommand(command, ["--version"], {
       env: environment,
     });
     return yield* spawnAndCollect(
       command,
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        cwd: probeCwd,
         env: environment,
         shell: spawnCommand.shell,
       }),
@@ -212,8 +217,9 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     });
   }
 
+  const versionTimeoutMs = yield* providerVersionProbeTimeoutMs;
   const versionResult = yield* runGrokVersionCommand(grokSettings, environment).pipe(
-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
+    Effect.timeoutOption(versionTimeoutMs),
     Effect.result,
   );
 
@@ -243,7 +249,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     return yield* new ProviderProbeTimeoutError({
       provider: "Grok",
       probe: "grok --version",
-      timeoutMs: VERSION_PROBE_TIMEOUT_MS,
+      timeoutMs: versionTimeoutMs,
       installed: true,
     });
   }
@@ -271,8 +277,9 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     });
   }
 
+  const acpDiscoveryTimeoutMs = yield* grokAcpModelDiscoveryTimeoutMs;
   const discoveryExit = yield* discoverGrokModelsViaAcp(grokSettings, environment).pipe(
-    Effect.timeoutOption(GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS),
+    Effect.timeoutOption(acpDiscoveryTimeoutMs),
     Effect.exit,
   );
   if (Exit.isFailure(discoveryExit)) {
@@ -297,7 +304,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     return yield* new ProviderProbeTimeoutError({
       provider: "Grok",
       probe: "ACP model discovery",
-      timeoutMs: GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS,
+      timeoutMs: acpDiscoveryTimeoutMs,
       installed: true,
       // `grok --version` already answered, so keep what it told us.
       ...(version ? { version } : {}),

@@ -301,20 +301,27 @@ function applyRequestedSessionConfiguration<E>(input: {
   });
 }
 
+function selectPermissionOptionId(
+  request: EffectAcpSchema.RequestPermissionRequest,
+  decision: Exclude<ProviderApprovalDecision, "cancel">,
+): string | undefined {
+  const kind =
+    decision === "acceptForSession"
+      ? "allow_always"
+      : decision === "accept"
+        ? "allow_once"
+        : "reject_once";
+  const option = request.options.find((entry) => entry.kind === kind);
+  return option?.optionId.trim() || undefined;
+}
+
 function selectAutoApprovedPermissionOption(
   request: EffectAcpSchema.RequestPermissionRequest,
 ): string | undefined {
-  const allowAlwaysOption = request.options.find((option) => option.kind === "allow_always");
-  if (typeof allowAlwaysOption?.optionId === "string" && allowAlwaysOption.optionId.trim()) {
-    return allowAlwaysOption.optionId.trim();
-  }
-
-  const allowOnceOption = request.options.find((option) => option.kind === "allow_once");
-  if (typeof allowOnceOption?.optionId === "string" && allowOnceOption.optionId.trim()) {
-    return allowOnceOption.optionId.trim();
-  }
-
-  return undefined;
+  return (
+    selectPermissionOptionId(request, "acceptForSession") ??
+    selectPermissionOptionId(request, "accept")
+  );
 }
 
 export function makeCursorAdapter(
@@ -753,7 +760,12 @@ export function makeCursorAdapter(
                         ? ({ outcome: "cancelled" } as const)
                         : {
                             outcome: "selected" as const,
-                            optionId: acpPermissionOutcome(resolved),
+                            // Prefer the agent-supplied optionId for the decision's
+                            // kind; the legacy hardcoded ids are only a fallback for
+                            // agents that omit a matching option.
+                            optionId:
+                              selectPermissionOptionId(params, resolved) ??
+                              acpPermissionOutcome(resolved),
                           },
                   };
                 }),
