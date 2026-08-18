@@ -11,7 +11,6 @@ set -euo pipefail
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_MUNIM_WEB_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 HOSTED_URL="${T3_MUNIM_HOSTED_URL:-https://mtcode.munimtech.com}"
-PROJECT="${T3_MUNIM_PAGES_PROJECT:-mtcode}"
 
 cd "$REPO"
 if [[ -f .env || -f .env.local ]]; then
@@ -27,8 +26,9 @@ node scripts/apply-web-brand-assets.ts munim apps/web/dist
 # reaches the runtime bundle.
 sed -i '' 's/T3 Code (Alpha)/MT Code (Alpha)/; s/T3 Code splash screen/MT Code splash screen/' apps/web/dist/index.html
 
-# Cloudflare Pages SPA history fallback (TanStack Router path routes like /pair).
-printf '/*  /index.html  200\n' > apps/web/dist/_redirects
-
-wrangler pages deploy apps/web/dist --project-name "$PROJECT" --branch mtcode-web --commit-dirty=true
+# Static-assets Worker with a custom domain (auto-creates DNS; SPA fallback
+# comes from not_found_handling in the wrangler config — no _redirects file,
+# Workers assets rejects the Pages-style rule).
+rm -f apps/web/dist/_redirects
+wrangler deploy --config scripts/mtcode-web.wrangler.jsonc
 echo "deployed $HOSTED_URL"
