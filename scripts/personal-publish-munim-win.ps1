@@ -1,7 +1,7 @@
 # Build public Munim Windows installer (appId com.munim.t3code) on Blade.
 param(
   [Parameter(Mandatory = $true)][string]$DesktopVersion,
-  [string]$UpdateRepository = "sheehanmunim/mtcode"
+  [string]$UpdateRepository = "munimtechnologies/mtcode"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,7 +25,7 @@ Log "munim win publish start"
 Log "DesktopVersion=$DesktopVersion UpdateRepository=$UpdateRepository"
 
 if (-not (Test-Path $repo)) {
-  git clone --branch main --single-branch https://github.com/sheehanmunim/mtcode.git $repo
+  git clone --branch main --single-branch https://github.com/munimtechnologies/mtcode.git $repo
 }
 Set-Location $repo
 git fetch origin main

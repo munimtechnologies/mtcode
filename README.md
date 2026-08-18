@@ -4,7 +4,7 @@ MT Code is a free, open-source desktop app for running and controlling coding ag
 
 ## Download
 
-**[munimtech.com/mt-code](https://munimtech.com/mt-code)** — or grab installers straight from [GitHub Releases](https://github.com/sheehanmunim/mtcode/releases):
+**[munimtech.com/mt-code](https://munimtech.com/mt-code)** — or grab installers straight from [GitHub Releases](https://github.com/munimtechnologies/mtcode/releases):
 
 - **macOS** (Apple Silicon): `MT-Code-<version>-arm64.dmg`
 - **Windows** (x64): `MT-Code-<version>-x64.exe`
@@ -104,6 +104,6 @@ Building from source? Start at [docs/internals/overview.md](./docs/internals/ove
 
 ## Relationship to upstream
 
-MT Code does not auto-merge [pingdotgg/t3code](https://github.com/pingdotgg/t3code). Upstream lands only when you explicitly ask an agent to merge it. Features built here are offered upstream as PRs when they fit; some MT Code features started as unmerged upstream PRs we adopted. Bug reports about MT Code builds belong on [this repo's issues](https://github.com/sheehanmunim/mtcode/issues) — please don't file MT Code problems upstream.
+MT Code does not auto-merge [pingdotgg/t3code](https://github.com/pingdotgg/t3code). Upstream lands only when you explicitly ask an agent to merge it. Features built here are offered upstream as PRs when they fit; some MT Code features started as unmerged upstream PRs we adopted. Bug reports about MT Code builds belong on [this repo's issues](https://github.com/munimtechnologies/mtcode/issues) — please don't file MT Code problems upstream.
 
 MT Code exists because T3 Code is truly open. Credit and thanks to the T3 team.

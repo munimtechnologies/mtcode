@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Keep MT Code current on Mac + Blade + Dell.
-# Source of truth: sheehanmunim/mtcode@main (git remote "fork" on this Mac).
+# Source of truth: munimtechnologies/mtcode@main (git remote "fork" on this Mac).
 # Builds the MT Code distro with the latest upstream nightly version string.
 #
 # Flow: push feature commits to fork/main → this job (launchd every 3h, or
@@ -12,7 +12,7 @@ set -euo pipefail
 # and only hand-run rebuilds ever reached the build step.
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
-# Mac checkout uses "fork" → github.com/sheehanmunim/mtcode (not origin/pingdotgg).
+# Mac checkout uses "fork" → github.com/munimtechnologies/mtcode (not origin/pingdotgg).
 PERSONAL_REMOTE="${T3_PERSONAL_REMOTE:-fork}"
 PRODUCT_BRANCH="${T3_PRODUCT_BRANCH:-main}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"

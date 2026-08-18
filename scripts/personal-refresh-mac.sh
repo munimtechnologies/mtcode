@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Refresh this Mac to latest MT Code, then push the same build to Blade + Dell.
-# Pulls sheehanmunim/mtcode main via the "fork" remote, builds arm64 DMG,
+# Pulls munimtechnologies/mtcode main via the "fork" remote, builds arm64 DMG,
 # installs, relaunches (verified), then refreshes Windows.
 set -euo pipefail
 

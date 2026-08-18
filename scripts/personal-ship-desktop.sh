@@ -15,7 +15,7 @@ cd "$REPO"
 git fetch "$PERSONAL_REMOTE" "$PRODUCT_BRANCH"
 
 # If this checkout has local main commits not on the fork yet, push them —
-# Blade builds from github.com/sheehanmunim/mtcode@main, not from this tree.
+# Blade builds from github.com/munimtechnologies/mtcode@main, not from this tree.
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$branch" != "$PRODUCT_BRANCH" ]]; then
   echo "checkout is '$branch'; expected '$PRODUCT_BRANCH' before shipping desktop" >&2
