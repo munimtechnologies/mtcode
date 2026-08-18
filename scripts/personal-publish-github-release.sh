@@ -96,7 +96,7 @@ ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -UpdateRepository "$RELEASE_REPO"
 
 WIN_REMOTE=$(ssh -o BatchMode=yes blade 'powershell.exe -NoProfile -Command "Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/MT-Code-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName"')
-WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1)
+WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1 | tr '\\' '/')
 if [[ -z "$WIN_REMOTE" ]]; then
   echo "Windows exe not found on Blade" >&2
   exit 1
@@ -105,7 +105,7 @@ echo "WIN_REMOTE=$WIN_REMOTE"
 WIN_LOCAL="$REPO/release/$(basename "$WIN_REMOTE")"
 scp -o BatchMode=yes "blade:$WIN_REMOTE" "$WIN_LOCAL"
 # Also pull yml/blockmap if present
-ssh -o BatchMode=yes blade "powershell.exe -NoProfile -Command \"Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/*Munim* | Select-Object -ExpandProperty Name\"" | tr -d '\r' | while read -r name; do
+ssh -o BatchMode=yes blade "powershell.exe -NoProfile -Command \"Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/*MT-Code*, C:/Users/muhha/dev/t3code-personal/release/*Munim*, C:/Users/muhha/dev/t3code-personal/release/nightly.yml -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name\"" | tr -d '\r' | while read -r name; do
   [[ -z "$name" ]] && continue
   [[ "$name" == *.exe ]] && continue
   scp -o BatchMode=yes "blade:C:/Users/muhha/dev/t3code-personal/release/$name" "$REPO/release/$name" || true
@@ -118,7 +118,7 @@ ASSETS=("$MAC_DMG")
 [[ -n "$MAC_YML" && -f "$MAC_YML" ]] && ASSETS+=("$MAC_YML")
 ASSETS+=("$WIN_LOCAL")
 [[ -f "${WIN_LOCAL}.blockmap" ]] && ASSETS+=("${WIN_LOCAL}.blockmap")
-for y in "$REPO"/release/latest.yml "$REPO"/release/*Munim*.yml; do
+for y in "$REPO"/release/latest.yml "$REPO"/release/nightly.yml "$REPO"/release/*Munim*.yml "$REPO"/release/*MT-Code*.yml; do
   [[ -f "$y" ]] && ASSETS+=("$y")
 done
 
@@ -138,7 +138,7 @@ NOTES=$(cat <<EOF
 MT Code — public build from \`sheehanmunim/t3code@personal\`.
 
 - App ID: \`com.munim.t3code\`
-- Downloads: https://munimtech.com/t3-code
+- Downloads: https://munimtech.com/mt-code
 - Updates come from this repository (not pingdotgg/t3code)
 
 Commit: \`$(git rev-parse --short HEAD)\`

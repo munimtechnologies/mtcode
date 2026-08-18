@@ -60,7 +60,7 @@ $ErrorActionPreference = $prevEap
 # The stamp is build input only; keep the clone clean.
 git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
 
-$exe = Get-ChildItem (Join-Path $repo "release\T3-Code-Munim-*-x64.exe") |
+$exe = Get-ChildItem (Join-Path $repo "release\MT-Code-*-x64.exe"), (Join-Path $repo "release\T3-Code-Munim-*-x64.exe") -ErrorAction SilentlyContinue |
   Sort-Object LastWriteTime -Descending |
   Select-Object -First 1
 if (-not $exe) { throw "Munim Windows exe not found in release/" }
