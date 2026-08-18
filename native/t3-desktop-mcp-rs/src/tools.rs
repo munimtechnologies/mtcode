@@ -126,13 +126,14 @@ fn all_tool_defs() -> Value {
         },
         {
             "name": "screenshot",
-            "description": "Capture the app's largest window as a PNG image. Prefer get_app_state for interaction, which is cheaper and gives clickable element ids; use a screenshot when you need to see rendered content the accessibility tree does not describe, such as canvas or video.",
+            "description": "Capture the app's largest window as an image. Prefer get_app_state for interaction, which is cheaper and gives clickable element ids; use a screenshot when you need to see rendered content the accessibility tree does not describe, such as canvas or video.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "app": { "type": "string", "description": "App name, bundle id, or pid" },
                     "display": { "type": "integer", "description": "Capture a whole display by index (see list_displays) instead of an app window" },
-                    "max_width": { "type": "integer", "description": "Downscale to this width in pixels (default 1400)" }
+                    "max_width": { "type": "integer", "description": "Downscale to this width in pixels (default 1400)" },
+                    "format": { "type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png). Use jpeg for live remote viewing." }
                 }
             }
         },

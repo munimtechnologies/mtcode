@@ -8,7 +8,7 @@
 //! X11/`xcb` when `DISPLAY` is set. Display capture uses `xcap` only; list and
 //! capture stay consistent (no grim-only displays advertised without capture).
 
-use image::{ImageEncoder, RgbaImage, codecs::png::PngEncoder, imageops::FilterType};
+use image::{ImageEncoder, RgbaImage, codecs::jpeg::JpegEncoder, codecs::png::PngEncoder, imageops::FilterType};
 use xcap::{Monitor, Window};
 
 use crate::platform::{DesktopError, Result};
@@ -34,7 +34,32 @@ fn guarded<T>(what: &str, call: impl FnOnce() -> Result<T>) -> Result<T> {
 /// dominate a model's context window.
 pub const DEFAULT_MAX_WIDTH: u32 = 1400;
 
-fn encode_png(image: RgbaImage, max_width: u32) -> Result<Vec<u8>> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CaptureFormat {
+    Png,
+    Jpeg,
+}
+
+impl CaptureFormat {
+    pub fn parse(value: Option<&str>) -> Result<Self> {
+        match value.unwrap_or("png").to_ascii_lowercase().as_str() {
+            "png" => Ok(Self::Png),
+            "jpeg" | "jpg" => Ok(Self::Jpeg),
+            other => Err(DesktopError::new(format!(
+                "unsupported screenshot format '{other}' — use png or jpeg"
+            ))),
+        }
+    }
+
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+        }
+    }
+}
+
+fn encode_image(image: RgbaImage, max_width: u32, format: CaptureFormat) -> Result<Vec<u8>> {
     let image = if max_width > 0 && image.width() > max_width {
         let height = ((image.height() as f64) * (max_width as f64) / (image.width() as f64))
             .round()
@@ -45,14 +70,31 @@ fn encode_png(image: RgbaImage, max_width: u32) -> Result<Vec<u8>> {
     };
 
     let mut buffer = Vec::new();
-    PngEncoder::new(&mut buffer)
-        .write_image(
-            image.as_raw(),
-            image.width(),
-            image.height(),
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|error| DesktopError::new(format!("failed to encode PNG: {error}")))?;
+    match format {
+        CaptureFormat::Png => {
+            PngEncoder::new(&mut buffer)
+                .write_image(
+                    image.as_raw(),
+                    image.width(),
+                    image.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .map_err(|error| DesktopError::new(format!("failed to encode PNG: {error}")))?;
+        }
+        CaptureFormat::Jpeg => {
+            // JPEG has no alpha; flatten onto black so translucent chrome does not
+            // become opaque white noise.
+            let rgb = image::DynamicImage::ImageRgba8(image).to_rgb8();
+            JpegEncoder::new_with_quality(&mut buffer, 55)
+                .write_image(
+                    rgb.as_raw(),
+                    rgb.width(),
+                    rgb.height(),
+                    image::ExtendedColorType::Rgb8,
+                )
+                .map_err(|error| DesktopError::new(format!("failed to encode JPEG: {error}")))?;
+        }
+    }
     Ok(buffer)
 }
 
@@ -90,11 +132,11 @@ fn list_displays_inner() -> Result<String> {
     Ok(lines.join("\n"))
 }
 
-pub fn capture_display(index: usize, max_width: u32) -> Result<Vec<u8>> {
-    guarded("display capture", || capture_display_inner(index, max_width))
+pub fn capture_display(index: usize, max_width: u32, format: CaptureFormat) -> Result<Vec<u8>> {
+    guarded("display capture", || capture_display_inner(index, max_width, format))
 }
 
-fn capture_display_inner(index: usize, max_width: u32) -> Result<Vec<u8>> {
+fn capture_display_inner(index: usize, max_width: u32, format: CaptureFormat) -> Result<Vec<u8>> {
     let monitors = Monitor::all()
         .map_err(|error| DesktopError::new(format!("failed to enumerate displays: {error}")))?;
     let monitor = monitors.get(index).ok_or_else(|| {
@@ -106,7 +148,7 @@ fn capture_display_inner(index: usize, max_width: u32) -> Result<Vec<u8>> {
     let image = monitor
         .capture_image()
         .map_err(|error| DesktopError::new(format!("failed to capture display: {error}")))?;
-    encode_png(image, max_width)
+    encode_image(image, max_width, format)
 }
 
 /// Capture the largest window owned by `pid`.
@@ -115,11 +157,11 @@ fn capture_display_inner(index: usize, max_width: u32) -> Result<Vec<u8>> {
 /// tiny helper windows, and the biggest one is reliably the document window the
 /// model means. Returns the window title alongside the PNG so the tool text can
 /// name what it captured.
-pub fn capture_app_window(pid: u32, max_width: u32) -> Result<(Vec<u8>, String)> {
-    guarded("window capture", || capture_app_window_inner(pid, max_width))
+pub fn capture_app_window(pid: u32, max_width: u32, format: CaptureFormat) -> Result<(Vec<u8>, String)> {
+    guarded("window capture", || capture_app_window_inner(pid, max_width, format))
 }
 
-fn capture_app_window_inner(pid: u32, max_width: u32) -> Result<(Vec<u8>, String)> {
+fn capture_app_window_inner(pid: u32, max_width: u32, format: CaptureFormat) -> Result<(Vec<u8>, String)> {
     let windows = Window::all()
         .map_err(|error| DesktopError::new(format!("failed to enumerate windows: {error}")))?;
 
@@ -146,37 +188,45 @@ fn capture_app_window_inner(pid: u32, max_width: u32) -> Result<(Vec<u8>, String
     let image = window
         .capture_image()
         .map_err(|error| DesktopError::new(format!("failed to capture window: {error}")))?;
-    Ok((encode_png(image, max_width)?, title))
+    Ok((encode_image(image, max_width, format)?, title))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_MAX_WIDTH, encode_png};
+    use super::{DEFAULT_MAX_WIDTH, CaptureFormat, encode_image};
     use image::RgbaImage;
 
     #[test]
     fn encodes_a_png_signature() {
-        let png = encode_png(RgbaImage::new(4, 4), DEFAULT_MAX_WIDTH).expect("encodes");
+        let png = encode_image(RgbaImage::new(4, 4), DEFAULT_MAX_WIDTH, CaptureFormat::Png)
+            .expect("encodes");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn encodes_a_jpeg_signature() {
+        let jpeg = encode_image(RgbaImage::new(8, 8), DEFAULT_MAX_WIDTH, CaptureFormat::Jpeg)
+            .expect("encodes");
+        assert_eq!(&jpeg[..2], b"\xff\xd8");
     }
 
     #[test]
     fn downscales_only_when_wider_than_the_limit() {
         // Narrower than the cap: dimensions must survive untouched, since
         // upscaling would waste tokens without adding detail.
-        let small = encode_png(RgbaImage::new(100, 50), 400).expect("encodes");
+        let small = encode_image(RgbaImage::new(100, 50), 400, CaptureFormat::Png).expect("encodes");
         let decoded = image::load_from_memory(&small).expect("decodes");
         assert_eq!((decoded.width(), decoded.height()), (100, 50));
 
         // Wider than the cap: scaled down, aspect ratio preserved.
-        let large = encode_png(RgbaImage::new(1000, 500), 400).expect("encodes");
+        let large = encode_image(RgbaImage::new(1000, 500), 400, CaptureFormat::Png).expect("encodes");
         let decoded = image::load_from_memory(&large).expect("decodes");
         assert_eq!((decoded.width(), decoded.height()), (400, 200));
     }
 
     #[test]
     fn a_zero_max_width_disables_downscaling() {
-        let png = encode_png(RgbaImage::new(80, 20), 0).expect("encodes");
+        let png = encode_image(RgbaImage::new(80, 20), 0, CaptureFormat::Png).expect("encodes");
         let decoded = image::load_from_memory(&png).expect("decodes");
         assert_eq!((decoded.width(), decoded.height()), (80, 20));
     }

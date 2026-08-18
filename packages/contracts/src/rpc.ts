@@ -177,6 +177,12 @@ import {
   ComputerTaskStreamEvent,
 } from "./computers.ts";
 import {
+  ComputerViewError,
+  ComputerViewInput,
+  ComputerViewStreamEvent,
+  ComputerViewStreamInput,
+} from "./computerView.ts";
+import {
   ServerConfigStreamEvent,
   ServerConfig,
   ServerProviderUpdateError,
@@ -279,6 +285,8 @@ export const WS_METHODS = {
   computersConnect: "computers.connect",
   computersSync: "computers.sync",
   computersRespond: "computers.respond",
+  computerViewStream: "computerView.stream",
+  computerViewInput: "computerView.input",
 
   // Server meta
   serverProbe: "server.probe",
@@ -985,6 +993,18 @@ export const WsComputersRespondRpc = Rpc.make(WS_METHODS.computersRespond, {
   error: Schema.Union([ComputerTaskError, EnvironmentAuthorizationError]),
 });
 
+export const WsComputerViewStreamRpc = Rpc.make(WS_METHODS.computerViewStream, {
+  payload: ComputerViewStreamInput,
+  success: ComputerViewStreamEvent,
+  error: Schema.Union([ComputerViewError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsComputerViewInputRpc = Rpc.make(WS_METHODS.computerViewInput, {
+  payload: ComputerViewInput,
+  error: Schema.Union([ComputerViewError, EnvironmentAuthorizationError]),
+});
+
 export const WsSubscribePreviewEventsRpc = Rpc.make(WS_METHODS.subscribePreviewEvents, {
   payload: Schema.Struct({}),
   success: PreviewEvent,
@@ -1215,6 +1235,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsComputersConnectRpc,
   WsComputersSyncRpc,
   WsComputersRespondRpc,
+  WsComputerViewStreamRpc,
+  WsComputerViewInputRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeServerConfigRpc,

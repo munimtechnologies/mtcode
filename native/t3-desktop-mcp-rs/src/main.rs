@@ -212,13 +212,13 @@ fn text_result(text: impl Into<String>, is_error: bool) -> Value {
     })
 }
 
-fn image_result(png: Vec<u8>, caption: String) -> Value {
-    let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+fn image_result(bytes: Vec<u8>, mime_type: &str, caption: String) -> Value {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     json!({
         "isError": false,
         "content": [
             { "type": "text", "text": caption },
-            { "type": "image", "data": encoded, "mimeType": "image/png" }
+            { "type": "image", "data": encoded, "mimeType": mime_type }
         ]
     })
 }
@@ -300,9 +300,13 @@ fn call_tool(
         let max_width = arg_i64(&args, "max_width")
             .unwrap_or(capture::DEFAULT_MAX_WIDTH as i64)
             .clamp(0, 8000) as u32;
+        let format = match capture::CaptureFormat::parse(arg_str(&args, "format")) {
+            Ok(format) => format,
+            Err(error) => return text_result(format!("error: {error}"), true),
+        };
         return match usize::try_from(display) {
-            Ok(index) => match capture::capture_display(index, max_width) {
-                Ok(png) => image_result(png, format!("display {index}")),
+            Ok(index) => match capture::capture_display(index, max_width, format) {
+                Ok(bytes) => image_result(bytes, format.mime_type(), format!("display {index}")),
                 Err(error) => text_result(format!("error: {error}"), true),
             },
             Err(_) => text_result("error: display index must be zero or greater", true),
@@ -406,19 +410,20 @@ fn run_desktop_tool(
             let max_width = arg_i64(args, "max_width")
                 .unwrap_or(capture::DEFAULT_MAX_WIDTH as i64)
                 .clamp(0, 8000) as u32;
+            let format = capture::CaptureFormat::parse(arg_str(args, "format"))?;
             if let Some(display) = arg_i64(args, "display") {
                 let index = usize::try_from(display).map_err(|_| {
                     DesktopError::new("display index must be zero or greater")
                 })?;
-                let png = capture::capture_display(index, max_width)?;
-                return Ok(image_result(png, format!("display {index}")));
+                let bytes = capture::capture_display(index, max_width, format)?;
+                return Ok(image_result(bytes, format.mime_type(), format!("display {index}")));
             }
             let app = arg_str(args, "app").ok_or_else(|| {
                 DesktopError::new("provide 'app' to capture a window, or 'display' for a whole screen")
             })?;
             let pid = desktop.resolve_pid(app)?;
-            let (png, title) = capture::capture_app_window(pid, max_width)?;
-            return Ok(image_result(png, format!("{app} — \"{title}\"")));
+            let (bytes, title) = capture::capture_app_window(pid, max_width, format)?;
+            return Ok(image_result(bytes, format.mime_type(), format!("{app} — \"{title}\"")));
         }
         other => {
             return Err(DesktopError::new(format!("unknown tool '{other}'")));

@@ -1104,6 +1104,22 @@ func captureDisplayPNG(index: Int, maxWidth: Int) -> (data: Data, width: Int, he
             }
             config.width = Int(Double(display.width) * scale)
             config.height = Int(Double(display.height) * scale)
+            config.showsCursor = true
+
+            let image = try await SCScreenshotManager.captureImage(
+                contentFilter: SCContentFilter(display: display, excludingWindows: []),
+                configuration: config)
+            let fileType: NSBitmapImageRep.FileType = jpeg ? .jpeg : .png
+            let properties: [NSBitmapImageRep.PropertyKey: Any] = jpeg
+                ? [.compressionFactor: 0.55] : [:]
+            if let bytes = NSBitmapImageRep(cgImage: image).representation(
+                using: fileType, properties: properties)
+            {
+                lock.lock()
+                result = (bytes, display.width, display.height)
+                lock.unlock()
+            }
+            config.height = Int(Double(display.height) * scale)
             config.showsCursor = false
             let image = try await SCScreenshotManager.captureImage(
                 contentFilter: SCContentFilter(display: display, excludingWindows: []),

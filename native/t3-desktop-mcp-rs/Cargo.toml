@@ -20,7 +20,7 @@ base64 = "0.22.1"
 xcap = "0.9.8"
 # Local IPC for the Chrome bridge: named pipes on Windows, Unix sockets on Linux.
 interprocess = "2.4.3"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 
 [target.'cfg(windows)'.dependencies]
 # Friendly wrapper over the UI Automation COM API. Raw `windows` bindings would

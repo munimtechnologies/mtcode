@@ -131,6 +131,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.computersConnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.computersSync]: AuthOrchestrationOperateScope,
   [WS_METHODS.computersRespond]: AuthOrchestrationOperateScope,
+  [WS_METHODS.computerViewStream]: AuthOrchestrationOperateScope,
+  [WS_METHODS.computerViewInput]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribePreviewEvents]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeDiscoveredLocalServers]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
