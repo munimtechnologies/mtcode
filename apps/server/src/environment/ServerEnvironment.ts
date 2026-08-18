@@ -156,6 +156,7 @@ export const make = Effect.gen(function* () {
       threadGoal: true,
       threadPinning: true,
       threadPinReorder: true,
+      threadActiveReorder: true,
       threadTitleRegeneration: true,
       sourceControlSshPasswordPrompts: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),

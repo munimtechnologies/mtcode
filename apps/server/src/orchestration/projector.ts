@@ -25,6 +25,7 @@ import {
   ThreadSettledPayload,
   ThreadPinnedPayload,
   ThreadPinReorderedPayload,
+  ThreadActiveReorderedPayload,
   ThreadSnoozedPayload,
   ThreadUnpinnedPayload,
   ThreadUnarchivedPayload,
@@ -437,6 +438,19 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             pinOrderKey: payload.orderKey,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.active-reordered":
+      return decodeForEvent(ThreadActiveReorderedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            // Sticky: nothing clears this key, so a thread returning to the
+            // active shelf resumes its manual slot.
+            activeOrderKey: payload.orderKey,
             updatedAt: payload.updatedAt,
           }),
         })),

@@ -286,6 +286,16 @@ export function applyThreadDetailEvent(
         },
       };
 
+    case "thread.active-reordered":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          activeOrderKey: event.payload.orderKey,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
     // ── Thread metadata ─────────────────────────────────────────────
     case "thread.meta-updated":
       return {
