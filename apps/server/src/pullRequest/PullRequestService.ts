@@ -1328,6 +1328,9 @@ export const make = Effect.gen(function* () {
               checks: changeRequest.checks,
               mergeCapabilities: changeRequest.mergeCapabilities,
               viewerPermissions: changeRequest.viewerPermissions,
+              ...(changeRequest.diffRevision === undefined
+                ? {}
+                : { diffRevision: changeRequest.diffRevision }),
               ...(viewer === null || viewer.trim().length === 0 ? {} : { viewer }),
               ...(changeRequest.baseComparison === undefined
                 ? {}
@@ -2009,22 +2012,37 @@ export const make = Effect.gen(function* () {
 
   // Epochs are the invalidation mechanism: a key carries its scope's epoch, so bumping the
   // epoch strands every entry made under the old one — no enumerating a cache whose keys
-  // (cursors, commits) nothing holds a list of. The counter is shared and monotonic so a
-  // scope re-entering `refEpochs` after eviction can never mint a key an old entry still has.
+  // (cursors, commits) nothing holds a list of. Each bounded scope map advances its fallback
+  // when it evicts: an evicted scope can therefore never fall back to an old cache key.
   let epochCounter = 0;
   let listingsEpoch = 0;
-  const refEpochs = new Map<string, number>();
   const REF_EPOCH_CAPACITY = 2_048;
   const refScope = (ref: PullRequestRef) => `${ref.projectId} ${ref.repository} ${ref.number}`;
-  const refEpoch = (ref: PullRequestRef) => refEpochs.get(refScope(ref)) ?? 0;
-  const bumpRefEpoch = (ref: PullRequestRef) => {
-    const scope = refScope(ref);
-    if (!refEpochs.has(scope) && refEpochs.size >= REF_EPOCH_CAPACITY) {
-      const oldest = refEpochs.keys().next().value;
-      if (oldest !== undefined) refEpochs.delete(oldest);
-    }
-    refEpochs.set(scope, ++epochCounter);
+  const makeScopedEpochs = () => {
+    let fallback = 0;
+    const epochs = new Map<string, number>();
+    return {
+      get: (ref: PullRequestRef) => epochs.get(refScope(ref)) ?? fallback,
+      bump: (ref: PullRequestRef) => {
+        const scope = refScope(ref);
+        if (!epochs.has(scope) && epochs.size >= REF_EPOCH_CAPACITY) {
+          const oldest = epochs.keys().next().value;
+          if (oldest !== undefined) {
+            epochs.delete(oldest);
+            fallback = ++epochCounter;
+          }
+        }
+        epochs.set(scope, ++epochCounter);
+      },
+    };
   };
+  const refEpochs = makeScopedEpochs();
+  const aggregateDiffEpochs = makeScopedEpochs();
+  const refEpoch = (ref: PullRequestRef) => refEpochs.get(ref);
+  const aggregateDiffEpoch = (ref: PullRequestRef) => aggregateDiffEpochs.get(ref);
+  const bumpAggregateDiffEpoch = (ref: PullRequestRef) => aggregateDiffEpochs.bump(ref);
+  // Aggregate keys already carry this ref-wide epoch, so a full invalidation needs one bump.
+  const bumpRefEpoch = (ref: PullRequestRef) => refEpochs.bump(ref);
 
   /** The positional filter slot of a cache key, back as the record `listUncached` takes. */
   const filtersOfKey = (
@@ -2235,7 +2253,8 @@ export const make = Effect.gen(function* () {
 
   const diffCache = yield* Cache.makeWith(
     (key: string) => {
-      const [, projectId, repository, number, cursor, commit] = JSON.parse(key) as [
+      const [, , projectId, repository, number, cursor, commit] = JSON.parse(key) as [
+        number,
         number,
         string,
         string,
@@ -2255,7 +2274,7 @@ export const make = Effect.gen(function* () {
       capacity: DIFF_CACHE_CAPACITY,
       timeToLive: (exit, key) => {
         if (!Exit.isSuccess(exit)) return Duration.zero;
-        const commit = (JSON.parse(key) as ReadonlyArray<unknown>)[5];
+        const commit = (JSON.parse(key) as ReadonlyArray<unknown>)[6];
         return commit === null ? DIFF_CACHE_TTL : COMMIT_DIFF_CACHE_TTL;
       },
     },
@@ -2265,13 +2284,16 @@ export const make = Effect.gen(function* () {
     DIFF_CACHE_CAPACITY,
   );
   const diff: PullRequestService["Service"]["diff"] = (input) => {
+    const commit = input.commit ?? null;
     const key = JSON.stringify([
       refEpoch(input),
+      // A named commit is immutable. Only the aggregate diff follows the branch comparison epoch.
+      commit === null ? aggregateDiffEpoch(input) : 0,
       input.projectId,
       input.repository,
       input.number,
       input.cursor ?? null,
-      input.commit ?? null,
+      commit,
     ]);
     return staleDiff(key, Cache.get(diffCache, key));
   };
@@ -2316,6 +2338,10 @@ export const make = Effect.gen(function* () {
         // A whole-workspace refresh is the reader asking to be re-answered from the hosts,
         // and that includes who the hosts say they are.
         viewersByHost.clear();
+        return;
+      }
+      if (input.resource === "diff") {
+        bumpAggregateDiffEpoch(input.reference);
         return;
       }
       bumpRefEpoch(input.reference);
