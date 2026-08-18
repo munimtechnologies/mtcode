@@ -37,6 +37,7 @@ import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
+import { ServerActivation } from "../../serverActivation.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
@@ -155,6 +156,7 @@ describe("ProviderCommandReactor", () => {
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
     readonly queuedTurnHandoffBeforeStart?: boolean;
+    readonly serverActivation?: Effect.Effect<void>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -392,7 +394,7 @@ describe("ProviderCommandReactor", () => {
         } satisfies OrchestrationEngineService["Service"];
       }),
     ).pipe(Layer.provide(orchestrationLayer));
-    const layer = ProviderCommandReactorLive.pipe(
+    const baseLayer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(reactorOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
@@ -422,6 +424,12 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const layer =
+      input?.serverActivation === undefined
+        ? baseLayer
+        : baseLayer.pipe(
+            Layer.provideMerge(Layer.succeed(ServerActivation, input.serverActivation)),
+          );
     runtime = ManagedRuntime.make(layer);
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
@@ -589,6 +597,41 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("runs a turn.start published before activation once the server unparks", async () => {
+    const activation = await Effect.runPromise(Deferred.make<void>());
+    const harness = await createHarness({
+      serverActivation: Deferred.await(activation),
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(Effect.yieldNow);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-before-activation"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-before-activation"),
+          role: "user",
+          text: "The app restarted while you were working",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    expect(harness.startSession.mock.calls.length).toBe(0);
+    expect(harness.sendTurn.mock.calls.length).toBe(0);
+
+    await Effect.runPromise(Deferred.succeed(activation, undefined));
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>

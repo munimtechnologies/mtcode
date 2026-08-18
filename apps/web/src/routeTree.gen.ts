@@ -602,8 +602,8 @@ interface SettingsRouteChildren {
   SettingsProvidersRoute: typeof SettingsProvidersRoute
   SettingsSkillsRoute: typeof SettingsSkillsRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
-  SettingsPluginsPluginIdRoute: typeof SettingsPluginsPluginIdRoute
   SettingsVoiceRoute: typeof SettingsVoiceRoute
+  SettingsPluginsPluginIdRoute: typeof SettingsPluginsPluginIdRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -620,8 +620,8 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsProvidersRoute: SettingsProvidersRoute,
   SettingsSkillsRoute: SettingsSkillsRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
-  SettingsPluginsPluginIdRoute: SettingsPluginsPluginIdRoute,
   SettingsVoiceRoute: SettingsVoiceRoute,
+  SettingsPluginsPluginIdRoute: SettingsPluginsPluginIdRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

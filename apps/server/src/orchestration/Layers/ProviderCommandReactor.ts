@@ -23,7 +23,6 @@ import * as Equal from "effect/Equal";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -39,7 +38,7 @@ import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
-import { forkParked, ServerActivation } from "../../serverActivation.ts";
+import { forkParked, forkStreamParked, ServerActivation } from "../../serverActivation.ts";
 import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
 import {
   resolveSourceControlWriterModelSelection,
@@ -1500,7 +1499,10 @@ const make = Effect.gen(function* () {
       }
     });
 
-    yield* forkParked(Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent));
+    // Subscribe now and delay processing until activation. Parking the
+    // subscribe itself drops SessionStartupReconciler's resume turn.start,
+    // which is dispatched before the prepared boundary opens.
+    yield* forkStreamParked(orchestrationEngine.streamDomainEvents, processEvent);
 
     yield* Effect.gen(function* () {
       const persistedQueuedTurns = yield* projectionQueuedTurnRepository.listAll;
