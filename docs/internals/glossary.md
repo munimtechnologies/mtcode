@@ -96,6 +96,10 @@ A typed signal emitted when an async milestone completes, such as `checkpoint.ba
 
 "Quiesced" means a turn has gone quiet and stable: follow-up work such as [CheckpointReactor.ts][6] has settled. It appears in [the receipt schema][13], so in practice it is something tests wait on rather than a production signal.
 
+#### Turn watchdog
+
+An in-memory stall detector for active turns, the complement of the provider session reaper (which only reaps idle sessions). Runtime ingestion feeds a per-thread activity clock in [TurnWatchdog.ts][27]; the sweeper in [TurnWatchdogReactor.ts][28] surfaces a turn that has gone silent past the stall threshold as an error activity, and can optionally recover a hung turn by dispatching `thread.turn.interrupt`. Blocking approval and user-input requests pause the clock. Configured with `T3CODE_TURN_WATCHDOG` (`0` disables), `T3CODE_TURN_WATCHDOG_STALL_SECONDS` (default 300), and `T3CODE_TURN_WATCHDOG_INTERRUPT_SECONDS` (recovery, off by default).
+
 ### Provider runtime
 
 The live backend agent implementation and its event stream. The main service is [ProviderService.ts][14], the adapter contract is [ProviderAdapter.ts][15], and the overview is in [providers.md][16].
@@ -203,3 +207,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [24]: ./overview.md
 [25]: ../../apps/server/src/pullRequestStack/GitHubPullRequestStackService.ts
 [26]: ../../packages/contracts/src/pullRequestStack.ts
+[27]: ../../apps/server/src/orchestration/TurnWatchdog.ts
+[28]: ../../apps/server/src/orchestration/Layers/TurnWatchdogReactor.ts

@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -36,6 +37,7 @@ import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
+import { TurnWatchdogService } from "../TurnWatchdog.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -896,6 +898,7 @@ export function runtimeEventToActivities(
 const make = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
+  const turnWatchdog = yield* TurnWatchdogService;
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -2039,6 +2042,55 @@ const make = Effect.gen(function* () {
           break;
       }
 
+      // Turn watchdog: any runtime event is provider-liveness evidence.
+      // Lifecycle edges start/settle the watch, and blocking requests pause
+      // the clock while the human decides (a turn waiting on an approval or
+      // a user-input question is not stalled).
+      {
+        const eventAtMsRaw = Date.parse(event.createdAt);
+        const eventAtMs = Number.isFinite(eventAtMsRaw)
+          ? eventAtMsRaw
+          : yield* Clock.currentTimeMillis;
+        turnWatchdog.recordActivity({ threadId: thread.id, atMs: eventAtMs });
+        switch (event.type) {
+          case "turn.started":
+            turnWatchdog.recordTurnStarted({
+              threadId: thread.id,
+              turnId: toTurnId(event.turnId),
+              atMs: eventAtMs,
+            });
+            break;
+          case "turn.completed":
+          case "turn.aborted":
+            turnWatchdog.recordTurnSettled(thread.id);
+            break;
+          case "session.exited":
+            turnWatchdog.clearThread(thread.id);
+            break;
+          case "request.opened":
+          case "user-input.requested":
+            if (event.requestId !== undefined) {
+              turnWatchdog.recordBlockingRequestOpened({
+                threadId: thread.id,
+                requestId: event.requestId,
+              });
+            }
+            break;
+          case "request.resolved":
+          case "user-input.resolved":
+            if (event.requestId !== undefined) {
+              turnWatchdog.recordBlockingRequestResolved({
+                threadId: thread.id,
+                requestId: event.requestId,
+                atMs: eventAtMs,
+              });
+            }
+            break;
+          default:
+            break;
+        }
+      }
+
       let taskTitle: string | undefined;
       if (event.type === "task.completed") {
         taskTitle = yield* lookupTaskDescription(thread.id, event.payload.taskId);
@@ -2064,7 +2116,20 @@ const make = Effect.gen(function* () {
       ).pipe(Effect.asVoid);
     });
 
-  const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
+  // Turn watchdog: watch from the moment the turn is REQUESTED, not from the
+  // runtime's turn.started — a provider that hangs at spawn never emits any
+  // runtime event at all, and that is precisely the hang worth catching.
+  const processDomainEvent = (event: TurnStartRequestedDomainEvent) =>
+    Effect.gen(function* () {
+      const requestedAtMsRaw = Date.parse(event.payload.createdAt);
+      const requestedAtMs = Number.isFinite(requestedAtMsRaw)
+        ? requestedAtMsRaw
+        : yield* Clock.currentTimeMillis;
+      turnWatchdog.recordTurnStarted({
+        threadId: event.payload.threadId,
+        atMs: requestedAtMs,
+      });
+    });
 
   const processInput = (input: RuntimeIngestionInput) =>
     input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
