@@ -33,6 +33,7 @@ Your existing subscriptions are used directly — MT Code sells nothing and adds
 - **Resume on restart** — threads and agents that were running when the app closed automatically pick up where they left off at the next launch.
 - **Cross-thread references** — type `#` in the composer to reference another thread; the agent can read that thread's transcript.
 - **Thread-to-thread messaging** — agents can list sibling threads and send messages between them, so parallel work can coordinate.
+- **Agent-chosen computers** — agents can send a task to another machine already connected in MT Code (this computer, SSH, T3 Connect, or a paired backend) without you changing **Run on**.
 - **Better "Open in editor" on macOS** — detects Cursor, VS Code Insiders, VSCodium, Trae, Kiro, and JetBrains IDEs by their app bundles, even when their CLI shims aren't installed.
 - **Installs alongside official T3 Code** — its own bundle ID (`com.munim.t3code`) and its own isolated data directory, so it never touches the official app's settings or sessions.
 
@@ -48,6 +49,7 @@ Full docs live in [docs/](./docs):
 - [Desktop notifications](./docs/user/desktop-notifications.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Thread messaging](./docs/user/thread-messaging.md)
+- [Sending work to another computer](./docs/user/computer-routing.md)
 - [Keeping app and server in sync](./docs/user/updating.md)
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)

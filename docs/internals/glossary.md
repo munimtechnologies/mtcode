@@ -17,6 +17,13 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 
 ### Project and workspace
 
+#### Environment
+
+One running T3 server and the machine it owns (filesystem, providers, terminals). Clients can be
+connected to several environments at once (local, SSH, T3 Connect, paired LAN). Agents send work
+to another environment with the `computer_list` / `computer_send` MCP tools; the client brokers
+that hop because only it is authenticated to both servers.
+
 #### Project
 
 The top-level workspace record in the app. In [the orchestration contracts][1], a project has a `workspaceRoot` and a title. It does not contain threads: `OrchestrationProject` and `OrchestrationThread` are separate arrays on the read model, and a project can have zero threads. See [workspace-layout.md][2].
