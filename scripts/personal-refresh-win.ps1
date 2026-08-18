@@ -1,5 +1,5 @@
 # Refresh Blade to latest personal fork (upstream nightly + CU/History).
-# Clone remote "origin" here is github.com/sheehanmunim/t3code (personal branch).
+# Clone remote "origin" here is github.com/sheehanmunim/mtcode (personal branch).
 # Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork.
 # The fleet ships the MT Code brand on every machine, same as the Mac.
 param(
@@ -32,7 +32,7 @@ Log "refresh start"
 Log ("args DesktopVersion=$DesktopVersion ForceRebuild=$ForceRebuild envVersion=$($env:T3CODE_DESKTOP_VERSION) envForce=$($env:T3_FORCE_REBUILD)")
 
 if (-not (Test-Path $repo)) {
-  git clone --branch personal --single-branch https://github.com/sheehanmunim/t3code.git $repo
+  git clone --branch personal --single-branch https://github.com/sheehanmunim/mtcode.git $repo
 }
 Set-Location $repo
 git fetch origin personal

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Keep personal fork apps current on Mac + Blade + Dell.
-# Source of truth: sheehanmunim/t3code@personal (git remote "fork" on this Mac).
+# Source of truth: sheehanmunim/mtcode@personal (git remote "fork" on this Mac).
 # Builds with latest upstream nightly version so logo/artwork are Nightly,
 # but product name stays "T3 Code".
 #
@@ -13,7 +13,7 @@ set -euo pipefail
 # and only hand-run rebuilds ever reached the build step.
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
-# Mac checkout uses "fork" → github.com/sheehanmunim/t3code (not origin/pingdotgg).
+# Mac checkout uses "fork" → github.com/sheehanmunim/mtcode (not origin/pingdotgg).
 PERSONAL_REMOTE="${T3_PERSONAL_REMOTE:-fork}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
 STATE="$LOG_DIR/last-built-sha"

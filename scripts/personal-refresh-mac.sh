@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Refresh this Mac to latest personal fork, then push the same build to Blade + Dell.
-# Pulls sheehanmunim/t3code personal via the "fork" remote, builds arm64 DMG,
+# Pulls sheehanmunim/mtcode personal via the "fork" remote, builds arm64 DMG,
 # installs, relaunches (verified), then refreshes Windows.
 set -euo pipefail
 

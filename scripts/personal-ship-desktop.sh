@@ -14,7 +14,7 @@ cd "$REPO"
 git fetch "$PERSONAL_REMOTE" personal
 
 # If this checkout has local personal commits not on the fork yet, push them —
-# Blade builds from github.com/sheehanmunim/t3code@personal, not from this tree.
+# Blade builds from github.com/sheehanmunim/mtcode@personal, not from this tree.
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$branch" != "personal" ]]; then
   echo "checkout is '$branch'; expected 'personal' before shipping desktop" >&2

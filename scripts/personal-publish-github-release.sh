@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish public Munim desktop installers to GitHub Releases on sheehanmunim/t3code.
+# Publish public Munim desktop installers to GitHub Releases on sheehanmunim/mtcode.
 #
 # Builds with T3CODE_DESKTOP_DISTRO=munim so appId=com.munim.t3code and the
 # updater feed points at this fork. Then uploads assets for munimtech.com.
@@ -10,7 +10,7 @@ set -euo pipefail
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
-RELEASE_REPO="${T3_MUNIM_RELEASE_REPO:-sheehanmunim/t3code}"
+RELEASE_REPO="${T3_MUNIM_RELEASE_REPO:-sheehanmunim/mtcode}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/publish-munim-$(date +%Y%m%d).log"
 
@@ -134,7 +134,7 @@ for a in "${ASSETS[@]}"; do
 done
 
 NOTES=$(cat <<EOF
-MT Code — public build from \`sheehanmunim/t3code@personal\`.
+MT Code — public build from \`sheehanmunim/mtcode@personal\`.
 
 - App ID: \`com.munim.t3code\`
 - Downloads: https://munimtech.com/mt-code
