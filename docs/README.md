@@ -5,6 +5,7 @@
 - [Install and first run](./user/install.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
+- [Message composer](./user/composer.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Messaging between threads](./user/thread-messaging.md)
 - [Review usage](./user/usage.md)

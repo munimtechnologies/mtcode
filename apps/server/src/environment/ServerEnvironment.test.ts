@@ -106,6 +106,7 @@ it.layer(testNodeServices)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadGoal).toBe(true);
       expect(second.capabilities.sourceControlSshPasswordPrompts).toBe(true);
       expect(second.capabilities.providerHandoff).toBe(true);
+      expect(second.capabilities.threadMessageCorrection).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
     }),
   );

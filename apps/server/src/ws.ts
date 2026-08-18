@@ -293,6 +293,7 @@ function projectSetupScriptCompatibilityDetail(
 /** Event types delivered on subscribeThread; keep ProjectionSnapshotQuery watermark in sync. */
 export const THREAD_DETAIL_STREAM_EVENT_TYPES = [
   "thread.message-sent",
+  "thread.message-corrected",
   "thread.proposed-plan-upserted",
   "thread.activity-appended",
   "thread.turn-diff-completed",

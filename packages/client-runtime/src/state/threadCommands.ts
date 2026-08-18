@@ -6,6 +6,7 @@ import {
   type ArchiveThreadInput,
   type CreateThreadInput,
   type CancelQueuedThreadTurnInput,
+  type CorrectThreadMessageInput,
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
   type RespondToThreadApprovalInput,
@@ -31,6 +32,7 @@ import {
   type CompleteThreadGoalInput,
   type UpdateThreadMetadataInput,
   archiveThread,
+  correctThreadMessage,
   createThread,
   cancelQueuedThreadTurn,
   deleteThread,
@@ -64,6 +66,7 @@ export type {
   ArchiveThreadInput,
   CreateThreadInput,
   CancelQueuedThreadTurnInput,
+  CorrectThreadMessageInput,
   DeleteThreadInput,
   InterruptThreadTurnInput,
   RespondToThreadApprovalInput,
@@ -229,6 +232,9 @@ export function createThreadEnvironmentAtoms<R, E>(
     cancelQueuedTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:cancel-queued-turn",
       execute: (input: CancelQueuedThreadTurnInput) => cancelQueuedThreadTurn(input),
+    correctMessage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:correct-message",
+      execute: (input: CorrectThreadMessageInput) => correctThreadMessage(input),
       scheduler,
       concurrency,
     }),

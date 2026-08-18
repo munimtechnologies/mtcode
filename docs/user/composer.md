@@ -12,3 +12,12 @@ thread and can be cancelled before they start, even if the mobile app disconnect
 If the server restarts during the narrow handoff to a provider, T3 Code reports the delivery as
 interrupted instead of replaying it automatically, because the provider may already have received
 the message. Check the provider transcript before resending it.
+
+## Edit or revert a message
+
+When an idle thread ends with your message, you can edit that final message. Once the assistant has
+replied, Edit is no longer available. Editing changes the wording shown in the conversation and
+sends a corrective follow-up.
+
+On web and desktop, Revert remains available on completed turns that have a checkpoint. It returns
+both the conversation and workspace to the state before that message.

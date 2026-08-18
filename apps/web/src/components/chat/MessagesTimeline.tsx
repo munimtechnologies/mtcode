@@ -14,6 +14,7 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
+const NOOP_MESSAGE_EDIT = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   splitInlineVisualizations,
@@ -72,6 +73,8 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
+import { isCommentSubmitShortcut } from "../diffs/commentSubmitShortcut";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
@@ -148,6 +151,9 @@ interface TimelineRowSharedState {
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
   onCancelQueuedMessage: (messageId: MessageId) => void;
+  editableMessageId: MessageId | null;
+  editingMessageId: MessageId | null;
+  onBeginMessageEdit: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
@@ -156,9 +162,17 @@ interface TimelineRowSharedState {
   onOpenAgents: () => void;
 }
 
+interface TimelineMessageEditState {
+  isSavingMessageEdit: boolean;
+  canSaveMessageEdit: boolean;
+  readEditingDraft: () => string;
+  onEditingDraftChange: (draft: string) => void;
+  onCancelMessageEdit: () => void;
+  onSaveMessageEdit: (draft: string) => void;
+}
+
 interface TimelineRowActivityState {
   isWorking: boolean;
-  isRevertingCheckpoint: boolean;
   activeTurnInProgress: boolean;
   latestTurnId: TurnId | null;
   /** Current plan step label for the working row, when the turn has a plan. */
@@ -167,6 +181,7 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
+const TimelineMessageEditCtx = createContext<TimelineMessageEditState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FADE_HEADER = <div className="h-10 sm:h-12" />;
 
@@ -229,6 +244,13 @@ interface MessagesTimelineProps {
   onRevertUserMessage: (messageId: MessageId) => void;
   onCancelQueuedMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
+  editableMessageId?: MessageId | null;
+  editingMessageId?: MessageId | null;
+  editingDraft?: string;
+  isSavingMessageEdit?: boolean;
+  onBeginMessageEdit?: (messageId: MessageId) => void;
+  onCancelMessageEdit?: () => void;
+  onSaveMessageEdit?: (draft: string) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
   markdownCwd: string | undefined;
@@ -276,6 +298,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertUserMessage,
   onCancelQueuedMessage,
   isRevertingCheckpoint,
+  editableMessageId = null,
+  editingMessageId = null,
+  editingDraft = "",
+  isSavingMessageEdit = false,
+  onBeginMessageEdit = NOOP_MESSAGE_EDIT,
+  onCancelMessageEdit = NOOP_MESSAGE_EDIT,
+  onSaveMessageEdit = NOOP_MESSAGE_EDIT,
   onImageExpand,
   activeThreadEnvironmentId,
   markdownCwd,
@@ -293,6 +322,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
 }: MessagesTimelineProps) {
+  const editingDraftRef = useRef(editingDraft);
+  const editingDraftMessageIdRef = useRef(editingMessageId);
+  if (editingDraftMessageIdRef.current !== editingMessageId) {
+    editingDraftMessageIdRef.current = editingMessageId;
+    editingDraftRef.current = editingDraft;
+  }
+  const readEditingDraft = useCallback(() => editingDraftRef.current, []);
+  const onEditingDraftChange = useCallback((draft: string) => {
+    editingDraftRef.current = draft;
+  }, []);
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
@@ -524,6 +563,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onCancelQueuedMessage,
+      editableMessageId,
+      editingMessageId,
+      onBeginMessageEdit,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -541,6 +583,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onCancelQueuedMessage,
+      editableMessageId,
+      editingMessageId,
+      onBeginMessageEdit,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -549,15 +594,33 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenAgents,
     ],
   );
+  const messageEditState = useMemo<TimelineMessageEditState>(
+    () => ({
+      isSavingMessageEdit,
+      canSaveMessageEdit: editingMessageId !== null && editableMessageId === editingMessageId,
+      readEditingDraft,
+      onEditingDraftChange,
+      onCancelMessageEdit,
+      onSaveMessageEdit,
+    }),
+    [
+      editableMessageId,
+      editingMessageId,
+      isSavingMessageEdit,
+      onCancelMessageEdit,
+      onEditingDraftChange,
+      onSaveMessageEdit,
+      readEditingDraft,
+    ],
+  );
   const activityState = useMemo<TimelineRowActivityState>(
     () => ({
       isWorking,
-      isRevertingCheckpoint,
       activeTurnInProgress,
       latestTurnId: latestTurn?.turnId ?? null,
       workingStepLabel,
     }),
-    [activeTurnInProgress, isRevertingCheckpoint, isWorking, latestTurn?.turnId, workingStepLabel],
+    [activeTurnInProgress, isWorking, latestTurn?.turnId, workingStepLabel],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -586,6 +649,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
+    <TimelineMessageEditCtx value={messageEditState}>
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
         <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
@@ -644,6 +708,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
+    </TimelineMessageEditCtx>
   );
 });
 
@@ -1022,10 +1087,18 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
   const pdfs = userAttachments.filter((attachment) => attachment.type === "pdf");
   const canRevertAgentWork = typeof row.revertTurnCount === "number";
+  const canEditMessage = ctx.editableMessageId === row.message.id;
+  const isEditing = ctx.editingMessageId === row.message.id;
+  const wasEdited = row.message.originalText !== undefined;
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className={cn(
+          "relative rounded-2xl bg-message p-3 text-message-foreground",
+          isEditing ? "w-full max-w-full" : "max-w-[80%]",
+        )}
+      >
         {regularImages.length > 0 && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
@@ -1095,20 +1168,24 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
-        <CollapsibleUserMessageBody
-          text={elementContextState.promptText}
-          terminalContexts={terminalContexts}
-          skills={ctx.skills}
-          markdownCwd={ctx.markdownCwd}
-        />
-      </div>
-      <div
-        className={cn(
-          "flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100",
-          row.message.deliveryState === "queued" && "opacity-100",
+        {isEditing ? (
+          <InlineUserMessageEditor />
+        ) : (
+          <CollapsibleUserMessageBody
+            text={elementContextState.promptText}
+            terminalContexts={terminalContexts}
+            skills={ctx.skills}
+            markdownCwd={ctx.markdownCwd}
+          />
         )}
-      >
-        <div className="flex shrink-0 items-center gap-2">
+      </div>
+      <div className="flex w-full max-w-[80%] items-center justify-end gap-2 pe-1 text-xs tabular-nums">
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-2 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100",
+            isEditing || row.message.deliveryState === "queued" ? "opacity-100" : "opacity-0",
+          )}
+        >
           {row.message.deliveryState === "queued" ? (
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <span>Queued</span>
@@ -1132,8 +1209,14 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
               {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
             </TooltipPopup>
           </Tooltip>
+          {wasEdited ? <span className="text-muted-foreground">Edited</span> : null}
           <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+            {canEditMessage && !isEditing ? (
+              <EditUserMessageButton messageId={row.message.id} />
+            ) : null}
+            {canRevertAgentWork && !isEditing ? (
+              <RevertUserMessageButton messageId={row.message.id} />
+            ) : null}
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
@@ -1141,6 +1224,84 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         </div>
       </div>
     </div>
+  );
+}
+
+function InlineUserMessageEditor() {
+  const edit = use(TimelineMessageEditCtx);
+  const activity = use(TimelineRowActivityCtx);
+  const [draft, setDraft] = useState(edit.readEditingDraft);
+  const editingDisabled = edit.isSavingMessageEdit || activity.isWorking;
+  const submissionDisabled = editingDisabled || !edit.canSaveMessageEdit;
+  return (
+    <div className="w-full space-y-2">
+      <Textarea
+        autoFocus
+        aria-label="Edit message"
+        className="[&_[data-slot=textarea]]:max-h-50 [&_[data-slot=textarea]]:overflow-y-auto"
+        value={draft}
+        disabled={editingDisabled}
+        onChange={(event) => {
+          const nextDraft = event.currentTarget.value;
+          setDraft(nextDraft);
+          edit.onEditingDraftChange(nextDraft);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            edit.onCancelMessageEdit();
+          }
+          if (isCommentSubmitShortcut(event, draft, submissionDisabled)) {
+            event.preventDefault();
+            edit.onSaveMessageEdit(draft);
+          }
+        }}
+      />
+      <div className="flex justify-end gap-1.5">
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          className="text-secondary-label hover:bg-muted/55 hover:text-message-foreground"
+          disabled={edit.isSavingMessageEdit}
+          onClick={edit.onCancelMessageEdit}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          disabled={submissionDisabled || draft.trim().length === 0}
+          onClick={() => edit.onSaveMessageEdit(draft)}
+        >
+          {edit.isSavingMessageEdit ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function EditUserMessageButton({ messageId }: { messageId: MessageId }) {
+  const ctx = use(TimelineRowCtx);
+  const activity = use(TimelineRowActivityCtx);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            disabled={activity.isWorking}
+            onClick={() => ctx.onBeginMessageEdit(messageId)}
+            aria-label="Edit message"
+          />
+        }
+      >
+        <SquarePenIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Edit message</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -1156,7 +1317,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             type="button"
             size="xs"
             variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
+            disabled={activity.isWorking}
             onClick={() => ctx.onRevertUserMessage(messageId)}
             aria-label="Revert to this message"
           />
