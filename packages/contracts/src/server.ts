@@ -96,6 +96,20 @@ export const ServerProviderSkill = Schema.Struct({
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 
+export const ServerProviderWorkspaceCapabilitiesInput = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  projectId: ProjectId,
+  threadId: Schema.optional(ThreadId),
+});
+export type ServerProviderWorkspaceCapabilitiesInput =
+  typeof ServerProviderWorkspaceCapabilitiesInput.Type;
+
+export const ServerProviderWorkspaceCapabilities = Schema.Struct({
+  slashCommands: Schema.Array(ServerProviderSlashCommand),
+  skills: Schema.Array(ServerProviderSkill),
+});
+export type ServerProviderWorkspaceCapabilities = typeof ServerProviderWorkspaceCapabilities.Type;
+
 /**
  * The Codex app-server exposes these fields as part of its account/rate-limit
  * response. Keep this projection provider-agnostic at the transport boundary

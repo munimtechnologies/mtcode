@@ -6636,6 +6636,7 @@ function ChatViewContent(props: ChatViewProps) {
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
+                            activeProjectId={activeProject?.id ?? null}
                             activeProjectDefaultModelSelection={
                               activeProject?.defaultModelSelection
                             }
