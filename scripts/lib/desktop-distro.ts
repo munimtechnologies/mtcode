@@ -45,17 +45,17 @@ const MUNIM: DesktopDistroIdentity = {
   id: "munim",
   appId: "com.munim.mtcode",
   productName: "MT Code",
-  packageName: "t3code-munim",
+  packageName: "mtcode",
   artifactName: "MT-Code-${version}-${arch}.${ext}",
   description: "MT Code — Munim Technologies fork of T3 Code",
   author: "Munim Technologies",
   updateRepository: "sheehanmunim/t3code",
-  protocolSchemes: ["t3code-munim", "t3code-munim-dev"],
+  protocolSchemes: ["mtcode", "mtcode-dev"],
   protocolName: "MT Code",
-  linuxExecutableName: "t3code-munim",
-  linuxStartupWmClass: "t3code-munim",
+  linuxExecutableName: "mtcode",
+  linuxStartupWmClass: "mtcode",
   nsisShortcutName: "MT Code",
-  nsisInstallDirectoryName: "t3code-munim",
+  nsisInstallDirectoryName: "mtcode",
 };
 
 export function resolveDesktopDistroId(
