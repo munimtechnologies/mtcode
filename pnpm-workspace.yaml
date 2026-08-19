@@ -26,7 +26,7 @@ allowBuilds:
 catalog:
   "@clerk/backend": 3.14.0
   "@clerk/clerk-js": 6.29.2
-  "@clerk/electron": 0.0.34-canary.v20260819050620
+  "@clerk/electron": 0.0.24
   "@clerk/electron-passkeys": 0.0.3
   "@clerk/expo": 4.2.0
   "@clerk/react": 6.14.4
@@ -56,7 +56,7 @@ catalog:
 minimumReleaseAgeExclude:
   - "@clerk/backend@3.14.0"
   - "@clerk/clerk-js@6.29.2"
-  - "@clerk/electron@0.0.34-canary.v20260819050620"
+  - "@clerk/electron@0.0.24"
   - "@clerk/electron-passkeys@0.0.3"
   - "@clerk/expo@4.2.0"
   - "@clerk/react@6.14.4"
