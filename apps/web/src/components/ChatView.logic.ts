@@ -405,7 +405,7 @@ export function deriveLockedProvider(input: {
   if (!threadHasStarted(input.thread)) {
     return null;
   }
-  // MT Model is a harness router. The live session sits on whatever backend
+  // MT Auto is a harness router. The live session sits on whatever backend
   // it picked; locking to that backend would steal the picker away from MT.
   if (isMtModelSelection(input.thread?.modelSelection)) {
     return null;

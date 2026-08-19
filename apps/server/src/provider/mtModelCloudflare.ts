@@ -1,7 +1,7 @@
 // @effect-diagnostics globalTimersInEffect:off - the classifier races a raw fetch against a deadline.
 // @effect-diagnostics preferSchemaOverJson:off - the worker response is untyped JSON, validated by hand below.
 /**
- * Optional Cloudflare classifier for MT Model.
+ * Optional Cloudflare classifier for MT Auto.
  *
  * MT Code matches T3 Code: local and $0 by default. This client stays dark
  * unless `MT_MODEL_ROUTER_URL` is set to an explicit worker URL. We never

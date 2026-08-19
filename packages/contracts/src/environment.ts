@@ -78,6 +78,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server can start a fresh provider session and replay bounded thread
       context when a started thread switches to an incompatible provider. */
   providerHandoff: Schema.optionalKey(Schema.Boolean),
+  /** Server understands the `mt` router instance and picks a real backend per
+      turn. Absent on servers from before MT Auto, which reject the instance
+      outright - so clients must not offer it for those environments. */
+  modelRouting: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.message.correct. Absent on older servers, so
       clients hide the action instead of sending it. */
   threadMessageCorrection: Schema.optionalKey(Schema.Boolean),
