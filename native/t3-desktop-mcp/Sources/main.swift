@@ -2376,6 +2376,34 @@ if CommandLine.arguments.contains("computer-history") {
     fputs("t3-desktop-mcp: computer-history requires --root <dir>\n", stderr)
     exit(2)
 }
+// Ask macOS for the permissions Computer Use needs, from inside the app bundle
+// so TCC records them against the app rather than whatever spawned us.
+//
+// This exists because a TCC row can outlive the signature it was granted to:
+// after a re-sign, System Settings still shows the app enabled while tccd logs
+// "Failed to match existing code requirement" and every AX call is refused.
+// Prompting re-creates the row against the signature running now.
+if CommandLine.arguments.contains("request-permissions") {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.accessory)
+    let prompted = AXIsProcessTrustedWithOptions(
+        [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+    )
+    // Screen Recording has no prompt API; macOS only lists an app once it has
+    // actually attempted a capture, so attempt one.
+    let screen = CGPreflightScreenCaptureAccess()
+    if !screen { _ = CGRequestScreenCaptureAccess() }
+    let payload: [String: Any] = [
+        "accessibility": prompted,
+        "screenRecording": CGPreflightScreenCaptureAccess(),
+    ]
+    if let data = try? JSONSerialization.data(withJSONObject: payload),
+       let text = String(data: data, encoding: .utf8) {
+        print(text)
+    }
+    exit(prompted ? 0 : 1)
+}
+
 // The agent pointer is a separate LSUIElement .app (see AgentCursor.swift)
 // launched via NSWorkspace with `--socket <path>` for move/hide commands.
 if CommandLine.arguments.contains("cursor-overlay") {
