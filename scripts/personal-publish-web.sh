@@ -32,10 +32,18 @@ if [[ "$MUNIM_CONNECT_ACTIVE" != 1 ]]; then
   echo "building without Munim Clerk; T3 Connect will still be offered as an external option"
 fi
 
-# Match the desktop munim distro: Nightly stage (sidebar artwork) with a plain
-# "MT Code" shell name, no "(Alpha)"/"(Nightly)" suffix.
-VITE_HOSTED_APP_URL="$HOSTED_URL" VITE_APP_BASE_NAME="MT Code" \
-  VITE_APP_STAGE_LABEL="Nightly" VITE_APP_DISPLAY_NAME="MT Code" \
+# Same single version the desktop builds stamp, so About on the hosted app
+# matches the installers instead of reporting the checked-in package version.
+# shellcheck source=lib/personal-mt-version.sh
+source "$REPO/scripts/lib/personal-mt-version.sh"
+personal_mt_export_desktop_version
+echo "web version $T3CODE_DESKTOP_VERSION"
+
+# Match the desktop munim distro: plain "MT Code", one release, no stage
+# suffix. Sidebar artwork is a setting now, not a side effect of a channel.
+APP_VERSION="$T3CODE_DESKTOP_VERSION" \
+  VITE_HOSTED_APP_URL="$HOSTED_URL" VITE_APP_BASE_NAME="MT Code" \
+  VITE_APP_DISPLAY_NAME="MT Code" \
   vp run --filter @t3tools/web build
 node scripts/apply-web-brand-assets.ts munim apps/web/dist
 

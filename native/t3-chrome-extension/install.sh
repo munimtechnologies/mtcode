@@ -63,7 +63,7 @@ for profile in "$@"; do
   cat > "$dir/$HOST_NAME.json" <<EOF
 {
   "name": "$HOST_NAME",
-  "description": "T3 Code desktop control bridge",
+  "description": "MT Code desktop control bridge",
   "path": "$wrapper",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
