@@ -182,8 +182,9 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     yield* Console.log("T3 Code is already set up to run in the background on this machine.");
     return true;
   }
-  // LaunchAgent / Startup shortcut start at login/sign-in and die at logout.
-  // systemd can linger; do not promise that on macOS or Windows.
+  // A LaunchAgent (macOS) and a Startup shortcut (Windows) both start at
+  // login and die at logout; neither has an enable-linger equivalent the way
+  // systemd does. Do not promise more than that.
   const platform = yield* HostProcessPlatform;
   const wanted = yield* Prompt.run(
     Prompt.confirm({
