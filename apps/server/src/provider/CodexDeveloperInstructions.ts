@@ -1,5 +1,7 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 
+import { resolveAppDisplayName } from "../appDisplayName.ts";
+
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## T3 Code collaborative browser
@@ -244,9 +246,15 @@ export function buildCodexDeveloperInstructions(
     readonly computerHomeWorkspace?: boolean;
   },
 ): string {
+  // Absent means "the caller did not say", which is not the same as false, so
+  // the keys are omitted rather than set to undefined.
   const extras = {
-    desktopToolsAvailable: options?.desktopToolsAvailable,
-    computerHomeWorkspace: options?.computerHomeWorkspace,
+    ...(options?.desktopToolsAvailable === undefined
+      ? {}
+      : { desktopToolsAvailable: options.desktopToolsAvailable }),
+    ...(options?.computerHomeWorkspace === undefined
+      ? {}
+      : { computerHomeWorkspace: options.computerHomeWorkspace }),
   };
   const base =
     interactionMode === "plan"
@@ -255,5 +263,5 @@ export function buildCodexDeveloperInstructions(
   const history = options?.computerHistoryContext ? `\n\n${options.computerHistoryContext}` : "";
   return `${base}
 
-<runtime_info>In case you're asked: you are running in T3 Code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>${history}`;
+<runtime_info>In case you're asked: you are running in ${resolveAppDisplayName()} through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>${history}`;
 }

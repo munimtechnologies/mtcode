@@ -975,7 +975,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     return yield* new ProviderProbeTimeoutError({
       provider: "Claude Agent",
       probe: "version",
-      timeoutMs: DEFAULT_TIMEOUT_MS,
+      timeoutMs: versionTimeoutMs,
       installed: true,
     });
   }

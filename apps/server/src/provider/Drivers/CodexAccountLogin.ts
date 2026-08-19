@@ -11,6 +11,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -93,12 +94,13 @@ const awaitLoginCompleted = (
   client: CodexClient.CodexAppServerClient["Service"],
   instanceId: ProviderInstanceId,
 ) =>
-  client.notifications.pipe(
-    Stream.filterMap((notification) =>
-      notification.method === "account/login/completed" && isLoginCompleted(notification.params)
-        ? Option.some(notification.params)
-        : Option.none(),
-    ),
+  client.raw.notifications.pipe(
+    Stream.filterMap((notification) => {
+      const params = notification.params;
+      return notification.method === "account/login/completed" && isLoginCompleted(params)
+        ? Result.succeed(params)
+        : Result.failVoid;
+    }),
     Stream.take(1),
     Stream.runHead,
     Effect.flatMap((completed) => {

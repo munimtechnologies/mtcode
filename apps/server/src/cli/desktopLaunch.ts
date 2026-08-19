@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - resolves installed app paths before any Effect runtime exists.
 /**
  * Best-effort activate-or-launch of the installed T3 Code desktop app so
  * `t3 .` can attach a project to it instead of starting a headless server.

@@ -92,7 +92,7 @@ const makeCliTestServerConfig = (
       staticDir: undefined,
       // Origin for open/attach is still the backend HTTP port; a recorded
       // devUrl only selects the `dev/` state directory for this fixture.
-      devUrl: asDev ? "http://localhost:5733" : undefined,
+      devUrl: asDev ? new URL("http://localhost:5733") : undefined,
       devAllowedOrigins: [],
       noBrowser: true,
       startupPresentation: "browser",
@@ -736,10 +736,8 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
       const baseDir = NodeFS.mkdtempSync(
         NodePath.join(NodeOS.tmpdir(), "t3-cli-open-live-fail-test-"),
       );
-      const missingWorkspace = NodePath.join(
-        NodeOS.tmpdir(),
-        `t3-cli-open-live-missing-${Date.now()}`,
-      );
+      // Unique because baseDir already is; no clock needed.
+      const missingWorkspace = NodePath.join(baseDir, "missing-workspace");
 
       yield* withLiveProjectCliServer(baseDir, () =>
         Effect.gen(function* () {
@@ -761,7 +759,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
           );
         }),
       );
-    }),
+    }).pipe(Effect.provide(NetService.layer)),
   );
 
   it.effect("rejects dev-url on project commands", () =>

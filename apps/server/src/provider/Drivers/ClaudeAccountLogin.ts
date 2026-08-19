@@ -13,6 +13,7 @@
 import * as NodeOS from "node:os";
 
 import * as Effect from "effect/Effect";
+import type * as Cause from "effect/Cause";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 
@@ -160,7 +161,9 @@ export function makeClaudeAccountLogin(
         }),
       );
 
-      const signals = yield* Queue.unbounded<SetupTokenSignal>();
+      // The exit handler ends the queue, which Effect models as a `Done`
+      // failure, so the queue has to admit it.
+      const signals = yield* Queue.unbounded<SetupTokenSignal, Cause.Done>();
       let transcript = "";
       let sawUrl = false;
       process.onData((data) => {
@@ -202,13 +205,14 @@ export function makeClaudeAccountLogin(
       });
 
       const events: ProviderAccountLoginFlow["events"] = Stream.fromQueue(signals).pipe(
-        Stream.mapEffect((signal) =>
-          signal.kind === "url"
-            ? Effect.succeed({
-                type: "awaitingCode",
-                url: signal.url,
-              } as const satisfies ProviderAccountLoginEvent)
-            : settle,
+        Stream.mapEffect(
+          (signal): Effect.Effect<ProviderAccountLoginEvent, ProviderAccountLoginError> =>
+            signal.kind === "url"
+              ? Effect.succeed({
+                  type: "awaitingCode",
+                  url: signal.url,
+                } as const satisfies ProviderAccountLoginEvent)
+              : settle,
         ),
       );
 

@@ -43,12 +43,14 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
-import { CodexDriver } from "../Drivers/CodexDriver.ts";
-import { CursorDriver } from "../Drivers/CursorDriver.ts";
-import { GrokDriver } from "../Drivers/GrokDriver.ts";
-import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
+import { ClaudeDriver, type ClaudeDriverEnv } from "../Drivers/ClaudeDriver.ts";
+import { CodexDriver, type CodexDriverEnv } from "../Drivers/CodexDriver.ts";
+import { CursorDriver, type CursorDriverEnv } from "../Drivers/CursorDriver.ts";
+import { GrokDriver, type GrokDriverEnv } from "../Drivers/GrokDriver.ts";
+import { OpenCodeDriver, type OpenCodeDriverEnv } from "../Drivers/OpenCodeDriver.ts";
+import type { AnyProviderDriver } from "../ProviderDriver.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
+import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
 
@@ -303,7 +305,15 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   // provides `OpenCodeRuntimeLive`'s deps while keeping its own outputs
   // surfaced; that merged layer then provides `ServerConfig.layerTest`'s
   // `FileSystem` dep while keeping everything else surfaced to the test.
-  const infraLayer = OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer));
+  // Claude's driver yields PtyAdapter at construction (account sign-in runs
+  // `claude setup-token` in a PTY). Nothing in this suite spawns one.
+  const testPtyAdapter = Layer.succeed(PtyAdapter.PtyAdapter, {
+    spawn: () => Effect.fail(new PtyAdapter.PtySpawnError({ adapter: "test", shell: "none" })),
+  } as PtyAdapter.PtyAdapter["Service"]);
+  const infraLayer = OpenCodeRuntimeLive.pipe(
+    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(testPtyAdapter),
+  );
   const testLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "provider-instance-registry-all-drivers-test",
   }).pipe(
@@ -364,8 +374,20 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         },
       };
 
+      // Spelled out so the array is not inferred from its first element:
+      // each driver asks for its own services, and the registry takes their
+      // union.
+      const drivers: ReadonlyArray<
+        AnyProviderDriver<
+          | CodexDriverEnv
+          | ClaudeDriverEnv
+          | CursorDriverEnv
+          | GrokDriverEnv
+          | OpenCodeDriverEnv
+        >
+      > = [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver];
       const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver],
+        drivers,
         configMap,
       });
 

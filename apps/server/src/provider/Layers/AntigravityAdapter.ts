@@ -48,6 +48,13 @@ export interface AntigravityAdapterLiveOptions {
 }
 
 interface ActiveProcessHandle {
+  /**
+   * The spawned process itself, kept so the monitor can tell whether the
+   * process it is finishing is still the session's current one. Comparing the
+   * wrapper to the raw handle never matched, which left a finished turn's
+   * process recorded as active.
+   */
+  readonly handle: unknown;
   readonly kill: () => Effect.Effect<void, never, never>;
 }
 
@@ -278,7 +285,7 @@ export function makeAntigravityAdapter(
           const turnStartedAt = yield* nowIso;
           const turnStartEventId = yield* nextEventId;
 
-          const turnRecord = {
+          const turnRecord: { id: TurnId; items: Array<unknown> } = {
             id: turnId,
             items: [{ prompt: input.input ?? "" }],
           };
@@ -392,6 +399,7 @@ export function makeAntigravityAdapter(
           );
 
           ctx.activeProcess = {
+            handle: processHandle,
             kill: () => Effect.asVoid(Effect.ignore(processHandle.kill())),
           };
 
@@ -548,7 +556,7 @@ export function makeAntigravityAdapter(
               threadId,
               Effect.gen(function* () {
                 if (ctx.activeTurnId !== turnId) return;
-                if (ctx.activeProcess === processHandle) {
+                if (ctx.activeProcess?.handle === processHandle) {
                   ctx.activeProcess = undefined;
                 }
                 ctx.activeTurnId = undefined;
@@ -578,7 +586,7 @@ export function makeAntigravityAdapter(
                     return yield* Effect.failCause(cause);
                   }
                   if (ctx.activeTurnId !== turnId) return;
-                  if (ctx.activeProcess === processHandle) {
+                  if (ctx.activeProcess?.handle === processHandle) {
                     yield* processHandle.kill();
                     ctx.activeProcess = undefined;
                   }

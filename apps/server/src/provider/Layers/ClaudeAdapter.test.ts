@@ -74,19 +74,43 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public getContextUsageCalls = 0;
   public getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
 
+  /**
+   * Recorded rather than bound, so the stub survives the query the adapter
+   * creates at session start: a test that stubs before `startSession` was
+   * otherwise stubbing an instance the adapter then replaced.
+   */
+  private contextUsageStub:
+    | { readonly kind: "response"; readonly response: SDKControlGetContextUsageResponse }
+    | { readonly kind: "failure" }
+    | undefined;
+
   stubContextUsage(response: SDKControlGetContextUsageResponse): void {
     this.getContextUsageCalls = 0;
-    this.getContextUsage = async () => {
-      this.getContextUsageCalls += 1;
-      return response;
-    };
+    this.contextUsageStub = { kind: "response", response };
+    this.installContextUsage();
   }
 
   stubContextUsageFailure(): void {
     this.getContextUsageCalls = 0;
+    this.contextUsageStub = { kind: "failure" };
+    this.installContextUsage();
+  }
+
+  /** Carry a previous query's stubs onto the one that replaced it. */
+  adoptStubsFrom(previous: FakeClaudeQuery | undefined): void {
+    if (!previous?.contextUsageStub) return;
+    this.contextUsageStub = previous.contextUsageStub;
+    this.getContextUsageCalls = previous.getContextUsageCalls;
+    this.installContextUsage();
+  }
+
+  private installContextUsage(): void {
     this.getContextUsage = async () => {
       this.getContextUsageCalls += 1;
-      throw new Error("getContextUsage failed");
+      const stub = this.contextUsageStub;
+      if (stub?.kind === "failure") throw new Error("getContextUsage failed");
+      if (stub?.kind === "response") return stub.response;
+      throw new Error("getContextUsage was not stubbed");
     };
   }
 
@@ -256,7 +280,9 @@ function makeHarness(config?: {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
     createQuery: (input) => {
       createInput = input;
+      const previous = query;
       query = new FakeClaudeQuery();
+      query.adoptStubsFrom(previous);
       return query;
     },
     ...(config?.resolveSdkSettings

@@ -127,6 +127,9 @@ function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
   const environment = {
     getEnvironmentId: Effect.succeed(environmentId),
     getDescriptor: Effect.succeed(descriptor),
+    // Nothing in these handlers renames the environment; the stub exists so
+    // the service shape is complete.
+    setEnvironmentLabel: () => Effect.void,
   } satisfies ServerEnvironment.ServerEnvironment["Service"];
 
   return McpServer.toolkit(ComputerToolkit).pipe(

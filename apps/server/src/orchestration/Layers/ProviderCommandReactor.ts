@@ -849,7 +849,7 @@ const make = Effect.gen(function* () {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
       prompt: input.messageText,
-      attachmentCount: input.attachments?.length,
+      ...(input.attachments === undefined ? {} : { attachmentCount: input.attachments.length }),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     });
     if (input.modelSelection !== undefined) {
@@ -1292,7 +1292,7 @@ const make = Effect.gen(function* () {
 
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageId: event.payload.messageId,
+      ...(event.payload.messageId === undefined ? {} : { messageId: event.payload.messageId }),
       messageText: message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined

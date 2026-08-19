@@ -39,6 +39,7 @@ import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
 import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
+import { providerDisabledMessage } from "../../appDisplayName.ts";
 import {
   haveProvidersChanged,
   mergeProviderSnapshot,
@@ -1981,10 +1982,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               ]);
               assert.strictEqual(cursorProvider?.enabled, false);
               assert.strictEqual(cursorProvider?.status, "disabled");
-              assert.strictEqual(
-                cursorProvider?.message,
-                "Cursor is disabled in T3 Code settings.",
-              );
+              // The brand is whatever build this runs in (MT Code inherits its
+              // name from the desktop app), so assert against the same source
+              // the message is built from.
+              assert.strictEqual(cursorProvider?.message, providerDisabledMessage("Cursor"));
               assert.strictEqual(cursorSpawned, false);
             }).pipe(Effect.provide(runtimeServices));
           }),
@@ -1998,7 +1999,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.enabled, false);
           assert.strictEqual(status.status, "disabled");
           assert.strictEqual(status.installed, false);
-          assert.strictEqual(status.message, "Codex is disabled in T3 Code settings.");
+          assert.strictEqual(status.message, providerDisabledMessage("Codex"));
         }),
       );
     });

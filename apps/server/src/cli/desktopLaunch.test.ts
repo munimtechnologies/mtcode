@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - the suite builds installed-app paths by hand.
 import * as NodePath from "node:path";
 
 import { assert, it } from "@effect/vitest";
