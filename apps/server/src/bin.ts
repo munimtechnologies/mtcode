@@ -21,6 +21,7 @@ import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { triageCommand } from "./cli/triage.ts";
+import { resolveAppDisplayName } from "./appDisplayName.ts";
 
 const DESKTOP_OPEN_POLL_ATTEMPTS = 40;
 const DESKTOP_OPEN_POLL_DELAY = Duration.millis(500);
@@ -50,7 +51,7 @@ const openProjectViaDesktopOrLiveServer = Effect.fn("openProjectViaDesktopOrLive
     }
 
     yield* Console.error(
-      "Launched T3 Code desktop, but it did not become ready in time. Falling back to the CLI server.",
+      `Launched ${resolveAppDisplayName()} desktop, but it did not become ready in time. Falling back to the CLI server.`,
     );
     return false;
   },
@@ -85,7 +86,7 @@ const connectUnavailableCommand = Command.make("connect", {
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
   Command.make("t3", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription(
-      "Run the T3 Code server, or open a directory in the desktop app / a running server.",
+      `Run the ${resolveAppDisplayName()} server, or open a directory in the desktop app / a running server.`,
     ),
     Command.withHandler((flags) =>
       Effect.gen(function* () {

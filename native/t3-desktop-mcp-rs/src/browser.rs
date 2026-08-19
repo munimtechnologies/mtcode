@@ -1,4 +1,4 @@
-//! Agent-owned Chrome tabs, via the T3 Code Chrome extension.
+//! Agent-owned Chrome tabs, via the MT Code Chrome extension.
 //!
 //! Chrome owns the lifetime of a native messaging host: it spawns the host when
 //! the extension connects and speaks 4-byte-length-prefixed JSON over that
@@ -172,7 +172,7 @@ impl BrowserBridge {
     pub fn call(&mut self, command: &str, args: &Value) -> Result<String, String> {
         if !self.connected() {
             return Err(format!(
-                "browser_{command} needs the T3 Code Chrome extension, which is not connected. \
+                "browser_{command} needs the MT Code Chrome extension, which is not connected. \
                  Install it from native/t3-chrome-extension, or use the desktop tools instead: \
                  get_app_state on the browser window, then click"
             ));
