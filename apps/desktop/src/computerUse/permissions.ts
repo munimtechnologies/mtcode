@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Sync Chrome preference reads for IPC must stay off the Effect runtime.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -252,6 +253,26 @@ export function readComputerUsePermissions(): DesktopComputerUsePermissionsState
   };
 }
 
+/** TCC's own name for each pane, as `tccutil reset` expects it. */
+function tccServiceFor(pane: DesktopComputerUsePrivacyPane): string {
+  return pane === "accessibility" ? "Accessibility" : "ScreenCapture";
+}
+
+function permissionStatusFor(
+  pane: DesktopComputerUsePrivacyPane,
+): DesktopComputerUsePermission["status"] {
+  return pane === "accessibility" ? accessibilityStatus() : screenRecordingStatus();
+}
+
+/** The bundle TCC records grants against; falls back to the shipped id. */
+function bundleIdentifier(): string {
+  try {
+    return Electron.app.getName() === "" ? "com.munim.mtcode" : (Electron.app as unknown as { getBundleIdentifier?: () => string }).getBundleIdentifier?.() ?? "com.munim.mtcode";
+  } catch {
+    return "com.munim.mtcode";
+  }
+}
+
 function privacySettingsUrl(pane: DesktopComputerUsePrivacyPane): string {
   // Legacy Security preference pane anchors still open the right list on
   // modern macOS and are more reliable than the Settings app deep links.
@@ -268,6 +289,22 @@ export async function openComputerUsePrivacySettings(
 ): Promise<boolean> {
   if (process.platform !== "darwin") {
     return false;
+  }
+
+  // A TCC row can outlive the signature it was granted to: after the app is
+  // re-signed, System Settings still shows it enabled while tccd logs "Failed
+  // to match existing code requirement" and refuses every call. The user then
+  // toggles a checkbox that is already on and nothing changes. Clearing the
+  // stale row first means the prompt below re-creates it against the signature
+  // running now.
+  if (permissionStatusFor(pane) === "denied") {
+    try {
+      NodeChildProcess.spawnSync("tccutil", ["reset", tccServiceFor(pane), bundleIdentifier()], {
+        timeout: 5_000,
+      });
+    } catch {
+      // Prompt anyway; a failed reset only means the stale row survives.
+    }
   }
 
   // Prompting trust adds this app to the Accessibility list when missing.
