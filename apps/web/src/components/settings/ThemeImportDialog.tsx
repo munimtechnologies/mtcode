@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { ThemeSearchSection } from "./ThemeSearchSection";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 /**
  * A full theme export is a few KB, so anything past this is not a theme file.
@@ -529,7 +530,7 @@ export function ThemeImportDialog({
                   <div className="min-w-0">
                     <p className="text-sm font-medium">Theme file</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {fileName ?? "Drop T3 Code or VS Code .json files"}
+                      {fileName ?? `Drop ${APP_DISPLAY_NAME} or VS Code .json files`}
                     </p>
                   </div>
                   {chooseButton()}

@@ -58,6 +58,7 @@ import {
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
 import { connectionStorageLayer } from "./storage";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 let nextObservedRpcRequestId = 0;
 
@@ -117,7 +118,7 @@ function clientMetadata() {
   const desktop = window.desktopBridge !== undefined;
   const platform = navigator.platform.trim();
   return {
-    label: desktop ? "T3 Code Desktop" : "T3 Code Web",
+    label: desktop ? `${APP_DISPLAY_NAME} Desktop` : `${APP_DISPLAY_NAME} Web`,
     deviceType: "desktop" as const,
     ...(platform === "" ? {} : { os: platform }),
   };

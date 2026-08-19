@@ -18,6 +18,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { APP_DISPLAY_NAME } from "~/branding";
 const installSteps: ReadonlyArray<{
   readonly stage: RelayClientInstallProgressStage;
   readonly label: string;
@@ -69,8 +70,8 @@ export function RelayClientInstallDialog() {
           </DialogTitle>
           <DialogDescription>
             {isInstalling
-              ? "T3 Code is preparing this environment for secure access through T3 Connect."
-              : "T3 Code needs the relay client to make this environment available through T3 Connect."}
+              ? `${APP_DISPLAY_NAME} is preparing this environment for secure access through T3 Connect.`
+              : `${APP_DISPLAY_NAME} needs the relay client to make this environment available through T3 Connect.`}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -91,7 +92,7 @@ export function RelayClientInstallDialog() {
                 value={activeStepIndex + 1}
               />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Keep T3 Code open while the relay client is installed.
+                Keep ${APP_DISPLAY_NAME} open while the relay client is installed.
               </p>
             </div>
           ) : (
