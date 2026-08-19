@@ -28,16 +28,20 @@ const developmentMacIconPngPath = NodePath.join(
   "blueprint-macos-1024.png",
 );
 const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "prod", "black-macos-1024.png");
+const munimMacIconPngPath = NodePath.join(repoRoot, "assets", "munim", "munim-macos-1024.png");
 const nightlyMacIconPngPath = NodePath.join(
   repoRoot,
   "assets",
   "nightly",
   "nightly-macos-1024.png",
 );
-// Personal fork: prefer Nightly dock icon for packaged/local non-dev launches.
-const packagedMacIconPngPath = NodeFS.existsSync(nightlyMacIconPngPath)
-  ? nightlyMacIconPngPath
-  : productionMacIconPngPath;
+const isMunimDistro = process.env.T3CODE_DESKTOP_DISTRO === "munim";
+const packagedMacIconPngPath =
+  isMunimDistro && NodeFS.existsSync(munimMacIconPngPath)
+    ? munimMacIconPngPath
+    : NodeFS.existsSync(nightlyMacIconPngPath)
+      ? nightlyMacIconPngPath
+      : productionMacIconPngPath;
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 

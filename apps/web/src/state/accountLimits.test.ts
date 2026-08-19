@@ -120,9 +120,67 @@ describe("mergeEnvironmentLimits", () => {
     expect(merged.get("codex")?.map((row) => row.instanceLabel)).toEqual(["codex_a", "codex_b"]);
   });
 
-  it("never dedupes across environments - clock skew must not delete a correct row", () => {
-    // Both environments run the default instance id. The desktop's clock is
-    // ahead; the laptop's row must survive anyway.
+  it("collapses the same subscription windows reported from several computers", () => {
+    const windows = [
+      {
+        id: "month",
+        label: "Month",
+        usedPercent: 100,
+        resetsAt: "2026-09-08T14:35:12.000Z",
+        windowMinutes: 43200,
+      },
+      {
+        id: "auto",
+        label: "Auto",
+        usedPercent: 73,
+        resetsAt: "2026-09-08T14:35:40.000Z",
+        windowMinutes: 43200,
+      },
+      {
+        id: "api",
+        label: "API",
+        usedPercent: 100,
+        resetsAt: "2026-09-08T14:35:00.000Z",
+        windowMinutes: 43200,
+      },
+    ] as const;
+    const merged = mergeEnvironmentLimits([
+      status("desktop", {
+        snapshots: [
+          snapshot("cursor", {
+            instanceId: "cursor" as never,
+            asOf: "2026-08-15T12:00:00.000Z",
+            windows: [...windows] as never,
+          }),
+        ],
+      }),
+      status("laptop", {
+        environmentIsPrimary: true,
+        snapshots: [
+          snapshot("cursor", {
+            instanceId: "cursor_work" as never,
+            asOf: "2026-08-15T11:00:00.000Z",
+            windows: [...windows] as never,
+          }),
+        ],
+      }),
+      status("workstation", {
+        snapshots: [
+          snapshot("cursor", {
+            instanceId: "cursor" as never,
+            asOf: "2026-08-15T13:00:00.000Z",
+            windows: [windows[0], { ...windows[1], usedPercent: 73.4 }, windows[2]] as never,
+          }),
+        ],
+      }),
+    ]);
+    const rows = merged.get("cursor") ?? [];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.environmentIsPrimary).toBe(true);
+    expect(rows[0]?.environmentId).toBe("laptop");
+  });
+
+  it("does not collapse empty snapshots across environments", () => {
     const merged = mergeEnvironmentLimits([
       status("desktop", {
         snapshots: [snapshot("codex", { asOf: "2026-08-15T12:00:09.000Z" })],

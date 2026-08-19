@@ -55,6 +55,8 @@ function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecyc
     case "search":
     case "fetch":
       return "web_search";
+    case "image":
+      return "image_view";
     default:
       return "dynamic_tool_call";
   }

@@ -107,7 +107,9 @@ import {
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
 } from "~/versionSkew";
-import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { hasClerkPublicConfig, hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { useOptionalConnectProviders } from "~/cloud/connectProviderContext";
+import { canEmbedClerkProvider, currentEmbedContext } from "~/cloud/connectProviders";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
@@ -1892,6 +1894,67 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   );
 }
 
+function ConnectAccountsSection() {
+  const connect = useOptionalConnectProviders();
+  const providers = connect?.providers ?? [];
+  const embedded = connect?.embedded ?? null;
+  const setActiveId = connect?.setActiveId;
+  const ctx = currentEmbedContext();
+  if (providers.length === 0 && !hasClerkPublicConfig()) return null;
+
+  return (
+    <SettingsSection title="Connect">
+      {providers.map((provider) => {
+        const embeddable = canEmbedClerkProvider(provider, ctx);
+        const isActiveEmbed = embedded?.id === provider.id;
+        if (provider.id === "t3" && !embeddable) {
+          return (
+            <SettingsRow
+              key={provider.id}
+              title="T3 Connect"
+              description="T3-linked machines live on T3's Clerk and relay. This origin cannot sign in to T3 Connect directly."
+              control={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    setActiveId?.("t3");
+                    window.open(provider.hostedAppUrl, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  Open T3 Connect
+                </Button>
+              }
+            />
+          );
+        }
+        return (
+          <SettingsRow
+            key={provider.id}
+            title={provider.label}
+            description={
+              provider.id === "mt"
+                ? isActiveEmbed
+                  ? "Sign in from the sidebar. Pair a computer under Remote environments — Computer Use works once it is connected."
+                  : "Munim Clerk identity for this site. Select it to sign in from the sidebar."
+                : "Sign in from the sidebar to reach machines linked through T3 Connect."
+            }
+            control={
+              isActiveEmbed ? (
+                <span className="text-xs text-muted-foreground">Active</span>
+              ) : (
+                <Button size="xs" variant="outline" onClick={() => setActiveId?.(provider.id)}>
+                  Use {provider.label}
+                </Button>
+              )
+            }
+          />
+        );
+      })}
+    </SettingsSection>
+  );
+}
+
 function CloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
   return hasCloudPublicConfig() ? <ConfiguredCloudLinkRow canManageRelay={canManageRelay} /> : null;
 }
@@ -1906,7 +1969,7 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
         <EmptyTitle>No saved remote environments</EmptyTitle>
         <EmptyDescription>
           {cloudEnabled
-            ? "Click “Add environment” to pair another environment, or connect one from T3 Connect."
+            ? "Click “Add environment” to pair another environment, or connect one from MT Connect or T3 Connect."
             : "Click “Add environment” to pair another environment."}
         </EmptyDescription>
       </EmptyHeader>
@@ -3212,6 +3275,7 @@ export function ConnectionsSettings() {
 
   return (
     <SettingsPageContainer>
+      <ConnectAccountsSection />
       {canManageLocalBackend ? (
         <>
           <SettingsSection title="This environment">

@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useId } from "react";
 
-import { APP_STAGE_LABEL } from "../branding";
+import { APP_HAS_UPDATE_TRACKS, APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 
@@ -47,6 +47,7 @@ export function useEnvironmentStageLabel(): string {
   return resolveServerBackedAppStageLabel({
     primaryServerVersion,
     fallbackStageLabel: APP_STAGE_LABEL,
+    allowNightlyStage: APP_HAS_UPDATE_TRACKS,
   });
 }
 

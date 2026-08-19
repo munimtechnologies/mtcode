@@ -110,6 +110,37 @@ describe("buildCursorAcpSpawnInput", () => {
       cwd: "/tmp/project",
     });
   });
+
+  it("pins --model as a root option before the acp subcommand", () => {
+    expect(
+      buildCursorAcpSpawnInput(
+        {
+          binaryPath: "/usr/local/bin/agent",
+          apiEndpoint: "http://localhost:3000",
+        },
+        "/tmp/project",
+        undefined,
+        "full-access",
+        "gpt-5.4-medium-fast[reasoning=medium]",
+      ),
+    ).toEqual({
+      command: "/usr/local/bin/agent",
+      args: ["-e", "http://localhost:3000", "--model", "gpt-5.4-medium-fast", "--force", "acp"],
+      cwd: "/tmp/project",
+    });
+  });
+
+  it("omits --model for empty, default, and auto selections", () => {
+    for (const model of [undefined, "", "default", "auto"]) {
+      expect(
+        buildCursorAcpSpawnInput(undefined, "/tmp/project", undefined, undefined, model),
+      ).toEqual({
+        command: "cursor-agent",
+        args: ["acp"],
+        cwd: "/tmp/project",
+      });
+    }
+  });
 });
 
 describe("applyCursorAcpModelSelection", () => {

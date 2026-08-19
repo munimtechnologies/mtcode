@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -9,6 +9,20 @@ import * as Schema from "effect/Schema";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "./DesktopAppSettings.ts";
+
+const originalDesktopDistro = process.env.T3CODE_DESKTOP_DISTRO;
+
+beforeEach(() => {
+  delete process.env.T3CODE_DESKTOP_DISTRO;
+});
+
+afterEach(() => {
+  if (originalDesktopDistro === undefined) {
+    delete process.env.T3CODE_DESKTOP_DISTRO;
+  } else {
+    process.env.T3CODE_DESKTOP_DISTRO = originalDesktopDistro;
+  }
+});
 
 const DesktopSettingsPatch = Schema.Struct({
   linuxPasswordStore: Schema.optionalKey(
@@ -117,6 +131,33 @@ describe("DesktopSettings", () => {
         wslOnly: false,
         wslDistro: null,
       } satisfies DesktopAppSettings.DesktopSettings,
+    );
+  });
+
+  it("defaults single-channel builds to latest even for nightly versions", () => {
+    assert.equal(
+      DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1", {
+        singleReleaseChannel: true,
+      }).updateChannel,
+      "latest",
+    );
+  });
+
+  it.effect("ignores a persisted nightly track on MT Code", () => {
+    process.env.T3CODE_DESKTOP_DISTRO = "munim";
+    return withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* writeSettingsPatch({
+          updateChannel: "nightly",
+          updateChannelConfiguredByUser: true,
+        });
+
+        const loaded = yield* settings.load;
+        assert.equal(loaded.updateChannel, "latest");
+        assert.equal(loaded.updateChannelConfiguredByUser, false);
+      }),
+      { appVersion: "0.0.17-nightly.20260415.1" },
     );
   });
 

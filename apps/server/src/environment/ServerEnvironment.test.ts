@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as NodeOS from "node:os";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { SERVICE_LAUNCHER_CONTEXT_ENV } from "../cloud/serviceProtocol.ts";
@@ -108,6 +109,9 @@ it.layer(testNodeServices)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.providerHandoff).toBe(true);
       expect(second.capabilities.threadMessageCorrection).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
+      expect(second.homeDirectory).toBe(
+        process.env.HOME?.trim() || process.env.USERPROFILE?.trim() || NodeOS.homedir(),
+      );
     }),
   );
 

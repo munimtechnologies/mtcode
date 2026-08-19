@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  CursorGenerateImageRequest,
   CursorListAvailableModelsResponse,
+  CursorTaskRequest,
+  cursorSubagentTypeName,
   extractAskQuestions,
   extractPlanMarkdown,
   extractTodosAsPlan,
+  formatCursorAskQuestionResponse,
+  formatCursorCreatePlanResponse,
+  formatCursorGenerateImageResponse,
+  formatCursorTaskResponse,
+  formatCursorUpdateTodosResponse,
 } from "./CursorAcpExtension.ts";
 
 describe("CursorAcpExtension", () => {
@@ -123,6 +131,82 @@ describe("CursorAcpExtension", () => {
         { step: "Titled step", status: "pending" },
         { step: "Whitespace content", status: "inProgress" },
       ],
+    });
+  });
+
+  it("formats ask-question answers with option ids, including label matches", () => {
+    const params = {
+      toolCallId: "ask-1",
+      questions: [
+        {
+          id: "language",
+          prompt: "Which language should I use?",
+          options: [
+            { id: "ts", label: "TypeScript" },
+            { id: "rs", label: "Rust" },
+          ],
+        },
+      ],
+    };
+
+    expect(formatCursorAskQuestionResponse(params, { language: "TypeScript" })).toEqual({
+      outcome: {
+        outcome: "answered",
+        answers: [{ questionId: "language", selectedOptionIds: ["ts"] }],
+      },
+    });
+    expect(formatCursorAskQuestionResponse(params, {})).toEqual({
+      outcome: { outcome: "skipped" },
+    });
+  });
+
+  it("formats create-plan, update-todos, task, and generate-image responses", () => {
+    expect(formatCursorCreatePlanResponse()).toEqual({ outcome: { outcome: "accepted" } });
+    expect(
+      formatCursorUpdateTodosResponse({
+        toolCallId: "todos-1",
+        todos: [{ id: "1", content: "Inspect state", status: "completed" }],
+        merge: true,
+      }),
+    ).toEqual({
+      outcome: {
+        outcome: "accepted",
+        todos: [{ id: "1", content: "Inspect state", status: "completed" }],
+      },
+    });
+
+    const task = CursorTaskRequest.make({
+      toolCallId: "task-1",
+      description: "Explore codebase",
+      prompt: "Find auth",
+      subagentType: "explore",
+      agentId: "agent-1",
+      durationMs: 40,
+    });
+    expect(cursorSubagentTypeName(task.subagentType)).toBe("explore");
+    expect(cursorSubagentTypeName({ custom: "reviewer" })).toBe("reviewer");
+    expect(formatCursorTaskResponse(task)).toEqual({
+      outcome: { outcome: "completed", agentId: "agent-1", durationMs: 40 },
+    });
+
+    const image = CursorGenerateImageRequest.make({
+      toolCallId: "image-1",
+      description: "App icon",
+      filePath: "/tmp/icon.png",
+    });
+    expect(formatCursorGenerateImageResponse(image)).toEqual({
+      outcome: { outcome: "generated", filePath: "/tmp/icon.png" },
+    });
+    expect(
+      formatCursorGenerateImageResponse({
+        toolCallId: "image-2",
+        description: "Missing path",
+      }),
+    ).toEqual({
+      outcome: {
+        outcome: "rejected",
+        reason: "Cursor did not supply a generated image path.",
+      },
     });
   });
 

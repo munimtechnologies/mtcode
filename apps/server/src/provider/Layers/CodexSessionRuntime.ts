@@ -18,6 +18,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -29,6 +30,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as NodeOS from "node:os";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -72,6 +74,20 @@ const isMcpToolApprovalMeta = Schema.is(McpToolApprovalMeta);
 
 export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | undefined): boolean {
   return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
+}
+
+export function hasConfiguredMcpServerNamed(
+  appServerArgs: ReadonlyArray<string> | undefined,
+  serverName: string,
+): boolean {
+  const needle = `mcp_servers.${serverName}.`;
+  return appServerArgs?.some((argument) => argument.includes(needle)) === true;
+}
+
+export function isComputerHomeCwd(cwd: string, homeDirectory: string = NodeOS.homedir()): boolean {
+  const normalizedCwd = normalizeProjectPathForComparison(cwd);
+  const normalizedHome = normalizeProjectPathForComparison(homeDirectory);
+  return normalizedCwd.length > 0 && normalizedCwd === normalizedHome;
 }
 
 export const CodexResumeCursorSchema = Schema.Struct({
@@ -410,10 +426,17 @@ function buildCodexCollaborationMode(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly computerHistoryContext?: string;
   readonly browserToolsAvailable?: boolean;
+  readonly desktopToolsAvailable?: boolean;
+  readonly computerHomeWorkspace?: boolean;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
-  // Mode-less turns still need Computer History when present — otherwise ordinary
-  // sendTurn calls silently drop the loaded context.
-  if (input.interactionMode === undefined && !input.computerHistoryContext) {
+  // Mode-less turns still need Computer History / Computer Use instructions
+  // when present — otherwise ordinary sendTurn calls silently drop them.
+  if (
+    input.interactionMode === undefined &&
+    !input.computerHistoryContext &&
+    input.desktopToolsAvailable !== true &&
+    input.computerHomeWorkspace !== true
+  ) {
     return undefined;
   }
   const interactionMode = input.interactionMode ?? "default";
@@ -430,9 +453,17 @@ function buildCodexCollaborationMode(input: {
         interactionMode,
         { model, reasoningEffort },
         input.browserToolsAvailable ?? true,
-        input.computerHistoryContext
-          ? { computerHistoryContext: input.computerHistoryContext }
-          : undefined,
+        {
+          ...(input.computerHistoryContext
+            ? { computerHistoryContext: input.computerHistoryContext }
+            : {}),
+          ...(input.desktopToolsAvailable !== undefined
+            ? { desktopToolsAvailable: input.desktopToolsAvailable }
+            : {}),
+          ...(input.computerHomeWorkspace !== undefined
+            ? { computerHomeWorkspace: input.computerHomeWorkspace }
+            : {}),
+        },
       ),
     },
   };
@@ -497,6 +528,8 @@ export function buildTurnStartParams(input: {
   readonly computerHistoryContext?: string;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean;
+  readonly desktopToolsAvailable?: boolean;
+  readonly computerHomeWorkspace?: boolean;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -529,6 +562,12 @@ export function buildTurnStartParams(input: {
       ? { computerHistoryContext: input.computerHistoryContext }
       : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
+    ...(input.desktopToolsAvailable !== undefined
+      ? { desktopToolsAvailable: input.desktopToolsAvailable }
+      : {}),
+    ...(input.computerHomeWorkspace !== undefined
+      ? { computerHomeWorkspace: input.computerHomeWorkspace }
+      : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2155,7 +2194,9 @@ export const makeCodexSessionRuntime = (
             // Derived from the session's own MCP configuration rather than the
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
-            browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
+            browserToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, "t3-code"),
+            desktopToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, "t3-desktop"),
+            computerHomeWorkspace: isComputerHomeCwd(options.cwd),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

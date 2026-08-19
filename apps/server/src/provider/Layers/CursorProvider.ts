@@ -226,6 +226,66 @@ function isCursorThinkingConfigOption(option: EffectAcpSchema.SessionConfigOptio
   return id === "thinking" || name.includes("thinking");
 }
 
+function isCursorSessionControlConfigOption(option: EffectAcpSchema.SessionConfigOption): boolean {
+  const category = getCursorConfigOptionCategory(option);
+  return category === "model" || category === "mode";
+}
+
+function isReservedCursorCapabilityOption(option: EffectAcpSchema.SessionConfigOption): boolean {
+  const category = getCursorConfigOptionCategory(option);
+  return (
+    isCursorSessionControlConfigOption(option) ||
+    category === "permission" ||
+    isCursorEffortConfigOption(option) ||
+    (option.category === "model_config" && isCursorContextConfigOption(option)) ||
+    (option.category === "model_config" && isCursorFastConfigOption(option)) ||
+    (option.category === "model_config" && isCursorThinkingConfigOption(option))
+  );
+}
+
+function buildCursorPassthroughOptionDescriptor(
+  option: EffectAcpSchema.SessionConfigOption,
+):
+  | ReturnType<typeof buildSelectOptionDescriptor>
+  | ReturnType<typeof buildBooleanOptionDescriptor>
+  | null {
+  const id = option.id.trim();
+  const label = option.name?.trim() || id;
+  if (!id || !label) {
+    return null;
+  }
+
+  if (option.type === "boolean" || isBooleanLikeConfigOption(option)) {
+    const currentValue = getBooleanCurrentValue(option);
+    return typeof currentValue === "boolean"
+      ? buildBooleanOptionDescriptor({ id, label, currentValue })
+      : buildBooleanOptionDescriptor({ id, label });
+  }
+
+  if (option.type !== "select") {
+    return null;
+  }
+
+  const options = flattenSessionConfigSelectOptions(option).flatMap((entry) => {
+    const value = entry.value.trim();
+    const name = entry.name.trim() || value;
+    if (!value || !name) {
+      return [];
+    }
+    return [
+      {
+        value,
+        label: name,
+        ...(option.currentValue === entry.value ? { isDefault: true } : {}),
+      },
+    ];
+  });
+  if (options.length === 0) {
+    return null;
+  }
+  return buildSelectOptionDescriptor({ id, label, options });
+}
+
 function isBooleanLikeConfigOption(option: EffectAcpSchema.SessionConfigOption): boolean {
   if (option.type === "boolean") {
     return true;
@@ -363,6 +423,13 @@ export function buildCursorCapabilitiesFromConfigOptions(
               }),
         ]
       : []),
+    ...configOptions.flatMap((option) => {
+      if (isReservedCursorCapabilityOption(option)) {
+        return [];
+      }
+      const descriptor = buildCursorPassthroughOptionDescriptor(option);
+      return descriptor ? [descriptor] : [];
+    }),
   ];
 
   return createModelCapabilities({
@@ -558,6 +625,41 @@ export function resolveCursorAcpConfigUpdates(
     const value = findCursorBooleanConfigValue(thinkingOption, requestedThinking);
     if (value !== undefined) {
       updates.push({ configId: thinkingOption.id, value });
+    }
+  }
+
+  const mappedConfigIds = new Set(updates.map((update) => update.configId));
+  for (const option of configOptions) {
+    if (isReservedCursorCapabilityOption(option) || mappedConfigIds.has(option.id)) {
+      continue;
+    }
+    const requested = selections?.find((selection) => selection.id === option.id);
+    if (!requested) {
+      continue;
+    }
+    if (typeof requested.value === "boolean") {
+      const value = findCursorBooleanConfigValue(option, requested.value);
+      if (value !== undefined) {
+        updates.push({ configId: option.id, value });
+        mappedConfigIds.add(option.id);
+      }
+      continue;
+    }
+    if (typeof requested.value !== "string") {
+      continue;
+    }
+    const requestedValue = requested.value;
+    const value = findCursorSelectOptionValue(
+      option,
+      (entry) =>
+        normalizeCursorConfigOptionToken(entry.value) ===
+          normalizeCursorConfigOptionToken(requestedValue) ||
+        normalizeCursorConfigOptionToken(entry.name) ===
+          normalizeCursorConfigOptionToken(requestedValue),
+    );
+    if (value) {
+      updates.push({ configId: option.id, value });
+      mappedConfigIds.add(option.id);
     }
   }
 

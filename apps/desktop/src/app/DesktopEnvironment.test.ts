@@ -1,11 +1,25 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+
+const originalDesktopDistro = process.env.T3CODE_DESKTOP_DISTRO;
+
+beforeEach(() => {
+  delete process.env.T3CODE_DESKTOP_DISTRO;
+});
+
+afterEach(() => {
+  if (originalDesktopDistro === undefined) {
+    delete process.env.T3CODE_DESKTOP_DISTRO;
+  } else {
+    process.env.T3CODE_DESKTOP_DISTRO = originalDesktopDistro;
+  }
+});
 
 const defaultInput = {
   appName: "T3 Code (Alpha)",
@@ -164,4 +178,19 @@ describe("DesktopEnvironment", () => {
       );
     }),
   );
+
+  it.effect("keeps MT Code on a single latest channel without a Nightly stage", () => {
+    process.env.T3CODE_DESKTOP_DISTRO = "munim";
+    return Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        appVersion: "0.0.34-nightly.20260818.1127",
+        isPackaged: true,
+      });
+
+      assert.equal(environment.branding.baseName, "MT Code");
+      assert.equal(environment.branding.displayName, "MT Code");
+      assert.equal(environment.branding.stageLabel, "Alpha");
+      assert.equal(environment.defaultDesktopSettings.updateChannel, "latest");
+    });
+  });
 });

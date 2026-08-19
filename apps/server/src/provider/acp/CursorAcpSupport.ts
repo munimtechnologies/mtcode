@@ -28,6 +28,7 @@ export interface CursorAcpRuntimeInput extends Omit<
   readonly cursorSettings: CursorAcpRuntimeCursorSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
+  readonly model?: string | null;
 }
 
 export interface CursorAcpModelSelectionErrorContext {
@@ -36,16 +37,33 @@ export interface CursorAcpModelSelectionErrorContext {
   readonly configId?: string;
 }
 
+function resolveCursorAcpSpawnModelFlag(model?: string | null): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const base = resolveCursorAcpBaseModelId(trimmed);
+  if (!base || base === "default" || base === "auto") {
+    return undefined;
+  }
+  return base;
+}
+
 export function buildCursorAcpSpawnInput(
   cursorSettings: CursorAcpRuntimeCursorSettings | null | undefined,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
   runtimeMode?: RuntimeMode,
+  model?: string | null,
 ): AcpSessionRuntime.AcpSpawnInput {
+  const modelId = resolveCursorAcpSpawnModelFlag(model);
   return {
     command: cursorSettings?.binaryPath || "cursor-agent",
     args: [
       ...(cursorSettings?.apiEndpoint ? (["-e", cursorSettings.apiEndpoint] as const) : []),
+      // Pin the model at process start. Cursor ACP session/set_model is not
+      // always applied to the inference backend; `--model` is the reliable path.
+      ...(modelId ? (["--model", modelId] as const) : []),
       // Without `--force` ("allow commands unless explicitly denied"),
       // cursor-agent keeps gating tool calls on the user's own CLI allowlist
       // in `~/.cursor/cli-config.json` and emits `session/request_permission`
@@ -76,6 +94,7 @@ export const makeCursorAcpRuntime = (
           input.cwd,
           input.environment,
           input.runtimeMode,
+          input.model,
         ),
         authMethodId: "cursor_login",
         skipAuthenticate: hasCursorApiKey(input.environment),

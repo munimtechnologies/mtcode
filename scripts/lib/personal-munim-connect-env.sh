@@ -41,27 +41,36 @@ munim_connect_load() {
   local missing=()
   [[ -n "${T3CODE_CLERK_PUBLISHABLE_KEY:-}" ]] || missing+=(T3CODE_CLERK_PUBLISHABLE_KEY)
   [[ -n "${T3CODE_CLERK_JWT_TEMPLATE:-}" ]] || missing+=(T3CODE_CLERK_JWT_TEMPLATE)
-  [[ -n "${T3CODE_RELAY_URL:-}" ]] || missing+=(T3CODE_RELAY_URL)
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "munim-connect: $MUNIM_CONNECT_ENV_FILE is missing ${missing[*]} — building without Munim Connect" >&2
     unset T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE T3CODE_RELAY_URL \
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID T3CODE_HOSTED_APP_URL
     return 0
   fi
 
   if [[ "$T3CODE_CLERK_PUBLISHABLE_KEY" == "$MUNIM_CONNECT_T3_PK" ||
-    "$T3CODE_RELAY_URL" == *"$MUNIM_CONNECT_T3_RELAY_HOST"* ||
+    "${T3CODE_RELAY_URL:-}" == *"$MUNIM_CONNECT_T3_RELAY_HOST"* ||
     "${T3CODE_CLERK_CLI_OAUTH_CLIENT_ID:-}" == "$MUNIM_CONNECT_T3_OAUTH_ID" ]]; then
     echo "munim-connect: $MUNIM_CONNECT_ENV_FILE contains T3/pingdotgg production values — refusing to build with them" >&2
     return 1
   fi
 
-  export T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE T3CODE_RELAY_URL
+  export T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE
+  if [[ -n "${T3CODE_RELAY_URL:-}" ]]; then
+    export T3CODE_RELAY_URL
+  fi
   if [[ -n "${T3CODE_CLERK_CLI_OAUTH_CLIENT_ID:-}" ]]; then
     export T3CODE_CLERK_CLI_OAUTH_CLIENT_ID
   fi
+  if [[ -n "${T3CODE_HOSTED_APP_URL:-}" ]]; then
+    export T3CODE_HOSTED_APP_URL
+  fi
   MUNIM_CONNECT_ACTIVE=1
-  echo "munim-connect: active (relay: $T3CODE_RELAY_URL)"
+  if [[ -n "${T3CODE_RELAY_URL:-}" ]]; then
+    echo "munim-connect: active (relay: $T3CODE_RELAY_URL)"
+  else
+    echo "munim-connect: active (Clerk only; pair computers locally — no Munim relay)"
+  fi
   return 0
 }
 
@@ -88,9 +97,14 @@ munim_connect_write_repo_env() {
     echo "# munim-connect: managed — regenerated from $MUNIM_CONNECT_ENV_FILE by scripts/lib/personal-munim-connect-env.sh"
     echo "T3CODE_CLERK_PUBLISHABLE_KEY=$T3CODE_CLERK_PUBLISHABLE_KEY"
     echo "T3CODE_CLERK_JWT_TEMPLATE=$T3CODE_CLERK_JWT_TEMPLATE"
-    echo "T3CODE_RELAY_URL=$T3CODE_RELAY_URL"
+    if [[ -n "${T3CODE_RELAY_URL:-}" ]]; then
+      echo "T3CODE_RELAY_URL=$T3CODE_RELAY_URL"
+    fi
     if [[ -n "${T3CODE_CLERK_CLI_OAUTH_CLIENT_ID:-}" ]]; then
       echo "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID=$T3CODE_CLERK_CLI_OAUTH_CLIENT_ID"
+    fi
+    if [[ -n "${T3CODE_HOSTED_APP_URL:-}" ]]; then
+      echo "T3CODE_HOSTED_APP_URL=$T3CODE_HOSTED_APP_URL"
     fi
   } >"$env_file"
   echo "munim-connect: wrote $env_file"

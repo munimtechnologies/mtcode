@@ -230,6 +230,17 @@ const parameterizedGpt54ConfigOptions = [
   },
 ] satisfies ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
 
+const parameterizedGpt54WithExtraOptions = [
+  ...parameterizedGpt54ConfigOptions,
+  {
+    type: "boolean",
+    currentValue: false,
+    category: "model_config",
+    id: "maxMode",
+    name: "Max Mode",
+  },
+] satisfies ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+
 const parameterizedClaudeConfigOptions = [
   {
     type: "select",
@@ -448,6 +459,27 @@ describe("buildCursorCapabilitiesFromConfigOptions", () => {
           ]),
           booleanDescriptor("fastMode", "Fast", true),
           booleanDescriptor("thinking", "Thinking", true),
+        ],
+      }),
+    );
+  });
+
+  it("passes through extra Cursor model config options beyond reasoning/context/fast/thinking", () => {
+    expect(buildCursorCapabilitiesFromConfigOptions(parameterizedGpt54WithExtraOptions)).toEqual(
+      createModelCapabilities({
+        optionDescriptors: [
+          selectDescriptor("reasoning", "Reasoning", [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium", isDefault: true },
+            { id: "high", label: "High" },
+            { id: "xhigh", label: "Extra High" },
+          ]),
+          selectDescriptor("contextWindow", "Context", [
+            { id: "272k", label: "272K", isDefault: true },
+            { id: "1m", label: "1M" },
+          ]),
+          booleanDescriptor("fastMode", "Fast", false),
+          booleanDescriptor("maxMode", "Max Mode", false),
         ],
       }),
     );
@@ -811,5 +843,13 @@ describe("resolveCursorAcpConfigUpdates", () => {
       { configId: "effort", value: "max" },
       { configId: "thinking", value: "false" },
     ]);
+  });
+
+  it("maps extra Cursor model config options onto matching ACP config updates", () => {
+    expect(
+      resolveCursorAcpConfigUpdates(parameterizedGpt54WithExtraOptions, [
+        { id: "maxMode", value: true },
+      ]),
+    ).toEqual([{ configId: "maxMode", value: true }]);
   });
 });

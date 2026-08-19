@@ -90,9 +90,14 @@ export class DesktopEnvironment extends Context.Service<
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
+  readonly singleReleaseChannel: boolean;
 }): DesktopAppStageLabel {
   if (input.isDevelopment) {
     return "Dev";
+  }
+
+  if (input.singleReleaseChannel) {
+    return "Alpha";
   }
 
   return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Alpha";
@@ -102,13 +107,14 @@ function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
   readonly baseName: string;
+  readonly singleReleaseChannel: boolean;
 }): DesktopAppBranding {
   const stageLabel = resolveDesktopAppStageLabel(input);
   return {
     baseName: input.baseName,
     stageLabel,
-    // Personal fork / Munim distro: keep Nightly stage for sidebar artwork, but
-    // show the product name in the shell (no "Alpha"/"Nightly" suffix).
+    // Munim / personal fork: show the product name in the shell with no
+    // Alpha/Nightly suffix. MT Code is a single release, not a channel.
     displayName: input.baseName,
   };
 }
@@ -176,10 +182,12 @@ const make = Effect.fn("desktop.environment.make")(function* (
     input.isPackaged && input.platform === "win32"
       ? path.join(input.resourcesPath, "server.asar")
       : appRoot;
+  const singleReleaseChannel = distro.id === "munim";
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,
     baseName: distro.baseName,
+    singleReleaseChannel,
   });
   const displayName = branding.displayName;
   const stateDir = resolveDesktopStateDir({
@@ -240,7 +248,9 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appImagePath: config.appImagePath,
     userDataDirName,
     legacyUserDataDirName,
-    defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
+    defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion, {
+      singleReleaseChannel,
+    }),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,
       processArch: input.processArch,

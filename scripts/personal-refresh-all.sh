@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep MT Code current on Mac + Blade + Dell.
 # Source of truth: munimtechnologies/mtcode@main (git remote "fork" on this Mac).
-# Builds the MT Code distro with the latest upstream nightly version string.
+# Builds the MT Code distro with a single version (no nightly channel).
 #
 # Flow: push feature commits to fork/main → this job (launchd every 3h, or
 # T3_FORCE_REBUILD=1) rebuilds Mac, builds Windows on Blade, installs on Dell.
@@ -55,13 +55,10 @@ if [[ ! -f .env ]]; then
   echo "created .env from .env.example for T3 Connect"
 fi
 
-# Match latest upstream nightly version string → Nightly icons + sidebar artwork
-NIGHTLY_TAG=$(gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
-if [[ -z "$NIGHTLY_TAG" ]]; then
-  echo "could not resolve latest nightly tag" >&2
-  exit 1
-fi
-export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
+# Single MT Code version: upstream base without the nightly prerelease.
+# shellcheck source=lib/personal-mt-version.sh
+source "$REPO/scripts/lib/personal-mt-version.sh"
+personal_mt_export_desktop_version
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
 # The fleet ships MT Code branding on every machine (Windows side does the same
@@ -69,9 +66,7 @@ echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 export T3CODE_DESKTOP_DISTRO=munim
 
 # Align package versions like upstream's release workflow, so the bundled
-# server and web report this nightly version instead of the stale package.json
-# one. Without this, every nightly-track client (app.t3.codes → Settings →
-# Update track: Nightly) shows "Server update available" against our servers.
+# server and web report this version instead of the stale package.json one.
 node scripts/update-release-package-versions.ts "$T3CODE_DESKTOP_VERSION"
 
 # --- Mac ---

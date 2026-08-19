@@ -20,6 +20,7 @@ import {
   createLocalDispatchSnapshot,
   deriveChatIsWorking,
   deriveComposerSendState,
+  deriveLockedProvider,
   dismissBranchMismatchForSession,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getStartedThreadModelChangeBlockReason,
@@ -527,6 +528,55 @@ describe("getStartedThreadModelChangeBlockReason", () => {
       description:
         "This provider does not allow switching models after a conversation has started.",
     });
+  });
+
+  it("allows switching onto MT Model after a session has started", () => {
+    expect(
+      getStartedThreadModelChangeBlockReason({
+        providers,
+        hasStartedSession: true,
+        currentModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+        nextModelSelection: {
+          instanceId: ProviderInstanceId.make("mt"),
+          model: "mt-auto",
+        },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("deriveLockedProvider", () => {
+  it("does not lock an MT Model thread to the routed backend", () => {
+    expect(
+      deriveLockedProvider({
+        thread: makeThread({
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("mt"),
+            model: "mt-auto",
+          },
+          session: {
+            ...readySession,
+            providerName: "claudeAgent",
+            providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          },
+        }),
+        selectedProvider: "mt",
+        threadProvider: "mt",
+      }),
+    ).toBeNull();
+  });
+
+  it("locks a started thread to the live session provider", () => {
+    expect(
+      deriveLockedProvider({
+        thread: makeThread({ session: readySession }),
+        selectedProvider: "codex",
+        threadProvider: "codex",
+      }),
+    ).toBe("codex");
   });
 });
 

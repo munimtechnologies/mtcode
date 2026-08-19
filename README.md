@@ -32,6 +32,8 @@ MT Code drives agents you already have. Install and sign in to at least one prov
 
 Your existing subscriptions are used directly — MT Code sells nothing and adds no accounts of its own.
 
+Same cost model as T3 Code: the app and its server run on your computer, and model tokens come from Claude / Codex / Cursor / Grok / OpenCode. The hosted UI at [mtcode.munimtech.com](https://mtcode.munimtech.com) is a static Worker on Cloudflare’s free plan. Pairing and Computer Use reach your machine directly. There is no Munim-hosted model proxy, no Workers AI classifier, and no PlanetScale relay unless you explicitly opt into that paid stack.
+
 ## MT Code vs T3 Code
 
 Compared to [T3 Code](https://github.com/pingdotgg/t3code). MT Code started as a fork. Upstream is merged only when you ask an agent to do it — nothing pulls `pingdotgg/t3code` automatically. Some rows started as unmerged upstream PRs that MT Code ships today; others were built here. 🚧 means it is in another MT Code thread/worktree and is not on the downloadable build yet.

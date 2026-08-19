@@ -53,6 +53,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   resolveDesktopDistroId,
   resolveDesktopDistroIdentity,
+  type DesktopDistroId,
   type DesktopDistroIdentity,
 } from "./lib/desktop-distro.ts";
 
@@ -2294,7 +2295,14 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   };
 });
 
-export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" {
+export function resolveDesktopUpdateChannel(
+  version: string,
+  distroId: DesktopDistroId = resolveDesktopDistroId(),
+): "latest" | "nightly" {
+  if (distroId === "munim") {
+    return "latest";
+  }
+
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 

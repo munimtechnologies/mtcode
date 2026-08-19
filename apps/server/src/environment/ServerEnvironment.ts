@@ -1,5 +1,9 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  HostProcessArchitecture,
+  HostProcessEnvironment,
+  HostProcessPlatform,
+} from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -8,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as NodeOS from "node:os";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -75,7 +80,10 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const hostPlatform = yield* HostProcessPlatform;
   const hostArchitecture = yield* HostProcessArchitecture;
+  const hostEnvironment = yield* HostProcessEnvironment;
   const environmentLabel = yield* Ref.make("");
+  const homeDirectory =
+    hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || NodeOS.homedir().trim();
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem.exists(serverConfig.environmentIdPath).pipe(
@@ -151,6 +159,7 @@ export const make = Effect.gen(function* () {
       arch: platformArch(hostArchitecture),
     },
     serverVersion: packageJson.version,
+    ...(homeDirectory.length > 0 ? { homeDirectory } : {}),
     capabilities: {
       repositoryIdentity: true,
       connectionProbe: true,

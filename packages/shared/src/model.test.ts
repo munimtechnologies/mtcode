@@ -160,6 +160,14 @@ describe("model slug normalization", () => {
     expect(normalizeModelSlug("opus", claude)).toBe("claude-opus-5");
     expect(normalizeCustomModelSlug(" opus ")).toBe("opus");
   });
+
+  it("expands Cursor nicknames onto current ACP model ids", () => {
+    const cursor = ProviderDriverKind.make("cursor");
+    expect(normalizeModelSlug("composer", cursor)).toBe("composer-2");
+    expect(normalizeModelSlug("opus", cursor)).toBe("claude-opus-5");
+    expect(normalizeModelSlug("sonnet-5", cursor)).toBe("claude-sonnet-5");
+    expect(normalizeModelSlug("gpt-5.4", cursor)).toBe("gpt-5.4");
+  });
 });
 
 function transition(input: {

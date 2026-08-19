@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import { afterAll, beforeAll } from "vite-plus/test";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as FileSystem from "effect/FileSystem";
 import * as Effect from "effect/Effect";
@@ -149,10 +150,25 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   } as const;
 });
 
+const originalDesktopDistro = process.env.T3CODE_DESKTOP_DISTRO;
+
+beforeAll(() => {
+  delete process.env.T3CODE_DESKTOP_DISTRO;
+});
+
+afterAll(() => {
+  if (originalDesktopDistro === undefined) {
+    delete process.env.T3CODE_DESKTOP_DISTRO;
+  } else {
+    process.env.T3CODE_DESKTOP_DISTRO = originalDesktopDistro;
+  }
+});
+
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
-    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
-    assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42", "default"), "nightly");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17", "default"), "latest");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42", "munim"), "latest");
   });
 
   it("keeps the plain desktop product name for personal fork packaging", () => {

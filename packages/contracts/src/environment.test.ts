@@ -49,4 +49,17 @@ describe("ExecutionEnvironmentDescriptor", () => {
       }).capabilities.threadMessageCorrection,
     ).toBe(true);
   });
+
+  it("treats a missing homeDirectory as unset under version skew", () => {
+    expect(decodeDescriptor(descriptor).homeDirectory).toBeUndefined();
+  });
+
+  it("preserves an advertised homeDirectory", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        homeDirectory: "/Users/me",
+      }).homeDirectory,
+    ).toBe("/Users/me");
+  });
 });

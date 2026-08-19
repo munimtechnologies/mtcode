@@ -107,6 +107,7 @@ import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore"
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useStartComputerThread } from "../hooks/useStartComputerThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
@@ -1844,6 +1845,7 @@ export default function Sidebar() {
   });
   const [projectScopeMenuOpen, setProjectScopeMenuOpen] = useState(false);
   const newThreadContext = useHandleNewThread();
+  const startComputerThread = useStartComputerThread();
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
     [],
@@ -3870,17 +3872,13 @@ export default function Sidebar() {
     autoAnimate(node, { duration: 150, easing: "ease-out" });
   }, []);
 
-  // New thread defaults to the project you're in (active thread's project,
-  // falling back to the top project) — same resolution the command palette
-  // uses. The command palette already offers a "New thread in..." submenu
-  // for multi-project setups.
+  // New thread starts on the current computer. Shift+click (and chat.newLocal)
+  // create in the project you're already in. The command palette still offers
+  // a "New thread in..." submenu for picking a folder.
   const handleNewThreadClick = useCallback(
     (event?: ReactMouseEvent) => {
-      // One project: nothing to pick, create immediately. Shift+click creates
-      // directly in the current project even with several projects, skipping
-      // the palette picker.
-      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
-        if (isMobile) setOpenMobile(false);
+      if (isMobile) setOpenMobile(false);
+      if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false)) {
         void startNewThreadFromContext({
           activeDraftThread: newThreadContext.activeDraftThread,
           activeThread: newThreadContext.activeThread ?? undefined,
@@ -3889,23 +3887,12 @@ export default function Sidebar() {
         });
         return;
       }
-      if (isMobile) setOpenMobile(false);
-      openCommandPalette({ open: "new-thread-in" });
+      void startComputerThread();
     },
-    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
+    [isMobile, newThreadContext, setOpenMobile, startComputerThread],
   );
 
-  // The button mirrors chat.new: in multi-project setups both route through
-  // the command palette's "New thread in..." picker, and in single-project
-  // setups both create immediately. In multi-project setups the label is only
-  // the picker's shortcut: falling back to chat.newLocal would advertise the
-  // same shortcut for both the picker and direct create. In single-project
-  // setups both commands create directly, so chat.newLocal is a valid
-  // fallback. The second tooltip line (multi-project only) advertises
-  // shift+click and its keyboard twin chat.newLocal for direct create.
-  const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.new") ??
-    (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
+  const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.new");
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
 
   const renderThreadRow = (
@@ -4051,7 +4038,7 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
+                        disabled={projects.length === 0 && environments.length === 0}
                         aria-label="New thread"
                       />
                     }
@@ -4063,7 +4050,7 @@ export default function Sidebar() {
                     />
                   </TooltipTrigger>
                   <TooltipPopup side="right">
-                    {projectGroups.length > 1 ? (
+                    {newThreadShortcutLabel || newThreadInProjectShortcutLabel ? (
                       <span className="flex flex-col gap-0.5">
                         <span>
                           {newThreadShortcutLabel
@@ -4077,8 +4064,6 @@ export default function Sidebar() {
                             : ""}
                         </span>
                       </span>
-                    ) : newThreadShortcutLabel ? (
-                      `New thread (${newThreadShortcutLabel})`
                     ) : (
                       "New thread"
                     )}

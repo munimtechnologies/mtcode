@@ -16,6 +16,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   isProviderSendTurnSupportedImageMimeType,
+  isMtModelSelection,
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -239,6 +240,7 @@ import {
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderInteractionModeToggle } from "../../providerModels";
+import { prependMtModelPickerEntry, withMtModelProvider } from "../../mtModel";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -551,6 +553,7 @@ export interface ChatComposerProps {
   isLocalDraftThread: boolean;
   forceExpandedOnMobile: boolean;
   projectSelectionRequired: boolean;
+  computerHomeWorkspace?: boolean;
 
   // Session phase
   phase: SessionPhase;
@@ -665,6 +668,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
+    computerHomeWorkspace = false,
     phase,
     isConnecting,
     isSendBusy,
@@ -800,11 +804,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // sorted default-first per driver kind for a stable picker order.
   const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
     () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+      prependMtModelPickerEntry(
+        sortProviderInstanceEntries(
+          applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+        ),
       ),
     [providerStatuses, settings],
   );
+  const pickerProviders = useMemo(() => withMtModelProvider(providerStatuses), [providerStatuses]);
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
     activeThread?.session?.providerInstanceId ??
@@ -849,6 +856,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   //   5. First enabled entry overall / default instance for the kind.
   //
   const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
+    // Session instance is the *routed* backend after MT Model picks one.
+    // Keep the sticky MT selection in the picker unless the draft explicitly
+    // moved to another provider.
+    if (
+      !lockedProvider &&
+      isMtModelSelection(activeThreadModelSelection) &&
+      (composerDraft.activeProvider === undefined ||
+        composerDraft.activeProvider === activeThreadModelSelection.instanceId)
+    ) {
+      return activeThreadModelSelection.instanceId;
+    }
     const candidates: Array<string | null | undefined> = [
       composerDraft.activeProvider,
       activeThread?.session?.providerInstanceId,
@@ -889,7 +907,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activeProjectDefaultModelSelection?.instanceId,
     activeThread?.session?.providerInstanceId,
-    activeThreadModelSelection?.instanceId,
+    activeThreadModelSelection,
     composerDraft.activeProvider,
     lockedContinuationGroupKey,
     lockedProvider,
@@ -913,7 +931,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadRef: composerDraftTarget,
-    providers: providerStatuses,
+    providers: pickerProviders,
     selectedProvider,
     selectedInstanceId,
     threadModelSelection: activeThreadModelSelection,
@@ -961,9 +979,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerProviderControls = useMemo(
     () => ({
       showInteractionModeToggle:
-        planModeUiEnabled && getProviderInteractionModeToggle(providerStatuses, selectedProvider),
+        planModeUiEnabled && getProviderInteractionModeToggle(pickerProviders, selectedProvider),
     }),
-    [planModeUiEnabled, providerStatuses, selectedProvider],
+    [planModeUiEnabled, pickerProviders, selectedProvider],
   );
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
@@ -3348,7 +3366,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Enable a provider in Settings to send a message"
                               : phase === "disconnected"
                                 ? "Ask for follow-up changes or attach images"
-                                : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                : computerHomeWorkspace
+                                  ? "Ask anything — I can use the pointer, apps, and files on this computer"
+                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
                   }
                   disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
                 />

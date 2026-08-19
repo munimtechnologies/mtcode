@@ -18,6 +18,7 @@ import {
   type KeybindingCommand,
   getLastVisibleMessage,
   getThreadMessageCorrectionEligibility,
+  isMtModelInstanceId,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -168,6 +169,7 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
+  MonitorIcon,
   PaperclipIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -195,10 +197,12 @@ import {
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useThreadGoalActions } from "../hooks/useThreadGoalActions";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useComputerUsePermissions } from "../hooks/useComputerUsePermissions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import { withMtModelProvider } from "../mtModel";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { preventRepeatedTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
-import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+import { isComputerHomeWorkspace, resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   derivePhysicalProjectKey,
   deriveLogicalProjectKeyFromSettings,
@@ -1314,6 +1318,9 @@ function ChatViewContent(props: ChatViewProps) {
   // settings UI never writes to remote environments), so read them from the
   // primary server rather than the thread's environment.
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
+  const computerUsePermissions = useComputerUsePermissions();
+  const [computerUsePermissionBannerDismissed, setComputerUsePermissionBannerDismissed] =
+    useState(false);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1850,6 +1857,10 @@ function ChatViewContent(props: ChatViewProps) {
   ]);
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
+  const isComputerHomeWorkspaceActive = isComputerHomeWorkspace(
+    activeProject?.workspaceRoot,
+    activeEnvironment?.serverConfig?.environment.homeDirectory,
+  );
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
@@ -2250,6 +2261,7 @@ function ChatViewContent(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const pickerProviders = useMemo(() => withMtModelProvider(providerStatuses), [providerStatuses]);
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider,
@@ -4850,6 +4862,40 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void handleSwitchCheckoutToThread();
   }, [gitStatusQuery.data?.hasWorkingTreeChanges, handleSwitchCheckoutToThread]);
+  const computerUsePermissionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (
+      !isComputerHomeWorkspaceActive ||
+      !primaryServerSettings.desktopControl.enabled ||
+      computerUsePermissionBannerDismissed ||
+      computerUsePermissions.missing.length === 0
+    ) {
+      return null;
+    }
+    const missing = computerUsePermissions.missing;
+    const labels = missing.map((permission) =>
+      permission.kind === "accessibility" ? "Accessibility" : "Screen Recording",
+    );
+    const first = missing[0];
+    if (!first) return null;
+    return {
+      id: "computer-use-permissions",
+      variant: "warning",
+      icon: <MonitorIcon />,
+      title: "Computer Use needs permission to use the pointer",
+      description: `Grant ${labels.join(" and ")} so the agent can click, type, and take screenshots without moving your mouse.`,
+      actions: (
+        <Button size="xs" onClick={() => void computerUsePermissions.openPermission(first)}>
+          Open Settings
+        </Button>
+      ),
+      onDismiss: () => setComputerUsePermissionBannerDismissed(true),
+    };
+  }, [
+    computerUsePermissionBannerDismissed,
+    computerUsePermissions,
+    isComputerHomeWorkspaceActive,
+    primaryServerSettings.desktopControl.enabled,
+  ]);
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const isUrgentSystemItem = (item: ComposerBannerStackItem) =>
       item.urgent === true || item.variant === "error" || item.variant === "warning";
@@ -4859,9 +4905,12 @@ function ChatViewContent(props: ChatViewProps) {
       backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem];
     const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
+    const computerUsePermissionItems =
+      computerUsePermissionBannerItem === null ? [] : [computerUsePermissionBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...urgentSystemItems,
+        ...computerUsePermissionItems,
         ...backgroundLivenessItems,
         ...calmSystemItems,
         ...wokeThreadItems,
@@ -4870,6 +4919,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     return [
       ...urgentSystemItems,
+      ...computerUsePermissionItems,
       ...backgroundLivenessItems,
       ...calmSystemItems,
       ...wokeThreadItems,
@@ -4917,6 +4967,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeBranchMismatchKey,
     backgroundLivenessBannerItem,
+    computerUsePermissionBannerItem,
     handleRestoreThreadBranch,
     isRestoringThreadBranch,
     localCheckoutBranchMismatch,
@@ -6338,7 +6389,7 @@ function ChatViewContent(props: ChatViewProps) {
         return null;
       }
       const reason = getStartedThreadModelChangeBlockReason({
-        providers: providerStatuses,
+        providers: pickerProviders,
         hasStartedSession: activeThread.session !== null,
         currentModelSelection: activeThread.modelSelection,
         currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
@@ -6346,18 +6397,18 @@ function ChatViewContent(props: ChatViewProps) {
       });
       return reason ? `${reason.description} Start a new thread to use this model.` : null;
     },
-    [activeServerThread, activeThread, isServerThread, providerStatuses],
+    [activeServerThread, activeThread, isServerThread, pickerProviders],
   );
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
-      const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
+      const entry = pickerProviders.find((snapshot) => snapshot.instanceId === instanceId);
       const resolvedDriverKind = entry?.driver ?? null;
       const resolvedModel = resolveAppModelSelectionForInstance(
         instanceId,
         settings,
-        providerStatuses,
+        pickerProviders,
         model,
       );
       if (!resolvedModel) {
@@ -6369,17 +6420,27 @@ function ChatViewContent(props: ChatViewProps) {
         model: resolvedModel,
       };
 
+      const sessionInstanceId = activeServerThread?.session?.providerInstanceId;
+      const sessionEntry = pickerProviders.find(
+        (snapshot) => snapshot.instanceId === sessionInstanceId,
+      );
+      const sessionDriver = sessionEntry?.driver ?? lockedProvider;
+      const selectingMt = isMtModelInstanceId(instanceId);
       const isCrossProvider =
         isServerThread &&
         activeServerThread !== null &&
         threadHasStarted(activeServerThread) &&
+        !selectingMt &&
         ((lockedProvider !== null &&
           resolvedDriverKind !== null &&
           resolvedDriverKind !== lockedProvider) ||
+          (sessionDriver !== null &&
+            resolvedDriverKind !== null &&
+            resolvedDriverKind !== sessionDriver) ||
           (lockedProvider !== null &&
             activeServerThread.session?.providerInstanceId &&
             (() => {
-              const currentEntry = providerStatuses.find(
+              const currentEntry = pickerProviders.find(
                 (snapshot) =>
                   snapshot.instanceId === activeServerThread.session?.providerInstanceId,
               );
@@ -6391,7 +6452,7 @@ function ChatViewContent(props: ChatViewProps) {
             })()));
 
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
-        providers: providerStatuses,
+        providers: pickerProviders,
         hasStartedSession: activeThread.session !== null,
         currentModelSelection: activeThread.modelSelection,
         currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
@@ -6431,7 +6492,7 @@ function ChatViewContent(props: ChatViewProps) {
       activeThread,
       isServerThread,
       lockedProvider,
-      providerStatuses,
+      pickerProviders,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
@@ -6938,6 +6999,7 @@ function ChatViewContent(props: ChatViewProps) {
                             isLocalDraftThread={isLocalDraftThread}
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
+                            computerHomeWorkspace={isComputerHomeWorkspaceActive}
                             phase={phase}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}

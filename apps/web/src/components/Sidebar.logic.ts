@@ -166,6 +166,7 @@ export interface ThreadJumpHintVisibilityController {
 export function resolveSidebarStageBadgeLabel(input: {
   primaryServerVersion: string | null | undefined;
   fallbackStageLabel: string;
+  allowNightlyStage?: boolean;
 }): string {
   return resolveServerBackedAppStageLabel(input);
 }
@@ -294,15 +295,14 @@ export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
 }
 
 // Shift+click on the new thread button creates directly in the current
-// project, skipping the command palette's project picker. With a single
-// project there is nothing to pick, so a plain click already creates
-// immediately and the modifier changes nothing.
+// project. A plain click starts a thread on the current computer instead of
+// opening the command palette's project picker. A project-scoped sidebar
+// still creates in that project.
 export function shouldCreateNewThreadInCurrentProject(
   shiftKey: boolean,
-  projectGroupCount: number,
   hasProjectScope = false,
 ): boolean {
-  return hasProjectScope || shiftKey || projectGroupCount <= 1;
+  return hasProjectScope || shiftKey;
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {

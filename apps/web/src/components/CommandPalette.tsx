@@ -62,6 +62,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useStartComputerThread } from "../hooks/useStartComputerThread";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
@@ -610,6 +611,7 @@ function OpenCommandPaletteDialog(props: {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
+  const startComputerThread = useStartComputerThread();
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -1596,6 +1598,18 @@ function OpenCommandPaletteDialog(props: {
     );
   }
 
+  actionItems.push({
+    kind: "action",
+    value: "action:new-thread",
+    searchTerms: ["new thread", "chat", "create", "draft", "computer"],
+    title: "New thread",
+    icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "chat.new",
+    run: async () => {
+      await startComputerThread();
+    },
+  });
+
   if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
@@ -1604,15 +1618,15 @@ function OpenCommandPaletteDialog(props: {
     if (activeProjectTitle) {
       actionItems.push({
         kind: "action",
-        value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft"],
+        value: "action:new-thread-in-current",
+        searchTerms: ["new thread", "chat", "create", "draft", "project"],
         title: (
           <>
             New thread in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "chat.new",
+        shortcutCommand: "chat.newLocal",
         run: async () => {
           await startNewThreadFromContext({
             activeDraftThread,

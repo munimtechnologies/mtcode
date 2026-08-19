@@ -6,10 +6,12 @@
 # underneath the process env, and the main dev checkout's .env carries T3's
 # production Clerk/relay keys, which must not be baked into this bundle.
 #
-# Connect: without ~/.mt/munim-connect.env the hosted app runs in pure pairing
-# mode (no Connect/Clerk). When that file provides the Munim-owned Clerk +
-# relay identifiers, they are exported into the process env below and baked in
-# (see scripts/lib/personal-munim-connect-env.sh).
+# Connect: ~/.mt/munim-connect.env supplies Munim Clerk (MT Connect). T3 Connect
+# is always offered as a second option (public T3 identifiers, or an Open T3
+# Connect link on this origin — T3's Clerk rejects mtcode.munimtech.com).
+# A Munim relay URL is optional and should stay omitted: without it the hosted
+# app signs in with MT Connect and reaches computers via pairing / Computer Use
+# (same $0 model as T3 Code; no PlanetScale / Workers Paid relay).
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -27,7 +29,7 @@ fi
 source "$REPO/scripts/lib/personal-munim-connect-env.sh"
 munim_connect_load
 if [[ "$MUNIM_CONNECT_ACTIVE" != 1 ]]; then
-  echo "building in pure pairing mode (no ~/.mt/munim-connect.env)"
+  echo "building without Munim Clerk; T3 Connect will still be offered as an external option"
 fi
 
 # Match the desktop munim distro: Nightly stage (sidebar artwork) with a plain

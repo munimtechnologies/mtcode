@@ -40,7 +40,12 @@ import { createModelSelection } from "@t3tools/shared/model";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
-import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+import {
+  APP_DISPLAY_VERSION,
+  APP_HAS_UPDATE_TRACKS,
+  HOSTED_APP_CHANNEL,
+  HOSTED_APP_CHANNEL_LABEL,
+} from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -228,7 +233,7 @@ function AboutVersionTitle() {
   return (
     <span className="inline-flex items-center gap-2">
       <span>Version</span>
-      <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
+      <code className="text-[11px] font-medium text-muted-foreground">{APP_DISPLAY_VERSION}</code>
     </span>
   );
 }
@@ -400,7 +405,7 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
-      {hasDesktopBridge ? (
+      {APP_HAS_UPDATE_TRACKS && hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
           description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
@@ -431,7 +436,7 @@ function AboutVersionSection() {
             </Select>
           }
         />
-      ) : selectedHostedAppChannel ? (
+      ) : APP_HAS_UPDATE_TRACKS && selectedHostedAppChannel ? (
         <SettingsRow
           title="Update track"
           description="Switches the hosted app release channel."

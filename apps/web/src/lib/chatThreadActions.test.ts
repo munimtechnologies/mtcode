@@ -6,6 +6,9 @@ import {
   resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
   resolveWorkspaceOptionsAfterEnvironmentRetarget,
+  resolveNewThreadEnvironmentId,
+  isComputerHomeWorkspace,
+  findComputerHomeProjectRef,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
@@ -203,5 +206,71 @@ describe("chatThreadActions", () => {
       envMode: "worktree",
       startFromOrigin: false,
     });
+  });
+
+  it("prefers the viewed thread's environment, then the draft, then primary", () => {
+    expect(
+      resolveNewThreadEnvironmentId({
+        activeThread: { environmentId: ENVIRONMENT_ID },
+        activeDraftThread: { environmentId: EnvironmentId.make("environment-draft") },
+        primaryEnvironmentId: EnvironmentId.make("environment-primary"),
+      }),
+    ).toBe(ENVIRONMENT_ID);
+    expect(
+      resolveNewThreadEnvironmentId({
+        activeDraftThread: { environmentId: EnvironmentId.make("environment-draft") },
+        primaryEnvironmentId: EnvironmentId.make("environment-primary"),
+      }),
+    ).toBe(EnvironmentId.make("environment-draft"));
+    expect(
+      resolveNewThreadEnvironmentId({
+        primaryEnvironmentId: EnvironmentId.make("environment-primary"),
+      }),
+    ).toBe(EnvironmentId.make("environment-primary"));
+    expect(resolveNewThreadEnvironmentId({ primaryEnvironmentId: null })).toBeNull();
+  });
+
+  it("matches a computer-home workspace across trailing-slash and case differences", () => {
+    expect(isComputerHomeWorkspace("/Users/me/", "/Users/me")).toBe(true);
+    expect(isComputerHomeWorkspace("/Users/me/Horus", "/Users/me")).toBe(false);
+    expect(isComputerHomeWorkspace("C:\\Users\\me", "C:/Users/me")).toBe(true);
+    expect(isComputerHomeWorkspace(null, "/Users/me")).toBe(false);
+  });
+
+  it("finds an existing home project on the target environment without duplicating it", () => {
+    const otherEnvironmentId = EnvironmentId.make("environment-2");
+
+    expect(
+      findComputerHomeProjectRef({
+        environmentId: ENVIRONMENT_ID,
+        homeDirectory: "/Users/me",
+        projects: [
+          {
+            environmentId: otherEnvironmentId,
+            id: FALLBACK_PROJECT_ID,
+            workspaceRoot: "/Users/me",
+          },
+          {
+            environmentId: ENVIRONMENT_ID,
+            id: PROJECT_ID,
+            workspaceRoot: "/Users/me/",
+          },
+        ],
+      }),
+    ).toEqual(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID));
+
+    expect(
+      findComputerHomeProjectRef({
+        environmentId: ENVIRONMENT_ID,
+        homeDirectory: "/Users/me",
+        projects: [
+          {
+            environmentId: ENVIRONMENT_ID,
+            id: PROJECT_ID,
+            workspaceRoot: "/Users/me/Horus",
+          },
+        ],
+      }),
+    ).toBeNull();
   });
 });

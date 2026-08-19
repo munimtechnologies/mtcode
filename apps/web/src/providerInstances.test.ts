@@ -417,6 +417,23 @@ describe("resolveDefaultProviderModelSelection", () => {
     expect(resolveDefaultProviderModelSelection(providers, stored)).toBe(stored);
   });
 
+  it("preserves an MT Model project default when a backend is ready", () => {
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: "claudeAgent",
+        models: [model("claude-opus-4-8", false, true)],
+      }),
+    ];
+    const stored = {
+      instanceId: ProviderInstanceId.make("mt"),
+      model: "mt-auto",
+      options: [{ id: "routeMode", value: "intelligence" }],
+    };
+
+    expect(resolveDefaultProviderModelSelection(providers, stored)).toBe(stored);
+  });
+
   it("replaces a stale stored instance with the first ready instance and its model", () => {
     const providers = [
       provider({

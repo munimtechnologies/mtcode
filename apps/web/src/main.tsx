@@ -8,8 +8,10 @@ import { createHashHistory, createBrowserHistory } from "@tanstack/react-router"
 import "./index.css";
 
 import { isElectron } from "./env";
+import { ConnectProvidersRoot, useConnectProviders } from "./cloud/connectProviderContext";
+import { providerHasRelay } from "./cloud/connectProviders";
 import { ManagedRelayAuthProvider } from "./cloud/managedAuth";
-import { hasCloudPublicConfig } from "./cloud/publicConfig";
+import { hasClerkPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
 import {
   syncDocumentElectronPlatformClasses,
@@ -28,8 +30,6 @@ if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
 
-const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
-
 // Autofill support makes clerk-js fire a passkey retrieval as soon as the
 // sign-in modal opens, which fails in the desktop shell and surfaces an error
 // banner before the user has done anything. Report it unsupported so passkeys
@@ -39,26 +39,54 @@ const manualOnlyPasskeys: typeof passkeys = {
   isAutoFillSupported: () => Promise.resolve(false),
 };
 
+function ClerkGate({ children }: { readonly children: React.ReactNode }) {
+  const { embedded } = useConnectProviders();
+  const publishableKey =
+    embedded?.clerkPublishableKey ??
+    (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined);
+  const enableClerk = Boolean(publishableKey && (embedded || hasClerkPublicConfig()));
+  const wrapRelay = Boolean(embedded && providerHasRelay(embedded));
+
+  if (!enableClerk || !publishableKey) {
+    return children;
+  }
+
+  const inner = wrapRelay ? (
+    <ManagedRelayAuthProvider>{children}</ManagedRelayAuthProvider>
+  ) : (
+    children
+  );
+
+  if (isElectron) {
+    return (
+      <ElectronClerkProvider
+        key={embedded?.id ?? "clerk"}
+        appearance={clerkAppearance}
+        publishableKey={publishableKey}
+        passkeys={manualOnlyPasskeys}
+      >
+        {inner}
+      </ElectronClerkProvider>
+    );
+  }
+
+  return (
+    <ClerkProvider
+      key={embedded?.id ?? "clerk"}
+      appearance={clerkAppearance}
+      publishableKey={publishableKey}
+    >
+      {inner}
+    </ClerkProvider>
+  );
+}
+
 const app = <AppRoot router={router} />;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {clerkPublishableKey && hasCloudPublicConfig() ? (
-      isElectron ? (
-        <ElectronClerkProvider
-          appearance={clerkAppearance}
-          publishableKey={clerkPublishableKey}
-          passkeys={manualOnlyPasskeys}
-        >
-          <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
-        </ElectronClerkProvider>
-      ) : (
-        <ClerkProvider appearance={clerkAppearance} publishableKey={clerkPublishableKey}>
-          <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
-        </ClerkProvider>
-      )
-    ) : (
-      app
-    )}
+    <ConnectProvidersRoot>
+      <ClerkGate>{app}</ClerkGate>
+    </ConnectProvidersRoot>
   </React.StrictMode>,
 );

@@ -4,7 +4,7 @@
 #
 # Requires: SSH hosts `blade` and `dell` (Dell may fall back via Blade LAN).
 # Optional env:
-#   T3CODE_DESKTOP_VERSION  nightly version string (resolved from upstream if unset)
+#   T3CODE_DESKTOP_VERSION  single MT Code version (resolved from upstream base if unset)
 #   T3_PERSONAL_REPO       default $HOME/dev/t3code
 #   T3_FORCE_REBUILD=1     force Blade rebuild even when SHA unchanged (default 1 here)
 set -euo pipefail
@@ -12,14 +12,9 @@ set -euo pipefail
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
 
-if [[ -z "${T3CODE_DESKTOP_VERSION:-}" ]]; then
-  NIGHTLY_TAG=$(gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
-  if [[ -z "$NIGHTLY_TAG" ]]; then
-    echo "could not resolve latest nightly tag" >&2
-    exit 1
-  fi
-  export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
-fi
+# shellcheck source=lib/personal-mt-version.sh
+source "$REPO/scripts/lib/personal-mt-version.sh"
+personal_mt_export_desktop_version
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 
 # --- Blade (build + install) ---

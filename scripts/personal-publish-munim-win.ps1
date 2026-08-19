@@ -49,7 +49,7 @@ if (-not $munimConnect -and -not (Test-Path ".env")) {
 $env:T3CODE_DESKTOP_DISTRO = "munim"
 $env:T3CODE_DESKTOP_UPDATE_REPOSITORY = $UpdateRepository
 $env:GITHUB_REPOSITORY = $UpdateRepository
-$env:T3CODE_DESKTOP_VERSION = $DesktopVersion
+$env:T3CODE_DESKTOP_VERSION = $DesktopVersion -replace '-nightly\.\d{8}\.\d+$', ''
 Remove-Item Env:T3CODE_DESKTOP_SIGNED -ErrorAction SilentlyContinue
 
 Log "HEAD=$(git rev-parse --short HEAD) T3CODE_DESKTOP_DISTRO=$($env:T3CODE_DESKTOP_DISTRO) VERSION=$($env:T3CODE_DESKTOP_VERSION)"
@@ -59,8 +59,7 @@ $ErrorActionPreference = "Continue"
 pnpm install
 if ($LASTEXITCODE -ne 0) { throw "pnpm install failed: $LASTEXITCODE" }
 # Align package versions like upstream's release workflow, so the bundled
-# server and web report this nightly version (else nightly-track clients
-# show "Server update available").
+# server and web report this version.
 node scripts/update-release-package-versions.ts $env:T3CODE_DESKTOP_VERSION
 if ($LASTEXITCODE -ne 0) { throw "version stamp failed: $LASTEXITCODE" }
 pnpm dist:desktop:win:x64

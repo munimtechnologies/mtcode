@@ -18,6 +18,8 @@ const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
+const emitCursorTask = process.env.T3_ACP_EMIT_CURSOR_TASK === "1";
+const emitCursorGenerateImage = process.env.T3_ACP_EMIT_CURSOR_GENERATE_IMAGE === "1";
 const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
 const emitXAiAskUserQuestionThenHang =
   process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION_THEN_HANG === "1";
@@ -808,6 +810,26 @@ const program = Effect.gen(function* () {
           },
         });
 
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitCursorTask) {
+        yield* agent.client.extNotification("cursor/task", {
+          toolCallId: "cursor-task-tool-call-1",
+          description: "Explore codebase",
+          prompt: "Find where authentication is handled and report the file paths.",
+          subagentType: "explore",
+          durationMs: 1200,
+        });
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitCursorGenerateImage) {
+        yield* agent.client.extNotification("cursor/generate_image", {
+          toolCallId: "cursor-image-tool-call-1",
+          description: "Minimal flat app icon",
+          filePath: "/tmp/icon.png",
+        });
         return { stopReason: "end_turn" };
       }
 

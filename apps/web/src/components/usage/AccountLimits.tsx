@@ -4,16 +4,14 @@
  * window a provider adds or brings back (Codex's paused 5-hour) appears
  * without a client change.
  *
- * One block per provider; one row group per (environment, instance) under
- * it. With a single row - the common case - nothing is captioned and the
- * markup is identical to the single-account rendering. With several, each
- * group is captioned with the instance's display name (and the environment
- * label when more than one environment reports) so two accounts' numbers
- * can never be mistaken for one another.
+ * One block per provider; one row group per distinct subscription under
+ * it. The same Cursor (or Codex) account reported from several computers
+ * is one row. With a single row - the common case - nothing is captioned.
  *
  * Every percentage is labelled `used` inline - a bare number cannot say
- * whether it is used or remaining. Snapshot age only renders once the data
- * is actually stale; fresh data needs no caption.
+ * whether it is used or remaining. The meter fills with what is left, so a
+ * window that is almost spent reads as a depleted bar. Snapshot age only
+ * renders once the data is actually stale; fresh data needs no caption.
  *
  * @module AccountLimits
  */
@@ -57,13 +55,17 @@ function usageTone(usedPercent: number): string | undefined {
   return undefined;
 }
 
+function remainingPercent(usedPercent: number): number {
+  return Math.min(100, Math.max(0, 100 - usedPercent));
+}
+
 function LimitMeter({ window, color }: { window: AccountLimitsWindow; color: string }) {
   return (
     <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
       <div
         className="h-full rounded-full"
         style={{
-          width: `${Math.min(100, Math.max(0, window.usedPercent))}%`,
+          width: `${remainingPercent(window.usedPercent)}%`,
           backgroundColor: color,
         }}
       />

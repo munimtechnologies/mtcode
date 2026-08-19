@@ -697,6 +697,32 @@ export const ACPRegistryIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const MtModelIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={cn("stroke-current", className)}
+    aria-hidden
+  >
+    <path
+      d="M12 3.2 13.7 8.3 19 10l-5.3 1.7L12 16.8l-1.7-5.1L5 10l5.3-1.7L12 3.2Z"
+      strokeWidth="1.7"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M18.2 15.4 19 17.8 21.4 18.6 19 19.4 18.2 21.8 17.4 19.4 15 18.6 17.4 17.8 18.2 15.4Z"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M5.4 14.8 6 16.6 7.8 17.2 6 17.8 5.4 19.6 4.8 17.8 3 17.2 4.8 16.6 5.4 14.8Z"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export const PiAgentIcon: Icon = ({ className, ...props }) => (
   <svg {...props} viewBox="0 0 800 800" className={cn("fill-none", className)}>
     <rect width="800" height="800" rx="160" fill="#000" />

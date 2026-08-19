@@ -60,6 +60,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import { prependMtModelPickerEntry, withMtModelProvider } from "../../mtModel";
 import {
   buildSidebarProjectSnapshots,
   type SidebarProjectGroupMember,
@@ -392,18 +393,21 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
 
   // ----- default model -----
+  const pickerProviders = useMemo(() => withMtModelProvider(serverProviders), [serverProviders]);
   const storedSelection = representative.defaultModelSelection;
-  const resolvedSelection = resolveDefaultProviderModelSelection(serverProviders, storedSelection);
+  const resolvedSelection = resolveDefaultProviderModelSelection(pickerProviders, storedSelection);
   const instanceEntries = useMemo(
     () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
+      prependMtModelPickerEntry(
+        sortProviderInstanceEntries(
+          applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
+        ),
       ),
     [serverProviders, settings],
   );
   const modelOptionsByInstance = useMemo(
-    () => getCustomModelOptionsByInstance(settings, serverProviders),
-    [serverProviders, settings],
+    () => getCustomModelOptionsByInstance(settings, pickerProviders),
+    [pickerProviders, settings],
   );
   const activeEntry = instanceEntries.find(
     (entry) => entry.instanceId === resolvedSelection?.instanceId,

@@ -2070,7 +2070,7 @@ let toolDefs: [[String: Any]] = [
     ],
     [
         "name": "click",
-        "description": "Click an element by element_id (preferred, uses the accessibility press action) or at absolute screen coordinates.",
+        "description": "Click an element by element_id (preferred, uses the accessibility press action) or at absolute screen coordinates. The agent pointer overlay moves to the target without moving the user's mouse.",
         "inputSchema": [
             "type": "object",
             "properties": [

@@ -1,6 +1,6 @@
-# Refresh Blade to latest MT Code (upstream nightly + CU/History).
+# Refresh Blade to latest MT Code.
 # Clone remote "origin" here is github.com/munimtechnologies/mtcode (main branch).
-# Uses T3CODE_DESKTOP_VERSION (nightly string) for Nightly logo/artwork.
+# Uses T3CODE_DESKTOP_VERSION (single version, no nightly prerelease).
 # The fleet ships the MT Code brand on every machine, same as the Mac.
 param(
   [string]$DesktopVersion = "",
@@ -79,9 +79,13 @@ if (-not $env:T3CODE_DESKTOP_VERSION) {
     Where-Object { $_.prerelease -eq $true -and $_.tag_name -match "nightly" } |
     Sort-Object { [datetime]$_.published_at } -Descending |
     Select-Object -First 1
-  if (-not $nightly -or -not $nightly.tag_name) { throw "could not resolve latest nightly tag" }
-  $env:T3CODE_DESKTOP_VERSION = ([string]$nightly.tag_name).TrimStart("v")
+  if (-not $nightly -or -not $nightly.tag_name) {
+    $env:T3CODE_DESKTOP_VERSION = (node -p "require('./apps/desktop/package.json').version.replace(/-nightly\\.[0-9.]+$/, '')")
+  } else {
+    $env:T3CODE_DESKTOP_VERSION = ([string]$nightly.tag_name).TrimStart("v")
+  }
 }
+$env:T3CODE_DESKTOP_VERSION = $env:T3CODE_DESKTOP_VERSION -replace '-nightly\.\d{8}\.\d+$', ''
 Log "T3CODE_DESKTOP_VERSION=$($env:T3CODE_DESKTOP_VERSION)"
 
 Log ("HEAD=" + (git rev-parse --short HEAD) + " " + (git log -1 --oneline))
@@ -89,8 +93,7 @@ Log ("HEAD=" + (git rev-parse --short HEAD) + " " + (git log -1 --oneline))
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 # Align package versions like upstream's release workflow, so the bundled
-# server and web report this nightly version instead of the stale package.json
-# one (else nightly-track clients show "Server update available").
+# server and web report this version instead of the stale package.json one.
 & node scripts/update-release-package-versions.ts $env:T3CODE_DESKTOP_VERSION *>> $log
 if ($LASTEXITCODE -ne 0) {
   Log "version stamp failed exit=$LASTEXITCODE"

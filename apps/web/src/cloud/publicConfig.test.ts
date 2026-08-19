@@ -2,12 +2,27 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   CloudPublicConfigMissingError,
+  hasClerkPublicConfig,
   hasCloudPublicConfig,
   resolveRelayClerkTokenOptions,
 } from "./publicConfig.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("hasClerkPublicConfig", () => {
+  it("requires a publishable key and JWT template, not a relay", () => {
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "");
+    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "");
+    vi.stubEnv("VITE_T3CODE_RELAY_URL", "");
+    expect(hasClerkPublicConfig()).toBe(false);
+
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_example");
+    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "t3-relay");
+    expect(hasClerkPublicConfig()).toBe(true);
+    expect(hasCloudPublicConfig()).toBe(false);
+  });
 });
 
 describe("hasCloudPublicConfig", () => {

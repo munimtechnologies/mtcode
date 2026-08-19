@@ -1,18 +1,19 @@
 /**
  * Multi-environment account-limits state.
  *
- * Every connected environment reports one snapshot per provider instance;
- * the client keeps ONE ROW PER (environment, provider, instance) and never
- * merges across environments: `asOf` comes from each environment's local
- * clock, and clock skew must not let one machine's reading replace another
- * machine's correct one. The one exception: byte-identical rows for the
- * SAME instance id collapse, because identical content under one id is the
- * same underlying reading seen twice (worktree servers sharing a home, two
- * machines seeded from the same transcripts) and carries no extra
- * information. Within a single environment, a server predating
- * instance attribution answers with unkeyed snapshots - those fold onto the
- * driver's default instance, freshest wins, which is exactly what that data
- * meant when it was written.
+ * Every connected environment reports one snapshot per provider instance.
+ * Within an environment, unkeyed (pre-attribution) snapshots fold onto the
+ * driver's default instance, freshest wins.
+ *
+ * Across environments, two kinds of duplicate collapse:
+ *  - Byte-identical rows (same instance, stamp, windows) — worktree servers
+ *    sharing a home, or two machines seeded from the same transcripts.
+ *  - The same subscription reading (same plan and window usage) reported
+ *    from several computers. Cursor's monthly pools are one account, not
+ *    one-per-machine; showing them three times is noise. Differing windows
+ *    stay separate so two Codex machines with different remaining quota
+ *    cannot overwrite each other, and empty snapshots never collapse
+ *    across clocks.
  *
  * @module state/accountLimits
  */
@@ -89,10 +90,43 @@ export interface AccountLimitsRow {
 export const legacyInstanceIdFor = (provider: UsageProviderKind): string =>
   provider === "claude" ? "claudeAgent" : provider;
 
+function roundResetToMinute(resetsAt: string | null): string | null {
+  if (resetsAt === null) return null;
+  const ms = Date.parse(resetsAt);
+  if (!Number.isFinite(ms)) return resetsAt;
+  return new Date(Math.floor(ms / 60_000) * 60_000).toISOString();
+}
+
+/**
+ * Identity of the subscription those windows describe, ignoring which
+ * computer reported them and when. Empty window lists are not a reading —
+ * they must not collapse two environments' "no data yet" clocks.
+ */
+export function subscriptionFingerprint(snapshot: AccountLimitsSnapshot): string | null {
+  if (snapshot.windows.length === 0) return null;
+  return JSON.stringify([
+    snapshot.provider,
+    snapshot.plan,
+    snapshot.windows.map((window) => ({
+      id: window.id,
+      usedPercent: Math.round(window.usedPercent),
+      resetsAt: roundResetToMinute(window.resetsAt),
+      windowMinutes: window.windowMinutes,
+    })),
+  ]);
+}
+
+function preferLimitsRow(current: AccountLimitsRow, candidate: AccountLimitsRow): AccountLimitsRow {
+  if (candidate.environmentIsPrimary !== current.environmentIsPrimary) {
+    return candidate.environmentIsPrimary ? candidate : current;
+  }
+  return candidate.snapshot.asOf > current.snapshot.asOf ? candidate : current;
+}
+
 /**
  * Pure merge, exported for tests: dedupe freshest-wins per instance WITHIN
- * an environment, never across environments (see module doc), grouped per
- * provider for rendering.
+ * an environment, then collapse the same subscription reading across
+ * computers (see module doc).
  */
 export function mergeEnvironmentLimits(
   statuses: readonly EnvironmentLimitsStatus[],
@@ -101,8 +135,10 @@ export function mergeEnvironmentLimits(
   // Two environments on one machine (worktree servers) can hold identical
   // snapshots. Byte-identical rows carry no extra information, so exact
   // duplicates collapse; rows that differ at all - clocks included - stay,
-  // because cross-environment freshness cannot be arbitrated (see module doc).
-  const seen = new Set<string>();
+  // unless they are the same subscription windows reported from several
+  // computers (handled below).
+  const seenExact = new Set<string>();
+  const seenSubscription = new Map<string, { provider: UsageProviderKind; index: number }>();
   for (const status of statuses) {
     const byInstance = new Map<string, AccountLimitsSnapshot>();
     for (const snapshot of status.snapshots ?? []) {
@@ -129,8 +165,8 @@ export function mergeEnvironmentLimits(
         snapshot.plan,
         snapshot.windows,
       ]);
-      if (seen.has(duplicateKey)) continue;
-      seen.add(duplicateKey);
+      if (seenExact.has(duplicateKey)) continue;
+      seenExact.add(duplicateKey);
       // Resolve the caption through the app-wide instance display-name
       // contract (explicit name wins, non-default ids humanize, defaults
       // keep the brand label), so Limits names accounts the same way the
@@ -139,14 +175,30 @@ export function mergeEnvironmentLimits(
         status.providers ?? [],
         ProviderInstanceId.make(instanceId),
       );
-      const rows = byProvider.get(snapshot.provider) ?? [];
-      rows.push({
+      const row: AccountLimitsRow = {
         environmentId: status.environmentId,
         environmentLabel: status.environmentLabel,
         environmentIsPrimary: status.environmentIsPrimary,
         instanceLabel: entry?.displayName ?? instanceId,
         snapshot,
-      });
+      };
+      const fingerprint = subscriptionFingerprint(snapshot);
+      if (fingerprint !== null) {
+        const existing = seenSubscription.get(fingerprint);
+        if (existing !== undefined) {
+          const rows = byProvider.get(existing.provider);
+          const current = rows?.[existing.index];
+          if (rows !== undefined && current !== undefined) {
+            rows[existing.index] = preferLimitsRow(current, row);
+          }
+          continue;
+        }
+      }
+      const rows = byProvider.get(snapshot.provider) ?? [];
+      if (fingerprint !== null) {
+        seenSubscription.set(fingerprint, { provider: snapshot.provider, index: rows.length });
+      }
+      rows.push(row);
       byProvider.set(snapshot.provider, rows);
     }
   }

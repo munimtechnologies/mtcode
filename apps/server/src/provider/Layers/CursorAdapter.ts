@@ -5,6 +5,7 @@
  */
 
 import {
+  classifyTaskAgentKind,
   ApprovalRequestId,
   type CursorSettings,
   type ProviderOptionSelection,
@@ -16,7 +17,9 @@ import {
   type ProviderUserInputAnswers,
   ProviderDriverKind,
   ProviderInstanceId,
+  RuntimeItemId,
   RuntimeRequestId,
+  RuntimeTaskId,
   type RuntimeMode,
   type ThreadId,
   TurnId,
@@ -76,10 +79,18 @@ import { applyCursorAcpModelSelection, makeCursorAcpRuntime } from "../acp/Curso
 import {
   CursorAskQuestionRequest,
   CursorCreatePlanRequest,
+  CursorGenerateImageRequest,
+  CursorTaskRequest,
   CursorUpdateTodosRequest,
+  cursorSubagentTypeName,
   extractAskQuestions,
   extractPlanMarkdown,
   extractTodosAsPlan,
+  formatCursorAskQuestionResponse,
+  formatCursorCreatePlanResponse,
+  formatCursorGenerateImageResponse,
+  formatCursorTaskResponse,
+  formatCursorUpdateTodosResponse,
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
@@ -583,6 +594,7 @@ export function makeCursorAdapter(
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
             runtimeMode: input.runtimeMode,
+            ...(cursorModelSelection?.model ? { model: cursorModelSelection.model } : {}),
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -641,7 +653,7 @@ export function makeCursorAdapter(
                     requestId: runtimeRequestId,
                     payload: { answers: resolved },
                   });
-                  return { answers: resolved };
+                  return formatCursorAskQuestionResponse(params, resolved);
                 }),
               ),
             );
@@ -667,33 +679,142 @@ export function makeCursorAdapter(
                       payload: params,
                     },
                   });
-                  return { accepted: true } as const;
+                  return formatCursorCreatePlanResponse();
                 }),
               ),
+            );
+            const emitCursorTodos = (params: typeof CursorUpdateTodosRequest.Type) =>
+              mapExtensionFailure(
+                Effect.gen(function* () {
+                  yield* logNative(
+                    input.threadId,
+                    "cursor/update_todos",
+                    params,
+                    "acp.cursor.extension",
+                  );
+                  if (ctx) {
+                    yield* emitPlanUpdate(
+                      ctx,
+                      extractTodosAsPlan(params),
+                      params,
+                      "acp.cursor.extension",
+                      "cursor/update_todos",
+                    );
+                  }
+                }),
+              );
+            yield* acp.handleExtRequest("cursor/update_todos", CursorUpdateTodosRequest, (params) =>
+              emitCursorTodos(params).pipe(Effect.as(formatCursorUpdateTodosResponse(params))),
             );
             yield* acp.handleExtNotification(
               "cursor/update_todos",
               CursorUpdateTodosRequest,
+              emitCursorTodos,
+            );
+            const emitCursorTask = (params: typeof CursorTaskRequest.Type) =>
+              mapExtensionFailure(
+                Effect.gen(function* () {
+                  yield* logNative(input.threadId, "cursor/task", params, "acp.cursor.extension");
+                  const taskType = cursorSubagentTypeName(params.subagentType);
+                  const taskId = RuntimeTaskId.make(params.agentId?.trim() || params.toolCallId);
+                  const description = params.description.trim() || "Cursor subagent";
+                  const model = params.model?.trim();
+                  const durationMs =
+                    typeof params.durationMs === "number" &&
+                    Number.isFinite(params.durationMs) &&
+                    params.durationMs >= 0
+                      ? Math.round(params.durationMs)
+                      : undefined;
+                  const linkage = {
+                    taskType,
+                    agentKind: classifyTaskAgentKind({ taskType }),
+                    role: taskType,
+                    title: description,
+                    toolUseId: params.toolCallId,
+                    ...(model ? { model } : {}),
+                  };
+                  yield* offerRuntimeEvent({
+                    type: "task.started",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    turnId: ctx?.activeTurnId,
+                    payload: {
+                      taskId,
+                      description,
+                      ...linkage,
+                    },
+                    raw: {
+                      source: "acp.cursor.extension",
+                      method: "cursor/task",
+                      payload: params,
+                    },
+                  });
+                  yield* offerRuntimeEvent({
+                    type: "task.completed",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    turnId: ctx?.activeTurnId,
+                    payload: {
+                      taskId,
+                      status: "completed",
+                      ...linkage,
+                      ...(durationMs !== undefined
+                        ? { typedUsage: { totalTokens: 0, durationMs } }
+                        : {}),
+                    },
+                  });
+                }),
+              );
+            yield* acp.handleExtRequest("cursor/task", CursorTaskRequest, (params) =>
+              emitCursorTask(params).pipe(Effect.as(formatCursorTaskResponse(params))),
+            );
+            yield* acp.handleExtNotification("cursor/task", CursorTaskRequest, emitCursorTask);
+            const emitCursorGeneratedImage = (params: typeof CursorGenerateImageRequest.Type) =>
+              mapExtensionFailure(
+                Effect.gen(function* () {
+                  yield* logNative(
+                    input.threadId,
+                    "cursor/generate_image",
+                    params,
+                    "acp.cursor.extension",
+                  );
+                  const filePath = params.filePath?.trim();
+                  const description = params.description.trim() || "Generated image";
+                  yield* offerRuntimeEvent({
+                    type: "item.completed",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    turnId: ctx?.activeTurnId,
+                    itemId: RuntimeItemId.make(params.toolCallId),
+                    payload: {
+                      itemType: "image_view",
+                      status: "completed",
+                      title: description,
+                      ...(filePath ? { detail: filePath } : {}),
+                    },
+                    raw: {
+                      source: "acp.cursor.extension",
+                      method: "cursor/generate_image",
+                      payload: params,
+                    },
+                  });
+                }),
+              );
+            yield* acp.handleExtRequest(
+              "cursor/generate_image",
+              CursorGenerateImageRequest,
               (params) =>
-                mapExtensionFailure(
-                  Effect.gen(function* () {
-                    yield* logNative(
-                      input.threadId,
-                      "cursor/update_todos",
-                      params,
-                      "acp.cursor.extension",
-                    );
-                    if (ctx) {
-                      yield* emitPlanUpdate(
-                        ctx,
-                        extractTodosAsPlan(params),
-                        params,
-                        "acp.cursor.extension",
-                        "cursor/update_todos",
-                      );
-                    }
-                  }),
+                emitCursorGeneratedImage(params).pipe(
+                  Effect.as(formatCursorGenerateImageResponse(params)),
                 ),
+            );
+            yield* acp.handleExtNotification(
+              "cursor/generate_image",
+              CursorGenerateImageRequest,
+              emitCursorGeneratedImage,
             );
             yield* acp.handleRequestPermission((params) =>
               mapExtensionFailure(

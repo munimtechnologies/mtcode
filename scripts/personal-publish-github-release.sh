@@ -19,15 +19,10 @@ echo "==== $(date -u +%Y-%m-%dT%H:%M:%SZ) munim publish start ===="
 
 cd "$REPO"
 
-NIGHTLY_TAG=$(gh api repos/pingdotgg/t3code/releases --jq '[.[] | select(.prerelease==true and (.tag_name|test("nightly")))] | sort_by(.published_at) | reverse | .[0].tag_name // empty')
-if [[ -z "$NIGHTLY_TAG" ]]; then
-  echo "could not resolve latest upstream nightly tag" >&2
-  exit 1
-fi
-
-# Keep the upstream nightly version string so icons/artwork stay Nightly and the
-# updater channel stays "nightly". GitHub release tag is prefixed with munim-.
-export T3CODE_DESKTOP_VERSION="${NIGHTLY_TAG#v}"
+# shellcheck source=lib/personal-mt-version.sh
+source "$REPO/scripts/lib/personal-mt-version.sh"
+personal_mt_export_desktop_version
+# GitHub release tag is prefixed with munim-.
 TAG="munim-v${T3CODE_DESKTOP_VERSION}"
 
 export T3CODE_DESKTOP_DISTRO=munim
@@ -63,9 +58,7 @@ elif [[ -f "$EXPECTED_MAC" && "${T3_MUNIM_FORCE_MAC:-}" != "1" ]]; then
   echo "-- reusing existing Munim Mac DMG (set T3_MUNIM_FORCE_MAC=1 to rebuild) --"
 else
   echo "-- building Munim Mac arm64 --"
-  # Align package versions like upstream's release workflow, so the bundled
-  # server and web report this nightly version (else nightly-track clients
-  # show "Server update available").
+  # Align package versions so the bundled server and web report this version.
   node scripts/update-release-package-versions.ts "$T3CODE_DESKTOP_VERSION"
   pnpm dist:desktop:dmg:arm64
   # The stamp is build input only; keep the checkout clean.
@@ -75,7 +68,7 @@ fi
 MAC_DMG=$(ls -t "$REPO"/release/MT-Code-*-arm64.dmg 2>/dev/null | head -1 || true)
 MAC_ZIP=$(ls -t "$REPO"/release/MT-Code-*-arm64.zip 2>/dev/null | head -1 || true)
 MAC_YML=""
-for candidate in "$REPO"/release/nightly-mac.yml "$REPO"/release/latest-mac.yml; do
+for candidate in "$REPO"/release/latest-mac.yml "$REPO"/release/nightly-mac.yml; do
   if [[ -f "$candidate" ]]; then
     MAC_YML="$candidate"
     break

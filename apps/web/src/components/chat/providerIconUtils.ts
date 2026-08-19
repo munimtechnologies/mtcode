@@ -5,6 +5,7 @@ import {
   CursorIcon,
   GrokIcon,
   Icon,
+  MtModelIcon,
   OpenAI,
   OpenCodeIcon,
 } from "../Icons";
@@ -17,6 +18,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make("cursor")]: CursorIcon,
   [ProviderDriverKind.make("grok")]: GrokIcon,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
+  [ProviderDriverKind.make("mt")]: MtModelIcon,
 };
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {

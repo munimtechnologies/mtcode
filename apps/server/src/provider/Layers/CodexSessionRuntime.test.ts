@@ -20,6 +20,7 @@ import {
   buildPermissionsApprovalResponse,
   buildTurnStartParams,
   hasConfiguredMcpServer,
+  hasConfiguredMcpServerNamed,
   isComputerUseMcpApproval,
   isMcpToolApproval,
   isRecoverableThreadResumeError,
@@ -532,6 +533,27 @@ describe("T3 browser developer instructions", () => {
       /preview_open/,
     );
   });
+
+  it("describes Computer Use pointer tools only when t3-desktop is attached", () => {
+    const withDesktop = codexDefaultModeDeveloperInstructions(false, {
+      desktopToolsAvailable: true,
+    });
+    NodeAssert.match(withDesktop, /t3-desktop/);
+    NodeAssert.match(withDesktop, /pointer overlay/);
+    NodeAssert.match(withDesktop, /get_app_state/);
+    NodeAssert.doesNotMatch(codexDefaultModeDeveloperInstructions(false), /t3-desktop/);
+  });
+
+  it("marks a home-directory thread as a whole-computer session", () => {
+    const instructions = codexDefaultModeDeveloperInstructions(false, {
+      computerHomeWorkspace: true,
+    });
+    NodeAssert.match(instructions, /This thread is the whole computer/);
+    NodeAssert.doesNotMatch(
+      codexDefaultModeDeveloperInstructions(false),
+      /This thread is the whole computer/,
+    );
+  });
 });
 
 describe("hasConfiguredMcpServer", () => {
@@ -542,6 +564,12 @@ describe("hasConfiguredMcpServer", () => {
       hasConfiguredMcpServer(["-c", 'mcp_servers.t3-code.url="http://127.0.0.1/mcp"']),
       true,
     );
+  });
+
+  it("matches a named MCP server without treating a sibling as present", () => {
+    const args = ["-c", "mcp_servers.t3-desktop.command='/usr/bin/t3-desktop-mcp'"];
+    NodeAssert.equal(hasConfiguredMcpServerNamed(args, "t3-desktop"), true);
+    NodeAssert.equal(hasConfiguredMcpServerNamed(args, "t3-code"), false);
   });
 });
 

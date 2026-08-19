@@ -218,6 +218,16 @@ describe("resolveSidebarStageBadgeLabel", () => {
     ).toBe("Nightly");
   });
 
+  it("returns the fallback label when nightly stages are disabled", () => {
+    expect(
+      resolveSidebarStageBadgeLabel({
+        primaryServerVersion: "0.0.28-nightly.20260616.12",
+        fallbackStageLabel: "Alpha",
+        allowNightlyStage: false,
+      }),
+    ).toBe("Alpha");
+  });
+
   it("returns the fallback label for stable primary server versions", () => {
     expect(
       resolveSidebarStageBadgeLabel({
@@ -436,21 +446,16 @@ describe("isSidebarNestedLinkClick", () => {
 });
 
 describe("shouldCreateNewThreadInCurrentProject", () => {
-  it("creates directly on shift+click in a multi-project setup", () => {
-    expect(shouldCreateNewThreadInCurrentProject(true, 2)).toBe(true);
+  it("creates in the current project on shift+click", () => {
+    expect(shouldCreateNewThreadInCurrentProject(true)).toBe(true);
   });
 
-  it("opens the picker on a plain click in a multi-project setup", () => {
-    expect(shouldCreateNewThreadInCurrentProject(false, 2)).toBe(false);
+  it("does not use the current project on a plain click", () => {
+    expect(shouldCreateNewThreadInCurrentProject(false)).toBe(false);
   });
 
-  it("creates directly when the sidebar is scoped to a project", () => {
-    expect(shouldCreateNewThreadInCurrentProject(false, 2, true)).toBe(true);
-  });
-
-  it("creates directly on any click with a single project", () => {
-    expect(shouldCreateNewThreadInCurrentProject(false, 1)).toBe(true);
-    expect(shouldCreateNewThreadInCurrentProject(true, 1)).toBe(true);
+  it("creates in the current project when the sidebar is scoped to a project", () => {
+    expect(shouldCreateNewThreadInCurrentProject(false, true)).toBe(true);
   });
 });
 

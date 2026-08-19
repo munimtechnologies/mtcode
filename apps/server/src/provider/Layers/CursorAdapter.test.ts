@@ -1306,7 +1306,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       const argvRuns = yield* Effect.promise(() => readArgvLog(argvLogPath));
       assert.lengthOf(argvRuns, 1, "session should not restart — only one spawn");
-      assert.deepStrictEqual(argvRuns[0], ["--force", "acp"]);
+      assert.deepStrictEqual(argvRuns[0], ["--model", "composer-2", "--force", "acp"]);
 
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
       const setConfigRequests = requests.filter(
@@ -1542,5 +1542,133 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       // they wait on virtual time that never advances, and a regression would
       // hang until the suite timeout instead of failing here.
     }).pipe(TestClock.withLive),
+  );
+
+  it.effect("projects Cursor subagent and generated-image extension notifications", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-extension-task-image");
+      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+      const settled = yield* Deferred.make<void>();
+      const seen = new Set<string>();
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({
+          T3_ACP_EMIT_CURSOR_TASK: "1",
+        }),
+      );
+      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.gen(function* () {
+          runtimeEvents.push(event);
+          if (String(event.threadId) !== String(threadId)) {
+            return;
+          }
+          if (event.type === "task.started" || event.type === "task.completed") {
+            seen.add(event.type);
+          }
+          if (event.type === "turn.completed") {
+            seen.add(event.type);
+          }
+          if (
+            seen.has("task.started") &&
+            seen.has("task.completed") &&
+            seen.has("turn.completed")
+          ) {
+            yield* Deferred.succeed(settled, undefined).pipe(Effect.orDie);
+          }
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "explore then stop",
+        attachments: [],
+      });
+      yield* Deferred.await(settled);
+
+      const taskStarted = runtimeEvents.find((event) => event.type === "task.started");
+      const taskCompleted = runtimeEvents.find((event) => event.type === "task.completed");
+      assert.isDefined(taskStarted);
+      assert.isDefined(taskCompleted);
+      if (taskStarted?.type === "task.started") {
+        assert.equal(taskStarted.payload.taskType, "explore");
+        assert.equal(taskStarted.payload.role, "explore");
+        assert.equal(taskStarted.payload.description, "Explore codebase");
+      }
+      if (taskCompleted?.type === "task.completed") {
+        assert.equal(taskCompleted.payload.status, "completed");
+        assert.equal(taskCompleted.payload.typedUsage?.durationMs, 1200);
+      }
+
+      yield* Fiber.interrupt(runtimeEventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("projects Cursor generated-image extension notifications as image views", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-extension-generate-image");
+      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+      const settled = yield* Deferred.make<void>();
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EMIT_CURSOR_GENERATE_IMAGE: "1" }),
+      );
+      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.gen(function* () {
+          runtimeEvents.push(event);
+          if (
+            String(event.threadId) === String(threadId) &&
+            event.type === "item.completed" &&
+            event.payload.itemType === "image_view"
+          ) {
+            yield* Deferred.succeed(settled, undefined).pipe(Effect.orDie);
+          }
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "generate an icon",
+        attachments: [],
+      });
+      yield* Deferred.await(settled);
+
+      const image = runtimeEvents.find(
+        (event) => event.type === "item.completed" && event.payload.itemType === "image_view",
+      );
+      assert.isDefined(image);
+      if (image?.type === "item.completed") {
+        assert.equal(image.payload.title, "Minimal flat app icon");
+        assert.equal(image.payload.detail, "/tmp/icon.png");
+        assert.equal(String(image.itemId), "cursor-image-tool-call-1");
+      }
+
+      yield* Fiber.interrupt(runtimeEventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
   );
 });

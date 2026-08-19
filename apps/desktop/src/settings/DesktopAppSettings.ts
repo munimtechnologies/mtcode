@@ -183,10 +183,13 @@ export class DesktopAppSettings extends Context.Service<
   }
 >()("@t3tools/desktop/settings/DesktopAppSettings") {}
 
-export function resolveDefaultDesktopSettings(appVersion: string): DesktopSettings {
+export function resolveDefaultDesktopSettings(
+  appVersion: string,
+  options?: { readonly singleReleaseChannel?: boolean },
+): DesktopSettings {
   return {
     ...DEFAULT_DESKTOP_SETTINGS,
-    updateChannel: resolveDefaultDesktopUpdateChannel(appVersion),
+    updateChannel: resolveDefaultDesktopUpdateChannel(appVersion, options),
   };
 }
 
@@ -207,14 +210,16 @@ export function normalizeMainWindowBounds(value: unknown): DesktopWindowBounds |
 function normalizeDesktopSettingsDocument(
   parsed: DesktopSettingsDocument,
   appVersion: string,
+  options?: { readonly singleReleaseChannel?: boolean },
 ): DesktopSettings {
-  const defaultSettings = resolveDefaultDesktopSettings(appVersion);
+  const defaultSettings = resolveDefaultDesktopSettings(appVersion, options);
   const mainWindowBounds = normalizeMainWindowBounds(parsed.mainWindowBounds);
   const parsedUpdateChannel = Option.fromNullishOr(parsed.updateChannel);
   const isLegacySettings = parsed.updateChannelConfiguredByUser === undefined;
-  const updateChannelConfiguredByUser =
-    parsed.updateChannelConfiguredByUser === true ||
-    (isLegacySettings && Option.contains(parsedUpdateChannel, "nightly"));
+  const updateChannelConfiguredByUser = options?.singleReleaseChannel
+    ? false
+    : parsed.updateChannelConfiguredByUser === true ||
+      (isLegacySettings && Option.contains(parsedUpdateChannel, "nightly"));
 
   // Newer form wins when both are present; otherwise fall back to the legacy
   // `wslMode === "wsl"` signal so users coming off the swap-mode build keep
@@ -231,9 +236,11 @@ function normalizeDesktopSettingsDocument(
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
     tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
-    updateChannel: updateChannelConfiguredByUser
-      ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
-      : defaultSettings.updateChannel,
+    updateChannel: options?.singleReleaseChannel
+      ? "latest"
+      : updateChannelConfiguredByUser
+        ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
+        : defaultSettings.updateChannel,
     updateChannelConfiguredByUser,
     wslBackendEnabled,
     wslDistro: normalizeWslDistro(parsed.wslDistro),
@@ -378,8 +385,9 @@ function readSettings(
   fileSystem: FileSystem.FileSystem,
   settingsPath: string,
   appVersion: string,
+  options?: { readonly singleReleaseChannel?: boolean },
 ): Effect.Effect<DesktopSettings> {
-  const defaultSettings = resolveDefaultDesktopSettings(appVersion);
+  const defaultSettings = resolveDefaultDesktopSettings(appVersion, options);
 
   return fileSystem.readFileString(settingsPath).pipe(
     Effect.option,
@@ -388,7 +396,7 @@ function readSettings(
         onNone: () => Effect.succeed(defaultSettings),
         onSome: (raw) =>
           decodeDesktopSettingsJson(raw).pipe(
-            Effect.map((parsed) => normalizeDesktopSettingsDocument(parsed, appVersion)),
+            Effect.map((parsed) => normalizeDesktopSettingsDocument(parsed, appVersion, options)),
             Effect.orElseSucceed(() => defaultSettings),
           ),
       }),
@@ -456,6 +464,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const settingsRef = yield* SynchronizedRef.make(environment.defaultDesktopSettings);
+  const singleReleaseChannel = environment.branding.baseName === "MT Code";
 
   const updateInMemory = (update: (settings: DesktopSettings) => DesktopSettings) =>
     SynchronizedRef.modify(settingsRef, (settings) => {
@@ -503,6 +512,7 @@ export const make = Effect.gen(function* () {
         fileSystem,
         environment.desktopSettingsPath,
         environment.appVersion,
+        { singleReleaseChannel },
       );
       return yield* SynchronizedRef.setAndGet(settingsRef, settings);
     }).pipe(Effect.withSpan("desktop.settings.load")),
@@ -527,9 +537,9 @@ export const make = Effect.gen(function* () {
         Effect.withSpan("desktop.settings.setTailscaleServe", { attributes: input }),
       ),
     setUpdateChannel: (channel) =>
-      persist((settings) => setUpdateChannel(settings, channel)).pipe(
-        Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } }),
-      ),
+      persist((settings) =>
+        singleReleaseChannel ? settings : setUpdateChannel(settings, channel),
+      ).pipe(Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } })),
     setWslBackendEnabled: (enabled) =>
       persist((settings) => setWslBackendEnabled(settings, enabled)).pipe(
         Effect.withSpan("desktop.settings.setWslBackendEnabled", { attributes: { enabled } }),

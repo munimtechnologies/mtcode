@@ -14,7 +14,21 @@
 # On success, Alchemy writes the deployed relay URL into this repo's root
 # .env; copy it into ~/.mt/munim-connect.env as T3CODE_RELAY_URL so client
 # builds pick it up.
+#
+# Refuses unless FORCE_PAID_RELAY=1 — this stack is optional and billed.
 set -euo pipefail
+
+if [[ "${FORCE_PAID_RELAY:-}" != "1" ]]; then
+  echo "Refusing to deploy the Munim relay stack." >&2
+  echo "That deploy bills PlanetScale + Cloudflare Workers Paid (Queues) + Axiom." >&2
+  echo "MT Code already works like T3 Code without it:" >&2
+  echo "  • desktop app + local server (your machine)" >&2
+  echo "  • https://mtcode.munimtech.com (static Worker, free plan)" >&2
+  echo "  • pairing / Computer Use to reach that machine" >&2
+  echo "  • T3 Connect on the desktop app (T3 pays for relay.t3.codes)" >&2
+  echo "Set FORCE_PAID_RELAY=1 only if you accept those bills." >&2
+  exit 1
+fi
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="${T3_PERSONAL_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"

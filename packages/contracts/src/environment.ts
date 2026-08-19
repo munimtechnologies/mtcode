@@ -110,6 +110,12 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
   capabilities: ExecutionEnvironmentCapabilities,
+  /**
+   * Absolute home directory of the account the server is running as. Optional
+   * so older servers still decode; clients use it as the computer-wide
+   * workspace when starting a thread without a project folder.
+   */
+  homeDirectory: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
 

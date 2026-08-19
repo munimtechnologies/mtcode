@@ -6,6 +6,7 @@ import { useCallback, useMemo } from "react";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useClientSettings } from "~/hooks/useSettings";
+import { isComputerHomeWorkspace } from "~/lib/chatThreadActions";
 import { selectProjectGroupingSettings } from "~/logicalProject";
 import {
   buildSidebarProjectPickerEntries,
@@ -93,7 +94,25 @@ export function DraftHeroHeadline({
           ),
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
-  const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
+  const activeProject = activeProjectRef
+    ? (projects.find(
+        (project) =>
+          project.environmentId === activeProjectRef.environmentId &&
+          project.id === activeProjectRef.projectId,
+      ) ?? null)
+    : null;
+  const activeEnvironment = activeProject
+    ? (environments.find(
+        (environment) => environment.environmentId === activeProject.environmentId,
+      ) ?? null)
+    : null;
+  const isComputerHome = isComputerHomeWorkspace(
+    activeProject?.workspaceRoot,
+    activeEnvironment?.serverConfig?.environment.homeDirectory,
+  );
+  const activeProjectDisplayName = isComputerHome
+    ? (activeEnvironment?.label ?? activeProjectGroup?.displayName ?? activeProjectTitle)
+    : (activeProjectGroup?.displayName ?? activeProjectTitle);
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
@@ -104,7 +123,13 @@ export function DraftHeroHeadline({
         <TooltipTrigger
           render={
             <MenuTrigger
-              aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
+              aria-label={
+                hasResolvedProject
+                  ? isComputerHome
+                    ? "Choose a project folder"
+                    : "Change project"
+                  : "Choose a project"
+              }
               className="pointer-events-auto inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
@@ -134,15 +159,24 @@ export function DraftHeroHeadline({
             });
           }}
         >
-          {projectPickerEntries.map(({ group }) => {
+          {projectPickerEntries.map(({ group, targetProject }) => {
+            const environment = environments.find(
+              (candidate) => candidate.environmentId === targetProject.environmentId,
+            );
+            const displayName = isComputerHomeWorkspace(
+              targetProject.workspaceRoot,
+              environment?.serverConfig?.environment.homeDirectory,
+            )
+              ? (environment?.label ?? group.displayName)
+              : group.displayName;
             return (
               <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
                 <Tooltip>
                   <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                    {group.displayName}
+                    {displayName}
                   </TooltipTrigger>
                   <TooltipPopup side="top" className="max-w-80">
-                    {group.displayName}
+                    {displayName}
                   </TooltipPopup>
                 </Tooltip>
               </MenuRadioItem>
@@ -168,7 +202,9 @@ export function DraftHeroHeadline({
 
   return (
     <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {hasResolvedProject ? (
+      {isComputerHome ? (
+        <>What should we work on{canChooseProject ? <> in {projectSelector}</> : null}?</>
+      ) : hasResolvedProject ? (
         <>What should we build in {projectSelector}?</>
       ) : canChooseProject ? (
         <>{projectSelector} to start</>

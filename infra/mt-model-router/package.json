@@ -1,0 +1,8 @@
+{
+  "name": "mt-model-router",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "npx wrangler deploy"
+  }
+}

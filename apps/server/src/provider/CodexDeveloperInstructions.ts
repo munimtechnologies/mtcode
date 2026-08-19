@@ -37,8 +37,40 @@ You are running on one T3 Code environment (one computer). Other computers the u
 If the task needs another computer's desktop, OS, files, GPU, or a machine that is already linked in T3 Code, call \`computer_list\` and then \`computer_send\` instead of asking the user to switch the Run on picker. Include the full task in \`message\`; the other computer does not receive this transcript. Use \`computer\` set to an id, label, SSH host, or \`this\`.
 `;
 
+const T3_CODE_DESKTOP_TOOL_INSTRUCTIONS = `
+
+## T3 Code Computer Use
+
+The \`t3-desktop\` MCP server drives this computer's GUI. A pointer overlay shows where you click and type; it does not move the user's mouse.
+
+Prefer these tools for anything on screen: \`list_apps\`, \`get_app_state\`, \`click\`, \`type_text\`, \`press_key\`, \`screenshot\`, and the \`browser_*\` tools for Chrome tabs you own.
+
+Call \`get_app_state\` before clicking so you have element ids. Use \`screenshot\` when the accessibility tree cannot describe what you need to see (canvas, video, games).
+
+Do not ask the user to click or type in an app you can drive yourself. If a tool fails because Accessibility or Screen Recording is missing, tell the user to grant those in Settings → Computer Use.
+`;
+
+const T3_CODE_COMPUTER_HOME_INSTRUCTIONS = `
+
+## This thread is the whole computer
+
+The working directory is this machine's home folder, not a specific project. Treat it as a computer-wide session: files anywhere, the terminal, and Computer Use (pointer, apps, browser) are all in scope. Pick a project folder only if the user asks or the task is clearly inside one repo.
+`;
+
+interface CodexExtraToolInstructions {
+  readonly browserToolsAvailable: boolean;
+  readonly desktopToolsAvailable?: boolean;
+  readonly computerHomeWorkspace?: boolean;
+}
+
+const extraToolInstructions = (options: CodexExtraToolInstructions): string =>
+  `${browserToolInstructions(options.browserToolsAvailable)}${
+    options.desktopToolsAvailable === true ? T3_CODE_DESKTOP_TOOL_INSTRUCTIONS : ""
+  }${options.computerHomeWorkspace === true ? T3_CODE_COMPUTER_HOME_INSTRUCTIONS : ""}${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}${T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}`;
+
 export const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
+  extras?: Omit<CodexExtraToolInstructions, "browserToolsAvailable">,
 ): string => `<collaboration_mode># Plan Mode (Conversational)
 
 You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed-intent- and implementation-wise-so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
@@ -167,13 +199,12 @@ Do not ask "should I proceed?" in the final output. The user can easily switch o
 Only produce at most one \`<proposed_plan>\` block per turn, and only when you are presenting a complete spec.
 
 If the user stays in Plan mode and asks for revisions after a prior \`<proposed_plan>\`, any new \`<proposed_plan>\` must be a complete replacement. If the user indicates that the prior plan is not acceptable but does not provide enough information to produce a complete replacement, address the concern and continue planning without producing a \`<proposed_plan>\` block. If the follow-up neither requires changes nor calls the plan into question (e.g. clarifying question), answer it before the block, then reproduce the prior \`<proposed_plan>\` unchanged.
-${browserToolInstructions(browserToolsAvailable)}
-${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}
-${T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}
+${extraToolInstructions({ browserToolsAvailable, ...extras })}
 </collaboration_mode>`;
 
 export const codexDefaultModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
+  extras?: Omit<CodexExtraToolInstructions, "browserToolsAvailable">,
 ): string => `<collaboration_mode># Collaboration Mode: Default
 
 You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
@@ -185,9 +216,7 @@ Your active mode changes only when new developer instructions with a different \
 Use the \`request_user_input\` tool only when it is listed in the available tools for this turn.
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
-${browserToolInstructions(browserToolsAvailable)}
-${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}
-${T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}
+${extraToolInstructions({ browserToolsAvailable, ...extras })}
 </collaboration_mode>`;
 
 export interface CodexRuntimeInfo {
@@ -209,12 +238,20 @@ export function buildCodexDeveloperInstructions(
    * setting, so the prompt cannot claim tools the turn doesn't have.
    */
   browserToolsAvailable = true,
-  options?: { readonly computerHistoryContext?: string },
+  options?: {
+    readonly computerHistoryContext?: string;
+    readonly desktopToolsAvailable?: boolean;
+    readonly computerHomeWorkspace?: boolean;
+  },
 ): string {
+  const extras = {
+    desktopToolsAvailable: options?.desktopToolsAvailable,
+    computerHomeWorkspace: options?.computerHomeWorkspace,
+  };
   const base =
     interactionMode === "plan"
-      ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
-      : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
+      ? codexPlanModeDeveloperInstructions(browserToolsAvailable, extras)
+      : codexDefaultModeDeveloperInstructions(browserToolsAvailable, extras);
   const history = options?.computerHistoryContext ? `\n\n${options.computerHistoryContext}` : "";
   return `${base}
 

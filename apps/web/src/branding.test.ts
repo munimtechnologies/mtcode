@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  formatDisplayedAppVersion,
   resolveServerBackedAppDisplayName,
   resolveServerBackedAppStageLabel,
 } from "./branding.logic";
@@ -40,7 +41,7 @@ describe("branding", () => {
     expect(branding.APP_DISPLAY_NAME).toBe("T3 Code (Nightly)");
   });
 
-  it("applies stage label and display name env overrides", async () => {
+  it("does not apply a Nightly stage to MT Code", async () => {
     vi.stubEnv("VITE_APP_BASE_NAME", "MT Code");
     vi.stubEnv("VITE_APP_STAGE_LABEL", "Nightly");
     vi.stubEnv("VITE_APP_DISPLAY_NAME", "MT Code");
@@ -48,7 +49,8 @@ describe("branding", () => {
     const branding = await import("./branding");
 
     expect(branding.APP_BASE_NAME).toBe("MT Code");
-    expect(branding.APP_STAGE_LABEL).toBe("Nightly");
+    expect(branding.APP_HAS_UPDATE_TRACKS).toBe(false);
+    expect(branding.APP_STAGE_LABEL).not.toBe("Nightly");
     expect(branding.APP_DISPLAY_NAME).toBe("MT Code");
   });
 
@@ -125,5 +127,28 @@ describe("branding logic", () => {
         primaryServerVersion: "0.0.28-nightly.20260616",
       }),
     ).toBe("T3 Code (Alpha)");
+  });
+
+  it("strips the nightly prerelease from displayed versions", () => {
+    expect(formatDisplayedAppVersion({ version: "0.0.34-nightly.20260818.1127" })).toBe("0.0.34");
+  });
+
+  it("keeps the nightly prerelease when stripping is disabled", () => {
+    expect(
+      formatDisplayedAppVersion({
+        version: "0.0.34-nightly.20260818.1127",
+        stripNightlyPrerelease: false,
+      }),
+    ).toBe("0.0.34-nightly.20260818.1127");
+  });
+
+  it("does not label MT Code servers as Nightly", () => {
+    expect(
+      resolveServerBackedAppStageLabel({
+        primaryServerVersion: "0.0.28-nightly.20260616.12",
+        fallbackStageLabel: "Alpha",
+        allowNightlyStage: false,
+      }),
+    ).toBe("Alpha");
   });
 });

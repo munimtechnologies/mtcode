@@ -69,6 +69,11 @@ export function resolveRelayTracingConfig() {
     : null;
 }
 
+export function hasClerkPublicConfig(): boolean {
+  const config = resolveCloudPublicConfig();
+  return Boolean(config.clerkPublishableKey && config.clerkJwtTemplate);
+}
+
 export function hasCloudPublicConfig(): boolean {
   const config = resolveCloudPublicConfig();
   return Boolean(config.clerkPublishableKey && config.clerkJwtTemplate && config.relayUrl);
