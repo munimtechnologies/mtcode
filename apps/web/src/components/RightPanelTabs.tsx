@@ -35,6 +35,7 @@ import {
   Menu,
   MenuItem,
   MenuPopup,
+  MenuShortcut,
   MenuSub,
   MenuSubPopup,
   MenuSubTrigger,
@@ -188,6 +189,23 @@ function tabAudioState(overlay: DesktopPreviewOverlay | null): TabAudioState {
   return overlay.audioMuted ? "muted" : "audible";
 }
 
+type SurfaceShortcutEvent = Pick<
+  KeyboardEvent,
+  "altKey" | "ctrlKey" | "defaultPrevented" | "isComposing" | "key" | "metaKey"
+>;
+
+export function surfaceShortcutActionForKey<
+  const Action extends { available: boolean; shortcut: string },
+>(actions: readonly Action[], event: SurfaceShortcutEvent): Action | null {
+  if (event.defaultPrevented || event.isComposing) return null;
+  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  return (
+    actions.find(
+      (action) => action.available && action.shortcut.toLowerCase() === event.key.toLowerCase(),
+    ) ?? null
+  );
+}
+
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
   return (
     <Tooltip>
@@ -200,6 +218,7 @@ function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement })
 function SurfaceMenuItem(props: {
   available: boolean;
   disabledReason?: string;
+  shortcut: string;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -208,8 +227,10 @@ function SurfaceMenuItem(props: {
       className={!props.available ? "data-disabled:pointer-events-auto" : undefined}
       onClick={props.onClick}
       disabled={!props.available}
+      aria-keyshortcuts={props.shortcut}
     >
       {props.children}
+      <MenuShortcut>{props.shortcut}</MenuShortcut>
     </MenuItem>
   );
   if (props.available || !props.disabledReason) return item;
@@ -320,8 +341,8 @@ function RightPanelEmptyState(props: {
   });
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
+      if (!action) return;
       if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
       const target = event.target;
       if (target instanceof HTMLElement) {
@@ -331,10 +352,6 @@ function RightPanelEmptyState(props: {
         const editable = target.isContentEditable ? target : target.closest("[contenteditable]");
         if (editable && (editable.textContent ?? "").trim().length > 0) return;
       }
-      const action = shortcutActionsRef.current.find(
-        (candidate) => candidate.shortcut.toLowerCase() === event.key.toLowerCase(),
-      );
-      if (!action) return;
       event.preventDefault();
       event.stopPropagation();
       action.onClick();
@@ -593,6 +610,66 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
 
+  const addSurfaceActions = [
+    {
+      label: "Browser",
+      icon: Globe2,
+      shortcut: "B",
+      available: props.browserAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.browser,
+      onClick: props.onAddBrowser,
+    },
+    {
+      label: "Terminal",
+      icon: TerminalSquare,
+      shortcut: "T",
+      available: props.terminalAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.terminal,
+      onClick: props.onAddTerminal,
+    },
+    {
+      label: "Files",
+      icon: Files,
+      shortcut: "F",
+      available: props.filesAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.files,
+      onClick: props.onAddFiles,
+    },
+    {
+      label: "Diff",
+      icon: FileDiff,
+      shortcut: "D",
+      available: props.diffAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.diff,
+      onClick: props.onAddDiff,
+    },
+    {
+      label: "Pull request",
+      icon: GitPullRequest,
+      shortcut: "P",
+      available: props.pullRequestAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
+      onClick: props.onAddPullRequest,
+    },
+    {
+      label: "Agents",
+      icon: Bot,
+      shortcut: "A",
+      available: props.agentsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.agents,
+      onClick: props.onAddAgents,
+    },
+  ] as const;
+
+  const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setAddSurfaceMenuOpen(false);
+    action.onClick();
+  };
+
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, surface: RightPanelSurface) => {
       event.preventDefault();
@@ -836,91 +913,65 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 >
                   <Plus className="size-3.5" />
                 </MenuTrigger>
-                <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                  {props.browserAvailable ? (
-                    <MenuSub>
-                      {/*
-                        Clicking the trigger opens the default profile, so the
-                        common case stays one click and there is no second row;
-                        hover or arrow reveals the rest. The choice lives at
-                        open time because a tab's profile is fixed then —
-                        Electron only honours a partition before attach.
-                      */}
-                      <MenuSubTrigger
-                        onClick={() => {
-                          setAddSurfaceMenuOpen(false);
-                          props.onAddBrowser();
-                        }}
-                      >
-                        <Globe2 />
-                        Browser
-                      </MenuSubTrigger>
-                      {/*
-                        Capped and truncated: profile names are user-supplied
-                        and run to 48 characters, which would otherwise widen
-                        the popup to fit-content and wrap.
-                      */}
-                      <MenuSubPopup className="min-w-40 max-w-56">
-                        {browserProfiles.map((profile) => (
-                          <MenuItem
-                            key={profile.id}
-                            onClick={() => props.onAddBrowserInProfile?.(profile.id)}
+                <MenuPopup
+                  align="start"
+                  side="bottom"
+                  sideOffset={6}
+                  className="min-w-44"
+                  onKeyDownCapture={handleAddSurfaceMenuKeyDown}
+                >
+                  {addSurfaceActions.map((action) => {
+                    const Icon = action.icon;
+                    // Browser is the one surface that can open under a chosen
+                    // profile. Clicking the row still opens the default one, so
+                    // the common case stays a single click; hover or arrow
+                    // reveals the rest. The choice lives at open time because a
+                    // tab's profile is fixed then - Electron only honours a
+                    // partition before attach.
+                    if (action.label === "Browser" && action.available && browserProfiles.length > 0) {
+                      return (
+                        <MenuSub key={action.label}>
+                          <MenuSubTrigger
+                            onClick={() => {
+                              setAddSurfaceMenuOpen(false);
+                              action.onClick();
+                            }}
                           >
-                            <span className="min-w-0 truncate">{profile.name}</span>
-                          </MenuItem>
-                        ))}
-                      </MenuSubPopup>
-                    </MenuSub>
-                  ) : (
-                    <SurfaceMenuItem
-                      available={false}
-                      disabledReason={SURFACE_DISABLED_REASONS.browser}
-                      onClick={props.onAddBrowser}
-                    >
-                      <Globe2 />
-                      Browser
-                    </SurfaceMenuItem>
-                  )}
-                  <SurfaceMenuItem
-                    available={props.terminalAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.terminal}
-                    onClick={props.onAddTerminal}
-                  >
-                    <TerminalSquare />
-                    Terminal
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.filesAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.files}
-                    onClick={props.onAddFiles}
-                  >
-                    <Files />
-                    Files
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.diffAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.diff}
-                    onClick={props.onAddDiff}
-                  >
-                    <FileDiff />
-                    Diff
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.pullRequestAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.pullRequest}
-                    onClick={props.onAddPullRequest}
-                  >
-                    <GitPullRequest />
-                    Pull request
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.agentsAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.agents}
-                    onClick={props.onAddAgents}
-                  >
-                    <Bot />
-                    Agents
-                  </SurfaceMenuItem>
+                            <Icon />
+                            {action.label}
+                            {action.shortcut ? <MenuShortcut>{action.shortcut}</MenuShortcut> : null}
+                          </MenuSubTrigger>
+                          {/*
+                            Capped and truncated: profile names are user-supplied
+                            and run to 48 characters, which would otherwise widen
+                            the popup to fit-content and wrap.
+                          */}
+                          <MenuSubPopup className="min-w-40 max-w-56">
+                            {browserProfiles.map((profile) => (
+                              <MenuItem
+                                key={profile.id}
+                                onClick={() => props.onAddBrowserInProfile?.(profile.id)}
+                              >
+                                <span className="min-w-0 truncate">{profile.name}</span>
+                              </MenuItem>
+                            ))}
+                          </MenuSubPopup>
+                        </MenuSub>
+                      );
+                    }
+                    return (
+                      <SurfaceMenuItem
+                        key={action.label}
+                        available={action.available}
+                        disabledReason={action.disabledReason}
+                        shortcut={action.shortcut}
+                        onClick={action.onClick}
+                      >
+                        <Icon />
+                        {action.label}
+                      </SurfaceMenuItem>
+                    );
+                  })}
                 </MenuPopup>
               </Menu>
             ) : null}
