@@ -28,6 +28,7 @@ import {
 import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
+  CrosshairIcon,
   ArrowLeftIcon,
   CloudUploadIcon,
   CornerLeftUpIcon,
@@ -77,7 +78,13 @@ import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import {
+  formatGoalStatusMessage,
+  goalChipActionLabel,
+  goalChipActions,
+} from "@t3tools/shared/composerTrigger";
+import { useThreadGoalActions } from "../hooks/useThreadGoalActions";
+import { readEnvironmentSupportsGoal, useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -607,6 +614,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const startComputerThread = useStartComputerThread();
+  const { runGoalAction, showGoalStatus } = useThreadGoalActions();
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -1754,6 +1762,48 @@ function OpenCommandPaletteDialog(props: {
         await startAddProjectBrowse(wslAddProjectEnvironmentOption.environmentId);
       },
     });
+  }
+
+  if (activeThread && readEnvironmentSupportsGoal(activeThread.environmentId)) {
+    const goal = activeThread.goal ?? null;
+    const goalForStatus = goal == null ? null : { status: goal.status, objective: goal.objective };
+    actionItems.push({
+      kind: "action",
+      value: "action:goal-status",
+      searchTerms: ["goal", "objective", "status", "/goal"],
+      title: "Show Objective status",
+      description: formatGoalStatusMessage(goalForStatus),
+      icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        showGoalStatus(goalForStatus);
+      },
+    });
+    if (goal != null) {
+      for (const action of goalChipActions(goal.status)) {
+        actionItems.push({
+          kind: "action",
+          value: `action:goal-${action}`,
+          searchTerms: [
+            "goal",
+            "objective",
+            action,
+            goalChipActionLabel(action),
+            "/goal",
+            `/goal ${action}`,
+          ],
+          title: `${goalChipActionLabel(action)} Objective`,
+          description: goal.objective,
+          icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            await runGoalAction({
+              environmentId: activeThread.environmentId,
+              threadId: activeThread.id,
+              action,
+            });
+          },
+        });
+      }
+    }
   }
 
   actionItems.push({

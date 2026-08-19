@@ -172,6 +172,7 @@ import {
   snoozeWakeLabel,
   type SnoozePreset,
 } from "./Sidebar.snooze";
+import { GoalActiveMarker } from "./chat/GoalChip";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
@@ -1302,6 +1303,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             </span>
             {title}
+            <GoalActiveMarker goal={thread.goal} />
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -1580,8 +1582,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
+              <GoalActiveMarker goal={thread.goal} />
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
@@ -1727,6 +1730,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           <div className="flex min-w-0 flex-1 flex-col justify-center">
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+              <GoalActiveMarker goal={thread.goal} />
               <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
                 {threadTimeLabel(thread)}
               </span>

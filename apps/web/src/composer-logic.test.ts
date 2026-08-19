@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  buildBuiltInSlashCommandItems,
   clampCollapsedComposerCursor,
   collapseExpandedComposerCursor,
   detectComposerTrigger,
@@ -386,5 +387,27 @@ describe("parseStandaloneComposerSlashCommand", () => {
   it("does not treat /goal as a standalone plan-mode command", () => {
     expect(parseStandaloneComposerSlashCommand("/goal")).toBeNull();
     expect(parseStandaloneComposerSlashCommand("/goal Reduce p95")).toBeNull();
+  });
+});
+
+describe("buildBuiltInSlashCommandItems", () => {
+  it("offers the goal commands the composer owns itself", () => {
+    const items = buildBuiltInSlashCommandItems({ planModeUiEnabled: false });
+
+    expect(items.map((item) => item.id)).toEqual([
+      "slash:model",
+      "slash:goal",
+      "slash:goal-pause",
+      "slash:goal-resume",
+      "slash:goal-clear",
+    ]);
+  });
+
+  it("adds the plan-mode commands only when plan mode is on", () => {
+    const withoutPlan = buildBuiltInSlashCommandItems({ planModeUiEnabled: false });
+    const withPlan = buildBuiltInSlashCommandItems({ planModeUiEnabled: true });
+
+    expect(withoutPlan.some((item) => item.id === "slash:plan")).toBe(false);
+    expect(withPlan.map((item) => item.id).slice(-2)).toEqual(["slash:plan", "slash:default"]);
   });
 });
