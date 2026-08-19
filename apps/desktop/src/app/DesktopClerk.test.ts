@@ -532,6 +532,12 @@ describe("DesktopClerk", () => {
       Effect.provide(makeDesktopClerkLayer()),
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+      // A secondary instance quits before it ever reaches the window, so an
+      // empty stand-in is enough to satisfy the layer's requirement.
+      Effect.provideService(
+        DesktopWindow.DesktopWindow,
+        {} as DesktopWindow.DesktopWindow["Service"],
+      ),
     );
   });
 

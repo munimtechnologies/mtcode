@@ -53,6 +53,10 @@ const builtInThemeModes = [
 describe("clerkAppearance", () => {
   it("maps theme colors without overriding Clerk's component structure", () => {
     expect(clerkAppearance).toEqual({
+      options: {
+        socialButtonsPlacement: "top",
+        unsafe_disableDevelopmentModeWarnings: true,
+      },
       variables: {
         colorPrimary: "var(--update-foreground)",
         colorPrimaryForeground: "var(--card)",

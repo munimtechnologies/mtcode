@@ -9,6 +9,9 @@ import type {
   ServerProviderAccountLogin,
 } from "@t3tools/contracts";
 
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import type * as Cause from "effect/Cause";
+
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
@@ -22,6 +25,21 @@ import {
   signInAccountLabel,
   type SignInPhase,
 } from "./ProviderAccountSignIn.logic";
+
+/**
+ * Atom command failures carry an Effect `Cause`, so squash it before reading a
+ * message off it: a defect otherwise renders as "[object Object]".
+ */
+function failureMessage(
+  result: { readonly cause: Cause.Cause<unknown> },
+  fallback: string,
+): string {
+  const error = squashAtomCommandFailure(result);
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return typeof error === "string" && error.length > 0 ? error : fallback;
+}
 
 interface ProviderAccountSignInProps {
   readonly environmentId: EnvironmentId;
@@ -120,10 +138,7 @@ export function ProviderAccountSignIn({
       onComplete?.();
       return;
     }
-    const message =
-      typeof result.error === "object" && result.error !== null && "message" in result.error
-        ? String((result.error as { message: unknown }).message)
-        : "Sign-in failed.";
+    const message = failureMessage(result, "Sign-in failed.");
     setPhase({ status: "failed", message });
   };
 
@@ -146,10 +161,7 @@ export function ProviderAccountSignIn({
       toastManager.add({
         type: "error",
         title: "Could not submit the code",
-        description:
-          typeof result.error === "object" && result.error !== null && "message" in result.error
-            ? String((result.error as { message: unknown }).message)
-            : "Try again.",
+        description: failureMessage(result, "Try again."),
       });
       return;
     }
@@ -171,7 +183,7 @@ export function ProviderAccountSignIn({
         size="icon-xs"
         variant="ghost"
         className="size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-        onClick={() => copyToClipboard(url, {})}
+        onClick={() => copyToClipboard(url)}
         aria-label="Copy sign-in link"
       >
         <CopyIcon className="size-3" />

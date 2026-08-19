@@ -1,5 +1,11 @@
-import { UserButton, useAuth } from "@clerk/react";
-import { ExternalLinkIcon, LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
+import { OrganizationSwitcher, UserButton, useAuth } from "@clerk/react";
+import {
+  Building2Icon,
+  ExternalLinkIcon,
+  LogInIcon,
+  ServerIcon,
+  SmartphoneIcon,
+} from "lucide-react";
 
 import {
   canEmbedClerkProviderInThisClient,
@@ -9,6 +15,7 @@ import { providerHasRelay } from "../../cloud/connectProviders";
 import { hasClerkPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
+import { MtConnectTeamPage } from "./MtConnectTeamPage";
 import { T3ConnectUserProfilePage } from "./T3ConnectUserProfilePage";
 import { useT3ConnectAuthPrompt } from "./useT3ConnectAuthPrompt";
 
@@ -33,34 +40,59 @@ function ConfiguredConnectSidebarAvatar() {
 
   if (!isLoaded || !isSignedIn) return null;
 
+  const isMtConnect = embedded?.id === "mt";
+
   return (
-    <UserButton
-      appearance={{
-        elements: {
-          avatarBox: "size-7",
-          userButtonTrigger: "rounded-lg p-1 hover:bg-sidebar-row-hover",
-        },
-      }}
-    >
-      {showRelayProfile ? (
-        <UserButton.UserProfilePage
-          label="Mobile clients"
-          labelIcon={<SmartphoneIcon className="size-4" />}
-          url="mobile-clients"
-        >
-          <MobileClientsUserProfilePage />
-        </UserButton.UserProfilePage>
+    <div className="flex shrink-0 items-center gap-0.5">
+      {isMtConnect ? (
+        <OrganizationSwitcher
+          createOrganizationMode="modal"
+          organizationProfileMode="modal"
+          appearance={{
+            elements: {
+              rootBox: "flex items-center",
+              organizationSwitcherTrigger: "size-7 rounded-lg p-0.5 hover:bg-sidebar-row-hover",
+            },
+          }}
+        />
       ) : null}
-      {showRelayProfile ? (
-        <UserButton.UserProfilePage
-          label={embedded?.label ?? "Connect"}
-          labelIcon={<ServerIcon className="size-4" />}
-          url="t3-connect"
-        >
-          <T3ConnectUserProfilePage />
-        </UserButton.UserProfilePage>
-      ) : null}
-    </UserButton>
+      <UserButton
+        appearance={{
+          elements: {
+            avatarBox: "size-7",
+            userButtonTrigger: "rounded-lg p-1 hover:bg-sidebar-row-hover",
+          },
+        }}
+      >
+        {isMtConnect ? (
+          <UserButton.UserProfilePage
+            label="Team"
+            labelIcon={<Building2Icon className="size-4" />}
+            url="team"
+          >
+            <MtConnectTeamPage />
+          </UserButton.UserProfilePage>
+        ) : null}
+        {showRelayProfile ? (
+          <UserButton.UserProfilePage
+            label="Mobile clients"
+            labelIcon={<SmartphoneIcon className="size-4" />}
+            url="mobile-clients"
+          >
+            <MobileClientsUserProfilePage />
+          </UserButton.UserProfilePage>
+        ) : null}
+        {showRelayProfile ? (
+          <UserButton.UserProfilePage
+            label={embedded?.label ?? "Connect"}
+            labelIcon={<ServerIcon className="size-4" />}
+            url="t3-connect"
+          >
+            <T3ConnectUserProfilePage />
+          </UserButton.UserProfilePage>
+        ) : null}
+      </UserButton>
+    </div>
   );
 }
 

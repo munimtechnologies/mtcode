@@ -2,7 +2,7 @@ import type { DesktopPreviewFavicon, PreviewSessionSnapshot } from "@t3tools/con
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanelTabs, tabMuteMenuItem } from "./RightPanelTabs";
 
 const previewSurface = {
   id: "browser:tab-1" as const,
@@ -161,5 +161,37 @@ describe("RightPanelTabs audio indicator", () => {
   it("hides the toggle when no runtime tab id can be resolved", () => {
     const html = renderTabs(null, undefined, { audible: true }, null);
     expect(html).not.toContain("Mute Local site");
+  });
+});
+
+describe("tabMuteMenuItem", () => {
+  const overlay = (audioMuted: boolean) =>
+    ({ audioMuted, audible: false }) as Parameters<typeof tabMuteMenuItem>[0]["overlay"];
+
+  it("stays disabled until the desktop tab exists", () => {
+    // The server session id resolves before the preview manager finishes
+    // createTab. Muting in that window fails with an error nobody surfaces.
+    expect(tabMuteMenuItem({ overlay: null, canResolveRuntimeTabId: true })).toEqual({
+      label: "Mute tab",
+      disabled: true,
+    });
+  });
+
+  it("stays disabled when no runtime tab id can be resolved", () => {
+    expect(tabMuteMenuItem({ overlay: overlay(false), canResolveRuntimeTabId: false })).toEqual({
+      label: "Mute tab",
+      disabled: true,
+    });
+  });
+
+  it("offers mute and unmute once the tab is addressable", () => {
+    expect(tabMuteMenuItem({ overlay: overlay(false), canResolveRuntimeTabId: true })).toEqual({
+      label: "Mute tab",
+      disabled: false,
+    });
+    expect(tabMuteMenuItem({ overlay: overlay(true), canResolveRuntimeTabId: true })).toEqual({
+      label: "Unmute tab",
+      disabled: false,
+    });
   });
 });

@@ -4,6 +4,15 @@ import type { ClerkProviderProps } from "@clerk/react";
  * the live T3 Code palette. CSS variables make theme changes propagate to
  * portaled sign-in and profile surfaces without remounting Clerk. */
 export const clerkAppearance = {
+  options: {
+    // Clerk v6 folded the old `layout` block into `options`.
+    socialButtonsPlacement: "top",
+    // Hosted MT Connect still uses Clerk development keys until `clerk deploy`
+    // finishes (custom domain + Google/GitHub/Apple apps + Munim Inc Stripe).
+    // Hide the orange "Development mode" badge so the sign-in modal matches
+    // production. Console warnings stay on.
+    unsafe_disableDevelopmentModeWarnings: true,
+  },
   variables: {
     // Clerk reuses its primary color for filled buttons and bare links. The
     // app's update foreground is the palette's action hue cast for readable

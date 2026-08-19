@@ -20,6 +20,7 @@ import { openLiveProjectIfPresent, projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
+import { triageCommand } from "./cli/triage.ts";
 
 const DESKTOP_OPEN_POLL_ATTEMPTS = 40;
 const DESKTOP_OPEN_POLL_DELAY = Duration.millis(500);
@@ -109,6 +110,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       projectCommand,
       serviceCommand,
       servicePreflightCommand,
+      triageCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
   );

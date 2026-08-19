@@ -31,6 +31,7 @@ import {
   hasQueuedTurnStart,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
+import type { ChangeRequestSettleSource } from "@t3tools/client-runtime/state/thread-settled";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   scopeProjectRef,
@@ -810,7 +811,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
-  onChangeRequestState: (threadKey: string, state: "open" | "closed" | "merged" | null) => void;
+  onChangeRequestState: (
+    threadKey: string,
+    changeRequest: ChangeRequestSettleSource | null,
+  ) => void;
   isOverlay?: boolean | undefined;
 }) {
   const {
@@ -864,7 +868,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
   });
-  const prState = pr?.state ?? null;
 
   // Same semantics as the legacy sidebar (never-visited counts as read):
   // switching sidebars must not light up every historical thread as unread.
@@ -882,7 +885,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const isWoke =
     wokeAtDate !== null &&
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
-    !changeRequestAutoSettles(prState, props.autoSettleOnMerge);
+    !changeRequestAutoSettles(pr, {
+      autoSettleOnMerge: props.autoSettleOnMerge,
+      thread,
+    });
   // In-flight rows (working, or waiting on approval/input) fade as a whole:
   // there is nothing for the user to do yet, so prominence is reserved for
   // rows that need a human — done (unread), read-but-unsettled, failed, and
@@ -958,11 +964,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
-  // Report the PR state so the parent can apply the configured merge rule
-  // and the always-on close rule during partitioning.
+  // Report the PR so the parent can apply the configured merge rule and the
+  // always-on close rule during partitioning. updatedAt rides along because
+  // settling on a merge happens once: a request last touched before the
+  // thread's own latest activity was already adjudicated.
+  const prState = pr?.state ?? null;
+  const prUpdatedAt = pr?.updatedAt ?? null;
+  const changeRequestSource = useMemo(
+    () => (prState === null ? null : { state: prState, updatedAt: prUpdatedAt }),
+    [prState, prUpdatedAt],
+  );
   useEffect(() => {
-    onChangeRequestState(threadKey, prState);
-  }, [onChangeRequestState, prState, threadKey]);
+    onChangeRequestState(threadKey, changeRequestSource);
+  }, [onChangeRequestState, changeRequestSource, threadKey]);
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
@@ -1977,17 +1991,23 @@ export default function Sidebar() {
   // PR states stream in per-row. The next partition applies the configured
   // merge rule and the always-on close rule.
   const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, "open" | "closed" | "merged">
+    ReadonlyMap<string, ChangeRequestSettleSource>
   >(() => new Map());
   const handleChangeRequestState = useCallback(
-    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
+    (threadKey: string, changeRequest: ChangeRequestSettleSource | null) => {
       setChangeRequestStateByKey((current) => {
-        if ((current.get(threadKey) ?? null) === state) return current;
+        const previous = current.get(threadKey) ?? null;
+        if (
+          (previous?.state ?? null) === (changeRequest?.state ?? null) &&
+          (previous?.updatedAt ?? null) === (changeRequest?.updatedAt ?? null)
+        ) {
+          return current;
+        }
         const next = new Map(current);
-        if (state === null) {
+        if (changeRequest === null) {
           next.delete(threadKey);
         } else {
-          next.set(threadKey, state);
+          next.set(threadKey, changeRequest);
         }
         return next;
       });
@@ -2110,7 +2130,7 @@ export default function Sidebar() {
       const supportsSnooze =
         serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-      const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
+      const changeRequest = changeRequestStateByKey.get(threadKey) ?? null;
       // Snooze outranks everything, including a pin: "hide until Tuesday"
       // temporarily suspends "keep on top". The pin survives underneath —
       // and so does its pinOrderKey, so on wake the thread reappears at
@@ -2131,7 +2151,7 @@ export default function Sidebar() {
           now,
           autoSettleAfterDays,
           autoSettleOnMerge,
-          changeRequestState,
+          changeRequest,
         })
       ) {
         settled.push(thread);

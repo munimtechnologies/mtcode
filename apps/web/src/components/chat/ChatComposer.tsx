@@ -51,6 +51,7 @@ import {
   replaceTextRange,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
+import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
@@ -861,6 +862,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // moved to another provider.
     if (
       !lockedProvider &&
+      activeThreadModelSelection != null &&
       isMtModelSelection(activeThreadModelSelection) &&
       (composerDraft.activeProvider === undefined ||
         composerDraft.activeProvider === activeThreadModelSelection.instanceId)

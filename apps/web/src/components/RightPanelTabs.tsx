@@ -160,6 +160,23 @@ function previewTabIdOf(
   return sessions[surface.resourceId]?.tabId ?? null;
 }
 
+/**
+ * Label and enabled state for a preview tab's mute menu entry.
+ * Stays disabled until desktop overlay state arrives: a server session id can
+ * resolve while the preview manager's createTab is still in flight, and muting
+ * then fails with a PreviewTabNotFoundError nothing surfaces to the user.
+ */
+export function tabMuteMenuItem(input: {
+  overlay: DesktopPreviewOverlay | null;
+  canResolveRuntimeTabId: boolean;
+}): { label: string; disabled: boolean } {
+  const muted = input.overlay?.audioMuted ?? false;
+  return {
+    label: muted ? "Unmute tab" : "Mute tab",
+    disabled: input.overlay === null || !input.canResolveRuntimeTabId,
+  };
+}
+
 type TabAudioState = "none" | "audible" | "muted";
 
 /**
@@ -592,16 +609,22 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         items.push({ id: "copy-path", label: "Copy path" });
       }
       const menuPreviewTabId = previewTabIdOf(surface, props.previewSessions);
-      const menuMuted = menuPreviewTabId
-        ? (props.desktopByTabId[menuPreviewTabId]?.audioMuted ?? false)
-        : false;
+      // Desktop overlay state only arrives once the preview manager has created
+      // the tab. A server session id alone can still be ahead of that, and
+      // muting then fails with PreviewTabNotFoundError that nobody surfaces.
+      const menuOverlay = menuPreviewTabId
+        ? (props.desktopByTabId[menuPreviewTabId] ?? null)
+        : null;
+      const menuMuted = menuOverlay?.audioMuted ?? false;
       if (surface.kind === "preview") {
         // Not gated on audibility: silencing a quiet tab ahead of time is the
-        // point, so the item is always offered once the tab has a guest.
+        // point, so the item is offered whenever the tab is mutable at all.
         items.push({
           id: "toggle-mute",
-          label: menuMuted ? "Unmute tab" : "Mute tab",
-          disabled: menuPreviewTabId === null || props.previewRuntimeTabId === undefined,
+          ...tabMuteMenuItem({
+            overlay: menuOverlay,
+            canResolveRuntimeTabId: props.previewRuntimeTabId !== undefined,
+          }),
         });
       }
       items.push(
@@ -629,9 +652,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           if (surface.kind === "file") props.onCopyFilePath(surface.relativePath);
           break;
         case "toggle-mute": {
-          const runtimeTabId = menuPreviewTabId
-            ? (props.previewRuntimeTabId?.(menuPreviewTabId) ?? null)
-            : null;
+          // menuOverlay repeats the disabled gate above: the desktop tab must
+          // exist before it can be addressed, however the menu was dismissed.
+          const runtimeTabId =
+            menuPreviewTabId && menuOverlay
+              ? (props.previewRuntimeTabId?.(menuPreviewTabId) ?? null)
+              : null;
           if (runtimeTabId) {
             void previewBridge?.setAudioMuted(runtimeTabId, !menuMuted).catch(() => undefined);
           }

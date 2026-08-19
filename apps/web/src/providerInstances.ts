@@ -18,6 +18,7 @@ import {
   isMtModelInstanceId,
   isMtModelSelection,
   PROVIDER_DISPLAY_NAMES,
+  resolveProviderInstanceEnabled,
   type ModelSelection,
   type ProviderDriverKind,
   ProviderInstanceId,
@@ -249,7 +250,7 @@ export function applyProviderInstanceSettings(
   return entries.map((entry) => {
     const explicitInstance = settings.providerInstances?.[entry.instanceId];
     const enabled = explicitInstance
-      ? (explicitInstance.enabled ?? true)
+      ? resolveProviderInstanceEnabled(explicitInstance)
       : entry.isDefault
         ? (legacyProviders[entry.driverKind]?.enabled ?? entry.enabled)
         : false;
@@ -395,12 +396,12 @@ export function resolveDefaultProviderModelSelection(
   providers: ReadonlyArray<ServerProvider>,
   selection: ModelSelection | null | undefined,
 ): ModelSelection | null {
-  if (isMtModelSelection(selection) && hasReadyMtModelBackend(providers)) {
+  if (selection != null && isMtModelSelection(selection) && hasReadyMtModelBackend(providers)) {
     return selection;
   }
   const instanceId = resolveSelectableProviderInstance(providers, selection?.instanceId);
   if (instanceId === undefined) return null;
-  if (selection?.instanceId === instanceId) return selection;
+  if (selection?.instanceId === instanceId) return selection ?? null;
   const model = getDefaultProviderInstanceModel(providers, instanceId);
   return model ? { instanceId, model } : null;
 }

@@ -44,7 +44,9 @@ export function resolveServerBackedAppDisplayName(input: {
   const stageLabel = resolveServerBackedAppStageLabel({
     primaryServerVersion: input.primaryServerVersion,
     fallbackStageLabel: input.fallbackStageLabel,
-    allowNightlyStage: input.allowNightlyStage,
+    ...(input.allowNightlyStage === undefined
+      ? {}
+      : { allowNightlyStage: input.allowNightlyStage }),
   });
 
   return stageLabel === input.fallbackStageLabel
