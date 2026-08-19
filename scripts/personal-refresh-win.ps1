@@ -31,12 +31,36 @@ function Log($msg) {
 Log "refresh start"
 Log ("args DesktopVersion=$DesktopVersion ForceRebuild=$ForceRebuild envVersion=$($env:T3CODE_DESKTOP_VERSION) envForce=$($env:T3_FORCE_REBUILD)")
 
+$productRepoUrl = "https://github.com/munimtechnologies/mtcode.git"
 if (-not (Test-Path $repo)) {
-  git clone --branch main --single-branch https://github.com/munimtechnologies/mtcode.git $repo
+  git clone --branch main --single-branch $productRepoUrl $repo
 }
 Set-Location $repo
+
+# A checkout made before the repo moved still points at the old remote, where
+# "main" does not resolve. Left alone, the fetch fails, rev-parse errors, and
+# the build silently ships whatever commit this machine happened to be sitting
+# on - which is how Blade and Dell ended up a day behind while reporting the
+# new version number.
+$currentRemote = (git remote get-url origin 2>$null)
+if ($LASTEXITCODE -ne 0) {
+  git remote add origin $productRepoUrl
+} elseif ($currentRemote.Trim() -ne $productRepoUrl) {
+  Log "origin was $currentRemote - repointing at $productRepoUrl"
+  git remote set-url origin $productRepoUrl
+}
+
 git fetch origin main
-$new = (git rev-parse origin/main).Trim()
+if ($LASTEXITCODE -ne 0) {
+  Log "fetch from origin failed - refusing to build a stale checkout"
+  exit 1
+}
+$new = (git rev-parse origin/main 2>$null)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($new)) {
+  Log "origin/main did not resolve - refusing to build a stale checkout"
+  exit 1
+}
+$new = $new.Trim()
 $old = ""
 if (Test-Path $stateFile) {
   $old = (Get-Content $stateFile -Raw).Trim()
