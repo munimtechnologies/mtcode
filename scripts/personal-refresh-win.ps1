@@ -50,6 +50,11 @@ if ($LASTEXITCODE -ne 0) {
   git remote set-url origin $productRepoUrl
 }
 
+# A single-branch clone from the old repo carries a refspec that no longer
+# writes refs/remotes/origin/main, so a bare `git fetch origin main` only
+# updates FETCH_HEAD and origin/main stays missing. Restate the refspec so the
+# tracking ref exists on every machine, however its clone was made.
+git config remote.origin.fetch "+refs/heads/main:refs/remotes/origin/main"
 git fetch origin main
 if ($LASTEXITCODE -ne 0) {
   Log "fetch from origin failed - refusing to build a stale checkout"
@@ -57,7 +62,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 $new = (git rev-parse origin/main 2>$null)
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($new)) {
-  Log "origin/main did not resolve - refusing to build a stale checkout"
+  # Fall back to what the fetch just brought down rather than building
+  # whatever this machine was sitting on.
+  $new = (git rev-parse FETCH_HEAD 2>$null)
+}
+if ([string]::IsNullOrWhiteSpace($new)) {
+  Log "could not resolve the product branch - refusing to build a stale checkout"
   exit 1
 }
 $new = $new.Trim()
@@ -77,8 +87,8 @@ if (($new -eq $old) -and ($force -ne "1")) {
   Log "no changes but staged installer missing - rebuilding"
 }
 
-git checkout -B main origin/main
-git reset --hard origin/main
+git checkout -B main $new
+git reset --hard $new
 
 # Bake Connect public client config into desktop artifacts (gitignored .env).
 # Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
