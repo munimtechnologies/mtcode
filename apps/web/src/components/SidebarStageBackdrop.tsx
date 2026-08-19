@@ -4,9 +4,43 @@ import { useId } from "react";
 import { APP_HAS_UPDATE_TRACKS, APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
+import { usePrimarySettings } from "../hooks/useSettings";
 
-export type SidebarStageBackdropVariant = "nightly" | "dev";
+export type SidebarStageBackdropVariant =
+  | { readonly kind: "nightly" }
+  | { readonly kind: "dev" }
+  | { readonly kind: "custom"; readonly image: string; readonly name: string };
 export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
+
+export const NIGHTLY_BACKDROP: SidebarStageBackdropVariant = { kind: "nightly" };
+export const DEV_BACKDROP: SidebarStageBackdropVariant = { kind: "dev" };
+
+/**
+ * Resolve the artwork to draw from the account's choice.
+ *
+ * "auto" defers to the build channel the way upstream does; every other value
+ * is a deliberate pick and ignores the channel entirely, which is the point on
+ * a single-release build like MT Code.
+ */
+export function resolveSidebarArtwork(input: {
+  readonly selection: string;
+  readonly stageLabel: string;
+  readonly custom: ReadonlyArray<{ readonly id: string; readonly name: string; readonly image: string }>;
+  readonly enabled?: boolean;
+}): SidebarStageBackdropVariant | null {
+  if (input.enabled === false) return null;
+  const selection = input.selection.trim();
+  if (selection === "none") return null;
+  if (selection === "night") return NIGHTLY_BACKDROP;
+  if (selection === "day") return DEV_BACKDROP;
+  if (selection !== "auto" && selection.length > 0) {
+    const artwork = input.custom.find((entry) => entry.id === selection);
+    // A deleted artwork leaves the header bare rather than silently falling
+    // back to a scene the user did not choose.
+    return artwork ? { kind: "custom", image: artwork.image, name: artwork.name } : null;
+  }
+  return resolveSidebarStageBackdropVariant(input.stageLabel);
+}
 
 // A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
 // more horizontal canvas instead of zooming the scene.
@@ -18,15 +52,15 @@ export function resolveSidebarStageBackdropVariant(
 ): SidebarStageBackdropVariant | null {
   if (!enabled) return null;
   const normalized = stageLabel.trim().toLowerCase();
-  if (normalized === "nightly") return "nightly";
-  if (normalized === "dev") return "dev";
+  if (normalized === "nightly") return NIGHTLY_BACKDROP;
+  if (normalized === "dev") return DEV_BACKDROP;
   return null;
 }
 
 export function resolveSidebarStageFocusRingOffsetClass(
   variant: SidebarStageBackdropVariant,
 ): string {
-  return variant === "nightly"
+  return variant.kind === "nightly"
     ? "focus-visible:ring-offset-(--stage-night-bottom)"
     : "focus-visible:ring-offset-(--stage-art-bottom)";
 }
@@ -52,7 +86,17 @@ export function useEnvironmentStageLabel(): string {
 }
 
 export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
-  return resolveSidebarStageBackdropVariant(useEnvironmentStageLabel(), enabled);
+  const stageLabel = useEnvironmentStageLabel();
+  const artwork = usePrimarySettings((settings) => ({
+    selection: settings.sidebarArtwork,
+    custom: settings.customSidebarArtworks,
+  }));
+  return resolveSidebarArtwork({
+    selection: artwork.selection,
+    stageLabel,
+    custom: artwork.custom,
+    enabled,
+  });
 }
 
 /** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
@@ -68,11 +112,32 @@ export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdro
 }
 
 export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return variant === "nightly" ? <NightlySkyArt /> : <DevBlueprintArt />;
+  if (variant.kind === "custom") return <CustomArt variant={variant} />;
+  return variant.kind === "nightly" ? <NightlySkyArt /> : <DevBlueprintArt />;
 }
 
 export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return variant === "nightly" ? <NightlySkyArt compact /> : <DevBlueprintArt compact />;
+  if (variant.kind === "custom") return <CustomArt variant={variant} />;
+  return variant.kind === "nightly" ? <NightlySkyArt compact /> : <DevBlueprintArt compact />;
+}
+
+/**
+ * A user's own artwork. Drawn as a cover-cropped band so any aspect ratio
+ * fills the header the way the built-in scenes do.
+ */
+function CustomArt({
+  variant,
+}: {
+  variant: Extract<SidebarStageBackdropVariant, { kind: "custom" }>;
+}) {
+  return (
+    <div
+      role="img"
+      aria-label={variant.name}
+      className="stage-art h-full w-full bg-cover bg-center bg-no-repeat"
+      style={{ backgroundImage: `url(${JSON.stringify(variant.image)})` }}
+    />
+  );
 }
 
 const NIGHTLY_STARS: ReadonlyArray<{

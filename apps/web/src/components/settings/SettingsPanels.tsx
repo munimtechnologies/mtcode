@@ -19,6 +19,8 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+  DEFAULT_SIDEBAR_ARTWORK_SELECTION,
+  MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES,
   DEFAULT_UNIFIED_SETTINGS,
   type EnvironmentIdentificationMode,
   MAX_CODE_FONT_SIZE,
@@ -1154,6 +1156,8 @@ export function AppearanceSettingsPanel() {
             }
           />
         ) : null}
+
+        <SidebarArtworkRow />
       </SettingsSection>
 
       <TypographySection />
@@ -1444,6 +1448,128 @@ const ADVANCED_TYPOGRAPHY_TARGET_IDS: ReadonlySet<string> = new Set([
  * and a settings-search jump to an override row flips Advanced on so the
  * target exists to scroll to.
  */
+/**
+ * Sidebar artwork: pick a built-in scene, one of your own, or nothing.
+ *
+ * Upstream only draws artwork on Dev/Nightly builds. MT Code ships a single
+ * release, so the artwork is a preference; custom pieces live in server
+ * settings, which is what makes them follow the account to every client
+ * attached to it rather than sitting in one browser's local storage.
+ */
+function SidebarArtworkRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const custom = settings.customSidebarArtworks;
+  const selection = settings.sidebarArtwork;
+
+  const options = useMemo(
+    () => [
+      { value: "auto", label: "Match the build" },
+      { value: "none", label: "None" },
+      { value: "night", label: "Night sky" },
+      { value: "day", label: "Blueprint" },
+      ...custom.map((artwork) => ({ value: artwork.id, label: artwork.name })),
+    ],
+    [custom],
+  );
+
+  const onPickFile = async (file: File) => {
+    setAddError(null);
+    if (file.size > MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES * 0.7) {
+      // base64 inflates by ~4/3, so the on-disk limit is hit before the file one.
+      setAddError("That image is too large. Pick one under about 350 KB.");
+      return;
+    }
+    const image = await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+    if (image === null || !image.startsWith("data:image/")) {
+      setAddError("That file could not be read as an image.");
+      return;
+    }
+    const id = `art_${Math.random().toString(36).slice(2, 10)}`;
+    const name = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Artwork";
+    updateSettings({
+      customSidebarArtworks: [...custom, { id, name, image, createdAt: new Date().toISOString() }],
+      sidebarArtwork: id,
+    });
+  };
+
+  const removeArtwork = (id: string) => {
+    updateSettings({
+      customSidebarArtworks: custom.filter((artwork) => artwork.id !== id),
+      ...(selection === id ? { sidebarArtwork: "auto" } : {}),
+    });
+  };
+
+  return (
+    <SettingsRow
+      {...searchableSetting("sidebar-artwork")}
+      description="Artwork behind the sidebar header. Your own artwork syncs to every client signed in here."
+      resetAction={
+        selection !== DEFAULT_SIDEBAR_ARTWORK_SELECTION ? (
+          <SettingResetButton
+            label="sidebar artwork"
+            onClick={() => updateSettings({ sidebarArtwork: DEFAULT_SIDEBAR_ARTWORK_SELECTION })}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex w-full flex-col items-end gap-2">
+          <Select
+            value={selection}
+            onValueChange={(value) => {
+              if (typeof value === "string") updateSettings({ sidebarArtwork: value });
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-48" aria-label="Sidebar artwork">
+              <SelectValue>
+                {options.find((option) => option.value === selection)?.label ?? "None"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {options.map((option) => (
+                <SelectItem hideIndicator key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          <div className="flex items-center gap-2">
+            {custom.some((artwork) => artwork.id === selection) ? (
+              <Button size="xs" variant="ghost" onClick={() => removeArtwork(selection ?? "")}>
+                Remove
+              </Button>
+            ) : null}
+            <Button size="xs" variant="outline" onClick={() => fileInputRef.current?.click()}>
+              Add artwork
+            </Button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void onPickFile(file);
+            }}
+          />
+          {addError !== null ? (
+            <span className="text-[11px] text-destructive">{addError}</span>
+          ) : null}
+        </div>
+      }
+    />
+  );
+}
+
 function TypographySection() {
   const [advanced, setAdvanced] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,

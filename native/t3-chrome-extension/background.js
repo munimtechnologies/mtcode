@@ -1,4 +1,4 @@
-// T3 Code desktop control — Chrome side.
+// MT Code desktop control — Chrome side.
 //
 // The agent works only in tabs it created, collected into a labelled tab group,
 // so the user's own tabs are never touched and they can keep browsing while a
@@ -11,7 +11,7 @@
 // carries the originating request id.
 
 const HOST = "com.t3tools.t3code.desktop";
-const GROUP_TITLE = "T3 Code";
+const GROUP_TITLE = "MT Code";
 const OWNED_STATE_KEY = "ownedState";
 
 /** Tabs this extension owns, and the group holding them. */
@@ -634,7 +634,7 @@ async function navigate(tabId, url) {
 //
 // Toolbar icon = T3 logo (manifest icons/). Tab favicon = Computer Use badge
 // (icons/pointer-*.png), matching Settings → Agent cursor overlay — so a tab
-// in the "T3 Code" group is visually distinct from the extension itself.
+// in the "MT Code" group is visually distinct from the extension itself.
 //
 // An extension cannot set a tab's favicon directly, but it can replace the
 // page's icon link, which is what Chrome renders in the tab strip. Pages

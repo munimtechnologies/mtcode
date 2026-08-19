@@ -213,6 +213,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "sidebar-artwork",
+    title: "Sidebar artwork",
+    to: "/settings/appearance",
+  },
+  {
     id: "keybindings",
     title: "Keybindings",
     to: "/settings/keybindings",

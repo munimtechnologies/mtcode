@@ -114,6 +114,39 @@ export const TerminalFontSize = Schema.Int.check(
 export type TerminalFontSize = typeof TerminalFontSize.Type;
 export const DEFAULT_TERMINAL_FONT_SIZE: TerminalFontSize = 12;
 
+/**
+ * Sidebar header artwork.
+ *
+ * Upstream ties the artwork to the Dev/Nightly channel; MT Code ships one
+ * release, so the artwork is a choice instead of a side effect of a build
+ * channel. "auto" keeps the upstream behaviour (art on Dev/Nightly, nothing
+ * on a release build); the named scenes and any custom artwork are explicit.
+ */
+export const SIDEBAR_ARTWORK_BUILT_IN_IDS = ["auto", "none", "night", "day"] as const;
+export const SidebarArtworkSelection = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(80),
+);
+export type SidebarArtworkSelection = typeof SidebarArtworkSelection.Type;
+export const DEFAULT_SIDEBAR_ARTWORK_SELECTION = "auto";
+
+/** Largest artwork a user may store, so settings stay a settings file. */
+export const MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES = 512 * 1024;
+
+/**
+ * A user's own artwork. Stored on the server so it follows the account to
+ * every client attached to it - desktop, browser, phone - rather than living
+ * in one device's local storage.
+ */
+export const CustomSidebarArtwork = Schema.Struct({
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
+  /** `data:` URL for an image (PNG, JPEG, WEBP, or SVG). */
+  image: TrimmedNonEmptyString.check(Schema.isMaxLength(MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES)),
+  /** ISO timestamp; a plain string so the settings schema stays service-free. */
+  createdAt: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+});
+export type CustomSidebarArtwork = typeof CustomSidebarArtwork.Type;
+
 export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill", "none"]);
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
 export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
@@ -763,6 +796,14 @@ export const ServerSettings = Schema.Struct({
   environmentLabel: TrimmedString.check(Schema.isMaxLength(40)).pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
   ),
+  /** Which sidebar artwork this account shows; see SidebarArtworkSelection. */
+  sidebarArtwork: SidebarArtworkSelection.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_ARTWORK_SELECTION)),
+  ),
+  /** The account's own artwork, synced to every client on this server. */
+  customSidebarArtworks: Schema.Array(CustomSidebarArtwork).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
   // including prior opt-ins, resets to the buffered default.
@@ -1015,6 +1056,8 @@ const AntigravitySettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   environmentLabel: Schema.optionalKey(TrimmedString.check(Schema.isMaxLength(40))),
+  sidebarArtwork: Schema.optionalKey(SidebarArtworkSelection),
+  customSidebarArtworks: Schema.optionalKey(Schema.Array(CustomSidebarArtwork)),
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),

@@ -700,25 +700,16 @@ export const ACPRegistryIcon: Icon = ({ className, ...props }) => (
 export const MtModelIcon: Icon = ({ className, ...props }) => (
   <svg
     {...props}
-    viewBox="0 0 24 24"
+    viewBox="0 0 128 128"
     fill="none"
-    className={cn("stroke-current", className)}
+    className={cn("fill-current", className)}
     aria-hidden
   >
+    {/* The Munim mark, same path the app icon draws. */}
     <path
-      d="M12 3.2 13.7 8.3 19 10l-5.3 1.7L12 16.8l-1.7-5.1L5 10l5.3-1.7L12 3.2Z"
-      strokeWidth="1.7"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M18.2 15.4 19 17.8 21.4 18.6 19 19.4 18.2 21.8 17.4 19.4 15 18.6 17.4 17.8 18.2 15.4Z"
-      strokeWidth="1.4"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M5.4 14.8 6 16.6 7.8 17.2 6 17.8 5.4 19.6 4.8 17.8 3 17.2 4.8 16.6 5.4 14.8Z"
-      strokeWidth="1.4"
-      strokeLinejoin="round"
+      d="M52.547 87.884L52.710 88.313L51.914 88.231L-0.000 603.926L105.522 614.537L135.846 313.360L180.699 434.810L181.210 439.258L182.291 439.136L184.066 443.911L265.794 413.732L273.569 383.736L293.716 313.043L312.994 481.660L219.104 524.021L180.964 657.000L668.780 436.993L668.189 435.670L631.008 110.432L725.000 105.249L719.204 0.000L419.046 16.549L424.862 121.797L525.037 116.268L554.382 372.820L413.312 436.422L366.622 27.955L262.488 39.871L262.937 43.850L212.900 219.495L150.865 51.563Z"
+      fillRule="nonzero"
+      transform="translate(22.067 26.000) scale(0.115677)"
     />
   </svg>
 );

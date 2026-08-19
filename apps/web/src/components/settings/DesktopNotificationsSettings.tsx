@@ -16,6 +16,8 @@ import { toastManager } from "../ui/toast.tsx";
 import { SettingsRow, SettingsSection } from "./settingsLayout.tsx";
 import { searchableSetting } from "./settingsSearch.ts";
 
+import { APP_DISPLAY_NAME } from "~/branding";
+
 const EVENT_OPTIONS: ReadonlyArray<{
   readonly event: DesktopNotificationEvent;
   readonly title: string;
@@ -158,14 +160,14 @@ function useDesktopNotificationSettingsModel() {
   };
 
   const masterDescription = isElectron
-    ? "Notify me when T3 Code is in the background."
+    ? `Notify me when ${APP_DISPLAY_NAME} is in the background.`
     : browserPermission.permission === "denied"
       ? "Blocked in your browser settings."
       : browserPermission.permission === "unsupported"
         ? "Not supported by this browser."
         : browserPermission.permission === "default"
-          ? "Allow notifications when T3 Code is in the background."
-          : "Notify me when T3 Code is in the background.";
+          ? `Allow notifications when ${APP_DISPLAY_NAME} is in the background.`
+          : `Notify me when ${APP_DISPLAY_NAME} is in the background.`;
 
   return {
     settings,

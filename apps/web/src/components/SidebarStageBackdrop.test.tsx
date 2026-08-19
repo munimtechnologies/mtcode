@@ -2,7 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  DEV_BACKDROP,
+  NIGHTLY_BACKDROP,
   resolveEnvironmentIdentificationPillLabel,
+  resolveSidebarArtwork,
   resolveSidebarStageBackdropVariant,
   resolveSidebarStageFocusRingOffsetClass,
   StageBackdropArt,
@@ -11,8 +14,8 @@ import {
 
 describe("SidebarStageBackdrop", () => {
   it("resolves stage artwork only when enabled", () => {
-    expect(resolveSidebarStageBackdropVariant("Dev")).toBe("dev");
-    expect(resolveSidebarStageBackdropVariant("Nightly")).toBe("nightly");
+    expect(resolveSidebarStageBackdropVariant("Dev")).toEqual(DEV_BACKDROP);
+    expect(resolveSidebarStageBackdropVariant("Nightly")).toEqual(NIGHTLY_BACKDROP);
     expect(resolveSidebarStageBackdropVariant("Dev", false)).toBeNull();
     expect(resolveSidebarStageBackdropVariant("Alpha")).toBeNull();
   });
@@ -25,16 +28,16 @@ describe("SidebarStageBackdrop", () => {
   });
 
   it("matches the focus-ring offset to each artwork palette", () => {
-    expect(resolveSidebarStageFocusRingOffsetClass("nightly")).toBe(
+    expect(resolveSidebarStageFocusRingOffsetClass(NIGHTLY_BACKDROP)).toBe(
       "focus-visible:ring-offset-(--stage-night-bottom)",
     );
-    expect(resolveSidebarStageFocusRingOffsetClass("dev")).toBe(
+    expect(resolveSidebarStageFocusRingOffsetClass(DEV_BACKDROP)).toBe(
       "focus-visible:ring-offset-(--stage-art-bottom)",
     );
   });
 
-  it.each(["nightly", "dev"] as const)(
-    "uses unique SVG definition ids when %s artwork is rendered more than once",
+  it.each([NIGHTLY_BACKDROP, DEV_BACKDROP] as const)(
+    "uses unique SVG definition ids when $kind artwork is rendered more than once",
     (variant) => {
       const markup = renderToStaticMarkup(
         <>
@@ -50,8 +53,8 @@ describe("SidebarStageBackdrop", () => {
   );
 
   it("paints each artwork variant with theme-owned color tokens", () => {
-    const nightlyMarkup = renderToStaticMarkup(<StageBackdropArt variant="nightly" />);
-    const devMarkup = renderToStaticMarkup(<StageBackdropArt variant="dev" />);
+    const nightlyMarkup = renderToStaticMarkup(<StageBackdropArt variant={NIGHTLY_BACKDROP} />);
+    const devMarkup = renderToStaticMarkup(<StageBackdropArt variant={DEV_BACKDROP} />);
 
     expect(nightlyMarkup).toContain("var(--stage-night-bottom)");
     expect(nightlyMarkup).toContain("var(--stage-night-line)");
@@ -62,12 +65,49 @@ describe("SidebarStageBackdrop", () => {
   });
 
   it.each([
-    ["nightly", "96 0 8192 96"],
-    ["dev", "64 0 8192 96"],
-  ] as const)("uses the compact %s crop inside the send button", (variant, viewBox) => {
+    [NIGHTLY_BACKDROP, "96 0 8192 96"],
+    [DEV_BACKDROP, "64 0 8192 96"],
+  ] as const)("uses the compact crop inside the send button", (variant, viewBox) => {
     const markup = renderToStaticMarkup(<StageBackdropButtonArt variant={variant} />);
 
     expect(markup).toContain(`viewBox="${viewBox}"`);
-    expect(markup).toContain(`stage-${variant === "dev" ? "blueprint" : "nightly"}`);
+    expect(markup).toContain(`stage-${variant.kind === "dev" ? "blueprint" : "nightly"}`);
+  });
+});
+
+describe("resolveSidebarArtwork", () => {
+  const custom = [{ id: "art_1", name: "Skyline", image: "data:image/png;base64,AAAA" }];
+
+  it("defers to the build channel only for auto", () => {
+    expect(resolveSidebarArtwork({ selection: "auto", stageLabel: "Nightly", custom })).toEqual(
+      NIGHTLY_BACKDROP,
+    );
+    // A release build has no channel artwork, which is why picking one matters.
+    expect(resolveSidebarArtwork({ selection: "auto", stageLabel: "", custom })).toBeNull();
+  });
+
+  it("honours an explicit pick regardless of channel", () => {
+    expect(resolveSidebarArtwork({ selection: "night", stageLabel: "", custom })).toEqual(
+      NIGHTLY_BACKDROP,
+    );
+    expect(resolveSidebarArtwork({ selection: "day", stageLabel: "Nightly", custom })).toEqual(
+      DEV_BACKDROP,
+    );
+    expect(resolveSidebarArtwork({ selection: "none", stageLabel: "Nightly", custom })).toBeNull();
+  });
+
+  it("renders the account's own artwork, and nothing once it is deleted", () => {
+    expect(resolveSidebarArtwork({ selection: "art_1", stageLabel: "", custom })).toEqual({
+      kind: "custom",
+      image: custom[0]!.image,
+      name: custom[0]!.name,
+    });
+    expect(resolveSidebarArtwork({ selection: "art_1", stageLabel: "", custom: [] })).toBeNull();
+  });
+
+  it("stays out of the way when artwork is switched off entirely", () => {
+    expect(
+      resolveSidebarArtwork({ selection: "night", stageLabel: "", custom, enabled: false }),
+    ).toBeNull();
   });
 });
