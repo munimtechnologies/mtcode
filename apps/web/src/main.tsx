@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { ClerkProvider } from "@clerk/react";
-import { passkeys as electronPasskeys } from "@clerk/electron/passkeys";
+import { passkeys } from "@clerk/electron/passkeys";
 import { ClerkProvider as ElectronClerkProvider } from "@clerk/electron/react";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
@@ -30,14 +30,9 @@ if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
 
-// @clerk/electron reports passkey autofill as supported but executes the
-// "quiet" autofill request as a modal prompt, so Clerk's sign-in form pops an
-// OS passkey dialog the moment it mounts. Report autofill as unsupported; the
-// explicit "Use passkey" button keeps working.
-// Upstream: https://github.com/clerk/javascript/issues/9496
-const passkeys = {
-  ...electronPasskeys,
-  isAutoFillSupported: () => Promise.resolve(false),
+// First Clerk UI build containing https://github.com/clerk/javascript/pull/9500.
+const electronClerkUI = {
+  __internal_clerkUIVersion: "1.30.5-canary.v20260819050620",
 };
 
 function ClerkGate({ children }: { readonly children: React.ReactNode }) {
@@ -62,6 +57,7 @@ function ClerkGate({ children }: { readonly children: React.ReactNode }) {
     return (
       <ElectronClerkProvider
         key={embedded?.id ?? "clerk"}
+        {...electronClerkUI}
         appearance={clerkAppearance}
         publishableKey={publishableKey}
         passkeys={passkeys}
