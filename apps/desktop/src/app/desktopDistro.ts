@@ -69,3 +69,19 @@ export function resolveRuntimeDesktopDistro(input: {
     linuxWmClass: input.isDevelopment ? "t3code-dev" : "t3code",
   };
 }
+
+/**
+ * The product name for messages the user reads, resolved from the running
+ * build. Main-process code that only needs a name (an error dialog, a keyring
+ * hint) can call this instead of threading DesktopEnvironment through.
+ */
+export function desktopAppDisplayName(
+  env: NodeJS.ProcessEnv = process.env,
+  appPath?: string,
+): string {
+  return resolveRuntimeDesktopDistro({
+    env,
+    ...(appPath === undefined ? {} : { appPath }),
+    isDevelopment: false,
+  }).baseName;
+}

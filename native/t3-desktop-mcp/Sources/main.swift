@@ -2014,7 +2014,7 @@ func toolBrowserPressKey(_ args: [String: Any]) -> String {
 
 func toolBrowserCloseAllTabs(_ args: [String: Any]) -> String {
     guard BrowserBridge.shared.isConnected else {
-        return "error: the T3 Code Chrome extension is not connected"
+        return "error: the MT Code Chrome extension is not connected"
     }
     return bridgeText(BrowserBridge.shared.call("close_all_tabs")) { payload in
         let closed = payload["closed"] as? Int ?? 0

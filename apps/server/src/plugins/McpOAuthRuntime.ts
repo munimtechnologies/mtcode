@@ -23,6 +23,7 @@ import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@t3tools/sh
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 export type McpOAuthHarness = Extract<PluginMarketplaceHarnessId, "codex" | "claude" | "cursor">;
 
@@ -517,7 +518,7 @@ export const make = (options: McpOAuthRuntimeOptions = {}) =>
           yield* client.request("initialize", {
             clientInfo: {
               name: "t3code_mcp_oauth",
-              title: "T3 Code MCP Authentication",
+              title: `${resolveAppDisplayName()} MCP Authentication`,
               version: "0.1.0",
             },
             capabilities: { experimentalApi: true },

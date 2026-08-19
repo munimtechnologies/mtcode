@@ -60,6 +60,7 @@ import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInst
 import * as ServerSettings from "../serverSettings.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 import * as McpOAuthRuntime from "./McpOAuthRuntime.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 import {
   CHATGPT_PUBLIC_MARKETPLACE_NAME,
   CHATGPT_PUBLIC_PLUGIN_SEARCH_MAX_PAGES,
@@ -3028,7 +3029,7 @@ const makeCodexPluginRuntime = (
           yield* client.request("initialize", {
             clientInfo: {
               name: "t3code_plugin_marketplace",
-              title: "T3 Code Plugin Marketplace",
+              title: `${resolveAppDisplayName()} Plugin Marketplace`,
               version: "0.1.0",
             },
             capabilities: { experimentalApi: true },

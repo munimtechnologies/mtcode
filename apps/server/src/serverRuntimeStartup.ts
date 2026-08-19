@@ -39,6 +39,7 @@ import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReape
 import * as SessionStartupReconciler from "./provider/Services/SessionStartupReconciler.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
+import { resolveAppDisplayName } from "./appDisplayName.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -445,7 +446,7 @@ export const make = (options?: StartupOptions) =>
             const startupBrowserTarget = yield* resolveStartupBrowserTarget;
             if (serverConfig.mode !== "desktop") {
               yield* Effect.logInfo(
-                "Authentication required. Open T3 Code using the pairing URL.",
+                `Authentication required. Open ${resolveAppDisplayName()} using the pairing URL.`,
               ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
             }
             yield* runStartupPhase("browser.open", maybeOpenBrowser(startupBrowserTarget));

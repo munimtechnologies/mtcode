@@ -396,7 +396,7 @@ final class BrowserBridge {
         lock.lock()
         guard clientFD >= 0 else {
             lock.unlock()
-            return .failure("the T3 Code Chrome extension is not connected")
+            return .failure("the MT Code Chrome extension is not connected")
         }
         nextID += 1
         let id = nextID
