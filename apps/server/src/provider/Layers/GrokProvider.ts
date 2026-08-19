@@ -17,6 +17,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { providerDisabledMessage } from "../../appDisplayName.ts";
+
 import {
   buildSelectOptionDescriptor,
   buildServerProvider,
@@ -80,7 +82,7 @@ export function buildInitialGrokProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Grok is disabled in T3 Code settings.",
+          message: providerDisabledMessage("Grok"),
         },
       });
     }
@@ -212,7 +214,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Grok is disabled in T3 Code settings.",
+        message: providerDisabledMessage("Grok"),
       },
     });
   }

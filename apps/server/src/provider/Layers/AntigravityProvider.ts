@@ -15,6 +15,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { providerDisabledMessage } from "../../appDisplayName.ts";
+
 import {
   buildServerProvider,
   isCommandMissingCause,
@@ -103,7 +105,7 @@ export function buildInitialAntigravityProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Antigravity is disabled in T3 Code settings.",
+          message: providerDisabledMessage("Antigravity"),
         },
       });
     }
@@ -173,7 +175,7 @@ export const checkAntigravityProviderStatus = Effect.fn("checkAntigravityProvide
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Antigravity is disabled in T3 Code settings.",
+          message: providerDisabledMessage("Antigravity"),
         },
       });
     }

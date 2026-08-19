@@ -48,6 +48,8 @@ import {
 } from "../providerMaintenance.ts";
 import * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts";
+
+import { providerDisabledMessage } from "../../appDisplayName.ts";
 import {
   cursorAboutTimeoutMs,
   cursorAcpModelDiscoveryTimeoutMs,
@@ -104,7 +106,7 @@ export function buildInitialCursorProviderSnapshot(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Cursor is disabled in T3 Code settings.",
+          message: providerDisabledMessage("Cursor"),
         },
       });
     }
@@ -1186,7 +1188,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Cursor is disabled in T3 Code settings.",
+        message: providerDisabledMessage("Cursor"),
       },
     });
   }

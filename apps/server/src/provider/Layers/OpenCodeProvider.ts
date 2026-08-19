@@ -24,6 +24,8 @@ import {
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
+import { providerDisabledMessage } from "../../appDisplayName.ts";
+
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
   showInteractionModeToggle: false,
@@ -274,8 +276,8 @@ export const makePendingOpenCodeProvider = (
           auth: { status: "unknown" },
           message:
             openCodeSettings.serverUrl.trim().length > 0
-              ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
-              : "OpenCode is disabled in T3 Code settings.",
+              ? `${providerDisabledMessage("OpenCode")} A server URL is configured.`
+              : providerDisabledMessage("OpenCode"),
         },
       });
     }
@@ -339,8 +341,8 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         status: "warning",
         auth: { status: "unknown" },
         message: isExternalServer
-          ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
-          : "OpenCode is disabled in T3 Code settings.",
+          ? `${providerDisabledMessage("OpenCode")} A server URL is configured.`
+          : providerDisabledMessage("OpenCode"),
       },
     });
   }

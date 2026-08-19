@@ -36,6 +36,9 @@ import {
 import { providerAuthProbeTimeoutMs, resolveProviderProbeCwd } from "../providerProbeTimeouts.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import packageJson from "../../../package.json" with { type: "json" };
+
+import { providerDisabledMessage } from "../../appDisplayName.ts";
+
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
@@ -503,7 +506,7 @@ const makePendingCodexProvider = (
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Codex is disabled in T3 Code settings.",
+          message: providerDisabledMessage("Codex"),
         },
       });
     }
@@ -589,7 +592,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Codex is disabled in T3 Code settings.",
+        message: providerDisabledMessage("Codex"),
       },
     });
   }

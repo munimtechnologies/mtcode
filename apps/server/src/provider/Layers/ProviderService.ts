@@ -58,6 +58,9 @@ import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
+
+import { providerDisabledMessage } from "../../appDisplayName.ts";
+
 const isModelSelection = Schema.is(ModelSelection);
 
 /**
@@ -614,7 +617,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (!instanceInfo.enabled) {
           return yield* toValidationError(
             "ProviderService.startSession",
-            `Provider instance '${resolvedInstanceId}' is disabled in T3 Code settings.`,
+            providerDisabledMessage(`Provider instance '${resolvedInstanceId}'`),
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));

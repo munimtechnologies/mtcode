@@ -403,6 +403,9 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
+        // The backend writes user-facing messages ("<Provider> is disabled in
+        // <App> settings"), and only the desktop knows which brand is running.
+        T3CODE_APP_DISPLAY_NAME: environment.branding.baseName,
       },
       // Primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
       extendEnv: true,
