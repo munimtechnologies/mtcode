@@ -6,7 +6,7 @@ import type {
   ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { mapViewerPointToScreen } from "@t3tools/shared/computerView";
-import { EyeIcon, MousePointerClickIcon, XIcon } from "lucide-react";
+import { EyeIcon, MaximizeIcon, MinimizeIcon, MousePointerClickIcon, XIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -29,6 +29,7 @@ import {
   computerViewFrameDataUrl,
   mapKeyboardEventToComputerViewInput,
   mapWheelToComputerViewInput,
+  resolveComputerViewCaptureWidth,
 } from "./computerViewInput.logic";
 
 /** Coalesce wheel spam into one scroll per flush so serial input keeps up. */
@@ -50,13 +51,27 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
   const [display, setDisplay] = useState<number | undefined>(undefined);
   const [controlEnabled, setControlEnabled] = useState(true);
   const [inputError, setInputError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // The host encodes at whatever width the viewer is actually drawing, so the
+  // picture is native rather than a 960px thumbnail stretched over a window.
+  const [captureWidth, setCaptureWidth] = useState(() =>
+    resolveComputerViewCaptureWidth({
+      renderedWidth: typeof window === "undefined" ? 1280 : window.innerWidth,
+      devicePixelRatio: typeof window === "undefined" ? 1 : window.devicePixelRatio,
+    }),
+  );
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const viewAtom = useMemo(
     () =>
       computerViewEnvironment.view({
         environmentId,
-        input: display === undefined ? {} : { display },
+        input: {
+          ...(display === undefined ? {} : { display }),
+          maxWidth: captureWidth,
+        },
       }),
-    [display, environmentId],
+    [captureWidth, display, environmentId],
   );
   const { data: view, error: streamError } = useEnvironmentQuery(viewAtom);
   const sendInputCommand = useAtomCommand(computerViewEnvironment.sendInput, {
@@ -173,6 +188,82 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
     [],
   );
 
+  // Resize follows the window, debounced and stepped by the width helper, so a
+  // drag-resize does not restart the capture stream on every frame.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (width <= 0) return;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        setCaptureWidth((current) => {
+          const next = resolveComputerViewCaptureWidth({
+            renderedWidth: width,
+            devicePixelRatio: window.devicePixelRatio,
+          });
+          return next === current ? current : next;
+        });
+      }, 400);
+    });
+    observer.observe(container);
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, []);
+
+  // Fullscreen plus Keyboard Lock is what lets Cmd-Tab, Escape, and Cmd-Space
+  // reach the remote machine instead of the browser. Both are best-effort:
+  // Safari has neither, and the viewer stays usable without them.
+  const toggleFullscreen = useCallback(() => {
+    const root = rootRef.current;
+    if (root === null) return;
+    if (document.fullscreenElement === null) {
+      void root.requestFullscreen?.().then(
+        () => {
+          const keyboard = (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } })
+            .keyboard;
+          void keyboard?.lock?.().catch(() => undefined);
+        },
+        () => undefined,
+      );
+      return;
+    }
+    const keyboard = (navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard;
+    keyboard?.unlock?.();
+    void document.exitFullscreen?.().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(document.fullscreenElement !== null);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      const keyboard = (navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard;
+      keyboard?.unlock?.();
+    };
+  }, []);
+
+  // Pasting types the local clipboard on the remote machine: sending Cmd-V
+  // instead would paste whatever is on the REMOTE clipboard, which is not what
+  // the person pressing paste in this window means.
+  useEffect(() => {
+    if (!controlEnabled) return;
+    const onPaste = (event: globalThis.ClipboardEvent) => {
+      const text = event.clipboardData?.getData("text/plain");
+      if (!text) return;
+      event.preventDefault();
+      event.stopPropagation();
+      sendInput({ type: "type", text });
+    };
+    window.addEventListener("paste", onPaste, true);
+    return () => window.removeEventListener("paste", onPaste, true);
+  }, [controlEnabled, sendInput]);
+
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (resolveShortcutCommand(event, keybindings) === "computerView.toggle") {
@@ -189,6 +280,11 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
         }
         return;
       }
+      // Mid-composition keystrokes belong to the IME, not the remote machine;
+      // the composed text arrives as one printable key when it commits.
+      if (event.isComposing || event.keyCode === 229) return;
+      // Paste is handled by the clipboard listener above.
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
       const input = mapKeyboardEventToComputerViewInput(event);
       if (input === null) return;
       event.preventDefault();
@@ -208,7 +304,8 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
       role="dialog"
       aria-modal="true"
       aria-label={`Live view of ${environmentLabel}`}
-      className="fixed inset-0 z-50 flex flex-col bg-black/90 [-webkit-app-region:no-drag]"
+      ref={rootRef}
+      className="fixed inset-0 z-50 flex flex-col bg-neutral-950 [-webkit-app-region:no-drag]"
     >
       <div className="flex h-11 shrink-0 items-center gap-2 px-3 text-sm text-white/80">
         <span className="min-w-0 truncate font-medium text-white">{environmentLabel}</span>
@@ -262,6 +359,30 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
                 : "View only"}
             </TooltipPopup>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-pressed={isFullscreen}
+                  aria-label={isFullscreen ? "Leave fullscreen" : "Fullscreen"}
+                  onClick={toggleFullscreen}
+                  className="inline-flex size-7 items-center justify-center rounded-sm text-white/60 hover:bg-white/10 hover:text-white"
+                />
+              }
+            >
+              {isFullscreen ? (
+                <MinimizeIcon className="size-4" />
+              ) : (
+                <MaximizeIcon className="size-4" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              {isFullscreen
+                ? "Leave fullscreen"
+                : "Fullscreen — sends system shortcuts to the remote machine"}
+            </TooltipPopup>
+          </Tooltip>
           <button
             type="button"
             aria-label="Close computer view"
@@ -272,7 +393,10 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
           </button>
         </div>
       </div>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center p-3 pt-0">
+      <div
+        ref={containerRef}
+        className="relative flex min-h-0 flex-1 items-center justify-center bg-black p-3 pt-0"
+      >
         {frame !== null ? (
           <img
             ref={surfaceRef}
@@ -283,7 +407,10 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
             onPointerUp={handlePointerUp}
             onWheel={handleWheel}
             onContextMenu={(event) => event.preventDefault()}
-            className={`h-full w-full select-none object-contain ${controlEnabled ? "cursor-crosshair" : ""}`}
+            // A stream narrower than the window is drawn smoothly rather than
+            // as sharpened mush; the capture width already tracks this box.
+            style={{ imageRendering: "auto" }}
+            className={`max-h-full max-w-full select-none object-contain ${controlEnabled ? "cursor-crosshair" : ""}`}
           />
         ) : (
           <div className="flex flex-col items-center gap-3 text-sm text-white/70">

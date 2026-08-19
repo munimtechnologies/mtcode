@@ -40,6 +40,7 @@ import {
   PaletteIcon,
   PlusIcon,
   RefreshCwIcon,
+  MonitorIcon,
   ServerIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -1062,6 +1063,38 @@ function OpenCommandPaletteDialog(props: {
     [openProjectFromSearch, pickerProjects, projectGroupByTargetKey],
   );
 
+  // Starting on a computer needs no project: the thread opens on that machine's
+  // home directory, the way Codex does. Listed above Projects so "just talk to
+  // this computer" is the first thing in the picker.
+  const computerThreadItems = useMemo<CommandPaletteActionItem[]>(
+    () =>
+      addProjectEnvironmentOptions.map((option) => ({
+        kind: "action",
+        value: `new-thread-on-computer:${option.environmentId}`,
+        searchTerms: [
+          option.label,
+          option.environmentId,
+          "computer",
+          "machine",
+          "device",
+          "no folder",
+          "whole computer",
+        ],
+        title: option.label,
+        description: option.isConnected
+          ? option.isPrimary
+            ? "This device · no folder needed"
+            : "No folder needed"
+          : option.status,
+        disabled: !option.isConnected,
+        icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await startComputerThread(option.environmentId);
+        },
+      })),
+    [addProjectEnvironmentOptions, startComputerThread],
+  );
+
   const projectThreadItems = useMemo(
     () =>
       enumerateCommandPaletteItems(
@@ -1509,6 +1542,11 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [
         {
+          value: "computers",
+          label: "Computers",
+          items: enumerateCommandPaletteItems(computerThreadItems),
+        },
+        {
           value: "projects",
           label: "Projects",
           items: enumerateCommandPaletteItems(prioritized),
@@ -1520,6 +1558,7 @@ function OpenCommandPaletteDialog(props: {
     browseNavigation,
     currentProjectEnvironmentId,
     currentProjectId,
+    computerThreadItems,
     openIntent,
     projectThreadItems,
     pushPaletteView,
@@ -1645,7 +1684,10 @@ function OpenCommandPaletteDialog(props: {
       title: "New thread in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+      groups: [
+        { value: "computers", label: "Computers", items: computerThreadItems },
+        { value: "projects", label: "Projects", items: projectThreadItems },
+      ],
     });
   }
 

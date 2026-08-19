@@ -61,6 +61,10 @@ const CAPTURE_TIMEOUT = Duration.seconds(15);
 const INPUT_TIMEOUT = Duration.seconds(10);
 /** Consecutive capture failures surface as status events until this cap. */
 const MAX_CONSECUTIVE_CAPTURE_FAILURES = 5;
+/** Identical captures in a row before the loop decides the screen is idle. */
+const IDLE_CAPTURE_RUNS = 8;
+/** Capture gap once the screen is idle. Any change still lands within this. */
+const IDLE_CAPTURE_INTERVAL_MS = 500;
 
 interface McpRpcResponse {
   readonly result?: McpToolResult;
@@ -318,9 +322,20 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
         const maxWidth = input.maxWidth ?? COMPUTER_VIEW_DEFAULT_MAX_WIDTH;
         let lastFrameAt = 0;
         let consecutiveFailures = 0;
+        // A still screen encodes to the same bytes every time. Comparing them
+        // is what lets the capture loop run fast without paying for it: only
+        // changed pixels reach the client.
+        let lastFrameData: string | null = null;
+        let unchangedRuns = 0;
         const nextEvent = Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
-          const wait = lastFrameAt + COMPUTER_VIEW_MIN_INTERVAL_MS - now;
+          // Back off while nothing moves so an idle viewer is not a busy loop
+          // on the host, and snap back to full speed the moment it does.
+          const interval =
+            unchangedRuns >= IDLE_CAPTURE_RUNS
+              ? IDLE_CAPTURE_INTERVAL_MS
+              : COMPUTER_VIEW_MIN_INTERVAL_MS;
+          const wait = lastFrameAt + interval - now;
           if (wait > 0) yield* Effect.sleep(Duration.millis(wait));
           const event: ComputerViewStreamEvent = yield* captureFrame(
             client,
@@ -343,9 +358,22 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
             }),
           );
           lastFrameAt = yield* Clock.currentTimeMillis;
+          if (event.type === "frame") {
+            if (event.data === lastFrameData) {
+              unchangedRuns += 1;
+              return null;
+            }
+            lastFrameData = event.data;
+            unchangedRuns = 0;
+          }
           return event;
         });
-        return Stream.concat(Stream.make(ready), Stream.fromEffectRepeat(nextEvent));
+        return Stream.concat(
+          Stream.make(ready),
+          Stream.fromEffectRepeat(nextEvent).pipe(
+            Stream.filter((event): event is ComputerViewStreamEvent => event !== null),
+          ),
+        );
       }),
     );
 

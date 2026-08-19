@@ -3,7 +3,7 @@
  * for the remote machine. Coordinates entering these helpers are already in
  * remote screen space (see mapViewerPointToScreen in @t3tools/shared).
  */
-import type { ComputerViewInput } from "@t3tools/contracts";
+import { COMPUTER_VIEW_MAX_WIDTH_LIMIT, type ComputerViewInput } from "@t3tools/contracts";
 
 /** Pointer movement below this many remote-screen pixels stays a click. */
 export const COMPUTER_VIEW_DRAG_THRESHOLD_PX = 5;
@@ -138,6 +138,32 @@ export function classifyPointerGesture(input: {
     ...(input.button === "right" ? { button: "right" as const } : {}),
     ...(clickCount === 1 ? {} : { clickCount }),
   };
+}
+
+/**
+ * Capture width to ask the host for, given how large the viewer is drawing the
+ * screen. Rounded to a step so a drag-resize does not restart the stream on
+ * every pixel, and clamped so a huge monitor cannot ask the host to encode
+ * more than the link can carry.
+ */
+export function resolveComputerViewCaptureWidth(input: {
+  readonly renderedWidth: number;
+  readonly devicePixelRatio: number;
+  readonly step?: number;
+  readonly min?: number;
+  readonly max?: number;
+}): number {
+  const step = input.step ?? 160;
+  const min = input.min ?? 960;
+  const max = input.max ?? COMPUTER_VIEW_MAX_WIDTH_LIMIT;
+  const ratio =
+    Number.isFinite(input.devicePixelRatio) && input.devicePixelRatio > 0
+      ? Math.min(input.devicePixelRatio, 2)
+      : 1;
+  const wanted = input.renderedWidth * ratio;
+  if (!Number.isFinite(wanted) || wanted <= 0) return min;
+  const stepped = Math.ceil(wanted / step) * step;
+  return Math.min(max, Math.max(min, stepped));
 }
 
 /** Data URL for rendering a streamed frame in an <img>. */

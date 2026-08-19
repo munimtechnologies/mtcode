@@ -1,9 +1,20 @@
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import * as Schema from "effect/Schema";
 
-/** Cap JPEG frame width so a remote stream stays usable on Tailscale. */
-export const COMPUTER_VIEW_DEFAULT_MAX_WIDTH = 960;
-export const COMPUTER_VIEW_MIN_INTERVAL_MS = 350;
+/**
+ * Frame width when the viewer has not said how big it is drawing. Viewers ask
+ * for their own rendered size (times the device pixel ratio) so the picture is
+ * not an upscaled 960px thumbnail on a large window.
+ */
+export const COMPUTER_VIEW_DEFAULT_MAX_WIDTH = 1280;
+/** Upper bound on a viewer's request: past this the host spends more time encoding than the link saves. */
+export const COMPUTER_VIEW_MAX_WIDTH_LIMIT = 2560;
+/**
+ * Floor on the gap between captures. Unchanged frames are dropped before they
+ * reach the wire, so a still screen costs nothing at this cadence while a
+ * moving one arrives at roughly 8 frames a second.
+ */
+export const COMPUTER_VIEW_MIN_INTERVAL_MS = 120;
 
 export const ComputerViewDisplay = Schema.Struct({
   index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -18,7 +29,12 @@ export type ComputerViewDisplay = typeof ComputerViewDisplay.Type;
 
 export const ComputerViewStreamInput = Schema.Struct({
   display: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  maxWidth: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  maxWidth: Schema.optional(
+    Schema.Int.check(
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(COMPUTER_VIEW_MAX_WIDTH_LIMIT),
+    ),
+  ),
 });
 export type ComputerViewStreamInput = typeof ComputerViewStreamInput.Type;
 

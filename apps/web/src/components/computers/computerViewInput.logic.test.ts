@@ -5,6 +5,7 @@ import {
   computerViewFrameDataUrl,
   mapKeyboardEventToComputerViewInput,
   mapWheelToComputerViewInput,
+  resolveComputerViewCaptureWidth,
 } from "./computerViewInput.logic";
 
 const noModifiers = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
@@ -140,5 +141,30 @@ describe("computerViewFrameDataUrl", () => {
     expect(computerViewFrameDataUrl({ mimeType: "image/jpeg", data: "abc" })).toBe(
       "data:image/jpeg;base64,abc",
     );
+  });
+});
+
+describe("resolveComputerViewCaptureWidth", () => {
+  it("asks for the rendered size in device pixels", () => {
+    expect(resolveComputerViewCaptureWidth({ renderedWidth: 1000, devicePixelRatio: 2 })).toBe(
+      2080,
+    );
+  });
+
+  it("steps the request so a drag-resize does not restart the stream constantly", () => {
+    const first = resolveComputerViewCaptureWidth({ renderedWidth: 1001, devicePixelRatio: 1 });
+    const second = resolveComputerViewCaptureWidth({ renderedWidth: 1100, devicePixelRatio: 1 });
+    expect(first).toBe(second);
+  });
+
+  it("clamps to a usable floor and a link-friendly ceiling", () => {
+    expect(resolveComputerViewCaptureWidth({ renderedWidth: 200, devicePixelRatio: 1 })).toBe(960);
+    expect(resolveComputerViewCaptureWidth({ renderedWidth: 6000, devicePixelRatio: 3 })).toBe(
+      2560,
+    );
+  });
+
+  it("falls back to the floor when the viewer has not laid out yet", () => {
+    expect(resolveComputerViewCaptureWidth({ renderedWidth: 0, devicePixelRatio: 1 })).toBe(960);
   });
 });
