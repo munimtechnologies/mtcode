@@ -19,7 +19,9 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+  DEFAULT_APP_ICON_SELECTION,
   DEFAULT_SIDEBAR_ARTWORK_SELECTION,
+  MAX_CUSTOM_APP_ICON_BYTES,
   MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES,
   DEFAULT_UNIFIED_SETTINGS,
   type EnvironmentIdentificationMode,
@@ -1158,6 +1160,7 @@ export function AppearanceSettingsPanel() {
         ) : null}
 
         <SidebarArtworkRow />
+        <AppIconRow />
       </SettingsSection>
 
       <TypographySection />
@@ -1466,10 +1469,9 @@ function SidebarArtworkRow() {
 
   const options = useMemo(
     () => [
-      { value: "auto", label: "Match the build" },
-      { value: "none", label: "None" },
       { value: "night", label: "Night sky" },
       { value: "day", label: "Blueprint" },
+      { value: "none", label: "None" },
       ...custom.map((artwork) => ({ value: artwork.id, label: artwork.name })),
     ],
     [custom],
@@ -1503,7 +1505,7 @@ function SidebarArtworkRow() {
   const removeArtwork = (id: string) => {
     updateSettings({
       customSidebarArtworks: custom.filter((artwork) => artwork.id !== id),
-      ...(selection === id ? { sidebarArtwork: "auto" } : {}),
+      ...(selection === id ? { sidebarArtwork: DEFAULT_SIDEBAR_ARTWORK_SELECTION } : {}),
     });
   };
 
@@ -1554,6 +1556,127 @@ function SidebarArtworkRow() {
             ref={fileInputRef}
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void onPickFile(file);
+            }}
+          />
+          {addError !== null ? (
+            <span className="text-[11px] text-destructive">{addError}</span>
+          ) : null}
+        </div>
+      }
+    />
+  );
+}
+
+/**
+ * App icon: the built-in mark, a light or dark variant, or your own image.
+ *
+ * The installed bundle keeps its own icon — rewriting that would break the
+ * code signature and take every macOS permission grant with it — so the pick
+ * is applied to the running app's Dock tile (or window icon off macOS).
+ */
+function AppIconRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const custom = settings.customAppIcons;
+  const selection = settings.appIcon;
+
+  const options = useMemo(
+    () => [
+      { value: "default", label: "MT Code" },
+      { value: "light", label: "Light — black mark" },
+      { value: "dark", label: "Dark — white mark" },
+      ...custom.map((icon) => ({ value: icon.id, label: icon.name })),
+    ],
+    [custom],
+  );
+
+  const onPickFile = async (file: File) => {
+    setAddError(null);
+    if (file.size > MAX_CUSTOM_APP_ICON_BYTES * 0.7) {
+      setAddError("That image is too large. Pick one under about 350 KB.");
+      return;
+    }
+    const image = await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+    // Electron's nativeImage reads PNG and JPEG only, so an SVG would save
+    // fine here and then silently fail to draw.
+    if (image === null || !/^data:image\/(png|jpeg|jpg)/.test(image)) {
+      setAddError("Use a square PNG or JPEG.");
+      return;
+    }
+    const id = `icon_${Math.random().toString(36).slice(2, 10)}`;
+    const name = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Icon";
+    updateSettings({
+      customAppIcons: [...custom, { id, name, image, createdAt: new Date().toISOString() }],
+      appIcon: id,
+    });
+  };
+
+  const removeIcon = (id: string) => {
+    updateSettings({
+      customAppIcons: custom.filter((icon) => icon.id !== id),
+      ...(selection === id ? { appIcon: DEFAULT_APP_ICON_SELECTION } : {}),
+    });
+  };
+
+  return (
+    <SettingsRow
+      {...searchableSetting("app-icon")}
+      description="Icon this app wears in the Dock and window. Your own icons sync to every client signed in here."
+      resetAction={
+        selection !== DEFAULT_APP_ICON_SELECTION ? (
+          <SettingResetButton
+            label="app icon"
+            onClick={() => updateSettings({ appIcon: DEFAULT_APP_ICON_SELECTION })}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex w-full flex-col items-end gap-2">
+          <Select
+            value={selection}
+            onValueChange={(value) => {
+              if (typeof value === "string") updateSettings({ appIcon: value });
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-48" aria-label="App icon">
+              <SelectValue>
+                {options.find((option) => option.value === selection)?.label ?? "MT Code"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {options.map((option) => (
+                <SelectItem hideIndicator key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          <div className="flex items-center gap-2">
+            {custom.some((icon) => icon.id === selection) ? (
+              <Button size="xs" variant="ghost" onClick={() => removeIcon(selection ?? "")}>
+                Remove
+              </Button>
+            ) : null}
+            <Button size="xs" variant="outline" onClick={() => fileInputRef.current?.click()}>
+              Upload icon
+            </Button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg"
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0];

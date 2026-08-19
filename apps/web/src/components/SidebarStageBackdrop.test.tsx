@@ -111,3 +111,19 @@ describe("resolveSidebarArtwork", () => {
     ).toBeNull();
   });
 });
+
+describe("named artwork defaults", () => {
+  it("draws the named scene even when the environment mode would hide artwork", () => {
+    // The picker is the user's answer; the palette/mode heuristics upstream
+    // uses to decide whether art suits the theme must not override it.
+    expect(
+      resolveSidebarArtwork({ selection: "night", stageLabel: "", custom: [], enabled: true }),
+    ).toEqual(NIGHTLY_BACKDROP);
+  });
+
+  it("keeps the legacy auto value working for older settings files", () => {
+    expect(
+      resolveSidebarArtwork({ selection: "auto", stageLabel: "Dev", custom: [] }),
+    ).toEqual(DEV_BACKDROP);
+  });
+});

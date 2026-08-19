@@ -137,6 +137,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   probeRemoteEditors: () => ipcRenderer.invoke(IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL, undefined),
+  setAppIcon: (input) => ipcRenderer.invoke(IpcChannels.SET_APP_ICON_CHANNEL, input),
   getComputerUsePermissions: () =>
     ipcRenderer.invoke(IpcChannels.GET_COMPUTER_USE_PERMISSIONS_CHANNEL, undefined),
   openComputerUsePrivacySettings: (pane) =>

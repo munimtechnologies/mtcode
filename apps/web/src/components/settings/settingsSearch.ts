@@ -218,6 +218,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "app-icon",
+    title: "App icon",
+    to: "/settings/appearance",
+  },
+  {
     id: "keybindings",
     title: "Keybindings",
     to: "/settings/keybindings",
