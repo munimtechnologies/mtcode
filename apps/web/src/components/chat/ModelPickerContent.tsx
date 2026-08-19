@@ -749,9 +749,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     }
                     const isCrossProvider =
                       props.lockedProvider !== null && !matchesLockedProvider(model);
-                    const disabledReason = isCrossProvider
-                      ? null
-                      : (getModelDisabledReason?.(model.instanceId, model.slug) ?? null);
+                    const disabledReason =
+                      getModelDisabledReason?.(model.instanceId, model.slug) ?? null;
                     return (
                       <ModelListRow
                         key={modelKey}

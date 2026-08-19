@@ -1,6 +1,7 @@
 import {
   isMtModelInstanceId,
   isMtModelSelection,
+  isProviderTurnReady,
   type AccountLimitsSnapshot,
   type ModelSelection,
   type ProviderInteractionMode,
@@ -41,10 +42,7 @@ export function buildMtRouteCandidates(
     if (isMtModelInstanceId(provider.instanceId)) {
       continue;
     }
-    const ready =
-      provider.enabled &&
-      provider.availability !== "unavailable" &&
-      (provider.status === "ready" || provider.status === "warning");
+    const ready = isProviderTurnReady(provider);
     const usedPercent = usedByInstance.get(provider.instanceId);
     for (const model of provider.models) {
       if (model.isLegacy || model.isCustom) {

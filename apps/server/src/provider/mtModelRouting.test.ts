@@ -60,6 +60,38 @@ describe("buildMtRouteCandidates", () => {
       },
     ]);
   });
+
+  it("marks warning and unauthenticated providers as not ready", () => {
+    const candidates = buildMtRouteCandidates([
+      {
+        instanceId: ProviderInstanceId.make("openai"),
+        driver: ProviderDriverKind.make("openCode"),
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown" },
+        checkedAt: "2026-08-18T00:00:00.000Z",
+        models: [{ slug: "openai/gpt-5.4", name: "GPT 5.4", isCustom: false, capabilities: null }],
+        slashCommands: [],
+        skills: [],
+      },
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "ready",
+        auth: { status: "unauthenticated" },
+        checkedAt: "2026-08-18T00:00:00.000Z",
+        models: [{ slug: "gpt-5.6-sol", name: "GPT 5.6", isCustom: false, capabilities: null }],
+        slashCommands: [],
+        skills: [],
+      },
+    ]);
+    expect(candidates.every((candidate) => candidate.ready === false)).toBe(true);
+  });
 });
 
 describe("resolveMtModelForTurn", () => {

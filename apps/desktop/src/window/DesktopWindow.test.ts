@@ -182,6 +182,41 @@ describe("isTrustedAudioPermissionRequest", () => {
   });
 });
 
+describe("isTrustedRendererPermissionRequest", () => {
+  it("allows clipboard permissions from the app renderer origin", () => {
+    for (const permission of ["clipboard-read", "clipboard-sanitized-write"] as const) {
+      assert.isTrue(
+        DesktopWindow.isTrustedRendererPermissionRequest({
+          applicationUrl: "t3code-dev://app/",
+          requestingUrl: "t3code-dev://app/task/123",
+          permission,
+        }),
+        permission,
+      );
+    }
+  });
+
+  it("rejects clipboard permissions from untrusted origins", () => {
+    assert.isFalse(
+      DesktopWindow.isTrustedRendererPermissionRequest({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "https://example.com/",
+        permission: "clipboard-sanitized-write",
+      }),
+    );
+  });
+
+  it("does not grant stale clipboard-write permission names", () => {
+    assert.isFalse(
+      DesktopWindow.isTrustedRendererPermissionRequest({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "t3code-dev://app/",
+        permission: "clipboard-write",
+      }),
+    );
+  });
+});
+
 const desktopAssetsLayer = Layer.succeed(DesktopAssets.DesktopAssets, {
   iconPaths: Effect.succeed({
     ico: Option.none<string>(),

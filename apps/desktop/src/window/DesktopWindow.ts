@@ -197,14 +197,10 @@ export function isSameOriginRendererNavigation(input: {
   }
 }
 
-export function isTrustedAudioPermissionRequest(input: {
+function isSameOriginRendererRequest(input: {
   readonly applicationUrl: string;
   readonly requestingUrl: string;
-  readonly permission: string;
-  readonly mediaTypes: ReadonlyArray<string>;
 }): boolean {
-  if (input.permission !== "media") return false;
-  if (!input.mediaTypes.includes("audio") || input.mediaTypes.includes("video")) return false;
   try {
     const application = new URL(input.applicationUrl);
     const requesting = new URL(input.requestingUrl);
@@ -216,6 +212,43 @@ export function isTrustedAudioPermissionRequest(input: {
   } catch {
     return false;
   }
+}
+
+export function isTrustedAudioPermissionRequest(input: {
+  readonly applicationUrl: string;
+  readonly requestingUrl: string;
+  readonly permission: string;
+  readonly mediaTypes: ReadonlyArray<string>;
+}): boolean {
+  if (input.permission !== "media") return false;
+  if (!input.mediaTypes.includes("audio") || input.mediaTypes.includes("video")) return false;
+  return isSameOriginRendererRequest(input);
+}
+
+// Async `navigator.clipboard.writeText()` is gated by Electron's
+// `clipboard-sanitized-write` permission (not `clipboard-write`). Both the
+// request and check handlers must allow it or built-in Copy actions fail with
+// "Write permission denied" — same fix as preview BrowserSession.
+const TRUSTED_RENDERER_CLIPBOARD_PERMISSIONS = new Set([
+  "clipboard-read",
+  "clipboard-sanitized-write",
+]);
+
+export function isTrustedRendererPermissionRequest(input: {
+  readonly applicationUrl: string;
+  readonly requestingUrl: string;
+  readonly permission: string;
+  readonly mediaTypes?: ReadonlyArray<string> | undefined;
+}): boolean {
+  if (TRUSTED_RENDERER_CLIPBOARD_PERMISSIONS.has(input.permission)) {
+    return isSameOriginRendererRequest(input);
+  }
+  return isTrustedAudioPermissionRequest({
+    applicationUrl: input.applicationUrl,
+    requestingUrl: input.requestingUrl,
+    permission: input.permission,
+    mediaTypes: input.mediaTypes ?? [],
+  });
 }
 
 export function isRetryableDevelopmentRendererLoadFailure(input: {
@@ -406,7 +439,7 @@ export const make = Effect.gen(function* () {
 
     window.webContents.session.setPermissionCheckHandler(
       (_webContents, permission, requestingOrigin, details) =>
-        isTrustedAudioPermissionRequest({
+        isTrustedRendererPermissionRequest({
           applicationUrl,
           requestingUrl: requestingOrigin,
           permission,
@@ -416,7 +449,7 @@ export const make = Effect.gen(function* () {
     window.webContents.session.setPermissionRequestHandler(
       (_webContents, permission, callback, details) => {
         callback(
-          isTrustedAudioPermissionRequest({
+          isTrustedRendererPermissionRequest({
             applicationUrl,
             requestingUrl: details.requestingUrl,
             permission,

@@ -20,6 +20,7 @@ import {
   getThreadMessageCorrectionEligibility,
   isMtModelInstanceId,
   OrchestrationThreadActivity,
+  providerTurnDisabledReason,
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
@@ -6504,6 +6505,18 @@ function ChatViewContent(props: ChatViewProps) {
   const handleConfirmHandoff = useCallback(
     async (handoffMarkdown: string, targetModelSelection: ModelSelection) => {
       if (!activeProject || !activeThread) return;
+      const targetProvider = pickerProviders.find(
+        (snapshot) => snapshot.instanceId === targetModelSelection.instanceId,
+      );
+      const turnDisabledReason = providerTurnDisabledReason(targetProvider);
+      if (turnDisabledReason) {
+        toastManager.add({
+          type: "error",
+          title: "Cannot hand off to this model",
+          description: turnDisabledReason,
+        });
+        return;
+      }
       // A disconnected computer never answers create/start, and the dialog
       // would sit on "Starting thread..." forever waiting for it. Say so
       // instead of spinning.
@@ -6651,6 +6664,7 @@ function ChatViewContent(props: ChatViewProps) {
       runtimeMode,
       startThreadTurn,
       waitForStartedServerThread,
+      pickerProviders,
     ],
   );
 
@@ -6658,6 +6672,11 @@ function ChatViewContent(props: ChatViewProps) {
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
         return null;
+      }
+      const provider = pickerProviders.find((snapshot) => snapshot.instanceId === instanceId);
+      const turnDisabledReason = providerTurnDisabledReason(provider);
+      if (turnDisabledReason) {
+        return turnDisabledReason;
       }
       if (isServerThread && activeServerThread && threadHasStarted(activeServerThread)) {
         return null;
