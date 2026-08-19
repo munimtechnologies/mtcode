@@ -11,7 +11,10 @@
 $ErrorActionPreference = 'Stop'
 
 $ExtensionId = 'kgdolgnijopbghhomnblabjkmjhnoage'
-$HostName = 'com.t3tools.t3code.desktop'
+$HostName = 'com.munim.mtcode.desktop'
+# Extensions that have not reloaded since the rename still ask for the old id,
+# and Chrome refuses a host it has no manifest for. Register both names.
+$LegacyHostName = 'com.t3tools.t3code.desktop'
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $binary = $env:T3CODE_DESKTOP_MCP_PATH
@@ -37,30 +40,37 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
   $utf8NoBom
 )
 
-$manifestPath = Join-Path $support "$HostName.json"
-$manifest = [ordered]@{
-  name            = $HostName
-  description     = 'MT Code desktop control bridge'
-  path            = $wrapper
-  type            = 'stdio'
-  allowed_origins = @("chrome-extension://$ExtensionId/")
+$manifestPaths = @{}
+foreach ($name in @($HostName, $LegacyHostName)) {
+  $path = Join-Path $support "$name.json"
+  $manifest = [ordered]@{
+    name            = $name
+    description     = 'MT Code desktop control bridge'
+    path            = $wrapper
+    type            = 'stdio'
+    allowed_origins = @("chrome-extension://$ExtensionId/")
+  }
+  # Chrome rejects native-host manifests with a UTF-8 BOM (PowerShell's UTF8
+  # encoding inserts one). Write UTF-8 without BOM explicitly.
+  [System.IO.File]::WriteAllText(
+    $path,
+    ($manifest | ConvertTo-Json -Depth 4),
+    $utf8NoBom
+  )
+  $manifestPaths[$name] = $path
 }
-# Chrome rejects native-host manifests with a UTF-8 BOM (PowerShell's UTF8
-# encoding inserts one). Write UTF-8 without BOM explicitly.
-[System.IO.File]::WriteAllText(
-  $manifestPath,
-  ($manifest | ConvertTo-Json -Depth 4),
-  $utf8NoBom
-)
+$manifestPath = $manifestPaths[$HostName]
 
 # Chrome and Chromium read separate registry trees; register wherever the
 # browser is actually installed.
 $installed = 0
 foreach ($vendor in @('Google\Chrome', 'Google\Chrome Beta', 'Chromium')) {
-  $key = "HKCU:\Software\$vendor\NativeMessagingHosts\$HostName"
   try {
-    New-Item -Path $key -Force | Out-Null
-    Set-ItemProperty -Path $key -Name '(default)' -Value $manifestPath
+    foreach ($name in @($HostName, $LegacyHostName)) {
+      $key = "HKCU:\Software\$vendor\NativeMessagingHosts\$name"
+      New-Item -Path $key -Force | Out-Null
+      Set-ItemProperty -Path $key -Name '(default)' -Value $manifestPaths[$name]
+    }
     Write-Host "registered host in: HKCU\Software\$vendor"
     $installed++
   } catch {

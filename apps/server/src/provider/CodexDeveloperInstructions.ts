@@ -1,6 +1,7 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 
 import { resolveAppDisplayName } from "../appDisplayName.ts";
+import { DESKTOP_MCP_SERVER_NAME } from "@t3tools/contracts";
 
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -43,7 +44,7 @@ const T3_CODE_DESKTOP_TOOL_INSTRUCTIONS = `
 
 ## T3 Code Computer Use
 
-The \`t3-desktop\` MCP server drives this computer's GUI. A pointer overlay shows where you click and type; it does not move the user's mouse.
+The \`${DESKTOP_MCP_SERVER_NAME}\` MCP server drives this computer's GUI. A pointer overlay shows where you click and type; it does not move the user's mouse.
 
 Prefer these tools for anything on screen: \`list_apps\`, \`get_app_state\`, \`click\`, \`type_text\`, \`press_key\`, \`screenshot\`, and the \`browser_*\` tools for Chrome tabs you own.
 

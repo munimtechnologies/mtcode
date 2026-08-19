@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describe } from "vite-plus/test";
-import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL, DESKTOP_MCP_SERVER_NAME, ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -534,14 +534,17 @@ describe("T3 browser developer instructions", () => {
     );
   });
 
-  it("describes Computer Use pointer tools only when t3-desktop is attached", () => {
+  it("describes Computer Use pointer tools only when the desktop MCP is attached", () => {
     const withDesktop = codexDefaultModeDeveloperInstructions(false, {
       desktopToolsAvailable: true,
     });
-    NodeAssert.match(withDesktop, /t3-desktop/);
+    NodeAssert.match(withDesktop, new RegExp(DESKTOP_MCP_SERVER_NAME));
     NodeAssert.match(withDesktop, /pointer overlay/);
     NodeAssert.match(withDesktop, /get_app_state/);
-    NodeAssert.doesNotMatch(codexDefaultModeDeveloperInstructions(false), /t3-desktop/);
+    NodeAssert.doesNotMatch(
+      codexDefaultModeDeveloperInstructions(false),
+      new RegExp(DESKTOP_MCP_SERVER_NAME),
+    );
   });
 
   it("marks a home-directory thread as a whole-computer session", () => {
@@ -567,8 +570,8 @@ describe("hasConfiguredMcpServer", () => {
   });
 
   it("matches a named MCP server without treating a sibling as present", () => {
-    const args = ["-c", "mcp_servers.t3-desktop.command='/usr/bin/t3-desktop-mcp'"];
-    NodeAssert.equal(hasConfiguredMcpServerNamed(args, "t3-desktop"), true);
+    const args = ["-c", `mcp_servers.${DESKTOP_MCP_SERVER_NAME}.command='/usr/bin/t3-desktop-mcp'`];
+    NodeAssert.equal(hasConfiguredMcpServerNamed(args, DESKTOP_MCP_SERVER_NAME), true);
     NodeAssert.equal(hasConfiguredMcpServerNamed(args, "t3-code"), false);
   });
 });

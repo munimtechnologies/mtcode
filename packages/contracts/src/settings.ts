@@ -771,9 +771,16 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
-/** Local desktop / browser computer-use MCP (`t3-desktop`). */
+/**
+ * MCP server name for the local desktop/browser control server. Spawn-time
+ * only - providers pass it when they launch, so nothing on disk carries the
+ * old name and renaming it costs nothing but a rebuild.
+ */
+export const DESKTOP_MCP_SERVER_NAME = "mt-desktop";
+
+/** Local desktop / browser computer-use MCP (`mt-desktop`). */
 export const DesktopControlSettings = Schema.Struct({
-  /** When false, providers do not inject the t3-desktop MCP server. Default on. */
+  /** When false, providers do not inject the mt-desktop MCP server. Default on. */
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Show the agent pointer overlay while controlling the desktop. */
   agentCursorEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -928,7 +935,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
-  // Local computer-use MCP (`t3-desktop`): agents can drive the desktop and an
+  // Local computer-use MCP (`mt-desktop`): agents can drive the desktop and an
   // agent-owned Chrome tab group. Off disables injection even when the binary
   // is present. Sub-flags are passed through to the MCP process as env.
   desktopControl: DesktopControlSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),

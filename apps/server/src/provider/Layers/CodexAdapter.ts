@@ -28,6 +28,7 @@ import {
   ThreadId,
   type TurnId,
   ProviderSendTurnInput,
+  DESKTOP_MCP_SERVER_NAME,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
@@ -1891,11 +1892,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               .replace(/\r/g, "\\r")
               .replace(/\t/g, "\\t")}"`;
           };
-          appServerArgs.push("-c", `mcp_servers.t3-desktop.command=${quoteToml(desktopMcp.path)}`);
+          appServerArgs.push("-c", `mcp_servers.${DESKTOP_MCP_SERVER_NAME}.command=${quoteToml(desktopMcp.path)}`);
           for (const entry of desktopMcp.env) {
             appServerArgs.push(
               "-c",
-              `mcp_servers.t3-desktop.env.${entry.name}=${quoteToml(entry.value)}`,
+              `mcp_servers.${DESKTOP_MCP_SERVER_NAME}.env.${entry.name}=${quoteToml(entry.value)}`,
             );
           }
         }

@@ -8,7 +8,11 @@
 set -eu
 
 EXTENSION_ID="kgdolgnijopbghhomnblabjkmjhnoage"
-HOST_NAME="com.t3tools.t3code.desktop"
+HOST_NAME="com.munim.mtcode.desktop"
+# Extensions that have not reloaded since the rename still ask for the old id,
+# and Chrome refuses a host it has no manifest for. Both names are registered
+# so neither side has to be updated first.
+LEGACY_HOST_NAME="com.t3tools.t3code.desktop"
 
 here=$(cd "$(dirname "$0")" && pwd)
 # macOS builds the Swift package; Linux builds the Rust crate that also covers
@@ -60,15 +64,17 @@ for profile in "$@"; do
   [ -d "$profile" ] || continue
   dir="$profile/NativeMessagingHosts"
   mkdir -p "$dir"
-  cat > "$dir/$HOST_NAME.json" <<EOF
+  for host_name in "$HOST_NAME" "$LEGACY_HOST_NAME"; do
+    cat > "$dir/$host_name.json" <<EOF
 {
-  "name": "$HOST_NAME",
+  "name": "$host_name",
   "description": "MT Code desktop control bridge",
   "path": "$wrapper",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
 }
 EOF
+  done
   echo "registered host in: $profile"
   installed=$((installed + 1))
 done

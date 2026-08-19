@@ -10,7 +10,11 @@
 // Commands arrive from the desktop app over native messaging; every reply
 // carries the originating request id.
 
-const HOST = "com.t3tools.t3code.desktop";
+const HOST = "com.munim.mtcode.desktop";
+// Installs made before the rename registered the host under its old name.
+// Chrome rejects an unknown host outright, so try the previous id second
+// rather than leaving those browsers unable to reach the desktop at all.
+const LEGACY_HOST = "com.t3tools.t3code.desktop";
 const GROUP_TITLE = "MT Code";
 const OWNED_STATE_KEY = "ownedState";
 
@@ -86,12 +90,18 @@ function ensureStateReady() {
 
 function connect() {
   if (port) return;
-  try {
-    port = chrome.runtime.connectNative(HOST);
-  } catch {
-    port = null;
-    return;
+  // Chrome throws for a host id it has no manifest for, so try the current
+  // name first and fall back to the pre-rename one. Installs that still carry
+  // only the old manifest keep working until they run the installer again.
+  for (const host of [HOST, LEGACY_HOST]) {
+    try {
+      port = chrome.runtime.connectNative(host);
+      break;
+    } catch {
+      port = null;
+    }
   }
+  if (!port) return;
   const sessionPort = port;
   connectedAt = Date.now();
   hadLiveSession = false;

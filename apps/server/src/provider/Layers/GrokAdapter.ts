@@ -12,6 +12,7 @@ import {
   RuntimeRequestId,
   type ThreadId,
   TurnId,
+  DESKTOP_MCP_SERVER_NAME,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -897,7 +898,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             ...(desktopMcp
               ? [
                   {
-                    name: "t3-desktop",
+                    name: DESKTOP_MCP_SERVER_NAME,
                     command: desktopMcp.path,
                     args: [] as string[],
                     env: [...desktopMcp.env],

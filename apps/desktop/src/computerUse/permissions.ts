@@ -141,25 +141,35 @@ function chromeExtensionInstalledInPreferences(preferencesPath: string): boolean
   }
 }
 
+/**
+ * Host manifest names, newest first. Installs made before the rename carry
+ * only the old one, and the installer writes both, so either counts as
+ * registered.
+ */
+const NATIVE_HOST_MANIFEST_NAMES = [
+  "com.munim.mtcode.desktop.json",
+  "com.t3tools.t3code.desktop.json",
+] as const;
+
+function anyHostManifest(directory: string): boolean {
+  return NATIVE_HOST_MANIFEST_NAMES.some((name) => {
+    try {
+      return NodeFS.statSync(NodePath.join(directory, name)).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
 function nativeHostRegistered(root: string): boolean {
-  const hostPath = NodePath.join(root, "NativeMessagingHosts", "com.t3tools.t3code.desktop.json");
-  try {
-    return NodeFS.statSync(hostPath).isFile();
-  } catch {
-    return false;
-  }
+  return anyHostManifest(NodePath.join(root, "NativeMessagingHosts"));
 }
 
 /** Windows registers the host via the registry + a support-dir manifest. */
 function nativeHostRegisteredWindows(): boolean {
   const local = process.env.LOCALAPPDATA;
   if (!local) return false;
-  const hostPath = NodePath.join(local, "t3-desktop-mcp", "com.t3tools.t3code.desktop.json");
-  try {
-    return NodeFS.statSync(hostPath).isFile();
-  } catch {
-    return false;
-  }
+  return anyHostManifest(NodePath.join(local, "t3-desktop-mcp"));
 }
 
 function resolveChromeExtensionStatus(): {
