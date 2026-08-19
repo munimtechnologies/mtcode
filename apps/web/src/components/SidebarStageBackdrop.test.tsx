@@ -127,3 +127,16 @@ describe("named artwork defaults", () => {
     ).toEqual(DEV_BACKDROP);
   });
 });
+
+describe("the header renders what the picker chose", () => {
+  it("resolves a named scene with no help from the build channel", () => {
+    // Regression: the sidebar header called the stage-label resolver directly,
+    // so a picked scene never reached the renderer on a release build.
+    expect(resolveSidebarArtwork({ selection: "night", stageLabel: "", custom: [] })).toEqual(
+      NIGHTLY_BACKDROP,
+    );
+    expect(resolveSidebarArtwork({ selection: "day", stageLabel: "", custom: [] })).toEqual(
+      DEV_BACKDROP,
+    );
+  });
+});
