@@ -1,3 +1,5 @@
+import { BUILT_IN_GOAL_SLASH_COMMANDS } from "@t3tools/shared/composerTrigger";
+
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -300,4 +302,54 @@ export function replaceTextRange(
   const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd));
   const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
   return { text: nextText, cursor: safeStart + replacement.length };
+}
+
+/**
+ * The slash commands the composer offers itself, before the provider's own.
+ * Extracted from the menu so the built-ins stay covered: the goal entries have
+ * been dropped by an integration merge before, and nothing unit-level noticed.
+ */
+export function buildBuiltInSlashCommandItems(options: {
+  readonly planModeUiEnabled: boolean;
+}): ReadonlyArray<{
+  readonly id: string;
+  readonly type: "slash-command";
+  readonly command: ComposerSlashCommand;
+  readonly label: string;
+  readonly description: string;
+}> {
+  return [
+    {
+      id: "slash:model",
+      type: "slash-command",
+      command: "model",
+      label: "/model",
+      description: "Switch response model for this thread",
+    },
+    ...BUILT_IN_GOAL_SLASH_COMMANDS.map((item) => ({
+      id: `slash:${item.command.replaceAll(" ", "-")}`,
+      type: "slash-command" as const,
+      command: item.command,
+      label: item.label,
+      description: item.description,
+    })),
+    ...(options.planModeUiEnabled
+      ? ([
+          {
+            id: "slash:plan",
+            type: "slash-command",
+            command: "plan",
+            label: "/plan",
+            description: "Switch this thread into plan mode",
+          },
+          {
+            id: "slash:default",
+            type: "slash-command",
+            command: "default",
+            label: "/default",
+            description: "Switch this thread back to normal build mode",
+          },
+        ] as const)
+      : []),
+  ];
 }

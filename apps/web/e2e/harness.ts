@@ -163,7 +163,10 @@ async function startIsolatedWebAppUnsafe(
   const page = await context.newPage();
   resources.page = page;
   page.setDefaultTimeout(15_000);
-  await page.goto(pairingUrl, { waitUntil: "domcontentloaded" });
+  // The first navigation lands on "Bundling in progress" whenever the dev
+  // server is cold, which outlasts the 15s default on a loaded machine. The
+  // redirect below already budgets 120s; the initial hop needs the same.
+  await page.goto(pairingUrl, { waitUntil: "domcontentloaded", timeout: 120_000 });
   await page.waitForURL((url) => !url.pathname.startsWith("/pair"), { timeout: 120_000 });
   const appReady = await waitForAppReady(page);
 
