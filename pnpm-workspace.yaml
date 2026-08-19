@@ -27,7 +27,7 @@ catalog:
   "@clerk/backend": 3.14.0
   "@clerk/clerk-js": 6.29.2
   "@clerk/electron": 0.0.34-canary.v20260819050620
-  "@clerk/electron-passkeys": 0.0.4-canary.v20260819050620
+  "@clerk/electron-passkeys": 0.0.3
   "@clerk/expo": 4.2.0
   "@clerk/react": 6.14.4
   "@clerk/shared": 4.29.2
@@ -57,7 +57,7 @@ minimumReleaseAgeExclude:
   - "@clerk/backend@3.14.0"
   - "@clerk/clerk-js@6.29.2"
   - "@clerk/electron@0.0.34-canary.v20260819050620"
-  - "@clerk/electron-passkeys@0.0.4-canary.v20260819050620"
+  - "@clerk/electron-passkeys@0.0.3"
   - "@clerk/expo@4.2.0"
   - "@clerk/react@6.14.4"
   - "@clerk/shared@4.29.2"
@@ -78,10 +78,10 @@ minimumReleaseAgeExclude:
   - alchemy@2.0.0-beta.65
   - effect@4.0.0-beta.103
   - "@legendapp/list@3.3.5"
-  - "@clerk/electron-passkeys-darwin-arm64@0.0.4-canary.v20260819050620"
-  - "@clerk/electron-passkeys-darwin-x64@0.0.4-canary.v20260819050620"
-  - "@clerk/electron-passkeys-win32-arm64-msvc@0.0.4-canary.v20260819050620"
-  - "@clerk/electron-passkeys-win32-x64-msvc@0.0.4-canary.v20260819050620"
+  - "@clerk/electron-passkeys-darwin-arm64@0.0.3"
+  - "@clerk/electron-passkeys-darwin-x64@0.0.3"
+  - "@clerk/electron-passkeys-win32-arm64-msvc@0.0.3"
+  - "@clerk/electron-passkeys-win32-x64-msvc@0.0.3"
 
 overrides:
   "@clerk/backend": "catalog:"
