@@ -432,7 +432,11 @@ const make = Effect.gen(function* () {
         ...(session ?? {
           threadId: input.threadId,
           providerName: null,
-          providerInstanceId: thread.modelSelection.instanceId,
+          // `mt` is a router, not a runnable instance. Stamping it here makes
+          // every later turn fail with "unknown provider instance 'mt'".
+          ...(isMtModelInstanceId(thread.modelSelection.instanceId)
+            ? {}
+            : { providerInstanceId: thread.modelSelection.instanceId }),
           runtimeMode: thread.runtimeMode,
         }),
         status: session?.status === "stopped" ? "stopped" : "error",
@@ -567,10 +571,16 @@ const make = Effect.gen(function* () {
         : (thread.session?.providerInstanceId ??
           mtDecision?.instanceId ??
           thread.modelSelection.instanceId);
-    const currentInstanceId =
-      isMtModelInstanceId(rawCurrentInstanceId) && mtDecision
-        ? mtDecision.instanceId
-        : rawCurrentInstanceId;
+    // A thread can carry the router id from an earlier MT Auto turn. It never
+    // names a runnable instance, so resolve it to this turn's routed backend,
+    // or - when the user has since picked a real model - to that pick.
+    const currentInstanceId = !isMtModelInstanceId(rawCurrentInstanceId)
+      ? rawCurrentInstanceId
+      : (mtDecision?.instanceId ??
+        (requestedModelSelection !== undefined &&
+        !isMtModelInstanceId(requestedModelSelection.instanceId)
+          ? requestedModelSelection.instanceId
+          : rawCurrentInstanceId));
     const desiredModelSelection = mtDecision
       ? { instanceId: mtDecision.instanceId, model: mtDecision.model }
       : (requestedModelSelection ?? thread.modelSelection);
@@ -1347,7 +1357,9 @@ const make = Effect.gen(function* () {
           ...(thread.session ?? {
             threadId: thread.id,
             providerName: null,
-            providerInstanceId: thread.modelSelection.instanceId,
+            ...(isMtModelInstanceId(thread.modelSelection.instanceId)
+              ? {}
+              : { providerInstanceId: thread.modelSelection.instanceId }),
             runtimeMode: thread.runtimeMode,
           }),
           status: "error",

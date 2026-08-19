@@ -9,6 +9,7 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  isMtModelInstanceId,
   MT_MODEL_INSTANCE_ID,
   MT_MODEL_SLUG,
 } from "@t3tools/contracts";
@@ -333,6 +334,18 @@ describe("ProviderCommandReactor", () => {
         }),
       getInstanceInfo: (instanceId) => {
         const raw = String(instanceId);
+        // The router is virtual: the real registry has no `mt` instance and
+        // fails the lookup, which is what surfaces as "references unknown
+        // provider instance 'mt'" in the app.
+        if (isMtModelInstanceId(instanceId)) {
+          return Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: "mt",
+              method: "provider.instance.info",
+              detail: `Provider instance '${raw}' is not configured in this build.`,
+            }),
+          ) as ReturnType<ProviderServiceShape["getInstanceInfo"]>;
+        }
         const driverKind = ProviderDriverKind.make(
           raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
         );
@@ -2079,6 +2092,69 @@ describe("ProviderCommandReactor", () => {
       instanceId: MT_MODEL_INSTANCE_ID,
       model: MT_MODEL_SLUG,
     });
+    expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex"));
+  });
+
+  it("starts a turn when an MT Auto thread picks a real model", async () => {
+    const harness = await createHarness({
+      threadModelSelection: { instanceId: MT_MODEL_INSTANCE_ID, model: MT_MODEL_SLUG },
+      extraRegistryProviders: [
+        {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "unknown" },
+          checkedAt: "2026-01-01T00:00:00.000Z",
+          models: [
+            {
+              slug: "gpt-5-codex",
+              name: "GPT-5 Codex",
+              isCustom: false,
+              isDefault: true,
+              capabilities: null,
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        },
+      ],
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    // The thread's saved selection is the router; the user picks a real model
+    // for this turn. Resolving the *current* instance used to hand `mt` to the
+    // registry, which fails with "references unknown provider instance 'mt'".
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-mt-thread-explicit-model"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-mt-explicit-model"),
+          role: "user",
+          text: "what is mv2 doing",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.filter((activity) => activity.kind === "provider.turn.start.failed"),
+    ).toHaveLength(0);
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex"));
   });
 
