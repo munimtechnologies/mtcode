@@ -19,14 +19,16 @@ describe("AppRoot", () => {
     const providerChildren = Children.toArray(
       (root as ReactElement<{ readonly children: ReactNode }>).props.children,
     );
-    expect(providerChildren).toHaveLength(1);
-    expect(isValidElement(providerChildren[0]) && providerChildren[0].type).toBe(
+    // The icon sync sits beside the voice provider: it needs the registry (the
+    // choice is a server setting) but owns no subtree of its own.
+    expect(providerChildren).toHaveLength(2);
+    expect(isValidElement(providerChildren[1]) && providerChildren[1].type).toBe(
       VoiceSessionProvider,
     );
 
     const children = Children.toArray(
       (
-        providerChildren[0] as ReactElement<{
+        providerChildren[1] as ReactElement<{
           readonly children: ReactNode;
         }>
       ).props.children,
