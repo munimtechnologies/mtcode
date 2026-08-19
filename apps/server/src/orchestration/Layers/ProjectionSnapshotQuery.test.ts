@@ -446,6 +446,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           snoozedAt: null,
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
+          activeOrderKey: null,
           titleRegeneration: null,
           goal: null,
           session: {
