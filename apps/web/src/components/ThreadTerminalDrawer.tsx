@@ -61,6 +61,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readLocalApi } from "~/localApi";
+import { confirmTerminalClose } from "~/lib/terminalCloseConfirm";
 import { useClientSettings } from "../hooks/useSettings";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { selectThreadTerminalCustomLabels, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -1410,6 +1411,17 @@ export default function ThreadTerminalDrawer({
     },
     [onCloseTerminal, renamingTerminalId],
   );
+  // Closing a terminal kills whatever is running in it, so upstream asks first
+  // (#7592). The fork's rename state still has to be torn down either way.
+  const confirmCloseTerminal = useCallback(
+    (terminalId: string) => {
+      const label = terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId);
+      void confirmTerminalClose([label]).then((confirmed) => {
+        if (confirmed) closeTerminalSafely(terminalId);
+      });
+    },
+    [closeTerminalSafely, terminalLabelById],
+  );
 
   useEffect(() => {
     cancelTerminalRenameRef.current = false;
@@ -1572,7 +1584,7 @@ export default function ThreadTerminalDrawer({
       </TerminalToolbarAction>
       <TerminalToolbarAction
         label={closeTerminalActionLabel}
-        onClick={() => closeTerminalSafely(resolvedActiveTerminalId)}
+        onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
       >
         <XIcon className="size-3.5" />
       </TerminalToolbarAction>
@@ -1755,7 +1767,7 @@ export default function ThreadTerminalDrawer({
                             type="button"
                             className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted"
                             aria-label={`Close ${displayLabel}`}
-                            onClick={() => closeTerminalSafely(terminalId)}
+                            onClick={() => confirmCloseTerminal(terminalId)}
                           >
                             <TerminalSquare className="size-3 shrink-0 group-hover/tab:hidden group-focus-visible/close:hidden pointer-coarse:hidden" />
                             <XIcon className="hidden size-3 group-hover/tab:block group-focus-visible/close:block pointer-coarse:block" />

@@ -27,11 +27,20 @@ class FakeElement {
   attributes = new Map<string, string>();
   className = "";
   disabled = false;
+  focused = false;
   type = "";
   private textValue = "";
   private readonly listeners = new Map<string, FakeListener[]>();
 
   constructor(readonly tagName: string) {}
+
+  get isConnected() {
+    let current: FakeElement | null = this;
+    while (current?.parent) {
+      current = current.parent;
+    }
+    return current?.tagName === "body";
+  }
 
   appendChild(child: FakeElement) {
     child.parent = this;
@@ -65,6 +74,26 @@ class FakeElement {
       listener(event);
     }
     return true;
+  }
+
+  focus() {
+    const fakeDocument = document as unknown as FakeDocument;
+    if (fakeDocument.activeElement === this) {
+      return;
+    }
+    fakeDocument.activeElement?.blur();
+    fakeDocument.activeElement = this;
+    this.focused = true;
+    this.dispatchEvent(new FakeDomEvent("focus"));
+  }
+
+  blur() {
+    const fakeDocument = document as unknown as FakeDocument;
+    if (fakeDocument.activeElement === this) {
+      fakeDocument.activeElement = null;
+    }
+    this.focused = false;
+    this.dispatchEvent(new FakeDomEvent("blur"));
   }
 
   set textContent(value: string) {
@@ -121,6 +150,7 @@ class FakeBody extends FakeElement {
 
 class FakeDocument {
   body = new FakeBody();
+  activeElement: FakeElement | null = null;
   private readonly listeners = new Map<string, FakeListener[]>();
 
   createElement(tagName: string) {
@@ -157,6 +187,7 @@ function findButton(label: string): FakeElement | undefined {
 
 beforeEach(() => {
   vi.stubGlobal("document", new FakeDocument());
+  vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("window", {
     innerWidth: 1280,
     innerHeight: 800,
@@ -254,6 +285,46 @@ describe("showContextMenuFallback", () => {
     childButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     await expect(selectionPromise).resolves.toBe("rename:project-b");
+  });
+
+  it("opens and focuses nested submenus when the parent is activated", async () => {
+    const invoker = (document as unknown as FakeDocument).createElement("button");
+    (document as unknown as FakeDocument).body.appendChild(invoker);
+    invoker.focus();
+    const selectionPromise = showContextMenuFallback([
+      {
+        id: "copy:submenu",
+        label: "Copy",
+        children: [
+          { id: "copy:path", label: "Path" },
+          { id: "copy:branch", label: "Branch" },
+        ],
+      },
+    ]);
+
+    const parentButton = findButton("Copy");
+    expect(parentButton).toBeTruthy();
+    expect(parentButton?.attributes.get("aria-haspopup")).toBe("menu");
+    expect(parentButton?.attributes.get("aria-expanded")).toBe("false");
+    parentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(parentButton?.attributes.get("aria-expanded")).toBe("true");
+
+    const childButton = findButton("Path");
+    const siblingButton = findButton("Branch");
+    expect(childButton).toBeTruthy();
+    expect(siblingButton).toBeTruthy();
+    expect(childButton?.focused).toBe(true);
+    expect(childButton?.style.background).toBe("var(--accent)");
+    expect(childButton?.style.color).toBe("var(--accent-foreground)");
+    siblingButton?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    expect(childButton?.focused).toBe(false);
+    expect(childButton?.style.background).toBe("transparent");
+    expect(siblingButton?.focused).toBe(true);
+    expect(siblingButton?.style.background).toBe("var(--accent)");
+    siblingButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    await expect(selectionPromise).resolves.toBe("copy:branch");
+    expect(invoker.focused).toBe(true);
   });
 });
 

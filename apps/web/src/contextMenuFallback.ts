@@ -206,7 +206,10 @@ export function showContextMenuFallback<T extends string>(
   position?: { x: number; y: number },
 ): Promise<T | null> {
   return new Promise<T | null>((resolve) => {
+    const previouslyFocusedElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const menuStack: HTMLDivElement[] = [];
+    const submenuTriggerStack: Array<HTMLButtonElement | undefined> = [];
     let isDisposed = false;
     let canDismissFromPointer = false;
 
@@ -223,8 +226,12 @@ export function showContextMenuFallback<T extends string>(
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("contextmenu", onContextMenu, true);
+      const shouldRestoreFocus = isNodeWithinMenuStack(document.activeElement, menuStack);
       for (const menu of menuStack) {
         menu.remove();
+      }
+      if (shouldRestoreFocus && previouslyFocusedElement?.isConnected) {
+        previouslyFocusedElement.focus({ preventScroll: true });
       }
       resolve(result);
     };
@@ -253,6 +260,7 @@ export function showContextMenuFallback<T extends string>(
 
     const closeMenusFromLevel = (level: number) => {
       while (menuStack.length > level) {
+        submenuTriggerStack.pop()?.setAttribute("aria-expanded", "false");
         menuStack.pop()?.remove();
       }
     };
@@ -262,6 +270,7 @@ export function showContextMenuFallback<T extends string>(
       preferredLeft: number,
       preferredTop: number,
       level: number,
+      parentTrigger?: HTMLButtonElement,
     ) => {
       closeMenusFromLevel(level);
 
@@ -337,39 +346,63 @@ export function showContextMenuFallback<T extends string>(
         button.appendChild(label);
 
         if (hasChildren) {
+          button.setAttribute("aria-haspopup", "menu");
+          button.setAttribute("aria-expanded", "false");
           const chevron = createIconElement("chevron-right", "neutral");
           if (chevron) {
             chevron.setAttribute(
               "class",
               "-me-0.5 ms-auto size-4.5 shrink-0 text-muted-foreground opacity-80 sm:size-4",
             );
+            chevron.setAttribute("aria-hidden", "true");
             chevron.dataset.contextMenuChevron = "true";
             button.appendChild(chevron);
           }
         }
 
         if (!isDisabled) {
+          let isHovered = false;
+          let isFocused = false;
+          const updateHighlight = () => {
+            const isHighlighted = isHovered || isFocused;
+            button.style.background = isHighlighted
+              ? isLeafDestructive
+                ? "color-mix(in srgb, var(--destructive) 10%, transparent)"
+                : "var(--accent)"
+              : "transparent";
+            button.style.color = isHighlighted
+              ? isLeafDestructive
+                ? "var(--destructive-foreground)"
+                : "var(--accent-foreground)"
+              : isLeafDestructive
+                ? "var(--destructive-foreground)"
+                : "var(--foreground)";
+          };
           button.addEventListener("mouseenter", () => {
-            button.style.background = isLeafDestructive
-              ? "color-mix(in srgb, var(--destructive) 10%, transparent)"
-              : "var(--accent)";
-            button.style.color = isLeafDestructive
-              ? "var(--destructive-foreground)"
-              : "var(--accent-foreground)";
+            button.focus({ preventScroll: true });
+            isHovered = true;
+            updateHighlight();
           });
           button.addEventListener("mouseleave", () => {
-            button.style.background = "transparent";
-            button.style.color = isLeafDestructive
-              ? "var(--destructive-foreground)"
-              : "var(--foreground)";
+            isHovered = false;
+            updateHighlight();
+          });
+          button.addEventListener("focus", () => {
+            isFocused = true;
+            updateHighlight();
+          });
+          button.addEventListener("blur", () => {
+            isFocused = false;
+            updateHighlight();
           });
 
           if (hasChildren) {
-            button.addEventListener("mouseenter", () => {
+            const openSubmenu = (focusFirstItem = false) => {
               const rect = button.getBoundingClientRect();
               const nextLeft = rect.right + 4;
               const nextTop = rect.top;
-              openMenu(item.children!, nextLeft, nextTop, level + 1);
+              openMenu(item.children!, nextLeft, nextTop, level + 1, button);
+              button.setAttribute("aria-expanded", "true");
 
               const childMenu = menuStack[level + 1];
               if (!childMenu) {
@@ -379,9 +412,18 @@ export function showContextMenuFallback<T extends string>(
               if (childRect.right > window.innerWidth) {
                 clampMenuPosition(childMenu, rect.left - childRect.width - 4, rect.top);
               }
+              if (focusFirstItem) {
+                [...childMenu.querySelectorAll<HTMLButtonElement>("button")]
+                  .find((childButton) => !childButton.disabled)
+                  ?.focus();
+              }
+            };
+            button.addEventListener("mouseenter", () => {
+              openSubmenu();
             });
             button.addEventListener("click", (event) => {
               event.preventDefault();
+              openSubmenu(true);
             });
           } else {
             button.addEventListener("mouseenter", () => {
@@ -404,6 +446,7 @@ export function showContextMenuFallback<T extends string>(
 
       document.body.appendChild(menu);
       menuStack[level] = menu;
+      submenuTriggerStack[level] = parentTrigger;
 
       requestAnimationFrame(() => {
         clampMenuPosition(menu, preferredLeft, preferredTop);

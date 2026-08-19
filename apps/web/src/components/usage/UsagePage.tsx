@@ -1,9 +1,12 @@
 import type { EnvironmentId, UsagePricingStatus, UsageProviderKind } from "@t3tools/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
-import { isCursorCoverageGap } from "@t3tools/shared/usageMerge";
+import {
+  isCursorCoverageGap,
+  type DailyTotals,
+  type HourlyTotals,
+} from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
@@ -21,7 +24,6 @@ import {
   formatTokens,
   formatUsageCost,
   formatUsd,
-  ALL_USAGE_WINDOW_DAYS,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
 import { Button } from "../ui/button";
@@ -34,9 +36,10 @@ import {
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
-import { WorkspacePageContainer, WorkspacePageHeader } from "../WorkspacePageContainer";
-import { AccountLimitsSection } from "./AccountLimits";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
+import { AccountLimitsSection } from "./AccountLimits";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION } from "./usageProviders";
 
 const WINDOW_OPTIONS = [
@@ -44,7 +47,6 @@ const WINDOW_OPTIONS = [
   { days: 7, label: "7 days" },
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
-  { days: ALL_USAGE_WINDOW_DAYS, label: "All" },
 ] as const;
 
 export function UsagePage() {
@@ -57,15 +59,8 @@ export function UsagePage() {
   const [environmentFilter, setEnvironmentFilter] = useState<EnvironmentId | null>(null);
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
-  const {
-    merged,
-    options,
-    environments,
-    selectedEnvironmentId,
-    isPending,
-    isPartial,
-    refresh: refreshUsage,
-  } = useUsage(window, environmentFilter);
+  const { merged, options, environments, selectedEnvironmentId, isPending, isPartial, refresh } =
+    useUsage(window, environmentFilter);
   const { refresh: refreshLimits } = useAccountLimits();
   const enabledProviders = useEnabledUsageProviders();
   // A provider switched off in Settings is not part of this workspace, so it
@@ -93,8 +88,14 @@ export function UsagePage() {
     (environment) =>
       environment.summary !== null && !merged.staleEnvironments.includes(environment.environmentId),
   ).length;
+  // Costs are omitted rather than shown as zero when pricing could not load.
   const costUnavailable = merged.pricingStatus === "unavailable";
   const formatCost = (value: number) => formatUsageCost(merged.pricingStatus, value);
+
+  // Hold the content until every environment is terminal. Rendering merged
+  // totals while devices are still answering makes every number on the page
+  // jump as each one lands.
+  const settling = isPending || isPartial;
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -120,7 +121,7 @@ export function UsagePage() {
       window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
     });
   };
-  const refreshWindow = useCallback(() => {
+  const refreshWindow = () => {
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     if (
       nextWindow.sinceDay === window.sinceDay &&
@@ -128,21 +129,11 @@ export function UsagePage() {
       nextWindow.sinceTime === window.sinceTime &&
       nextWindow.untilTime === window.untilTime
     ) {
-      refreshUsage();
-      refreshLimits();
+      refresh();
     } else {
       setWindowSelection({ days: windowDays, window: nextWindow });
     }
-  }, [
-    windowDays,
-    isPast24Hours,
-    window.sinceDay,
-    window.untilDay,
-    window.sinceTime,
-    window.untilTime,
-    refreshUsage,
-    refreshLimits,
-  ]);
+  };
   const windowLabel =
     isPast24Hours && window.sinceTime !== undefined && window.untilTime !== undefined
       ? `${formatDateTimeShort(window.sinceTime, window.timeZone)} to ${formatDateTimeShort(window.untilTime, window.timeZone)}`
@@ -208,7 +199,7 @@ export function UsagePage() {
           >
             <SelectValue>{metric === "cost" ? "Cost" : "Tokens"}</SelectValue>
           </SelectTrigger>
-          <SelectPopup align="end">
+          <SelectPopup align="end" alignItemWithTrigger={false}>
             <SelectItem value="cost">Cost</SelectItem>
             <SelectItem value="tokens">Tokens</SelectItem>
           </SelectPopup>
@@ -224,7 +215,7 @@ export function UsagePage() {
               {WINDOW_OPTIONS.find((option) => option.days === windowDays)?.label}
             </SelectValue>
           </SelectTrigger>
-          <SelectPopup align="end">
+          <SelectPopup align="end" alignItemWithTrigger={false}>
             {WINDOW_OPTIONS.map((option) => (
               <SelectItem key={option.days} value={String(option.days)}>
                 {option.label}
@@ -286,7 +277,7 @@ export function UsagePage() {
                 </Select>
               </div>
             ) : null}
-            {isPending ? (
+            {settling ? (
               <>
                 {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
                 <UsageSkeleton />
@@ -467,7 +458,7 @@ export function UsagePage() {
                           merged.models.map((model) => (
                             <tr
                               key={`${model.provider}:${model.model}`}
-                              className="hover:bg-muted/20"
+                              className="border-b border-border/50 transition-colors hover:bg-muted/50"
                             >
                               <td className="py-2 text-foreground">
                                 <span className="flex items-center gap-2">
@@ -479,7 +470,7 @@ export function UsagePage() {
                                 {costUnavailable ? "—" : formatUsd(model.costUsd)}
                               </td>
                               <td className="py-2 text-right text-muted-foreground tabular-nums">
-                                {costUnavailable ? "—" : formatPercent(model.costShare)}
+                                {formatPercent(model.costShare)}
                               </td>
                               <td className="py-2 text-right text-muted-foreground tabular-nums">
                                 {formatTokens(model.totalTokens)}
@@ -506,10 +497,7 @@ export function UsagePage() {
                       <tbody>
                         {breakdownPeriods.length === 0 ? (
                           <tr>
-                            <td
-                              colSpan={visibleProviders.length + 3}
-                              className="py-6 text-center text-muted-foreground"
-                            >
+                            <td colSpan={5} className="py-6 text-center text-muted-foreground">
                               No activity in this window.
                             </td>
                           </tr>
@@ -517,7 +505,7 @@ export function UsagePage() {
                           breakdownPeriods.map((period) => (
                             <tr
                               key={"hourStart" in period ? period.hourStart : period.day}
-                              className="hover:bg-muted/20"
+                              className="border-b border-border/50 transition-colors hover:bg-muted/50"
                             >
                               <td className="py-2 text-foreground">
                                 {"hourStart" in period
@@ -578,11 +566,10 @@ function Metric({ label, value }: { readonly label: string; readonly value: stri
 }
 
 /**
- * Says plainly when the totals are incomplete: an environment that failed, a
- * Cursor soft-fail (desktop not signed in / export error), a transcript
- * directory another environment already reported, or a missing rate table.
- * Claude/Codex missing homes are normal when those agents are unused and stay
- * out of this notice.
+ * Says plainly when the totals are incomplete: an environment that failed, or
+ * one whose transcripts another environment already reported. Environments
+ * that are still answering never reach this notice; the page shows the
+ * loading skeleton until every one is terminal.
  */
 function UsageCoverageNotice({
   environments,
@@ -688,8 +675,9 @@ function UsageEmptyState({ children }: { readonly children: string }) {
 }
 
 /**
- * Per-device progress while at least one environment is still answering. Only
- * rendered with two or more devices; a lone device has nothing to enumerate.
+ * Per-device progress while the page waits for every environment to answer.
+ * Only rendered with two or more devices; a lone device has nothing to
+ * enumerate.
  */
 function UsageDeviceStrip({
   environments,
@@ -711,19 +699,10 @@ function UsageDeviceStrip({
             </span>
           );
         }
-        if (environment.error !== null || !environment.isPending) {
-          const status =
-            environment.error !== null
-              ? "could not report usage"
-              : environment.phase === "available"
-                ? "not connected"
-                : environment.phase === "error"
-                  ? "unavailable"
-                  : environment.phase;
+        if (environment.error !== null) {
           return (
             <span
               key={environment.environmentId}
-              aria-label={`${environment.label}, ${status}`}
               className="flex items-center gap-1 text-destructive"
             >
               <XIcon className="size-3" aria-hidden />
@@ -750,9 +729,8 @@ function UsageDeviceStrip({
 }
 
 /**
- * Static stand-in with the loaded page's shape: headline, provider split,
- * chart and metrics strip. No shimmer; content appears when the first device
- * answers.
+ * Static stand-in with the loaded page's shape. No shimmer; blocks fill in
+ * exactly once when the last device answers.
  */
 function UsageSkeleton() {
   return (
@@ -760,12 +738,12 @@ function UsageSkeleton() {
       <section className="grid gap-6 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-1">
-            <div className="h-8 w-36 rounded-sm bg-muted" />
-            <div className="h-3 w-32 rounded-sm bg-muted" />
+            <div className="h-10 w-36 rounded-sm bg-muted" />
+            <div className="h-4 w-32 rounded-sm bg-muted" />
           </div>
           {PROVIDER_ORDER.map((provider) => (
             <div key={provider} className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex min-h-5 items-center justify-between gap-4">
                 <span className="flex items-center gap-2">
                   <span
                     aria-hidden
@@ -777,7 +755,7 @@ function UsageSkeleton() {
                 </span>
                 <div className="h-3.5 w-14 rounded-sm bg-muted" />
               </div>
-              <div className="h-3 w-36 rounded-sm bg-muted" />
+              <div className="h-4 w-36 rounded-sm bg-muted" />
             </div>
           ))}
         </div>
