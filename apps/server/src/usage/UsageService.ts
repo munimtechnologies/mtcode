@@ -38,6 +38,8 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ServerConfig } from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { hasEnabledCursorInstance } from "./cursorAppData.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { listProviderHomeCandidates, scanHomePath } from "./usageHomes.ts";
@@ -631,10 +633,24 @@ export const make = Effect.gen(function* () {
     // Cursor has no local token transcripts; pull the dashboard CSV export
     // when Cursor desktop is signed in on this machine. Failures stay soft so
     // Claude/Codex still render.
-    const cursorExport = yield* loadCursorUsageRecords({
-      cacheDir: cursorExportCacheDir,
-      nowMs: startedAtMs,
-    }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+    //
+    // The export lives in Cursor's own application-support directory, which
+    // macOS guards behind an "access data from other apps" prompt. Someone who
+    // switched the Cursor driver off is not asking for that.
+    const cursorEnabled = yield* settingsService.getSettings.pipe(
+      Effect.map((settings) => hasEnabledCursorInstance(deriveProviderInstanceConfigMap(settings))),
+      Effect.catchCause(() => Effect.succeed(true)),
+    );
+    const cursorExport = cursorEnabled
+      ? yield* loadCursorUsageRecords({
+          cacheDir: cursorExportCacheDir,
+          nowMs: startedAtMs,
+        }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient))
+      : ({
+          status: "missing",
+          message: "Cursor is switched off in settings.",
+          userId: null,
+        } as const);
     const cursorSessionIds = new Set<string>();
     if (cursorExport.status === "ok") {
       for (const record of cursorExport.records) {

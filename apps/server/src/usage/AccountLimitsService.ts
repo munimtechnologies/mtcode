@@ -54,6 +54,7 @@ import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { loadCursorAccountLimits } from "./accountLimitsCursor.ts";
+import { hasEnabledCursorInstance } from "./cursorAppData.ts";
 import {
   claudeUsageSnapshotFromUnknown,
   claudeWindowFromRateLimitEvent,
@@ -68,6 +69,8 @@ const CODEX_SEED_MIN_INTERVAL_MS = 60_000;
 
 /** Dashboard pulls share the CSV export's freshness window. */
 const CURSOR_SEED_MIN_INTERVAL_MS = 5 * 60_000;
+/** How long an unproductive Cursor read waits before it is worth asking again. */
+const CURSOR_SEED_BACKOFF_MS = 6 * 60 * 60_000;
 
 /** On-disk shape of the snapshot cache: the contract array, JSON-encoded. */
 const LimitsCacheFile = Schema.Array(AccountLimitsSnapshot);
@@ -450,7 +453,13 @@ export const make = Effect.gen(function* () {
    */
   const maybeSeedCursorFromDashboard = Effect.fn("AccountLimitsService.seedCursor")(function* (
     nowMs: number,
+    configMap: ProviderInstanceConfigMap | null,
   ) {
+    // Reading Cursor's dashboard session means reading Cursor's own
+    // application-support directory, which macOS guards behind an "access data
+    // from other apps" prompt. Only do that for someone who actually runs
+    // Cursor here: a workspace with the driver switched off never triggers it.
+    if (configMap !== null && !hasEnabledCursorInstance(configMap)) return;
     if (nowMs - lastCursorSeedAttemptAtMs < CURSOR_SEED_MIN_INTERVAL_MS) return;
     lastCursorSeedAttemptAtMs = nowMs;
 
@@ -465,7 +474,14 @@ export const make = Effect.gen(function* () {
     const loaded = yield* loadCursorAccountLimits(homeDir === undefined ? {} : { homeDir }).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
     );
-    if (loaded.status !== "ok" || loaded.snapshot.windows.length === 0) return;
+    if (loaded.status !== "ok" || loaded.snapshot.windows.length === 0) {
+      // Cursor is installed but said nothing useful: either it is signed out,
+      // or macOS refused the read. Retrying every five minutes would re-raise
+      // the "access data from other apps" prompt all day, so back off for a
+      // long while and let an explicit refresh be the way back in.
+      lastCursorSeedAttemptAtMs = nowMs + CURSOR_SEED_BACKOFF_MS - CURSOR_SEED_MIN_INTERVAL_MS;
+      return;
+    }
     const asOf = DateTime.formatIso(DateTime.makeUnsafe(nowMs));
     yield* stateLock.withPermits(1)(
       Effect.gen(function* () {
@@ -493,7 +509,9 @@ export const make = Effect.gen(function* () {
     yield* maybeSeedCodexFromTranscripts(nowMs, configMap).pipe(
       Effect.catchCause(() => Effect.void),
     );
-    yield* maybeSeedCursorFromDashboard(nowMs).pipe(Effect.catchCause(() => Effect.void));
+    yield* maybeSeedCursorFromDashboard(nowMs, configMap).pipe(
+      Effect.catchCause(() => Effect.void),
+    );
     // A deleted instance takes its rows with it - anything else leaves a
     // ghost account forcing the captioned multi-row UI forever. A merely
     // disabled instance keeps its cache (re-enabling restores it) but stays
