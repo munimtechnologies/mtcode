@@ -228,16 +228,15 @@ relaunch_t3() {
         sleep 0.25
         continue
       fi
-      if osascript >/dev/null 2>&1 <<'APPLESCRIPT'
-tell application "System Events"
-  if not (exists process "MT Code") then error "no process"
-end tell
+      # A fresh PID is the proof the relaunch worked. The AppleScript below
+      # only brings the window forward, and it needs an Automation grant the
+      # installing shell may not have — gating success on it reported a
+      # perfectly good install as "no fresh MT Code process after open".
+      osascript >/dev/null 2>&1 <<'APPLESCRIPT' || true
 tell application "MT Code" to activate
 APPLESCRIPT
-      then
-        echo "MAC_GUI_VISIBLE $APP_PATH pid=$pid"
-        return 0
-      fi
+      echo "MAC_GUI_VISIBLE $APP_PATH pid=$pid"
+      return 0
     fi
     sleep 0.25
   done
