@@ -881,6 +881,13 @@ export const WINDOWS_SERVER_EXTRA_RESOURCES = [
     filter: [WINDOWS_SERVER_ASAR_RESOURCE, `${WINDOWS_SERVER_ASAR_RESOURCE}.unpacked/**/*`],
   },
 ] as const;
+/** Icon files the App icon setting can switch the running app to. */
+export const ALTERNATE_APP_ICON_FILES = [
+  "munim-macos-1024.png",
+  "munim-icon-light-1024.png",
+  "munim-icon-dark-1024.png",
+] as const;
+
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
@@ -897,10 +904,11 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     // Alternate app icons the user can switch to at runtime. The bundle's own
     // icon cannot change without breaking the signature, so the Dock icon is
-    // swapped from these instead.
-    from: "assets/munim",
+    // swapped from these instead. Staged by `stageAlternateAppIcons`, because
+    // electron-builder only sees the staged app tree — a repo-relative matcher
+    // silently copies nothing.
+    from: "apps/desktop/prod-resources/app-icons",
     to: "app-icons",
-    filter: ["munim-icon-*.png", "munim-macos-1024.png"],
   },
 ] as const;
 
@@ -2111,6 +2119,27 @@ function stageMacIcons(
   });
 }
 
+/**
+ * Copy the alternate app icons into the staged resources so electron-builder
+ * can emit them at `resources/app-icons`. The runtime swaps the Dock tile
+ * between these; the bundle's own icon stays put, because rewriting it would
+ * break the code signature and every macOS permission grant with it.
+ */
+export const stageAlternateAppIcons = Effect.fn("stageAlternateAppIcons")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const destination = path.join(input.stageResourcesDir, "app-icons");
+  yield* fs.makeDirectory(destination, { recursive: true });
+  for (const file of ALTERNATE_APP_ICON_FILES) {
+    const source = path.join(input.repoRoot, "assets/munim", file);
+    if (!(yield* fs.exists(source))) continue;
+    yield* fs.copyFile(source, path.join(destination, file));
+  }
+});
+
 export const stageDesktopDmgBackground = Effect.fn("stageDesktopDmgBackground")(function* (
   stageResourcesDir: string,
   channel: "latest" | "nightly",
@@ -3226,6 +3255,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     arch: options.arch,
     verbose: options.verbose,
   });
+  yield* stageAlternateAppIcons({ repoRoot, stageResourcesDir });
   if (options.platform === "mac") {
     yield* stageDesktopMcp({
       repoRoot,

@@ -470,6 +470,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           from: "apps/desktop/prod-resources/t3-desktop-mcp",
           to: "t3-desktop-mcp",
         },
+        {
+          from: "apps/desktop/prod-resources/app-icons",
+          to: "app-icons",
+        },
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
       assert.deepStrictEqual(win.nsis, {
@@ -1130,9 +1134,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it("stages the resource monitor and the desktop MCP as external executable resources", () => {
-    // Both are native executables that cannot run from inside an asar, and both are resolved
-    // relative to `process.resourcesPath` at runtime.
+  it("stages the resource monitor, the desktop MCP, and the alternate app icons", () => {
+    // The executables cannot run from inside an asar, and every entry here is
+    // resolved relative to `process.resourcesPath` at runtime. Each `from`
+    // must point INSIDE the staged app tree: electron-builder never sees the
+    // repo, so a repo-relative matcher copies nothing and fails silently.
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
       {
         from: "apps/desktop/prod-resources/resource-monitor",
@@ -1141,6 +1147,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       {
         from: "apps/desktop/prod-resources/t3-desktop-mcp",
         to: "t3-desktop-mcp",
+      },
+      {
+        from: "apps/desktop/prod-resources/app-icons",
+        to: "app-icons",
       },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
