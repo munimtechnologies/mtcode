@@ -24,6 +24,7 @@ import {
   type AccountLimitsRow,
   legacyInstanceIdFor,
   useAccountLimits,
+  useEnabledUsageProviders,
 } from "../../state/accountLimits";
 import { formatAgo, formatResetAt } from "@t3tools/shared/limitsFormat";
 import {
@@ -167,8 +168,9 @@ function HoverWindowRow({
 /** Compact per-provider availability, shown on hovering the Usage button. */
 export function AccountLimitsHoverCard() {
   const { byProvider, reportingEnvironments, isPending, isSettling } = useAccountLimits();
+  const enabledProviders = useEnabledUsageProviders();
   const nowMs = useNowMs();
-  const providers = visibleLimitsProviders(byProvider);
+  const providers = visibleLimitsProviders(byProvider, enabledProviders);
 
   if (isPending && byProvider.size === 0) {
     return <p className="px-1 py-2 text-xs text-muted-foreground">Loading limits…</p>;
@@ -277,8 +279,9 @@ function SectionWindowRow({
 /** The "Limits" strip above the analytics: one column per provider. */
 export function AccountLimitsSection() {
   const { byProvider, reportingEnvironments, isSettling } = useAccountLimits();
+  const enabledProviders = useEnabledUsageProviders();
   const nowMs = useNowMs();
-  const providers = visibleLimitsProviders(byProvider);
+  const providers = visibleLimitsProviders(byProvider, enabledProviders);
 
   return (
     <section className="flex flex-col gap-3">

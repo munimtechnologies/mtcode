@@ -14,6 +14,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import {
@@ -27,6 +28,13 @@ import {
 } from "@t3tools/contracts";
 
 import type { ProviderAccountLoginFlow } from "../ProviderDriver.ts";
+
+/**
+ * How long a driver may take to hand back its flow (spawn its CLI, negotiate,
+ * and return the browser URL or device code). A driver that never answers used
+ * to leave the client on "Starting sign-in..." with no way out but Cancel.
+ */
+const LOGIN_START_TIMEOUT = "45 seconds" as const;
 import { ProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "./ProviderRegistry.ts";
 
@@ -87,10 +95,27 @@ export class ProviderAccountLoginRunner extends Context.Service<
                 message: `Provider '${input.instanceId}' does not support '${input.mode}' sign-in.`,
               });
             }
-            const flow = yield* support.start({
-              mode: input.mode,
-              ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
-            });
+            const flow = yield* support
+              .start({
+                mode: input.mode,
+                ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
+              })
+              .pipe(
+                Effect.timeoutOption(LOGIN_START_TIMEOUT),
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(
+                        new ProviderAccountLoginError({
+                          instanceId: input.instanceId,
+                          message:
+                            "The provider did not respond to the sign-in request. Check that its CLI is installed and up to date, then try again.",
+                        }),
+                      ),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              );
             const codeSink = flow.submitCode;
             if (codeSink !== undefined) {
               activeCodeSinks.set(input.instanceId, codeSink);

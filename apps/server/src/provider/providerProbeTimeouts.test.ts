@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - the suite writes budget files to disk.
+// @effect-diagnostics globalDate:off - the suite asserts on wall-clock budgets.
+// @effect-diagnostics globalDateInEffect:off - the suite asserts on wall-clock budgets.
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeFs from "node:fs";
 import * as NodeOs from "node:os";

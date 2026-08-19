@@ -70,6 +70,44 @@ const accountLimitsAtom = Atom.make((get): readonly EnvironmentLimitsStatus[] =>
   return statuses;
 }).pipe(Atom.withLabel("web-account-limits"));
 
+/**
+ * Usage/limits pages speak the usage contract's provider kinds; the provider
+ * config speaks driver kinds. Claude is the one that differs.
+ */
+function usageProviderKindForDriver(driver: string): UsageProviderKind | null {
+  const kind = driver === "claudeAgent" ? "claude" : driver;
+  return (
+    ((["claude", "codex", "cursor", "grok", "opencode"] as const).find(
+      (candidate) => candidate === kind,
+    ) as UsageProviderKind | undefined) ?? null
+  );
+}
+
+/**
+ * Provider kinds enabled on at least one connected computer. `null` while no
+ * environment has streamed its provider config yet - callers show everything
+ * rather than blink rows out during connect.
+ *
+ * A provider the user switched off in Settings has no place on a usage or
+ * limits page: there is nothing to spend and nothing to run.
+ */
+export function useEnabledUsageProviders(): ReadonlySet<UsageProviderKind> | null {
+  const environments = useAtomValue(accountLimitsAtom);
+  return useMemo(() => {
+    const known = environments.filter((environment) => environment.providers !== null);
+    if (known.length === 0) return null;
+    const enabled = new Set<UsageProviderKind>();
+    for (const environment of known) {
+      for (const provider of environment.providers ?? []) {
+        if (!provider.enabled || provider.status === "disabled") continue;
+        const kind = usageProviderKindForDriver(String(provider.driver));
+        if (kind !== null) enabled.add(kind);
+      }
+    }
+    return enabled;
+  }, [environments]);
+}
+
 /** One rendered limits row: a provider instance seen from one environment. */
 export interface AccountLimitsRow {
   readonly environmentId: EnvironmentId;

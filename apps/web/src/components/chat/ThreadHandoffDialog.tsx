@@ -202,12 +202,13 @@ export function ThreadHandoffDialog({
     [isSubmitting, onConfirmHandoff, onOpenChange],
   );
 
+  // Closing mid-submit is allowed on purpose: the start still runs, and a
+  // dialog that refuses to close is a trap when the other end goes quiet.
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
-      if (isSubmitting) return;
       onOpenChange(nextOpen);
     },
-    [isSubmitting, onOpenChange],
+    [onOpenChange],
   );
 
   if (!targetModelSelection) {
@@ -216,7 +217,7 @@ export function ThreadHandoffDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogPopup className="max-w-2xl" showCloseButton={!isSubmitting}>
+      <DialogPopup className="max-w-2xl">
         <ThreadHandoffContent
           sourceThread={sourceThread}
           targetModelSelection={targetModelSelection}

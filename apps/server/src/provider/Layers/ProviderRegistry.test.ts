@@ -38,9 +38,12 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
+import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import {
   haveProvidersChanged,
   mergeProviderSnapshot,
+  mergeProviderSnapshots,
+  selectProvidersByKind,
   ProviderRegistryLive,
 } from "./ProviderRegistry.ts";
 import * as ServerConfig from "../../config.ts";
@@ -50,6 +53,11 @@ import type { ProviderInstance } from "../ProviderDriver.ts";
 import * as ProviderInstanceRegistry from "../Services/ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "../Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+
+const TestPtyAdapterLayer = Layer.succeed(PtyAdapter.PtyAdapter, {
+  spawn: () => Effect.fail(new PtyAdapter.PtySpawnError({ adapter: "test", shell: "none" })),
+} as PtyAdapter.PtyAdapter["Service"]);
+
 const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS);
@@ -1614,6 +1622,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
             Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            // Claude's driver asks for a PTY at hydration (account sign-in runs
+            // `claude setup-token` in one). Nothing here spawns one.
+            Layer.provideMerge(TestPtyAdapterLayer),
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
@@ -1707,6 +1718,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
             Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            // Claude's driver asks for a PTY at hydration (account sign-in runs
+            // `claude setup-token` in one). Nothing here spawns one.
+            Layer.provideMerge(TestPtyAdapterLayer),
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
@@ -1758,7 +1772,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             );
             assert.strictEqual(initialCodex?.status, "error");
             assert.strictEqual(initialCodex?.installed, false);
-            assert.deepStrictEqual(spawnedCommands, [firstMissing]);
+            // The fork ships extra drivers (Antigravity) whose probes spawn
+            // alongside codex's; this test is about codex re-probing.
+            const codexSpawns = () =>
+              spawnedCommands.filter((command) => command.startsWith("t3code_codex_"));
+            assert.deepStrictEqual(codexSpawns(), [firstMissing]);
 
             // Drive a settings change. The Hydration layer's
             // `SettingsWatcherLive` consumes this via `streamChanges`,
@@ -1795,7 +1813,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             });
 
             const reprobedCodex = refreshed.find((provider) => provider.instanceId === "codex");
-            assert.deepStrictEqual(spawnedCommands, [firstMissing, secondMissing]);
+            assert.deepStrictEqual(codexSpawns(), [firstMissing, secondMissing]);
             assert.strictEqual(reprobedCodex?.status, "error");
             assert.strictEqual(reprobedCodex?.installed, false);
           }).pipe(Effect.provide(runtimeServices));
@@ -1829,6 +1847,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
             Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            // Claude's driver asks for a PTY at hydration (account sign-in runs
+            // `claude setup-token` in one). Nothing here spawns one.
+            Layer.provideMerge(TestPtyAdapterLayer),
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
@@ -1891,6 +1912,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
             const providerRegistryLayer = ProviderRegistryLive.pipe(
               Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+              // Claude's driver asks for a PTY at hydration (account sign-in runs
+              // `claude setup-token` in one). Nothing here spawns one.
+              Layer.provideMerge(TestPtyAdapterLayer),
               Layer.provideMerge(
                 Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
               ),
@@ -1947,6 +1971,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               );
 
               assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
+                // Antigravity is a fork driver; upstream's list stops at opencode.
+                "antigravity",
                 "claudeAgent",
                 "codex",
                 "cursor",

@@ -462,7 +462,7 @@ export const make = Effect.gen(function* () {
 
     const homeDir =
       hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || undefined;
-    const loaded = yield* loadCursorAccountLimits({ homeDir }).pipe(
+    const loaded = yield* loadCursorAccountLimits(homeDir === undefined ? {} : { homeDir }).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
     );
     if (loaded.status !== "ok" || loaded.snapshot.windows.length === 0) return;

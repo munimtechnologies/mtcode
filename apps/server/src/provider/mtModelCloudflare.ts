@@ -1,3 +1,5 @@
+// @effect-diagnostics globalTimersInEffect:off - the classifier races a raw fetch against a deadline.
+// @effect-diagnostics preferSchemaOverJson:off - the worker response is untyped JSON, validated by hand below.
 /**
  * Optional Cloudflare classifier for MT Model.
  *
@@ -31,7 +33,7 @@ export class MtModelCloudflareClassifier extends Context.Service<
       readonly interactionMode?: string | undefined;
     }) => Effect.Effect<MtTurnClassification | null>;
   }
->()("t3/provider/MtModelCloudflareClassifier") {}
+>()("t3/provider/mtModelCloudflare/MtModelCloudflareClassifier") {}
 
 export function readMtModelRouterUrl(
   env: Record<string, string | undefined> = process.env,
@@ -45,7 +47,14 @@ export function readMtModelRouterUrl(
 
 export function makeMtModelCloudflareClassifier(input: {
   readonly url?: string | undefined;
-  readonly fetch?: typeof fetch;
+  /**
+   * Only the call signature is used, so tests can pass a bare async function
+   * without restating the platform's static members (`preconnect`).
+   */
+  readonly fetch?: (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => Promise<Response>;
   readonly now?: () => number;
   readonly timeoutMs?: number;
   readonly warmup?: boolean;

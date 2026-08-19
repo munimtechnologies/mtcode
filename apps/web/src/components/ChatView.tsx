@@ -524,6 +524,9 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
+/** How long a handoff's create/start step may sit unanswered before it counts as failed. */
+const HANDOFF_STEP_TIMEOUT_MS = 30_000;
+
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -6282,9 +6285,37 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
+  // The dialog blocks its own close while submitting, so a step that never
+  // settles (a computer that dropped off mid-flight) would strand the user on
+  // "Starting thread...". Every remote step gets a deadline instead.
+  const timedOutRef = useRef(false);
+  const withHandoffTimeout = useCallback(async <T,>(run: () => Promise<T>): Promise<T | null> => {
+    let timer: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const result = await Promise.race([
+      run(),
+      new Promise<null>((resolve) => {
+        timer = globalThis.setTimeout(() => resolve(null), HANDOFF_STEP_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer !== null) globalThis.clearTimeout(timer);
+    if (result === null) timedOutRef.current = true;
+    return result;
+  }, []);
+
   const handleConfirmHandoff = useCallback(
     async (handoffMarkdown: string, targetModelSelection: ModelSelection) => {
       if (!activeProject || !activeThread) return;
+      // A disconnected computer never answers create/start, and the dialog
+      // would sit on "Starting thread..." forever waiting for it. Say so
+      // instead of spinning.
+      if (activeEnvironmentUnavailable) {
+        toastManager.add({
+          type: "error",
+          title: "Computer is not connected",
+          description: "Reconnect it to continue this conversation with another model.",
+        });
+        return;
+      }
       const nextThreadId = newThreadId();
       const nextThreadTitle = `${activeThread.title} (Handoff)`;
       const createdAt = new Date().toISOString();
@@ -6296,42 +6327,46 @@ function ChatViewContent(props: ChatViewProps) {
         resetLocalDispatch();
       };
 
-      const createResult = await createThread({
-        environmentId,
-        input: {
-          threadId: nextThreadId,
-          projectId: activeProject.id,
-          title: nextThreadTitle,
-          modelSelection: targetModelSelection,
-          runtimeMode,
-          interactionMode: "default",
-          branch: activeThreadBranch,
-          worktreePath: activeThread.worktreePath,
-          createdAt,
-        },
-      });
-      let failure: AtomCommandResult<unknown, unknown> | null =
-        createResult._tag === "Failure" ? createResult : null;
-
-      if (failure === null) {
-        const startResult = await startThreadTurn({
+      const createResult = await withHandoffTimeout(() =>
+        createThread({
           environmentId,
           input: {
             threadId: nextThreadId,
-            message: {
-              messageId: newMessageId(),
-              role: "user",
-              text: handoffMarkdown,
-              attachments: [],
-            },
+            projectId: activeProject.id,
+            title: nextThreadTitle,
             modelSelection: targetModelSelection,
-            titleSeed: nextThreadTitle,
             runtimeMode,
             interactionMode: "default",
+            branch: activeThreadBranch,
+            worktreePath: activeThread.worktreePath,
             createdAt,
           },
-        });
-        failure = startResult._tag === "Failure" ? startResult : null;
+        }),
+      );
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult === null || createResult._tag === "Failure" ? createResult : null;
+
+      if (failure === null && createResult !== null) {
+        const startResult = await withHandoffTimeout(() =>
+          startThreadTurn({
+            environmentId,
+            input: {
+              threadId: nextThreadId,
+              message: {
+                messageId: newMessageId(),
+                role: "user",
+                text: handoffMarkdown,
+                attachments: [],
+              },
+              modelSelection: targetModelSelection,
+              titleSeed: nextThreadTitle,
+              runtimeMode,
+              interactionMode: "default",
+              createdAt,
+            },
+          }),
+        );
+        failure = startResult === null || startResult._tag === "Failure" ? startResult : null;
       }
 
       if (failure === null) {
@@ -6354,7 +6389,8 @@ function ChatViewContent(props: ChatViewProps) {
         failure = navigateResult._tag === "Failure" ? navigateResult : null;
       }
 
-      if (failure !== null) {
+      if (failure !== null || timedOutRef.current) {
+        timedOutRef.current = false;
         const cleanupResult = await deleteThread({
           environmentId,
           input: {
@@ -6367,7 +6403,15 @@ function ChatViewContent(props: ChatViewProps) {
             squashAtomCommandFailure(cleanupResult),
           );
         }
-        if (!isAtomCommandInterrupted(failure)) {
+        if (failure === null) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not start handoff thread",
+              description: "The computer did not respond. Check that it is still connected.",
+            }),
+          );
+        } else if (!isAtomCommandInterrupted(failure)) {
           const error = squashAtomCommandFailure(failure);
           toastManager.add(
             stackedThreadToast({
@@ -6394,6 +6438,8 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [
+      activeEnvironmentUnavailable,
+      withHandoffTimeout,
       activeProject,
       activeThread,
       activeThreadBranch,
@@ -6488,15 +6534,28 @@ function ChatViewContent(props: ChatViewProps) {
         nextModelSelection,
       });
 
+      // A cross-provider pick stays in THIS thread. The server restarts the
+      // session on the next turn and prepends the conversation transcript for
+      // the incoming provider (see providerHandoffTranscript), so there is
+      // nothing a second thread would buy. The new-thread dialog is kept only
+      // for providers that genuinely refuse a model change mid-conversation.
       if (
-        isCrossProvider ||
-        (modelChangeBlockReason &&
-          isServerThread &&
-          activeServerThread !== null &&
-          threadHasStarted(activeServerThread))
+        modelChangeBlockReason &&
+        isServerThread &&
+        activeServerThread !== null &&
+        threadHasStarted(activeServerThread)
       ) {
         setHandoffTargetModelSelection(nextModelSelection);
         setIsHandoffDialogOpen(true);
+        return;
+      }
+      if (isCrossProvider) {
+        setComposerDraftModelSelection(
+          scopeThreadRef(activeThread.environmentId, activeThread.id),
+          nextModelSelection,
+        );
+        setStickyComposerModelSelection(nextModelSelection);
+        scheduleComposerFocus();
         return;
       }
 

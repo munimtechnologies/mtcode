@@ -25,6 +25,9 @@ const HEAD_REF_TEMPLATE: Record<SourceControlProviderKind, ((n: number) => strin
   gitlab: (n) => `refs/merge-requests/${n}/head`,
   bitbucket: null,
   "azure-devops": null,
+  // Forgejo mirrors Gitea, which publishes a pull request's head the way
+  // GitHub does.
+  forgejo: (n) => `refs/pull/${n}/head`,
   unknown: null,
 };
 

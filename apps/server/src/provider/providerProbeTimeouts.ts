@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - reads the probe budget file synchronously, outside any Effect runtime.
 import * as NodeFs from "node:fs";
 import * as NodeOs from "node:os";
 import * as Effect from "effect/Effect";

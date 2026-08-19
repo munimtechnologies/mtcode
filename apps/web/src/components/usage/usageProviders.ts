@@ -53,19 +53,30 @@ export function providerHasLimitWindows(
   return (rows ?? []).some((row) => row.snapshot.windows.length > 0);
 }
 
-/** Always Codex/Claude/Cursor; other providers only once they actually report windows. */
+/**
+ * Codex/Claude/Cursor by default; other providers only once they actually
+ * report windows. Providers switched off in Settings drop out entirely,
+ * unless they still report a window (an account that is out of quota is worth
+ * seeing even while the driver is off). `enabled` is null before any computer
+ * has streamed its provider config - show the default set rather than blink.
+ */
 export function visibleLimitsProviders(
   byProvider: ReadonlyMap<
     UsageProviderKind,
     ReadonlyArray<{ readonly snapshot: { readonly windows: readonly unknown[] } }>
   >,
+  enabled?: ReadonlySet<UsageProviderKind> | null,
 ): readonly UsageProviderKind[] {
+  const hasWindows = (provider: UsageProviderKind) =>
+    providerHasLimitWindows(byProvider.get(provider));
+  const isVisible = (provider: UsageProviderKind) =>
+    enabled == null || enabled.has(provider) || hasWindows(provider);
+  const base = LIMITS_PROVIDER_ORDER.filter(isVisible);
   const extras = PROVIDER_ORDER.filter(
     (provider) =>
-      !LIMITS_PROVIDER_ORDER.includes(provider) &&
-      providerHasLimitWindows(byProvider.get(provider)),
+      !LIMITS_PROVIDER_ORDER.includes(provider) && hasWindows(provider) && isVisible(provider),
   );
-  return [...LIMITS_PROVIDER_ORDER, ...extras];
+  return [...base, ...extras];
 }
 
 export const PROVIDER_LABEL = Object.fromEntries(

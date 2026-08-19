@@ -46,6 +46,12 @@ interface ProviderAccountSignInProps {
   readonly instanceId: ProviderInstanceId;
   readonly driver: string;
   readonly accountLogin: ServerProviderAccountLogin;
+  /**
+   * Whether this instance already has a working account. An authenticated
+   * instance does not ask to sign in again; the flows stay one click away
+   * behind "Sign in again" for switching or repairing an account.
+   */
+  readonly isAuthenticated?: boolean | undefined;
   readonly onComplete?: (() => void) | undefined;
   /**
    * Extra idle-state actions rendered next to Sign in / device code / API key
@@ -64,6 +70,7 @@ export function ProviderAccountSignIn({
   instanceId,
   driver,
   accountLogin,
+  isAuthenticated = false,
   onComplete,
   trailingActions,
 }: ProviderAccountSignInProps) {
@@ -71,6 +78,7 @@ export function ProviderAccountSignIn({
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [codeDraft, setCodeDraft] = useState("");
+  const [showSignInOptions, setShowSignInOptions] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const loginProviderAccount = useAtomCommand(serverEnvironment.loginProviderAccount, {
@@ -202,7 +210,25 @@ export function ProviderAccountSignIn({
 
   return (
     <div className="grid gap-2">
-      {phase.status === "idle" || phase.status === "failed" ? (
+      {(phase.status === "idle" || phase.status === "failed") &&
+      isAuthenticated &&
+      !showSignInOptions ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {trailingActions}
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => setShowSignInOptions(true)}
+          >
+            Sign in again
+          </Button>
+        </div>
+      ) : null}
+
+      {(phase.status === "idle" || phase.status === "failed") &&
+      (!isAuthenticated || showSignInOptions) ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {accountLogin.modes.includes("oauth") ? (
             <Button

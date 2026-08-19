@@ -7,7 +7,7 @@ import { isCursorCoverageGap } from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
-import { useAccountLimits } from "../../state/accountLimits";
+import { useAccountLimits, useEnabledUsageProviders } from "../../state/accountLimits";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { isEnvironmentUsageStillReporting } from "../../state/usageEnvironmentScope";
 import {
@@ -67,6 +67,21 @@ export function UsagePage() {
     refresh: refreshUsage,
   } = useUsage(window, environmentFilter);
   const { refresh: refreshLimits } = useAccountLimits();
+  const enabledProviders = useEnabledUsageProviders();
+  // A provider switched off in Settings is not part of this workspace, so it
+  // has no row here. One that ran before being switched off keeps its row:
+  // hiding it would leave its spend inside the headline with nothing to
+  // attribute it to.
+  const visibleProviders = useMemo(
+    () =>
+      PROVIDER_ORDER.filter(
+        (provider) =>
+          enabledProviders === null ||
+          enabledProviders.has(provider) ||
+          (merged.providers.find((entry) => entry.provider === provider)?.sessions ?? 0) > 0,
+      ),
+    [enabledProviders, merged.providers],
+  );
 
   useEffect(() => {
     if (environmentFilter !== null && selectedEnvironmentId === null) {
@@ -320,7 +335,7 @@ export function UsagePage() {
                       </span>
                     </div>
 
-                    {PROVIDER_ORDER.map((provider) => {
+                    {visibleProviders.map((provider) => {
                       const totals = merged.providers.find((entry) => entry.provider === provider);
                       const share =
                         metric === "cost" && !costUnavailable
@@ -479,7 +494,7 @@ export function UsagePage() {
                       <thead>
                         <tr className="border-b border-border text-left text-xs text-muted-foreground">
                           <th className="py-2 font-normal">{isPast24Hours ? "Hour" : "Day"}</th>
-                          {PROVIDER_ORDER.map((provider) => (
+                          {visibleProviders.map((provider) => (
                             <th key={provider} className="py-2 text-right font-normal">
                               {PROVIDER_PRESENTATION[provider].label}
                             </th>
@@ -492,7 +507,7 @@ export function UsagePage() {
                         {breakdownPeriods.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={PROVIDER_ORDER.length + 3}
+                              colSpan={visibleProviders.length + 3}
                               className="py-6 text-center text-muted-foreground"
                             >
                               No activity in this window.
@@ -509,7 +524,7 @@ export function UsagePage() {
                                   ? formatHourShort(period.hourStart, window.timeZone)
                                   : formatDayShort(period.day)}
                               </td>
-                              {PROVIDER_ORDER.map((provider) => (
+                              {visibleProviders.map((provider) => (
                                 <td
                                   key={provider}
                                   className="py-2 text-right text-muted-foreground tabular-nums"

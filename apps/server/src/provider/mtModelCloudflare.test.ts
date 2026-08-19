@@ -1,3 +1,4 @@
+// @effect-diagnostics globalTimers:off - the suite stubs fetch, including a deliberately slow one.
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 

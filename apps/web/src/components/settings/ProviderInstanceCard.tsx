@@ -720,6 +720,7 @@ export function ProviderInstanceCard({
                 instanceId={instanceId}
                 driver={String(instance.driver)}
                 accountLogin={liveProvider.accountLogin}
+                isAuthenticated={liveProvider.auth.status === "authenticated"}
                 trailingActions={
                   onAddAccount ? (
                     <Button type="button" size="xs" variant="outline" onClick={onAddAccount}>
