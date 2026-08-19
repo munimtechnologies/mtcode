@@ -52,6 +52,7 @@ import {
   ThreadId,
   TurnId,
   type UserInputQuestion,
+  DESKTOP_MCP_SERVER_NAME,
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
@@ -4786,7 +4787,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : {}),
         ...(desktopMcp
           ? {
-              "t3-desktop": {
+              [DESKTOP_MCP_SERVER_NAME]: {
                 type: "stdio" as const,
                 command: desktopMcp.path,
                 ...(desktopMcp.env.length > 0

@@ -23,6 +23,7 @@ import {
   type RuntimeMode,
   type ThreadId,
   TurnId,
+  DESKTOP_MCP_SERVER_NAME,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -582,7 +583,7 @@ export function makeCursorAdapter(
             ...(desktopMcp
               ? [
                   {
-                    name: "t3-desktop",
+                    name: DESKTOP_MCP_SERVER_NAME,
                     command: desktopMcp.path,
                     args: [] as string[],
                     env: [...desktopMcp.env],

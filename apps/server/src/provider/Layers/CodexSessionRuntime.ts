@@ -15,6 +15,7 @@ import {
   RuntimeMode,
   ThreadId,
   TurnId,
+  DESKTOP_MCP_SERVER_NAME,
 } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
@@ -2195,7 +2196,7 @@ export const makeCodexSessionRuntime = (
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, "t3-code"),
-            desktopToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, "t3-desktop"),
+            desktopToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, DESKTOP_MCP_SERVER_NAME),
             computerHomeWorkspace: isComputerHomeCwd(options.cwd),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
