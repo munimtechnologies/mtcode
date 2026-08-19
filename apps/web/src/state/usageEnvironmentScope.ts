@@ -38,13 +38,20 @@ interface EnvironmentUsageLoadingEntry {
 export function isEnvironmentUsageStillReporting(
   environment: EnvironmentUsageLoadingEntry,
 ): boolean {
-  return environment.isPending && environment.summary === null && environment.error === null;
+  // A retained summary does not mean this environment has reported: it is the
+  // previous request's answer, still on screen while the refresh runs.
+  return environment.isPending && environment.error === null;
 }
 
 export function getEnvironmentUsageLoadingState(
   environments: readonly EnvironmentUsageLoadingEntry[],
 ): { readonly isPending: boolean; readonly isPartial: boolean } {
-  const answeredCount = environments.filter((environment) => environment.summary !== null).length;
+  // SWR keeps the previous summary on screen while a refresh is in flight, so
+  // a retained value belongs to the *previous* request. Counting it as an
+  // answer settled a refresh before any environment had reported new numbers.
+  const answeredCount = environments.filter(
+    (environment) => environment.summary !== null && !environment.isPending,
+  ).length;
   const stillReporting = environments.filter(isEnvironmentUsageStillReporting).length;
 
   return {

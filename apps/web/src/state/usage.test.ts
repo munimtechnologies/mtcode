@@ -113,3 +113,37 @@ describe("usage environment scope", () => {
     expect(scope.environments).toEqual(options);
   });
 });
+
+describe("usage refresh settling", () => {
+  it("settles a refresh only after every environment answers the new request", () => {
+    // Retained summaries from the previous request, both refreshing.
+    const macRefreshing = {
+      phase: "connected" as const,
+      isPending: true,
+      summary: {},
+      error: null,
+    };
+    const linuxRefreshing = {
+      phase: "connected" as const,
+      isPending: true,
+      summary: {},
+      error: null,
+    };
+    expect(getEnvironmentUsageLoadingState([macRefreshing, linuxRefreshing])).toEqual({
+      isPending: true,
+      isPartial: false,
+    });
+
+    const macAnswered = { ...macRefreshing, isPending: false };
+    expect(getEnvironmentUsageLoadingState([macAnswered, linuxRefreshing])).toEqual({
+      isPending: false,
+      isPartial: true,
+    });
+
+    const linuxAnswered = { ...linuxRefreshing, isPending: false };
+    expect(getEnvironmentUsageLoadingState([macAnswered, linuxAnswered])).toEqual({
+      isPending: false,
+      isPartial: false,
+    });
+  });
+});
