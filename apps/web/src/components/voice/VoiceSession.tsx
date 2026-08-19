@@ -25,6 +25,7 @@ import { VoiceTraceTimeline } from "./VoiceTraceTimeline";
 import { type ResizeEdge, useVoicePanelGeometry } from "./useVoicePanelGeometry";
 import { createOpenAIRealtimeSessionConfig, useVoiceSettingsStore } from "./voiceSettingsStore";
 import { useVoiceTraceStore, type VoiceTraceEntryKind } from "./voiceTraceStore";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 type VoiceStatus = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 
@@ -135,7 +136,7 @@ const VOICE_TOOLS = [
     type: "function",
     name: "get_previous_messages",
     description:
-      "Read an older page of messages from the T3 Code task where this voice session started. Use beforeMessageId to continue paging backward.",
+      `Read an older page of messages from the ${APP_DISPLAY_NAME} task where this voice session started. Use beforeMessageId to continue paging backward.`,
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -156,7 +157,7 @@ const VOICE_TOOLS = [
   {
     type: "function",
     name: "read_composer",
-    description: "Read the unsent composer text for the current T3 Code task.",
+    description: `Read the unsent composer text for the current ${APP_DISPLAY_NAME} task.`,
     parameters: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -264,7 +265,7 @@ export function voiceInstructions(latestAssistantMessage: string | null): string
     ? `\n\n<latest_task_message>\n${latestAssistantMessage}\n</latest_task_message>`
     : "\n\nThere is no completed AI message in the origin task yet.";
   return `# Role and Objective
-You are T3 Code's conversational voice copilot inside a desktop interface for coding-agent harnesses. Start silently and wait for the user. Help the user understand the ongoing task, unfamiliar terms, and project context, or help draft an unsent prompt.
+You are ${APP_DISPLAY_NAME}'s conversational voice copilot inside a desktop interface for coding-agent harnesses. Start silently and wait for the user. Help the user understand the ongoing task, unfamiliar terms, and project context, or help draft an unsent prompt.
 
 # Personality and Tone
 The user is a software developer. Assume technical fluency. Use standard engineering terminology without defining basic concepts unless asked. Be direct, neutral, and information-dense. Do not use analogies or tutorial framing by default.

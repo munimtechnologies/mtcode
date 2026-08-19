@@ -13,6 +13,7 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { canSubmitSshPassword } from "./sshPasswordRequestForm";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 export interface SshPasswordPromptRequestPresentation {
   readonly requestId: string;
@@ -176,7 +177,7 @@ export function SshPasswordRequestDialog({
           <DialogTitle>SSH Authentication Required</DialogTitle>
           <DialogDescription>
             T3 needs your SSH key passphrase or password to connect to <code>{target}</code>. It is
-            passed to the SSH process for this attempt and is not saved by T3 Code.
+            passed to the SSH process for this attempt and is not saved by ${APP_DISPLAY_NAME}.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-3" scrollFade={false}>

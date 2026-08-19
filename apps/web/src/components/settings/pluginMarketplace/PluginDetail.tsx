@@ -63,6 +63,7 @@ import {
 } from "~/pluginMarketplace/store";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settingsLayout";
 import { HarnessIcon, HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 function LoadingPlugin() {
   return (
@@ -699,7 +700,7 @@ function ComputerUsePermissions({ plugin }: { readonly plugin: PluginMarketplace
         />
         <SettingsRow
           title="App automation"
-          description="Allow T3 Code to control System Events and each application you choose to use."
+          description={`Allow ${APP_DISPLAY_NAME} to control System Events and each application you choose to use.`}
           control={
             <Button
               size="sm"

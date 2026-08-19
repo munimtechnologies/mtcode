@@ -44,6 +44,7 @@ import {
 } from "../voice/voiceSettingsStore";
 import { useVoiceTraceStore } from "../voice/voiceTraceStore";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 function messageFromError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -122,7 +123,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
     if (result._tag === "Success") {
       setConfigured(true);
       setApiKey("");
-      setFeedback("API key saved securely on this T3 Code environment.");
+      setFeedback(`API key saved securely on this ${APP_DISPLAY_NAME} environment.`);
     } else {
       setFeedback(messageFromError(squashAtomCommandFailure(result)));
     }
@@ -167,7 +168,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
     if (result._tag === "Success") {
       setParallelConfigured(true);
       setParallelApiKey("");
-      setParallelFeedback("Parallel API key saved securely on this T3 Code environment.");
+      setParallelFeedback(`Parallel API key saved securely on this ${APP_DISPLAY_NAME} environment.`);
     } else {
       setParallelFeedback(messageFromError(squashAtomCommandFailure(result)));
     }
@@ -211,14 +212,14 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
       <div>
         <h1 className="text-xl font-semibold tracking-[-0.02em]">Voice</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configure the global OpenAI Realtime voice layer for T3 Code.
+          Configure the global OpenAI Realtime voice layer for ${APP_DISPLAY_NAME}.
         </p>
       </div>
 
       <SettingsSection title="OpenAI Realtime" icon={<Mic2Icon className="size-3.5" />}>
         <SettingsRow
           title="API key"
-          description="Stored only by the selected T3 Code server. The app uses it to mint short-lived browser credentials."
+          description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The app uses it to mint short-lived browser credentials.`}
           status={
             <span className={configured ? "text-emerald-600 dark:text-emerald-400" : undefined}>
               {configured ? "Configured" : "Not configured"}
@@ -291,7 +292,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
       <SettingsSection title="Parallel Web" icon={<Globe2Icon className="size-3.5" />}>
         <SettingsRow
           title="API key"
-          description="Stored only by the selected T3 Code server. The voice agent uses Parallel Search and Extract through server-side tools."
+          description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The voice agent uses Parallel Search and Extract through server-side tools.`}
           status={
             <span
               className={parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined}

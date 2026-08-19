@@ -26,6 +26,7 @@ import {
   type ImportOutcome,
   type WizardStep,
 } from "./browserImportWizard.logic";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 /** A profile the import can land in. */
 export interface WizardTargetProfile {
@@ -220,7 +221,7 @@ function FullDiskAccessStep({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Let T3 Code read {source.name}&rsquo;s cookies</DialogTitle>
+        <DialogTitle>Let ${APP_DISPLAY_NAME} read {source.name}&rsquo;s cookies</DialogTitle>
         <DialogDescription>
           {source.name} keeps its cookies somewhere only apps with Full Disk Access can reach. Turn
           that on for T3 Code in System Settings, then come back and finish the import.

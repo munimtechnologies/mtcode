@@ -39,6 +39,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 function isDesktopHost(): boolean {
   return typeof window !== "undefined" && window.desktopBridge !== undefined;
@@ -330,7 +331,7 @@ export function ComputerHistorySettings() {
         </p>
         {!onDesktop ? (
           <p className="text-muted-foreground mb-3 px-3 text-sm sm:px-4">
-            Computer History recording runs in the T3 Code desktop app.
+            Computer History recording runs in the ${APP_DISPLAY_NAME} desktop app.
           </p>
         ) : null}
 

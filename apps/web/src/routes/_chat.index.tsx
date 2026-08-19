@@ -17,8 +17,8 @@ import {
   useThreadShells,
 } from "../state/entities";
 import { useEnvironments } from "../state/environments";
-import { APP_DISPLAY_NAME } from "~/branding";
 import { hasClerkPublicConfig, hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();

@@ -28,6 +28,7 @@ import { environmentPresentations } from "~/state/presentation";
 import { environmentSnapshotAtom } from "~/state/shell";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 const TARGET_READY_TIMEOUT_MS = 20_000;
 const TARGET_READY_POLL_MS = 200;
@@ -235,6 +236,6 @@ async function waitForTargetSnapshot(
     "computer_offline",
     lastPhase === "connected"
       ? "That computer connected but T3 has not loaded its projects yet."
-      : "Could not reach that computer. Keep T3 Code running there, or pick it in Run on first.",
+      : `Could not reach that computer. Keep ${APP_DISPLAY_NAME} running there, or pick it in Run on first.`,
   );
 }

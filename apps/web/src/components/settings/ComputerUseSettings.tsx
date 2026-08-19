@@ -31,9 +31,10 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { APP_DISPLAY_NAME } from "~/branding";
 
 /** Shown when the desktop host lacks the Computer Use permissions bridge API. */
-const BRIDGE_UNSUPPORTED_MESSAGE = "Update T3 Code to check Computer Use permissions";
+const BRIDGE_UNSUPPORTED_MESSAGE = `Update ${APP_DISPLAY_NAME} to check Computer Use permissions`;
 
 function isDesktopHost(): boolean {
   return typeof window !== "undefined" && window.desktopBridge !== undefined;
@@ -167,14 +168,14 @@ export function ComputerUseSettings() {
             <MonitorIcon className="mt-0.5 size-4 shrink-0" />
             <p>
               You are connected to a remote environment. Computer Use settings apply on the host
-              running the T3 Code desktop app.
+              running the ${APP_DISPLAY_NAME} desktop app.
             </p>
           </div>
         ) : null}
 
         <SettingsRow
           {...searchableSetting("computer-use-enabled")}
-          description="Let T3 Code control apps on your computer"
+          description={`Let ${APP_DISPLAY_NAME} control apps on your computer`}
           resetAction={
             desktop.enabled !== defaults.enabled ? (
               <SettingResetButton
@@ -372,7 +373,7 @@ export function ComputerUseSettings() {
           <DialogHeader>
             <DialogTitle>Google Chrome</DialogTitle>
             <DialogDescription>
-              Load the T3 Code extension so agents can open and drive tabs in a labelled group
+              Load the ${APP_DISPLAY_NAME} extension so agents can open and drive tabs in a labelled group
               without taking over your browsing.
             </DialogDescription>
           </DialogHeader>
