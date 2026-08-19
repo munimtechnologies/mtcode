@@ -264,6 +264,8 @@ import type { ReviewCommentContext } from "../../reviewCommentContext";
 import { useThreadShells } from "../../state/entities";
 import { searchThreadReferences } from "../../threadReferenceSearch";
 
+import { useEnvironmentPresentation } from "~/state/presentation";
+
 const runtimeModeConfig: Record<
   RuntimeMode,
   { label: string; description: string; icon: LucideIcon }
@@ -803,16 +805,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Instance-aware projection of the wire provider list. One entry per
   // configured instance (default built-in + any custom `providerInstances.*`),
   // sorted default-first per driver kind for a stable picker order.
+  // The turn runs on the thread's machine, and only a machine that understands
+  // the `mt` instance can route it. An older server answers with "unknown
+  // provider instance 'mt'", so the entry is withheld for those environments.
+  const { presentation: composerEnvironmentPresentation } = useEnvironmentPresentation(
+    _activeThreadEnvironmentId ?? environmentId,
+  );
+  const serverCanRoute =
+    composerEnvironmentPresentation?.serverConfig?.environment.capabilities.modelRouting !== false;
   const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
     () =>
       prependMtModelPickerEntry(
         sortProviderInstanceEntries(
           applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
         ),
+        { serverCanRoute },
       ),
-    [providerStatuses, settings],
+    [providerStatuses, serverCanRoute, settings],
   );
-  const pickerProviders = useMemo(() => withMtModelProvider(providerStatuses), [providerStatuses]);
+  const pickerProviders = useMemo(
+    () => withMtModelProvider(providerStatuses, { serverCanRoute }),
+    [providerStatuses, serverCanRoute],
+  );
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
     activeThread?.session?.providerInstanceId ??
@@ -857,7 +871,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   //   5. First enabled entry overall / default instance for the kind.
   //
   const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
-    // Session instance is the *routed* backend after MT Model picks one.
+    // Session instance is the *routed* backend after MT Auto picks one.
     // Keep the sticky MT selection in the picker unless the draft explicitly
     // moved to another provider.
     if (

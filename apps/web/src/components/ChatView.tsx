@@ -2273,7 +2273,14 @@ function ChatViewContent(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
-  const pickerProviders = useMemo(() => withMtModelProvider(providerStatuses), [providerStatuses]);
+  // Only the machine that will run the turn can route it; an older server
+  // rejects the `mt` instance instead of picking a backend.
+  const environmentCanRouteModels =
+    activeEnvironment?.serverConfig?.environment.capabilities.modelRouting !== false;
+  const pickerProviders = useMemo(
+    () => withMtModelProvider(providerStatuses, { serverCanRoute: environmentCanRouteModels }),
+    [environmentCanRouteModels, providerStatuses],
+  );
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider,

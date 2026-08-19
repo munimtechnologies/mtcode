@@ -1,5 +1,5 @@
 /**
- * MT Model router — local analog of Cursor Auto / Cursor Router.
+ * MT Auto router — local analog of Cursor Auto / Cursor Router.
  *
  * Cursor trains Compass on hundreds of thousands of live turns. We score each
  * turn locally (same $0 model as T3 Code: no cloud classifier). The resolved
@@ -408,7 +408,7 @@ function describeRoute(
   if (classification.source === "cloudflare") {
     parts.push("cloudflare");
   }
-  return `MT Model → ${candidate.model} (${parts.join(", ")})`;
+  return `MT Auto → ${candidate.model} (${parts.join(", ")})`;
 }
 
 function unwrapClassificationRecord(input: unknown): Record<string, unknown> | null {

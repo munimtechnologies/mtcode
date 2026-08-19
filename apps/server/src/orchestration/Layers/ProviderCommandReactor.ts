@@ -533,7 +533,7 @@ const make = Effect.gen(function* () {
         provider: "mt",
         method: "thread.turn.start",
         detail:
-          "MT Model has no ready providers to route to. Enable Codex, Claude, Cursor, or another provider in Settings.",
+          "MT Auto has no ready providers to route to. Enable Codex, Claude, Cursor, or another provider in Settings.",
       });
     }
     const resolveActiveSession = (threadId: ThreadId) =>
@@ -683,7 +683,7 @@ const make = Effect.gen(function* () {
           tone: "info",
           kind: "thread.model-changed",
           summary: isMtModelSelection(stickyModelSelection)
-            ? (mtDecision?.reason ?? `MT Model → ${desiredModelSelection.model}`)
+            ? (mtDecision?.reason ?? `MT Auto → ${desiredModelSelection.model}`)
             : `Switched model to ${desiredModelSelection.model}`,
           payload: {
             fromInstanceId: String(currentInstanceId),

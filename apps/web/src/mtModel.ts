@@ -22,7 +22,7 @@ export function createMtModelCapabilities() {
         id: MT_MODEL_ROUTE_MODE_OPTION_ID,
         label: "Routing",
         description:
-          "How aggressively MT Model spends quota on frontier models. Cost keeps chores cheap; Intelligence upgrades harder tasks. Routing is local and free.",
+          "How aggressively MT Auto spends quota on frontier models. Cost keeps chores cheap; Intelligence upgrades harder tasks. Routing is local and free.",
         type: "select",
         currentValue: DEFAULT_MT_MODEL_ROUTE_MODE,
         options: [
@@ -80,10 +80,20 @@ export function createMtModelProviderSnapshot(): ServerProvider {
   };
 }
 
+/**
+ * MT Auto is a harness-level router: the client offers it, but the SERVER has
+ * to understand the `mt` instance when the turn starts. A machine running an
+ * older build rejects it outright ("references unknown provider instance
+ * 'mt'"), so the entry is withheld unless that environment says it can route.
+ */
 export function withMtModelProvider(
   providers: ReadonlyArray<ServerProvider>,
+  options?: { readonly serverCanRoute?: boolean | undefined },
 ): ReadonlyArray<ServerProvider> {
   if (providers.some((provider) => isMtModelInstanceId(provider.instanceId))) {
+    return providers;
+  }
+  if (options?.serverCanRoute === false) {
     return providers;
   }
   const hasReadyBackend = providers.some(
@@ -101,8 +111,12 @@ export function withMtModelProvider(
 
 export function prependMtModelPickerEntry(
   entries: ReadonlyArray<ProviderInstanceEntry>,
+  options?: { readonly serverCanRoute?: boolean | undefined },
 ): ReadonlyArray<ProviderInstanceEntry> {
   if (entries.some((entry) => isMtModelInstanceId(entry.instanceId))) {
+    return entries;
+  }
+  if (options?.serverCanRoute === false) {
     return entries;
   }
   const hasReadyBackend = entries.some(
