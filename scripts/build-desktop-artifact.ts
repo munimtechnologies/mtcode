@@ -868,7 +868,11 @@ export const WINDOWS_SERVER_ASAR_IGNORE_GLOBS = [
   "**/node_modules/.bin",
   "**/node_modules/.bin/**",
 ] as const;
-export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;
+// A tripwire on payload bloat, not a hard budget: it catches an accidental
+// node_modules tree or a stray source dir landing in the package. MT Code
+// ships three alternate app icons on top of upstream's payload (the icon the
+// user picks is applied to the running window), which is a deliberate +3.
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 84;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {
