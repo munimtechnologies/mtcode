@@ -811,8 +811,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const { presentation: composerEnvironmentPresentation } = useEnvironmentPresentation(
     _activeThreadEnvironmentId ?? environmentId,
   );
+  // Absent (not just `false`) means an older server that rejects the `mt`
+  // instance outright, so MT Auto is only offered once an environment has
+  // answered that it can route. While the config is still loading nothing is
+  // known yet, and withholding the entry there would yank a sticky MT
+  // selection out of the picker on every reconnect.
+  const composerServerConfig = composerEnvironmentPresentation?.serverConfig ?? null;
   const serverCanRoute =
-    composerEnvironmentPresentation?.serverConfig?.environment.capabilities.modelRouting !== false;
+    composerServerConfig === null
+      ? true
+      : composerServerConfig.environment.capabilities.modelRouting === true;
   const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
     () =>
       prependMtModelPickerEntry(
@@ -878,7 +886,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       !lockedProvider &&
       activeThreadModelSelection != null &&
       isMtModelSelection(activeThreadModelSelection) &&
-      (composerDraft.activeProvider === undefined ||
+      // An untouched draft carries `null`, not `undefined` — treating only
+      // `undefined` as "no explicit pick" let the routed backend take the
+      // picker over as soon as any draft existed for the thread.
+      (composerDraft.activeProvider == null ||
         composerDraft.activeProvider === activeThreadModelSelection.instanceId)
     ) {
       return activeThreadModelSelection.instanceId;
