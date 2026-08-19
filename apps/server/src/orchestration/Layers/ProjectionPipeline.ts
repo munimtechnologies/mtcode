@@ -922,6 +922,83 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        // Goals: the decider emits these, the projection table has carried a
+        // goal_json column since migration 041, and the snapshot query reads
+        // it - but nothing ever wrote it, so every read model reported no
+        // goal. `thread.goal.continue` then refused with "no Active Goal to
+        // continue" and autonomous continuation never ran.
+        case "thread.goal-set": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            goal: {
+              objective: event.payload.objective,
+              status: event.payload.status,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+            },
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.goal-paused":
+        case "thread.goal-resumed":
+        case "thread.goal-blocked":
+        case "thread.goal-usage-limited": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const goal = existingRow.value.goal;
+          if (goal == null) {
+            return;
+          }
+          const status =
+            event.type === "thread.goal-paused"
+              ? "paused"
+              : event.type === "thread.goal-resumed"
+                ? "active"
+                : event.type === "thread.goal-blocked"
+                  ? "blocked"
+                  : "usageLimited";
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            goal: { ...goal, status, updatedAt: event.payload.updatedAt },
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.goal-cleared":
+        case "thread.goal-completed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // Completing a goal keeps it visible as completed; clearing removes
+          // it, which is the difference the composer badge renders.
+          const goal = existingRow.value.goal;
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            goal:
+              event.type === "thread.goal-completed" && goal != null
+                ? { ...goal, status: "complete", updatedAt: event.payload.updatedAt }
+                : null,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.deleted": {
           attachmentSideEffects.deletedThreadIds.add(event.payload.threadId);
           const existingRow = yield* projectionThreadRepository.getById({

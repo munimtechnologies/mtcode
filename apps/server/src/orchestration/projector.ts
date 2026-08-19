@@ -21,6 +21,12 @@ import {
   ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
+  ThreadGoalClearedPayload,
+  ThreadQueuedTurnCancelledPayload,
+  ThreadQueuedTurnDispatchedPayload,
+  ThreadTurnQueuedPayload,
+  ThreadGoalPausedPayload,
+  ThreadGoalSetPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadMessageCorrectedPayload,
@@ -486,7 +492,12 @@ export function projectEvent(
       );
 
     case "thread.active-reordered":
-      return decodeForEvent(ThreadActiveReorderedPayload, event.payload, event.type, "payload").pipe(
+      return decodeForEvent(
+        ThreadActiveReorderedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -523,6 +534,131 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             runtimeMode: payload.runtimeMode,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    // Queued turns had the same gap as goals: the pipeline marked the message
+    // queued in SQL, but the read model the decider validates against never
+    // did, so dispatching one was refused with "no longer waiting".
+    case "thread.turn-queued":
+      return decodeForEvent(ThreadTurnQueuedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          // A goal continuation queues without a user message.
+          const messageId = payload.messageId;
+          if (messageId === undefined) return nextBase;
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: thread.messages.map((entry) =>
+                entry.id === messageId ? { ...entry, deliveryState: "queued" as const } : entry,
+              ),
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-dispatched":
+      return decodeForEvent(
+        ThreadQueuedTurnDispatchedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: thread.messages.map((entry) => {
+                if (entry.id !== payload.messageId) return entry;
+                const { deliveryState: _dropped, ...delivered } = entry;
+                return delivered;
+              }),
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-cancelled":
+      return decodeForEvent(
+        ThreadQueuedTurnCancelledPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              messages: thread.messages.filter((entry) => entry.id !== payload.messageId),
+            }),
+          };
+        }),
+      );
+
+    // Goals were emitted by the decider and persisted as events, but no
+    // projector case ever applied them, so the read model always reported no
+    // goal: setting one appeared to work and then `thread.goal.continue`
+    // refused with "no Active Goal to continue".
+    case "thread.goal-set":
+      return decodeForEvent(ThreadGoalSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            goal: {
+              objective: payload.objective,
+              status: payload.status,
+              createdAt: payload.createdAt,
+              updatedAt: payload.updatedAt,
+            },
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.goal-paused":
+    case "thread.goal-resumed":
+    case "thread.goal-blocked":
+    case "thread.goal-usage-limited":
+    case "thread.goal-completed":
+      return decodeForEvent(ThreadGoalPausedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const status =
+            event.type === "thread.goal-paused"
+              ? ("paused" as const)
+              : event.type === "thread.goal-resumed"
+                ? ("active" as const)
+                : event.type === "thread.goal-blocked"
+                  ? ("blocked" as const)
+                  : event.type === "thread.goal-usage-limited"
+                    ? ("usageLimited" as const)
+                    : ("complete" as const);
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const goal = thread?.goal;
+          if (goal == null) return nextBase;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              goal: { ...goal, status, updatedAt: payload.updatedAt },
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.goal-cleared":
+      return decodeForEvent(ThreadGoalClearedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            goal: null,
             updatedAt: payload.updatedAt,
           }),
         })),

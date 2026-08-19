@@ -14,6 +14,9 @@ import {
   ThreadSnoozedPayload as ContractsThreadSnoozedPayloadSchema,
   ThreadUnsnoozedPayload as ContractsThreadUnsnoozedPayloadSchema,
   ThreadGoalSetPayload as ContractsThreadGoalSetPayloadSchema,
+  ThreadTurnQueuedPayload as ContractsThreadTurnQueuedPayloadSchema,
+  ThreadQueuedTurnDispatchedPayload as ContractsThreadQueuedTurnDispatchedPayloadSchema,
+  ThreadQueuedTurnCancelledPayload as ContractsThreadQueuedTurnCancelledPayloadSchema,
   ThreadGoalPausedPayload as ContractsThreadGoalPausedPayloadSchema,
   ThreadGoalResumedPayload as ContractsThreadGoalResumedPayloadSchema,
   ThreadGoalClearedPayload as ContractsThreadGoalClearedPayloadSchema,
@@ -55,6 +58,9 @@ export const ThreadUnsettledPayload = ContractsThreadUnsettledPayloadSchema;
 export const ThreadSnoozedPayload = ContractsThreadSnoozedPayloadSchema;
 export const ThreadUnsnoozedPayload = ContractsThreadUnsnoozedPayloadSchema;
 export const ThreadGoalSetPayload = ContractsThreadGoalSetPayloadSchema;
+export const ThreadTurnQueuedPayload = ContractsThreadTurnQueuedPayloadSchema;
+export const ThreadQueuedTurnDispatchedPayload = ContractsThreadQueuedTurnDispatchedPayloadSchema;
+export const ThreadQueuedTurnCancelledPayload = ContractsThreadQueuedTurnCancelledPayloadSchema;
 export const ThreadGoalPausedPayload = ContractsThreadGoalPausedPayloadSchema;
 export const ThreadGoalResumedPayload = ContractsThreadGoalResumedPayloadSchema;
 export const ThreadGoalClearedPayload = ContractsThreadGoalClearedPayloadSchema;
