@@ -4921,10 +4921,13 @@ function ChatViewContent(props: ChatViewProps) {
       variant: "warning",
       icon: <MonitorIcon />,
       title: "Computer Use needs permission to use the pointer",
-      description: `Grant ${labels.join(" and ")} so the agent can click, type, and take screenshots without moving your mouse.`,
+      // The button also repairs a grant that macOS still lists as enabled but
+      // refuses (the stored code requirement no longer matches the app after a
+      // re-sign), so "Open Settings" undersells what pressing it does.
+      description: `Grant ${labels.join(" and ")} so the agent can click, type, and take screenshots without moving your mouse. If macOS already shows this app as allowed, pressing Fix re-asks — the old approval no longer matches this build.`,
       actions: (
         <Button size="xs" onClick={() => void computerUsePermissions.openPermission(first)}>
-          Open Settings
+          Fix permissions
         </Button>
       ),
       onDismiss: () => setComputerUsePermissionBannerDismissed(true),
