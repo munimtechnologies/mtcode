@@ -118,16 +118,15 @@ export const DEFAULT_TERMINAL_FONT_SIZE: TerminalFontSize = 12;
  * Sidebar header artwork.
  *
  * Upstream ties the artwork to the Dev/Nightly channel; MT Code ships one
- * release, so the artwork is a choice instead of a side effect of a build
- * channel. "auto" keeps the upstream behaviour (art on Dev/Nightly, nothing
- * on a release build); the named scenes and any custom artwork are explicit.
+ * release, so the artwork is a plain choice: a named scene, one of your own,
+ * or none.
  */
-export const SIDEBAR_ARTWORK_BUILT_IN_IDS = ["auto", "none", "night", "day"] as const;
+export const SIDEBAR_ARTWORK_BUILT_IN_IDS = ["night", "day", "none"] as const;
 export const SidebarArtworkSelection = TrimmedNonEmptyString.check(
   Schema.isMaxLength(80),
 );
 export type SidebarArtworkSelection = typeof SidebarArtworkSelection.Type;
-export const DEFAULT_SIDEBAR_ARTWORK_SELECTION = "auto";
+export const DEFAULT_SIDEBAR_ARTWORK_SELECTION = "night";
 
 /** Largest artwork a user may store, so settings stay a settings file. */
 export const MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES = 512 * 1024;
@@ -146,6 +145,30 @@ export const CustomSidebarArtwork = Schema.Struct({
   createdAt: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
 });
 export type CustomSidebarArtwork = typeof CustomSidebarArtwork.Type;
+
+/**
+ * Which icon the app wears in the Dock, taskbar, and window.
+ *
+ * The bundle's own icon cannot change at runtime without breaking the code
+ * signature (and with it every macOS permission grant), so this swaps the
+ * *running* icon rather than rewriting the installed app.
+ */
+export const APP_ICON_BUILT_IN_IDS = ["default", "light", "dark"] as const;
+export const AppIconSelection = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
+export type AppIconSelection = typeof AppIconSelection.Type;
+export const DEFAULT_APP_ICON_SELECTION = "default";
+
+/** Same size ceiling as artwork: a settings file, not an asset store. */
+export const MAX_CUSTOM_APP_ICON_BYTES = 512 * 1024;
+
+export const CustomAppIcon = Schema.Struct({
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(60)),
+  /** `data:` URL for a square PNG or JPEG; Electron cannot load SVG icons. */
+  image: TrimmedNonEmptyString.check(Schema.isMaxLength(MAX_CUSTOM_APP_ICON_BYTES)),
+  createdAt: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+});
+export type CustomAppIcon = typeof CustomAppIcon.Type;
 
 export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill", "none"]);
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
@@ -804,6 +827,12 @@ export const ServerSettings = Schema.Struct({
   customSidebarArtworks: Schema.Array(CustomSidebarArtwork).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** Which icon the desktop app wears; see AppIconSelection. */
+  appIcon: AppIconSelection.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_APP_ICON_SELECTION)),
+  ),
+  /** The account's own icons, synced the same way artwork is. */
+  customAppIcons: Schema.Array(CustomAppIcon).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
   // including prior opt-ins, resets to the buffered default.
@@ -1058,6 +1087,8 @@ export const ServerSettingsPatch = Schema.Struct({
   environmentLabel: Schema.optionalKey(TrimmedString.check(Schema.isMaxLength(40))),
   sidebarArtwork: Schema.optionalKey(SidebarArtworkSelection),
   customSidebarArtworks: Schema.optionalKey(Schema.Array(CustomSidebarArtwork)),
+  appIcon: Schema.optionalKey(AppIconSelection),
+  customAppIcons: Schema.optionalKey(Schema.Array(CustomAppIcon)),
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),

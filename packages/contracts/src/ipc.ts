@@ -1264,6 +1264,12 @@ export interface DesktopBridge {
    */
   openComputerUsePrivacySettings?: (pane: DesktopComputerUsePrivacyPane) => Promise<boolean>;
   /**
+   * Swap the icon the running app wears. The installed bundle keeps its own
+   * icon: rewriting that would break the signature, and with it every macOS
+   * permission grant.
+   */
+  setAppIcon?: (input: { readonly id: string; readonly image?: string }) => Promise<boolean>;
+  /**
    * Computer History daemon status (recording phase, paths, accessibility).
    * Optional for older desktop builds.
    */

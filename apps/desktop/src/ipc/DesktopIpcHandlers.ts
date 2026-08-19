@@ -23,6 +23,7 @@ import {
   getComputerUsePermissions,
   openComputerUsePrivacySettings,
 } from "./methods/computerUse.ts";
+import { setAppIcon } from "./methods/appIcon.ts";
 import {
   clearComputerHistory,
   deleteComputerHistoryMemory,
@@ -111,6 +112,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getComputerUsePermissions);
   yield* ipc.handle(openComputerUsePrivacySettings);
+  yield* ipc.handle(setAppIcon);
   yield* ipc.handle(getComputerHistoryStatus);
   yield* ipc.handle(getComputerHistoryTimeline);
   yield* ipc.handle(patchComputerHistorySettings);

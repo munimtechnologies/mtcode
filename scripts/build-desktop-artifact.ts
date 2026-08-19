@@ -894,6 +894,14 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/t3-desktop-mcp",
     to: "t3-desktop-mcp",
   },
+  {
+    // Alternate app icons the user can switch to at runtime. The bundle's own
+    // icon cannot change without breaking the signature, so the Dock icon is
+    // swapped from these instead.
+    from: "assets/munim",
+    to: "app-icons",
+    filter: ["munim-icon-*.png", "munim-macos-1024.png"],
+  },
 ] as const;
 
 export interface MacPasskeySigningConfiguration {

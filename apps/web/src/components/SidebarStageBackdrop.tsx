@@ -33,12 +33,14 @@ export function resolveSidebarArtwork(input: {
   if (selection === "none") return null;
   if (selection === "night") return NIGHTLY_BACKDROP;
   if (selection === "day") return DEV_BACKDROP;
-  if (selection !== "auto" && selection.length > 0) {
+  if (selection.length > 0 && selection !== "auto") {
     const artwork = input.custom.find((entry) => entry.id === selection);
     // A deleted artwork leaves the header bare rather than silently falling
     // back to a scene the user did not choose.
     return artwork ? { kind: "custom", image: artwork.image, name: artwork.name } : null;
   }
+  // Legacy "auto" (and an empty value) defer to the build channel, which is
+  // how this setting behaved before the scenes were named.
   return resolveSidebarStageBackdropVariant(input.stageLabel);
 }
 
@@ -91,11 +93,16 @@ export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBack
     selection: settings.sidebarArtwork,
     custom: settings.customSidebarArtworks,
   }));
+  // An explicit pick is the user telling us what to draw, so it outranks the
+  // environment-identification mode and the palette heuristic that upstream
+  // uses to decide whether artwork suits the current theme. `enabled` still
+  // governs the legacy "auto" value, which follows the build channel.
+  const explicit = artwork.selection.length > 0 && artwork.selection !== "auto";
   return resolveSidebarArtwork({
     selection: artwork.selection,
     stageLabel,
     custom: artwork.custom,
-    enabled,
+    enabled: explicit ? true : enabled,
   });
 }
 
