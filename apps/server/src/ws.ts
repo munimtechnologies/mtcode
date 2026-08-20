@@ -110,6 +110,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
+import * as ConversationImport from "./conversationImport/ConversationImport.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -566,6 +567,7 @@ const makeWsRpcLayer = (
             return Effect.void;
         }
       };
+      const conversationImport = yield* ConversationImport.ConversationImport;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
@@ -1979,6 +1981,18 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.listExternalConversations]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listExternalConversations,
+            conversationImport.list(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.importExternalConversation]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.importExternalConversation,
+            conversationImport.importConversation(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>

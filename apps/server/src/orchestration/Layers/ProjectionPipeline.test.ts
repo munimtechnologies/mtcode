@@ -4526,6 +4526,142 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
   ),
 );
 
+it.layer(makeProjectionPipelinePrefixedTestLayer("t3-import-turn-anchor-test-"))(
+  "OrchestrationProjectionPipeline imported turn anchors",
+  (it) => {
+    it.effect("projects imported messages as a completed provider turn", () =>
+      Effect.gen(function* () {
+        const eventStore = yield* OrchestrationEventStore;
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-import-anchor");
+        const turnId = TurnId.make("turn-import-anchor");
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-import-anchor-created"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-08-15T00:00:00.000Z",
+          commandId: CommandId.make("cmd-import-anchor-created"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-import-anchor-created"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-import-anchor"),
+            title: "Imported thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.3-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-08-15T00:00:00.000Z",
+            updatedAt: "2026-08-15T00:00:00.003Z",
+          },
+        });
+
+        const appendMessage = (
+          sequence: number,
+          role: "user" | "assistant",
+          messageId: string,
+          occurredAt: string,
+        ) =>
+          eventStore.append({
+            type: "thread.message-sent",
+            eventId: EventId.make(`evt-import-anchor-${sequence}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt,
+            commandId: CommandId.make(`cmd-import-anchor-${sequence}`),
+            causationEventId: null,
+            correlationId: CorrelationId.make(`cmd-import-anchor-${sequence}`),
+            metadata: {},
+            payload: {
+              threadId,
+              messageId: MessageId.make(messageId),
+              role,
+              text: messageId,
+              turnId,
+              streaming: false,
+              createdAt: occurredAt,
+              updatedAt: occurredAt,
+            },
+          });
+
+        yield* appendMessage(1, "user", "user-import-anchor", "2026-08-15T00:00:00.001Z");
+        yield* appendMessage(2, "assistant", "assistant-import-anchor", "2026-08-15T00:00:00.002Z");
+        yield* eventStore.append({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-import-anchor-3"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-08-15T00:00:00.003Z",
+          commandId: CommandId.make("cmd-import-anchor-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-import-anchor-3"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "codex",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              providerThreadId: "external-thread",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-08-15T00:00:00.003Z",
+            },
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const turnRows = yield* sql<{
+          readonly turnId: string;
+          readonly pendingMessageId: string | null;
+          readonly assistantMessageId: string | null;
+          readonly state: string;
+          readonly requestedAt: string;
+          readonly completedAt: string | null;
+        }>`
+          SELECT
+            turn_id AS "turnId",
+            pending_message_id AS "pendingMessageId",
+            assistant_message_id AS "assistantMessageId",
+            state,
+            requested_at AS "requestedAt",
+            completed_at AS "completedAt"
+          FROM projection_turns
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(turnRows, [
+          {
+            turnId: "turn-import-anchor",
+            pendingMessageId: "user-import-anchor",
+            assistantMessageId: "assistant-import-anchor",
+            state: "completed",
+            requestedAt: "2026-08-15T00:00:00.001Z",
+            completedAt: "2026-08-15T00:00:00.002Z",
+          },
+        ]);
+
+        const threadRows = yield* sql<{ readonly latestTurnId: string | null }>`
+          SELECT latest_turn_id AS "latestTurnId"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(threadRows, [{ latestTurnId: "turn-import-anchor" }]);
+      }),
+    );
+  },
+);
+
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
