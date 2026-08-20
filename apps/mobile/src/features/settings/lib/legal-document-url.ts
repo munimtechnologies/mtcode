@@ -16,16 +16,32 @@ function resolveMarketingSiteUrl(override: string | undefined): URL {
   }
 }
 
+function resolveDocumentPath(envName: string, fallback: string): string {
+  const override = process.env[envName]?.trim();
+  if (!override) {
+    return fallback;
+  }
+  return override.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
 const MARKETING_SITE_URL = resolveMarketingSiteUrl(process.env.EXPO_PUBLIC_MARKETING_SITE_URL);
 
 function marketingSiteDocumentUrl(path: string): string {
   return new URL(path, MARKETING_SITE_URL).toString();
 }
 
-export const PRIVACY_POLICY_URL = marketingSiteDocumentUrl("privacy-policy");
-export const SECURITY_POLICY_URL = marketingSiteDocumentUrl("security-policy");
-export const TERMS_OF_SERVICE_URL = marketingSiteDocumentUrl("terms-of-service");
-export const LEGAL_URL = marketingSiteDocumentUrl("legal");
+export const PRIVACY_POLICY_URL = marketingSiteDocumentUrl(
+  resolveDocumentPath("EXPO_PUBLIC_PRIVACY_POLICY_PATH", "privacy-policy"),
+);
+export const SECURITY_POLICY_URL = marketingSiteDocumentUrl(
+  resolveDocumentPath("EXPO_PUBLIC_SECURITY_POLICY_PATH", "security-policy"),
+);
+export const TERMS_OF_SERVICE_URL = marketingSiteDocumentUrl(
+  resolveDocumentPath("EXPO_PUBLIC_TERMS_OF_SERVICE_PATH", "terms-of-service"),
+);
+export const LEGAL_URL = marketingSiteDocumentUrl(
+  resolveDocumentPath("EXPO_PUBLIC_LEGAL_PATH", "legal"),
+);
 
 export const ALLOWED_LEGAL_DOCUMENT_URLS = [
   LEGAL_URL,

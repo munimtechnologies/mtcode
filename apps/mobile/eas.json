@@ -57,6 +57,11 @@
         "APP_VARIANT": "production",
         "T3CODE_MOBILE_DISTRO": "munim",
         "MOBILE_VERSION_POLICY": "appVersion",
+        "EXPO_PUBLIC_MARKETING_SITE_URL": "https://www.munimtech.com",
+        "EXPO_PUBLIC_PRIVACY_POLICY_PATH": "privacy",
+        "EXPO_PUBLIC_TERMS_OF_SERVICE_PATH": "terms",
+        "EXPO_PUBLIC_SECURITY_POLICY_PATH": "privacy",
+        "EXPO_PUBLIC_LEGAL_PATH": "privacy",
         "NODE_OPTIONS": "--max-old-space-size=4096"
       },
       "channel": "production-munim"
