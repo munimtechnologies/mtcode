@@ -1,6 +1,8 @@
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
+import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
+import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -346,6 +348,30 @@ export function isLatestTurnSettled(
   if (!session) return true;
   if (session.status === "running") return false;
   return true;
+}
+
+export function shouldEscapeUnsettledThreadOnOfflineEnvironment(
+  latestTurn: LatestTurnTiming | null,
+  session: SessionActivityState | null,
+  connectionPhase: EnvironmentConnectionPhase | null | undefined,
+): boolean {
+  if (canCreateProjectInEnvironment(connectionPhase)) return false;
+  return latestTurn !== null && !isLatestTurnSettled(latestTurn, session);
+}
+
+export function shouldOpenLatestThreadForProject(
+  latestTurn: LatestTurnTiming | null,
+  session: SessionActivityState | null,
+  connectionPhase: EnvironmentConnectionPhase | null | undefined,
+): boolean {
+  return !shouldEscapeUnsettledThreadOnOfflineEnvironment(latestTurn, session, connectionPhase);
+}
+
+export function shouldReadProjectFileForNewThreadDefaults(
+  projectDefaultThreadEnvMode: string | null | undefined,
+  connectionPhase: EnvironmentConnectionPhase | null | undefined,
+): boolean {
+  return projectDefaultThreadEnvMode == null && canCreateProjectInEnvironment(connectionPhase);
 }
 
 export function deriveActiveWorkStartedAt(
