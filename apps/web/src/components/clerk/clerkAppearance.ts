@@ -7,6 +7,9 @@ export const clerkAppearance = {
   options: {
     // Clerk v6 folded the old `layout` block into `options`.
     socialButtonsPlacement: "top",
+    // Purple night-sky MT mark (munim web apple-touch), not the black-on-white
+    // squircle that Clerk Dashboard still serves as the default application logo.
+    logoImageUrl: "/apple-touch-icon.png",
     // Hosted MT Connect still uses Clerk development keys until `clerk deploy`
     // finishes (custom domain + Google/GitHub/Apple apps + Munim Inc Stripe).
     // Hide the orange "Development mode" badge so the sign-in modal matches

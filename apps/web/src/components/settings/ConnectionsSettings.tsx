@@ -1913,7 +1913,7 @@ function ConnectAccountsSection() {
             <SettingsRow
               key={provider.id}
               title="T3 Connect"
-              description="T3-linked machines live on T3's Clerk and relay. This origin cannot sign in to T3 Connect directly."
+              description="T3-linked machines live on T3's Clerk and relay. Open T3 Connect to sign in — MT Connect stays available here for Munim identity."
               control={
                 <Button
                   size="xs"
@@ -1929,17 +1929,17 @@ function ConnectAccountsSection() {
             />
           );
         }
+        const mtDescription = isActiveEmbed
+          ? "Sign in from the sidebar. Pair a computer under Remote environments — Computer Use works once it is connected."
+          : "Munim Clerk identity for this site. Select it to sign in from the sidebar.";
+        const t3Description = isActiveEmbed
+          ? "Signed in for T3-linked machines and the T3 relay. Switch back to MT Connect anytime for Munim identity."
+          : "Reach machines linked through T3 Connect. You can switch back to MT Connect without losing either account.";
         return (
           <SettingsRow
             key={provider.id}
             title={provider.label}
-            description={
-              provider.id === "mt"
-                ? isActiveEmbed
-                  ? "Sign in from the sidebar. Pair a computer under Remote environments — Computer Use works once it is connected."
-                  : "Munim Clerk identity for this site. Select it to sign in from the sidebar."
-                : "Sign in from the sidebar to reach machines linked through T3 Connect."
-            }
+            description={provider.id === "mt" ? mtDescription : t3Description}
             control={
               isActiveEmbed ? (
                 <span className="text-xs text-muted-foreground">Active</span>

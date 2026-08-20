@@ -55,6 +55,7 @@ describe("clerkAppearance", () => {
     expect(clerkAppearance).toEqual({
       options: {
         socialButtonsPlacement: "top",
+        logoImageUrl: "/apple-touch-icon.png",
         unsafe_disableDevelopmentModeWarnings: true,
       },
       variables: {

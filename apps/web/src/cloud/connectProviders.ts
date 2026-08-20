@@ -127,13 +127,15 @@ export function resolveDefaultConnectProviderId(
   if (stored && providers.some((provider) => provider.id === stored)) {
     return stored;
   }
+  // Prefer MT Connect whenever Munim keys are baked in — Electron and web.
+  // T3 Connect stays available via "Use T3 Connect" / Open T3 Connect.
   const mt = providers.find((provider) => provider.id === "mt");
-  if (mt && !ctx.isElectron) return "mt";
+  if (mt) return "mt";
   const embeddableT3 = providers.find(
     (provider) => provider.id === "t3" && canEmbedClerkProvider(provider, ctx),
   );
   if (embeddableT3) return "t3";
-  return mt?.id ?? providers[0]?.id ?? null;
+  return providers[0]?.id ?? null;
 }
 
 export function resolveEmbeddedClerkProvider(

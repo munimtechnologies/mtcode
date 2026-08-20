@@ -74,13 +74,13 @@ describe("resolveDefaultConnectProviderId", () => {
     ).toBe("mt");
   });
 
-  it("defaults to T3 Connect on Electron when both exist", () => {
+  it("defaults to MT Connect on Electron when both exist", () => {
     expect(
       resolveDefaultConnectProviderId([mt, t3], {
         origin: "file://",
         isElectron: true,
       }),
-    ).toBe("t3");
+    ).toBe("mt");
   });
 });
 

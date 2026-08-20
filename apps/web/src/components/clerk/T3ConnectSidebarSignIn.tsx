@@ -108,8 +108,21 @@ function ConfiguredConnectSidebarSignIn() {
     <SidebarMenu>
       {mt && clerkReady ? <EmbeddedConnectSignInRow provider={mt} /> : null}
       {t3 ? (
-        clerkReady && canEmbedClerkProviderInThisClient(t3) && embedded?.id === "t3" ? (
-          <EmbeddedConnectSignInRow provider={t3} />
+        clerkReady && canEmbedClerkProviderInThisClient(t3) ? (
+          embedded?.id === "t3" ? (
+            <EmbeddedConnectSignInRow provider={t3} />
+          ) : (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => {
+                  setActiveId("t3");
+                }}
+              >
+                <LogInIcon />
+                <span>Use T3 Connect</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )
         ) : (
           <SidebarMenuItem>
             <SidebarMenuButton
