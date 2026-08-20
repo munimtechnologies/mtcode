@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Local Apple ASC API keys
+credentials/apple/
+
+credentials.json
+credentials/

@@ -33,6 +33,7 @@ export const BRAND_ASSET_PATHS = {
   munimWebAppleTouchIconPng: "assets/munim/munim-web-apple-touch-180.png",
   munimWebWordmarkPng: "assets/munim/munim-web-wordmark.png",
   munimLinuxIconPng: "assets/munim/munim-universal-1024.png",
+  munimUniversalIconPng: "assets/munim/munim-universal-1024.png",
   munimWindowsIconIco: "assets/munim/munim-windows.ico",
 
   developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",

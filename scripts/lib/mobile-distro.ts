@@ -65,8 +65,9 @@ const MUNIM: MobileDistroIdentity = {
   appleTeamId: "6T5J6U2UVT",
   clerkRelyingParty: "clerk.mtcode.munimtech.com",
   hostedAppDomain: "mtcode.munimtech.com",
-  easProjectId: undefined,
-  expoOwner: undefined,
+  // @munimtechnologies/mt-code
+  easProjectId: "0c4e70dd-ce27-4669-aba1-d1e5a683fbbf",
+  expoOwner: "munimtechnologies",
 };
 
 export function resolveMobileDistroRaw(

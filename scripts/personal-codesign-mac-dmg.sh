@@ -43,10 +43,36 @@ fi
 ditto "$APP_SRC" "$WORK/MT Code.app"
 hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force
 
-codesign --deep --force --options runtime --timestamp \
-  --sign "$IDENTITY" \
-  "$WORK/MT Code.app"
-codesign --verify --deep --strict "$WORK/MT Code.app"
+APP="$WORK/MT Code.app"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OSX_SIGN_DIR="$(find "$REPO_ROOT/node_modules" -type d -path '*/node_modules/@electron/osx-sign' 2>/dev/null | head -1)"
+if [[ -z "$OSX_SIGN_DIR" || ! -f "$OSX_SIGN_DIR/package.json" ]]; then
+  echo "missing @electron/osx-sign" >&2
+  exit 1
+fi
+echo "osx-sign: $OSX_SIGN_DIR"
+
+# Proper Electron inside-out signing (hardened runtime + Apple timestamp).
+IDENTITY="$IDENTITY" APP_PATH="$APP" OSX_SIGN_DIR="$OSX_SIGN_DIR" node <<'NODE'
+const { signAsync } = require(process.env.OSX_SIGN_DIR);
+(async () => {
+  await signAsync({
+    app: process.env.APP_PATH,
+    platform: 'darwin',
+    identity: process.env.IDENTITY,
+    hardenedRuntime: true,
+    optionsForFile: () => ({
+      hardenedRuntime: true,
+    }),
+  });
+  console.log('osx-sign complete');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+NODE
+
+codesign --verify --deep --strict "$APP"
 
 STAGE="$WORK/stage"
 mkdir -p "$STAGE"

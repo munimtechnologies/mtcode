@@ -52,9 +52,11 @@
     },
     "production-munim": {
       "extends": "production",
+      "credentialsSource": "local",
       "env": {
         "APP_VARIANT": "production",
         "T3CODE_MOBILE_DISTRO": "munim",
+        "MOBILE_VERSION_POLICY": "appVersion",
         "NODE_OPTIONS": "--max-old-space-size=4096"
       },
       "channel": "production-munim"
@@ -70,7 +72,13 @@
       }
     },
     "production-munim": {
-      "ios": {},
+      "ios": {
+        "ascAppId": "6803353917",
+        "ascApiKeyPath": "./credentials/apple/AuthKey_A5X3Y92UJP.p8",
+        "ascApiKeyId": "A5X3Y92UJP",
+        "ascApiKeyIssuerId": "6f677a98-7245-4fce-a5ae-be933547b809",
+        "appleTeamId": "6T5J6U2UVT"
+      },
       "android": {
         "track": "internal"
       }

@@ -35,10 +35,13 @@ describe("mobile-distro", () => {
     expect(resolveMobileDistroIdentity("munim").hostedAppDomain).toBe("mtcode.munimtech.com");
   });
 
-  it("omits Expo updates for Munim until a dedicated project exists", () => {
+  it("uses the Munim Expo project for OTA updates", () => {
     const munim = resolveMobileDistroIdentity("munim");
-    expect(munim.easProjectId).toBeUndefined();
-    expect(resolveMobileUpdatesUrl(munim)).toBeUndefined();
+    expect(munim.easProjectId).toBe("0c4e70dd-ce27-4669-aba1-d1e5a683fbbf");
+    expect(munim.expoOwner).toBe("munimtechnologies");
+    expect(resolveMobileUpdatesUrl(munim)).toBe(
+      "https://u.expo.dev/0c4e70dd-ce27-4669-aba1-d1e5a683fbbf",
+    );
     expect(resolveMobileUpdatesUrl(resolveMobileDistroIdentity(""))).toBe(
       "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     );

@@ -83,6 +83,7 @@ import { QRCodeSvg } from "../ui/qr-code";
 import { Spinner } from "../ui/spinner";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
@@ -109,7 +110,11 @@ import {
 } from "~/versionSkew";
 import { hasClerkPublicConfig, hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useOptionalConnectProviders } from "~/cloud/connectProviderContext";
-import { canEmbedClerkProvider, currentEmbedContext } from "~/cloud/connectProviders";
+import {
+  canEmbedClerkProvider,
+  currentEmbedContext,
+  type ConnectProviderId,
+} from "~/cloud/connectProviders";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
@@ -1809,13 +1814,15 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     operationError,
     reconcileCloudState,
   } = useCloudLinkController();
+  const connect = useOptionalConnectProviders();
+  const connectLabel = connect?.embedded?.label ?? connect?.active?.label ?? "Connect";
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
 
   const disabledReason = !isSignedIn
-    ? "Sign in to T3 Connect to manage this environment."
+    ? `Sign in to ${connectLabel} to manage this environment.`
     : !canManageRelay
-      ? "Your session does not have permission to manage T3 Connect access."
+      ? `Your session does not have permission to manage ${connectLabel} access.`
       : null;
   const isBusy = isUpdating || isUpdatingPreference;
 
@@ -1828,15 +1835,15 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       toastManager.add({
         type: "success",
         title: enabled
-          ? "T3 Connect linked"
+          ? `${connectLabel} linked`
           : publishAgentActivity
-            ? "T3 Connect tunnel disabled"
-            : "T3 Connect unlinked",
+            ? `${connectLabel} tunnel disabled`
+            : `${connectLabel} unlinked`,
         description: enabled
-          ? "This environment is available through T3 Connect."
+          ? `This environment is available through ${connectLabel}.`
           : publishAgentActivity
             ? "The managed tunnel was removed. Agent activity publishing stays on."
-            : "This environment is no longer available through T3 Connect.",
+            : `This environment is no longer available through ${connectLabel}.`,
       });
     }
     setIsUpdating(false);
@@ -1861,15 +1868,16 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     <>
       {window.desktopBridge ? (
         <SettingsRow
-          title="T3 Connect"
+          title={`Share via ${connectLabel}`}
           description={
             managedTunnelActive
-              ? "This environment is available to your other devices through T3 Connect."
-              : "Make this environment available to your other devices through T3 Connect."
+              ? `This environment is available to your other devices through ${connectLabel}.`
+              : `Make this environment available to your other devices through ${connectLabel}.`
           }
           status={operationError ?? primaryCloudLinkState.error}
           control={
             <CloudLinkSwitch
+              ariaLabel={`Share this environment via ${connectLabel}`}
               checked={managedTunnelActive}
               disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
               disabledReason={disabledReason}
@@ -1880,7 +1888,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       ) : null}
       <SettingsRow
         title="Publish agent activity"
-        description="Send activity from this environment to your mobile clients for push notifications and Live Activities. Works without a T3 Connect tunnel."
+        description="Send activity from this environment to your mobile clients for push notifications and Live Activities. Works without a managed Connect tunnel."
         control={
           <CloudLinkSwitch
             ariaLabel="Publish agent activity to mobile clients"
@@ -1895,63 +1903,96 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   );
 }
 
+function connectIdentityDescription(
+  activeId: ConnectProviderId | null,
+  providers: ReadonlyArray<{ id: ConnectProviderId; label: string }>,
+): string {
+  const hasMt = providers.some((provider) => provider.id === "mt");
+  const hasT3 = providers.some((provider) => provider.id === "t3");
+  if (activeId === "mt") {
+    return hasT3
+      ? "Munim identity for this app. Switch to T3 to reach T3-linked machines and the T3 relay."
+      : "Munim identity for this app. Sign in from the sidebar, then pair a computer under Remote environments.";
+  }
+  if (activeId === "t3") {
+    return hasMt
+      ? "T3 identity for T3-linked machines and the T3 relay. Switch to MT for Munim identity."
+      : "T3 identity for T3-linked machines and the T3 relay.";
+  }
+  return "Choose which Connect identity signs you in from the sidebar.";
+}
+
 function ConnectAccountsSection() {
   const connect = useOptionalConnectProviders();
   const providers = connect?.providers ?? [];
-  const embedded = connect?.embedded ?? null;
+  const activeId = connect?.activeId ?? null;
   const setActiveId = connect?.setActiveId;
   const ctx = currentEmbedContext();
   if (providers.length === 0 && !hasClerkPublicConfig()) return null;
 
+  const selectProvider = (id: ConnectProviderId) => {
+    const provider = providers.find((entry) => entry.id === id);
+    if (!provider || !setActiveId) return;
+    setActiveId(id);
+    // T3's production Clerk rejects non-app.t3.codes web origins — open hosted.
+    if (id === "t3" && !canEmbedClerkProvider(provider, ctx) && provider.hostedAppUrl) {
+      window.open(provider.hostedAppUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  if (providers.length >= 2) {
+    const selectedId = activeId ?? providers[0]?.id ?? null;
+    return (
+      <SettingsSection title="Connect">
+        <SettingsRow
+          title="Identity"
+          description={connectIdentityDescription(selectedId, providers)}
+          control={
+            <ToggleGroup
+              aria-label="Connect identity"
+              variant="segmented"
+              value={selectedId ? [selectedId] : []}
+              onValueChange={(next) => {
+                const value = next[0];
+                if (value === "mt" || value === "t3") selectProvider(value);
+              }}
+            >
+              {providers.map((provider) => (
+                <Toggle key={provider.id} value={provider.id}>
+                  {provider.id === "mt" ? "MT" : "T3"}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          }
+        />
+      </SettingsSection>
+    );
+  }
+
+  const only = providers[0];
+  if (!only) return null;
+  const embeddable = canEmbedClerkProvider(only, ctx);
   return (
     <SettingsSection title="Connect">
-      {providers.map((provider) => {
-        const embeddable = canEmbedClerkProvider(provider, ctx);
-        const isActiveEmbed = embedded?.id === provider.id;
-        if (provider.id === "t3" && !embeddable) {
-          return (
-            <SettingsRow
-              key={provider.id}
-              title="T3 Connect"
-              description="T3-linked machines live on T3's Clerk and relay. Open T3 Connect to sign in — MT Connect stays available here for Munim identity."
-              control={
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => {
-                    setActiveId?.("t3");
-                    window.open(provider.hostedAppUrl, "_blank", "noopener,noreferrer");
-                  }}
-                >
-                  Open T3 Connect
-                </Button>
-              }
-            />
-          );
+      <SettingsRow
+        title={only.label}
+        description={connectIdentityDescription(only.id, providers)}
+        control={
+          only.id === "t3" && !embeddable ? (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                selectProvider("t3");
+              }}
+            >
+              Open T3 Connect
+            </Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">Active</span>
+          )
         }
-        const mtDescription = isActiveEmbed
-          ? "Sign in from the sidebar. Pair a computer under Remote environments — Computer Use works once it is connected."
-          : "Munim Clerk identity for this site. Select it to sign in from the sidebar.";
-        const t3Description = isActiveEmbed
-          ? "Signed in for T3-linked machines and the T3 relay. Switch back to MT Connect anytime for Munim identity."
-          : "Reach machines linked through T3 Connect. You can switch back to MT Connect without losing either account.";
-        return (
-          <SettingsRow
-            key={provider.id}
-            title={provider.label}
-            description={provider.id === "mt" ? mtDescription : t3Description}
-            control={
-              isActiveEmbed ? (
-                <span className="text-xs text-muted-foreground">Active</span>
-              ) : (
-                <Button size="xs" variant="outline" onClick={() => setActiveId?.(provider.id)}>
-                  Use {provider.label}
-                </Button>
-              )
-            }
-          />
-        );
-      })}
+      />
     </SettingsSection>
   );
 }

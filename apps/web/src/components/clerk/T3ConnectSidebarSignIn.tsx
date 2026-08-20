@@ -11,7 +11,7 @@ import {
   canEmbedClerkProviderInThisClient,
   useOptionalConnectProviders,
 } from "../../cloud/connectProviderContext";
-import { providerHasRelay } from "../../cloud/connectProviders";
+import { providerHasRelay, type ConnectProviderId } from "../../cloud/connectProviders";
 import { hasClerkPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
@@ -99,17 +99,30 @@ function ConfiguredConnectSidebarAvatar() {
 function ConfiguredConnectSidebarSignIn() {
   const connect = useOptionalConnectProviders();
   if (!connect) return null;
-  const { providers, embedded, setActiveId } = connect;
+  const { providers, activeId, embedded, setActiveId } = connect;
   const mt = providers.find((provider) => provider.id === "mt");
   const t3 = providers.find((provider) => provider.id === "t3");
   const clerkReady = Boolean(embedded);
+  const selectedId: ConnectProviderId | null = activeId ?? embedded?.id ?? null;
 
   return (
     <SidebarMenu>
-      {mt && clerkReady ? <EmbeddedConnectSignInRow provider={mt} /> : null}
+      {mt && clerkReady && selectedId === "mt" ? <EmbeddedConnectSignInRow provider={mt} /> : null}
+      {mt && clerkReady && selectedId === "t3" ? (
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            onClick={() => {
+              setActiveId("mt");
+            }}
+          >
+            <LogInIcon />
+            <span>Switch to MT Connect</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ) : null}
       {t3 ? (
         clerkReady && canEmbedClerkProviderInThisClient(t3) ? (
-          embedded?.id === "t3" ? (
+          selectedId === "t3" ? (
             <EmbeddedConnectSignInRow provider={t3} />
           ) : (
             <SidebarMenuItem>
@@ -119,7 +132,7 @@ function ConfiguredConnectSidebarSignIn() {
                 }}
               >
                 <LogInIcon />
-                <span>Use T3 Connect</span>
+                <span>Switch to T3 Connect</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           )
@@ -148,25 +161,8 @@ function EmbeddedConnectSignInRow({
 }) {
   const { isLoaded, isSignedIn } = useAuth();
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
-  const connect = useOptionalConnectProviders();
-  const embedded = connect?.embedded ?? null;
-  const setActiveId = connect?.setActiveId;
 
   if (!isLoaded || isSignedIn) return null;
-  if (embedded && embedded.id !== provider.id) {
-    return (
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          onClick={() => {
-            setActiveId?.(provider.id);
-          }}
-        >
-          <LogInIcon />
-          <span>Sign in to {provider.label}</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    );
-  }
 
   return (
     <SidebarMenuItem>
