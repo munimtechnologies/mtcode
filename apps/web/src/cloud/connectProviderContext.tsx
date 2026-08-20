@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
 import {
-  canEmbedClerkProvider,
   currentEmbedContext,
   readBakedConnectProviders,
   resolveDefaultConnectProviderId,
   resolveEmbeddedClerkProvider,
+  selectEmbeddableConnectProviderId,
   writeStoredConnectProviderId,
   type ConnectProviderId,
   type ConnectProviderPublicConfig,
@@ -16,7 +16,9 @@ interface ConnectProvidersContextValue {
   readonly activeId: ConnectProviderId | null;
   readonly active: ConnectProviderPublicConfig | null;
   readonly embedded: ConnectProviderPublicConfig | null;
-  readonly setActiveId: (id: ConnectProviderId) => void;
+  /** Switch the in-app Clerk identity. Non-embeddable providers (T3 on hosted
+   * Munim web) are ignored — open their hostedAppUrl instead. */
+  readonly setActiveId: (id: ConnectProviderId) => boolean;
 }
 
 const ConnectProvidersContext = createContext<ConnectProvidersContextValue | null>(null);
@@ -27,10 +29,17 @@ export function ConnectProvidersRoot({ children }: { readonly children: ReactNod
     resolveDefaultConnectProviderId(providers, currentEmbedContext()),
   );
 
-  const setActiveId = useCallback((id: ConnectProviderId) => {
-    setActiveIdState(id);
-    writeStoredConnectProviderId(id);
-  }, []);
+  const setActiveId = useCallback(
+    (id: ConnectProviderId): boolean => {
+      const ctx = currentEmbedContext();
+      const next = selectEmbeddableConnectProviderId(providers, id, ctx);
+      if (!next) return false;
+      setActiveIdState(next);
+      writeStoredConnectProviderId(next);
+      return true;
+    },
+    [providers],
+  );
 
   const value = useMemo<ConnectProvidersContextValue>(() => {
     const ctx = currentEmbedContext();

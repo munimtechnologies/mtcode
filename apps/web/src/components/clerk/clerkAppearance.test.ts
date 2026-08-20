@@ -56,6 +56,7 @@ describe("clerkAppearance", () => {
       options: {
         socialButtonsPlacement: "top",
         logoImageUrl: "/apple-touch-icon.png",
+        logoLinkUrl: "/",
         unsafe_disableDevelopmentModeWarnings: true,
       },
       variables: {
@@ -74,6 +75,8 @@ describe("clerkAppearance", () => {
         colorRing: "var(--ring)",
       },
       elements: {
+        logoBox: "justify-center",
+        logoImage: "size-10 rounded-xl",
         formFieldErrorText: { color: "var(--error-foreground)" },
         formFieldWarningText: { color: "var(--warning-foreground)" },
         formFieldSuccessText: { color: "var(--success-foreground)" },

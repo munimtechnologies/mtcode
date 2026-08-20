@@ -187,7 +187,7 @@ function HostedStaticOnboardingState() {
                 {cloudEnabled
                   ? "Sign in to MT Connect or T3 Connect to reach a linked environment, or add a reachable backend manually."
                   : clerkEnabled
-                    ? "Sign in to MT Connect in the sidebar, open T3 Connect for T3-linked machines, or add a reachable backend. Computer Use works once an environment is connected."
+                    ? "Sign in to MT Connect in the sidebar. Open T3 Connect in a browser for T3-linked machines, or add a reachable backend. Computer Use works once an environment is connected."
                     : "Add a reachable backend manually to start working from this browser."}
               </EmptyDescription>
               <div className="mt-6 flex justify-center">

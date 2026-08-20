@@ -1,15 +1,16 @@
 import type { ClerkProviderProps } from "@clerk/react";
 
 /** Keeps Clerk's stock component structure while binding its color system to
- * the live T3 Code palette. CSS variables make theme changes propagate to
+ * the live app palette. CSS variables make theme changes propagate to
  * portaled sign-in and profile surfaces without remounting Clerk. */
 export const clerkAppearance = {
   options: {
     // Clerk v6 folded the old `layout` block into `options`.
     socialButtonsPlacement: "top",
-    // Purple night-sky MT mark (munim web apple-touch), not the black-on-white
-    // squircle that Clerk Dashboard still serves as the default application logo.
+    // Night-sky MT mark from apps/web/public — not Clerk Dashboard's default
+    // application logo (which can still show purple/generic branding).
     logoImageUrl: "/apple-touch-icon.png",
+    logoLinkUrl: "/",
     // Hosted MT Connect still uses Clerk development keys until `clerk deploy`
     // finishes (custom domain + Google/GitHub/Apple apps + Munim Inc Stripe).
     // Hide the orange "Development mode" badge so the sign-in modal matches
@@ -37,6 +38,9 @@ export const clerkAppearance = {
     colorRing: "var(--ring)",
   },
   elements: {
+    // Prefer the app-served MT mark over Clerk's dashboard favicon/logo.
+    logoBox: "justify-center",
+    logoImage: "size-10 rounded-xl",
     formFieldErrorText: { color: "var(--error-foreground)" },
     formFieldWarningText: { color: "var(--warning-foreground)" },
     formFieldSuccessText: { color: "var(--success-foreground)" },

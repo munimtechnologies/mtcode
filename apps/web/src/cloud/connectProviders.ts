@@ -124,11 +124,21 @@ export function resolveDefaultConnectProviderId(
 ): ConnectProviderId | null {
   if (providers.length === 0) return null;
   const stored = readStoredConnectProviderId();
-  if (stored && providers.some((provider) => provider.id === stored)) {
-    return stored;
+  if (stored) {
+    const storedProvider = providers.find((provider) => provider.id === stored) ?? null;
+    // Ignore a persisted T3 selection on origins where T3 Clerk cannot embed —
+    // otherwise the UI claims "T3" while the session stays on MT Connect.
+    if (storedProvider && canEmbedClerkProvider(storedProvider, ctx)) {
+      return stored;
+    }
+    if (storedProvider && !canEmbedClerkProvider(storedProvider, ctx)) {
+      const fallback = providers.find((provider) => canEmbedClerkProvider(provider, ctx))?.id;
+      if (fallback) writeStoredConnectProviderId(fallback);
+    }
   }
   // Prefer MT Connect whenever Munim keys are baked in — Electron and web.
-  // T3 Connect stays available via "Use T3 Connect" / Open T3 Connect.
+  // T3 Connect stays available via "Open T3 Connect" (hosted) or an in-app
+  // switch on Electron where T3 Clerk can embed.
   const mt = providers.find((provider) => provider.id === "mt");
   if (mt) return "mt";
   const embeddableT3 = providers.find(
@@ -136,6 +146,18 @@ export function resolveDefaultConnectProviderId(
   );
   if (embeddableT3) return "t3";
   return providers[0]?.id ?? null;
+}
+
+/** Persist an in-app Connect identity only when Clerk can actually embed it. */
+export function selectEmbeddableConnectProviderId(
+  providers: ReadonlyArray<ConnectProviderPublicConfig>,
+  id: ConnectProviderId,
+  ctx: ConnectEmbedContext,
+): ConnectProviderId | null {
+  const provider = providers.find((entry) => entry.id === id) ?? null;
+  if (!provider) return null;
+  if (canEmbedClerkProvider(provider, ctx)) return id;
+  return null;
 }
 
 export function resolveEmbeddedClerkProvider(
