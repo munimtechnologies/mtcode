@@ -275,7 +275,7 @@ fn all_tool_defs() -> Value {
         },
         {
             "name": "browser_close_all_tabs",
-            "description": "Close every tab the agent opened and remove its tab group. Call this when finished with the browser so no empty group is left in the user's tab strip.",
+            "description": "Close every tab the agent opened and remove its tab group. Call this when finished with the browser so no empty group is left in the user's tab strip. The MCP process also runs this automatically when the Computer Use session ends.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {

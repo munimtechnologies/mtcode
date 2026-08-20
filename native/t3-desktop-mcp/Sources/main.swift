@@ -2258,7 +2258,7 @@ let toolDefs: [[String: Any]] = [
     ],
     [
         "name": "browser_close_all_tabs",
-        "description": "Close every tab the agent opened and remove its tab group. Call this when finished with the browser so no empty group is left in the user's tab strip.",
+        "description": "Close every tab the agent opened and remove its tab group. Call this when finished with the browser so no empty group is left in the user's tab strip. The MCP process also runs this automatically when the Computer Use session ends.",
         "inputSchema": ["type": "object", "properties": [:] as [String: Any]],
     ],
     [
@@ -2417,6 +2417,33 @@ if CommandLine.arguments.contains("cursor-overlay") {
 
 BrowserBridge.shared.start()
 
+/// Best-effort: drop the agent Chrome tab group when this MCP process is going
+/// away so aborted / unfinished Computer Use turns do not leave an empty
+/// "MT Code" / "T3 Code" group in the user's tab strip.
+func cleanupAgentBrowserTabsOnExit() {
+    guard browserControlEnabled, BrowserBridge.shared.isConnected else { return }
+    _ = BrowserBridge.shared.call("close_all_tabs", timeout: 2)
+}
+
+/// SIGTERM/SIGINT often arrive before stdin EOF when the host tears down the
+/// MCP child. Handle them on a Dispatch queue (not a raw signal handler) so we
+/// can still talk to the Chrome bridge.
+var exitCleanupSignalSources: [DispatchSourceSignal] = []
+func installExitCleanupSignals() {
+    for sig in [SIGTERM, SIGINT] as [Int32] {
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .global(qos: .userInitiated))
+        source.setEventHandler {
+            cleanupAgentBrowserTabsOnExit()
+            AgentCursor.shared.hide()
+            exit(0)
+        }
+        source.resume()
+        exitCleanupSignalSources.append(source)
+    }
+}
+installExitCleanupSignals()
+
 // ScreenCaptureKit talks to the window server, which asserts (did_initialize)
 // unless the process has been initialised as a GUI app. `.accessory` keeps it
 // out of the Dock and app switcher while still allowing the cursor overlay
@@ -2543,6 +2570,7 @@ while let line = readLine(strippingNewline: true) {
     }
 }
     // stdin closed: the client is gone, so the process should follow.
+    cleanupAgentBrowserTabsOnExit()
     AgentCursor.shared.hide()
     exit(0)
 }

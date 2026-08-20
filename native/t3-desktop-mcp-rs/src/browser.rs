@@ -164,6 +164,10 @@ impl BrowserBridge {
         }
     }
 
+    pub fn is_connected(&self) -> bool {
+        self.connected()
+    }
+
     fn connected(&self) -> bool {
         self.outgoing.lock().is_ok_and(|guard| guard.is_some())
     }

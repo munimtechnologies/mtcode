@@ -172,6 +172,12 @@ fn main() {
         }
     }
 
+    // Best-effort: drop the agent Chrome tab group when this MCP process exits
+    // so unfinished Computer Use turns do not leave an empty group behind.
+    if tools::browser_control_enabled() && browser.is_connected() {
+        let _ = browser.call("close_all_tabs", &json!({}));
+    }
+
     #[cfg(any(windows, target_os = "linux"))]
     platform::agent_cursor::AgentCursor::shared().hide();
 }

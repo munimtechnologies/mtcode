@@ -113,6 +113,7 @@ import { useOptionalConnectProviders } from "~/cloud/connectProviderContext";
 import {
   canEmbedClerkProvider,
   currentEmbedContext,
+  providerHasRelay,
   type ConnectProviderId,
 } from "~/cloud/connectProviders";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
@@ -1816,14 +1817,23 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   } = useCloudLinkController();
   const connect = useOptionalConnectProviders();
   const connectLabel = connect?.embedded?.label ?? connect?.active?.label ?? "Connect";
+  const activeProvider = connect?.active ?? connect?.embedded ?? null;
+  const hasRelay = providerHasRelay(activeProvider);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
 
-  const disabledReason = !isSignedIn
+  const sessionDisabledReason = !isSignedIn
     ? `Sign in to ${connectLabel} to manage this environment.`
     : !canManageRelay
       ? `Your session does not have permission to manage ${connectLabel} access.`
       : null;
+  // Publish works without a managed tunnel; Share needs an https relay URL on
+  // the active Connect provider (MT has Clerk today but no Munim relay yet).
+  const shareDisabledReason =
+    sessionDisabledReason ??
+    (!hasRelay
+      ? `${connectLabel} has no managed relay configured. Switch identity to T3 to share via the T3 relay, or deploy a Munim relay.`
+      : null);
   const isBusy = isUpdating || isUpdatingPreference;
 
   const updateManagedTunnel = async (enabled: boolean) => {
@@ -1870,17 +1880,25 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
         <SettingsRow
           title={`Share via ${connectLabel}`}
           description={
-            managedTunnelActive
-              ? `This environment is available to your other devices through ${connectLabel}.`
-              : `Make this environment available to your other devices through ${connectLabel}.`
+            !hasRelay
+              ? `Sharing needs a managed ${connectLabel} relay. Publish agent activity still works without one.`
+              : managedTunnelActive
+                ? `This environment is available to your other devices through ${connectLabel}.`
+                : `Make this environment available to your other devices through ${connectLabel}.`
           }
           status={operationError ?? primaryCloudLinkState.error}
           control={
             <CloudLinkSwitch
               ariaLabel={`Share this environment via ${connectLabel}`}
               checked={managedTunnelActive}
-              disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
-              disabledReason={disabledReason}
+              disabled={
+                !canManageRelay ||
+                !isSignedIn ||
+                !hasRelay ||
+                primaryCloudLinkState.isPending ||
+                isBusy
+              }
+              disabledReason={shareDisabledReason}
               onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
             />
           }
@@ -1894,7 +1912,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             ariaLabel="Publish agent activity to mobile clients"
             checked={publishAgentActivity}
             disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
-            disabledReason={disabledReason}
+            disabledReason={sessionDisabledReason}
             onCheckedChange={(enabled) => void updatePublishAgentActivity(enabled)}
           />
         }
