@@ -336,15 +336,18 @@ export const make = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ channel });
     const allowsPrerelease = channel === "nightly";
+    // Release-note hover needs fullChangelog on every channel (including latest /
+    // MT Code's single track). Prerelease allowance stays nightly-only.
+    const fullChangelog = true;
     yield* electronUpdater.setChannel(channel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowsPrerelease);
-    yield* electronUpdater.setFullChangelog(allowsPrerelease);
+    yield* electronUpdater.setFullChangelog(fullChangelog);
     yield* logUpdaterInfo("using update channel", {
       channel,
       allowPrerelease: allowsPrerelease,
       allowDowngrade: allowsPrerelease,
-      fullChangelog: allowsPrerelease,
+      fullChangelog,
     });
   });
 

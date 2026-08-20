@@ -316,13 +316,16 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("enables nightly full changelog release notes and broadcasts summaries", () => {
+  it.effect("enables full changelog release notes on latest and nightly", () => {
     const harness = makeHarness();
 
     return Effect.scoped(
       Effect.gen(function* () {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
+
+        // MT Code / latest still needs release notes for the update hover.
+        assert.equal(harness.fullChangelog(), true);
 
         yield* updates.setChannel("nightly");
         assert.equal(harness.fullChangelog(), true);
@@ -355,6 +358,33 @@ describe("DesktopUpdates", () => {
           },
         ]);
         assert.deepEqual(harness.sentStates.at(-1)?.releaseNotes, state.releaseNotes);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("broadcasts latest-channel release notes for the update hover", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", {
+          version: "0.0.37",
+          releaseNotes:
+            "## What's changed\n- feat: show update changelog on hover\n- fix: clean Computer Use tab groups",
+        });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.channel, "latest");
+        assert.deepEqual(state.releaseNotes, [
+          {
+            version: "0.0.37",
+            items: ["feat: show update changelog on hover", "fix: clean Computer Use tab groups"],
+          },
+        ]);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
