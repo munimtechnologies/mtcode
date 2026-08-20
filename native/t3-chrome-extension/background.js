@@ -299,7 +299,7 @@ async function send(tabId, method, params = {}) {
 /// agent can click. Mirrors the accessibility-tree tools on the desktop side.
 const SNAPSHOT_JS = `(() => {
   const out = [];
-  const sel = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[contenteditable=true],summary';
+  const sel = 'a,button,input,textarea,select,cfc-select,mat-option,[role=button],[role=link],[role=textbox],[role=combobox],[role=listbox],[role=option],[role=menu],[role=menuitem],[aria-haspopup],[contenteditable=true],summary';
   let i = 0;
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect();
@@ -404,24 +404,44 @@ const PAINT_CURSOR_JS = `
       el.style.cssText = 'position:fixed;left:0;top:0;width:112px;height:112px;' +
         'pointer-events:none;z-index:2147483647;opacity:0;will-change:transform,opacity;' +
         'transform-origin:' + hotspot + 'px ' + hotspot + 'px;';
+      // Same artwork as desktop BubbleView / T3AgentCursor (cursor-112.png).
       const img = document.createElement('img');
       img.src = src;
       img.width = 112;
       img.height = 112;
       img.alt = '';
       img.draggable = false;
-      img.style.cssText = 'display:block;width:112px;height:112px;';
+      img.style.cssText = 'display:block;width:112px;height:112px;' +
+        'transform-origin:' + hotspot + 'px ' + hotspot + 'px;will-change:transform;';
       el.appendChild(img);
       (document.documentElement || document.body).appendChild(el);
-      el.__t3 = { x: x, y: y, tilt: 0, arc: 1, raf: 0 };
+      el.__t3 = { x: x, y: y, tilt: 0, arc: 1, raf: 0, breatheRaf: 0, phase: 0 };
     } else {
       const img = el.querySelector('img');
       if (img && img.src !== src) img.src = src;
     }
 
-    const st = el.__t3 || (el.__t3 = { x: x, y: y, tilt: 0, arc: 1, raf: 0 });
+    const st = el.__t3 || (el.__t3 = { x: x, y: y, tilt: 0, arc: 1, raf: 0, breatheRaf: 0, phase: 0 });
     if (st.raf) { cancelAnimationFrame(st.raf); st.raf = 0; }
     clearTimeout(el.__t3hide);
+
+    // Idle breathe matches BubbleView: scale 1 + 0.03*sin(phase) on the artwork.
+    const ensureBreathe = () => {
+      if (st.breatheRaf) return;
+      const tick = () => {
+        const img = el.querySelector('img');
+        if (!img || parseFloat(getComputedStyle(el).opacity) < 0.05) {
+          st.breatheRaf = 0;
+          if (img) img.style.transform = '';
+          return;
+        }
+        st.phase = (st.phase || 0) + 0.045;
+        const breathe = 1 + 0.03 * Math.sin(st.phase);
+        img.style.transform = 'scale(' + breathe + ')';
+        st.breatheRaf = requestAnimationFrame(tick);
+      };
+      st.breatheRaf = requestAnimationFrame(tick);
+    };
 
     const place = (px, py, tilt) => {
       st.x = px; st.y = py; st.tilt = tilt;
@@ -443,15 +463,18 @@ const PAINT_CURSOR_JS = `
       // Force style flush so the opacity transition runs from 0.
       void el.offsetWidth;
       el.style.opacity = '1';
+      ensureBreathe();
       waitMs = fadeInMs + 40;
     } else if (dist < 3) {
       el.style.transition = 'opacity ' + fadeInMs + 'ms ease-out';
       el.style.opacity = '1';
       place(x, y, 0);
+      ensureBreathe();
       waitMs = 60;
     } else {
       el.style.transition = 'opacity 120ms linear';
       el.style.opacity = '1';
+      ensureBreathe();
       st.arc *= -1;
       const handle = Math.min(72, Math.max(22, dist * 0.18));
       const nx = -dy / dist;
@@ -503,6 +526,9 @@ const PAINT_CURSOR_JS = `
     }
 
     el.__t3hide = setTimeout(function () {
+      if (st.breatheRaf) { cancelAnimationFrame(st.breatheRaf); st.breatheRaf = 0; }
+      const img = el.querySelector('img');
+      if (img) img.style.transform = '';
       el.style.transition = 'opacity ' + fadeOutMs + 'ms ease';
       el.style.opacity = '0';
     }, taskFadeMs);
@@ -558,6 +584,10 @@ async function hideCursor(tabId) {
         `  if (!el) return false;` +
         `  clearTimeout(el.__t3hide);` +
         `  if (el.__t3 && el.__t3.raf) cancelAnimationFrame(el.__t3.raf);` +
+        `  if (el.__t3 && el.__t3.breatheRaf) cancelAnimationFrame(el.__t3.breatheRaf);` +
+        `  if (el.__t3) { el.__t3.raf = 0; el.__t3.breatheRaf = 0; }` +
+        `  const img = el.querySelector('img');` +
+        `  if (img) img.style.transform = '';` +
         `  el.style.transition = 'opacity ${CURSOR_FADE_OUT_MS}ms ease';` +
         `  el.style.opacity = '0';` +
         `  return true;` +
