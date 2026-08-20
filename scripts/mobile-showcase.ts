@@ -33,11 +33,13 @@ import {
 
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const MOBILE_ROOT = NodePath.join(REPO_ROOT, "apps/mobile");
-const ANDROID_PACKAGE = "com.t3tools.t3code";
-const APP_SCHEME = "t3code";
+const IS_MUNIM_SHOWCASE = NodeProcess.env.T3CODE_MOBILE_DISTRO === "munim";
+const ANDROID_PACKAGE = IS_MUNIM_SHOWCASE ? "com.munim.mtcode" : "com.t3tools.t3code";
+const APP_SCHEME = IS_MUNIM_SHOWCASE ? "mtcode" : "t3code";
 const IOS_READY_FILENAME = "T3ShowcaseReadyScene";
 const SERVER_HOST = "0.0.0.0";
 const IOS_SIMULATOR_ARCH = NodeProcess.arch === "arm64" ? "arm64" : "x86_64";
+// Native Xcode product stays T3Code; Munim only changes display name / bundle id.
 const IOS_APP_PATH = NodePath.join(
   MOBILE_ROOT,
   ".showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app",
@@ -65,6 +67,7 @@ const MOBILE_BUILD_ENV = {
   // Lets the capture build require full screen on iPad so the app can rotate
   // itself to landscape (see app.config.ts).
   T3_SHOWCASE_CAPTURE_BUILD: "1",
+  ...(IS_MUNIM_SHOWCASE ? { T3CODE_MOBILE_DISTRO: "munim" } : {}),
   JAVA_HOME:
     NodeProcess.env.JAVA_HOME ??
     (NodeProcess.platform === "darwin"

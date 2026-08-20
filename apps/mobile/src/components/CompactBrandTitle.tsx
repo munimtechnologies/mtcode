@@ -6,8 +6,9 @@ import type {
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { T3Wordmark } from "./T3Wordmark";
+import { BrandWordmark } from "./BrandWordmark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
+import { getBrandLabel, getProductName } from "../lib/branding";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useThemeColor } from "../lib/useThemeColor";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../native/native-glass";
@@ -41,11 +42,13 @@ export function CompactBrandTitle(
   const subtleColor = useThemeColor("--color-subtle");
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   const titleOffset = brandTitleOffset(props.nativeLeadingItem === true);
+  const productName = getProductName();
+  const brandLabel = getBrandLabel();
 
   return (
     <View
       aria-level={1}
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel={`${productName}, Threads`}
       accessible
       role="heading"
       style={{
@@ -55,7 +58,7 @@ export function CompactBrandTitle(
         marginLeft: titleOffset,
       }}
     >
-      <T3Wordmark color={iconColor} height={15} />
+      <BrandWordmark color={iconColor} height={15} />
       <Text
         style={{
           color: mutedColor,
@@ -64,7 +67,7 @@ export function CompactBrandTitle(
           letterSpacing: -0.5,
         }}
       >
-        Code
+        {brandLabel}
       </Text>
       <View
         style={{

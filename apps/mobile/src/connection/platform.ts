@@ -25,6 +25,7 @@ import * as Network from "expo-network";
 import { AppState } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
+import { getConnectName } from "../lib/branding";
 import * as Runtime from "../lib/runtime";
 import * as MobileStorage from "../persistence/mobile-storage";
 import { appAtomRegistry } from "../state/atom-registry";
@@ -122,7 +123,7 @@ const capabilitiesLayer = Layer.effectContext(
           if (session === null) {
             return yield* new ConnectionBlockedError({
               reason: "authentication",
-              detail: "Sign in to T3 Connect to connect this environment.",
+              detail: `Sign in to ${getConnectName()} to connect this environment.`,
             });
           }
           const token = yield* session.readClerkToken().pipe(
@@ -137,7 +138,7 @@ const capabilitiesLayer = Layer.effectContext(
           if (token === null) {
             return yield* new ConnectionBlockedError({
               reason: "authentication",
-              detail: "The T3 Connect session is unavailable.",
+              detail: `The ${getConnectName()} session is unavailable.`,
             });
           }
           return token;

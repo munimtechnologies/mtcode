@@ -1,7 +1,24 @@
 import { readHostedPairingRequest } from "@t3tools/shared/remote";
 import * as Schema from "effect/Schema";
 
+import { getAppScheme, getAppSchemeDev, getAppSchemePreview } from "../../lib/branding";
+
 const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
+
+function isMobileAppPairingScheme(protocol: string): boolean {
+  const scheme = protocol.replace(/:$/, "");
+  return (
+    scheme === getAppScheme() ||
+    scheme === getAppSchemeDev() ||
+    scheme === getAppSchemePreview() ||
+    scheme === "t3code" ||
+    scheme === "t3code-dev" ||
+    scheme === "t3code-preview" ||
+    scheme === "mtcode" ||
+    scheme === "mtcode-dev" ||
+    scheme === "mtcode-preview"
+  );
+}
 
 function isIpLiteral(host: string): boolean {
   try {
@@ -78,7 +95,7 @@ export function extractPairingUrlFromQrPayload(payload: string): string {
 
   try {
     const url = new URL(trimmed);
-    if (url.protocol === "t3code:") {
+    if (isMobileAppPairingScheme(url.protocol)) {
       const pairingUrl = url.searchParams.get(MOBILE_PAIRING_URL_PARAM)?.trim() ?? "";
       if (pairingUrl.length > 0) {
         return pairingUrl;
