@@ -115,6 +115,7 @@ import {
   currentEmbedContext,
   providerHasRelay,
   type ConnectProviderId,
+  type ConnectProviderPublicConfig,
 } from "~/cloud/connectProviders";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { authEnvironment } from "~/state/auth";
@@ -1816,9 +1817,15 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     reconcileCloudState,
   } = useCloudLinkController();
   const connect = useOptionalConnectProviders();
-  const connectLabel = connect?.embedded?.label ?? connect?.active?.label ?? "Connect";
-  const activeProvider = connect?.active ?? connect?.embedded ?? null;
-  const hasRelay = providerHasRelay(activeProvider);
+  // Label + relay checks follow the Clerk instance that is actually mounted.
+  const embeddedProvider = connect?.embedded ?? null;
+  const connectLabel = embeddedProvider?.label ?? "Connect";
+  const hasRelay = providerHasRelay(embeddedProvider);
+  const canSwitchToT3Relay = Boolean(
+    connect?.providers.some(
+      (provider) => provider.id === "t3" && canEmbedClerkProvider(provider, currentEmbedContext()),
+    ),
+  );
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
 
@@ -1828,11 +1835,13 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       ? `Your session does not have permission to manage ${connectLabel} access.`
       : null;
   // Publish works without a managed tunnel; Share needs an https relay URL on
-  // the active Connect provider (MT has Clerk today but no Munim relay yet).
+  // the embedded Connect provider (MT has Clerk today but no Munim relay yet).
   const shareDisabledReason =
     sessionDisabledReason ??
     (!hasRelay
-      ? `${connectLabel} has no managed relay configured. Switch identity to T3 to share via the T3 relay, or deploy a Munim relay.`
+      ? canSwitchToT3Relay
+        ? `${connectLabel} has no managed relay yet. Use T3 Connect in this app to share via the T3 relay, or keep Publish on without Share.`
+        : `${connectLabel} has no managed relay yet. Publish agent activity still works; Share needs a Munim relay deploy.`
       : null);
   const isBusy = isUpdating || isUpdatingPreference;
 
@@ -1922,49 +1931,52 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
 }
 
 function connectIdentityDescription(
-  activeId: ConnectProviderId | null,
-  providers: ReadonlyArray<{ id: ConnectProviderId; label: string }>,
+  embeddedId: ConnectProviderId | null,
+  providers: ReadonlyArray<ConnectProviderPublicConfig>,
+  ctx: ReturnType<typeof currentEmbedContext>,
 ): string {
   const hasMt = providers.some((provider) => provider.id === "mt");
-  const hasT3 = providers.some((provider) => provider.id === "t3");
-  if (activeId === "mt") {
-    return hasT3
-      ? "Munim identity for this app. Switch to T3 to reach T3-linked machines and the T3 relay."
-      : "Munim identity for this app. Sign in from the sidebar, then pair a computer under Remote environments.";
+  const t3 = providers.find((provider) => provider.id === "t3");
+  const t3Embeds = Boolean(t3 && canEmbedClerkProvider(t3, ctx));
+  if (embeddedId === "mt") {
+    if (t3Embeds) {
+      return "Munim identity for this app. Use T3 Connect when you need T3-linked machines or the T3 relay.";
+    }
+    if (t3) {
+      return "Munim identity for this app. Open T3 Connect in a browser tab for T3-linked machines — it cannot sign in inside this page.";
+    }
+    return "Munim identity for this app. Sign in from the sidebar, then pair a computer under Remote environments.";
   }
-  if (activeId === "t3") {
+  if (embeddedId === "t3") {
     return hasMt
-      ? "T3 identity for T3-linked machines and the T3 relay. Switch to MT for Munim identity."
+      ? "T3 identity for T3-linked machines and the T3 relay. Use MT Connect for Munim identity."
       : "T3 identity for T3-linked machines and the T3 relay.";
   }
-  return "Choose which Connect identity signs you in from the sidebar.";
+  return "Sign in from the sidebar to use Connect.";
 }
 
 function ConnectAccountsSection() {
   const connect = useOptionalConnectProviders();
   const providers = connect?.providers ?? [];
-  const activeId = connect?.activeId ?? null;
+  const embedded = connect?.embedded ?? null;
   const setActiveId = connect?.setActiveId;
   const ctx = currentEmbedContext();
   if (providers.length === 0 && !hasClerkPublicConfig()) return null;
 
-  const selectProvider = (id: ConnectProviderId) => {
-    const provider = providers.find((entry) => entry.id === id);
-    if (!provider || !setActiveId) return;
-    setActiveId(id);
-    // T3's production Clerk rejects non-app.t3.codes web origins — open hosted.
-    if (id === "t3" && !canEmbedClerkProvider(provider, ctx) && provider.hostedAppUrl) {
-      window.open(provider.hostedAppUrl, "_blank", "noopener,noreferrer");
-    }
-  };
+  const embeddableProviders = providers.filter((provider) => canEmbedClerkProvider(provider, ctx));
+  const externalT3 =
+    providers.find(
+      (provider) =>
+        provider.id === "t3" && !canEmbedClerkProvider(provider, ctx) && provider.hostedAppUrl,
+    ) ?? null;
 
-  if (providers.length >= 2) {
-    const selectedId = activeId ?? providers[0]?.id ?? null;
+  if (embeddableProviders.length >= 2) {
+    const selectedId = embedded?.id ?? embeddableProviders[0]?.id ?? null;
     return (
       <SettingsSection title="Connect">
         <SettingsRow
           title="Identity"
-          description={connectIdentityDescription(selectedId, providers)}
+          description={connectIdentityDescription(selectedId, providers, ctx)}
           control={
             <ToggleGroup
               aria-label="Connect identity"
@@ -1972,10 +1984,10 @@ function ConnectAccountsSection() {
               value={selectedId ? [selectedId] : []}
               onValueChange={(next) => {
                 const value = next[0];
-                if (value === "mt" || value === "t3") selectProvider(value);
+                if ((value === "mt" || value === "t3") && setActiveId) setActiveId(value);
               }}
             >
-              {providers.map((provider) => (
+              {embeddableProviders.map((provider) => (
                 <Toggle key={provider.id} value={provider.id}>
                   {provider.id === "mt" ? "MT" : "T3"}
                 </Toggle>
@@ -1987,21 +1999,20 @@ function ConnectAccountsSection() {
     );
   }
 
-  const only = providers[0];
+  const only = embeddableProviders[0] ?? providers[0];
   if (!only) return null;
-  const embeddable = canEmbedClerkProvider(only, ctx);
   return (
     <SettingsSection title="Connect">
       <SettingsRow
-        title={only.label}
-        description={connectIdentityDescription(only.id, providers)}
+        title={embedded?.label ?? only.label}
+        description={connectIdentityDescription(embedded?.id ?? only.id, providers, ctx)}
         control={
-          only.id === "t3" && !embeddable ? (
+          externalT3 ? (
             <Button
               size="xs"
               variant="outline"
               onClick={() => {
-                selectProvider("t3");
+                window.open(externalT3.hostedAppUrl, "_blank", "noopener,noreferrer");
               }}
             >
               Open T3 Connect
@@ -2016,7 +2027,11 @@ function ConnectAccountsSection() {
 }
 
 function CloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
-  return hasCloudPublicConfig() ? <ConfiguredCloudLinkRow canManageRelay={canManageRelay} /> : null;
+  // Publish works with Clerk alone; Share still gates on an https relay inside
+  // ConfiguredCloudLinkRow. Don't hide the whole section when Munim has no relay.
+  return hasClerkPublicConfig() || hasCloudPublicConfig() ? (
+    <ConfiguredCloudLinkRow canManageRelay={canManageRelay} />
+  ) : null;
 }
 
 function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {

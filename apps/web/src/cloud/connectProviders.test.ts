@@ -6,6 +6,7 @@ import {
   providerHasRelay,
   resolveDefaultConnectProviderId,
   resolveEmbeddedClerkProvider,
+  selectEmbeddableConnectProviderId,
 } from "./connectProviders.ts";
 
 const mt = {
@@ -92,6 +93,23 @@ describe("resolveEmbeddedClerkProvider", () => {
         isElectron: false,
       }),
     ).toEqual(mt);
+  });
+});
+
+describe("selectEmbeddableConnectProviderId", () => {
+  it("rejects T3 on hosted Munim web", () => {
+    expect(
+      selectEmbeddableConnectProviderId([mt, t3], "t3", {
+        origin: "https://mtcode.munimtech.com",
+        isElectron: false,
+      }),
+    ).toBeNull();
+    expect(
+      selectEmbeddableConnectProviderId([mt, t3], "t3", {
+        origin: "file://",
+        isElectron: true,
+      }),
+    ).toBe("t3");
   });
 });
 

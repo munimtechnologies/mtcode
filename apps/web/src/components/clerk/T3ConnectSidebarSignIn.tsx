@@ -11,7 +11,7 @@ import {
   canEmbedClerkProviderInThisClient,
   useOptionalConnectProviders,
 } from "../../cloud/connectProviderContext";
-import { providerHasRelay, type ConnectProviderId } from "../../cloud/connectProviders";
+import { providerHasRelay, type ConnectProviderPublicConfig } from "../../cloud/connectProviders";
 import { hasClerkPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
@@ -99,16 +99,29 @@ function ConfiguredConnectSidebarAvatar() {
 function ConfiguredConnectSidebarSignIn() {
   const connect = useOptionalConnectProviders();
   if (!connect) return null;
-  const { providers, activeId, embedded, setActiveId } = connect;
+  const { providers, embedded, setActiveId } = connect;
   const mt = providers.find((provider) => provider.id === "mt");
   const t3 = providers.find((provider) => provider.id === "t3");
-  const clerkReady = Boolean(embedded);
-  const selectedId: ConnectProviderId | null = activeId ?? embedded?.id ?? null;
+  // Auth UI follows the Clerk instance that is actually mounted — never a
+  // persisted preference for a provider that cannot embed on this origin.
+  const signedInProvider = embedded;
 
   return (
     <SidebarMenu>
-      {mt && clerkReady && selectedId === "mt" ? <EmbeddedConnectSignInRow provider={mt} /> : null}
-      {mt && clerkReady && selectedId === "t3" ? (
+      {signedInProvider ? <EmbeddedConnectSignInRow provider={signedInProvider} /> : null}
+      {mt && t3 && signedInProvider?.id === "mt" && canEmbedClerkProviderInThisClient(t3) ? (
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            onClick={() => {
+              setActiveId("t3");
+            }}
+          >
+            <LogInIcon />
+            <span>Use T3 Connect</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ) : null}
+      {mt && t3 && signedInProvider?.id === "t3" && canEmbedClerkProviderInThisClient(mt) ? (
         <SidebarMenuItem>
           <SidebarMenuButton
             onClick={() => {
@@ -116,39 +129,21 @@ function ConfiguredConnectSidebarSignIn() {
             }}
           >
             <LogInIcon />
-            <span>Switch to MT Connect</span>
+            <span>Use MT Connect</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : null}
-      {t3 ? (
-        clerkReady && canEmbedClerkProviderInThisClient(t3) ? (
-          selectedId === "t3" ? (
-            <EmbeddedConnectSignInRow provider={t3} />
-          ) : (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                onClick={() => {
-                  setActiveId("t3");
-                }}
-              >
-                <LogInIcon />
-                <span>Switch to T3 Connect</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )
-        ) : (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => {
-                setActiveId("t3");
-                window.open(t3.hostedAppUrl, "_blank", "noopener,noreferrer");
-              }}
-            >
-              <ExternalLinkIcon />
-              <span>Open T3 Connect</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        )
+      {t3 && !canEmbedClerkProviderInThisClient(t3) && t3.hostedAppUrl ? (
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            onClick={() => {
+              window.open(t3.hostedAppUrl, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLinkIcon />
+            <span>Open T3 Connect</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
       ) : null}
     </SidebarMenu>
   );
@@ -157,7 +152,7 @@ function ConfiguredConnectSidebarSignIn() {
 function EmbeddedConnectSignInRow({
   provider,
 }: {
-  readonly provider: { id: "mt" | "t3"; label: string };
+  readonly provider: Pick<ConnectProviderPublicConfig, "id" | "label">;
 }) {
   const { isLoaded, isSignedIn } = useAuth();
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
