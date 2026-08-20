@@ -40,11 +40,11 @@ if [[ "$MUNIM_CONNECT_ACTIVE" == 1 ]]; then
 fi
 
 SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
-# Full T3CODE_DESKTOP_SIGNED enables passkey provisioning which this machine may
-# not have. Ship unsigned Mac DMGs for now; Gatekeeper needs right-click → Open.
-# Set T3CODE_DESKTOP_SIGNED=1 + Apple passkey env later for notarized builds.
+# Full T3CODE_DESKTOP_SIGNED enables Clerk passkey provisioning we may not have.
+# Build unsigned via electron-builder, then Developer ID codesign the DMG/app
+# with scripts/personal-codesign-mac-dmg.sh. Notarization needs APPLE_API_ISSUER.
 unset T3CODE_DESKTOP_SIGNED || true
-echo "building Munim Mac unsigned (Developer ID available: ${SIGN_IDENTITY:-none})"
+echo "building Munim Mac (post-codesign with Developer ID: ${SIGN_IDENTITY:-none})"
 
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
@@ -86,7 +86,13 @@ echo "MAC_DMG=$MAC_DMG"
 echo "MAC_ZIP=${MAC_ZIP:-none}"
 echo "MAC_YML=${MAC_YML:-none}"
 
-# Optional local codesign of the .app inside DMG is handled by electron-builder when CSC is set.
+if [[ -n "$SIGN_IDENTITY" && "${T3_MUNIM_SKIP_CODESIGN:-}" != "1" ]]; then
+  echo "-- Developer ID codesign Mac DMG --"
+  /bin/bash "$REPO/scripts/personal-codesign-mac-dmg.sh" "$MAC_DMG"
+  MAC_ZIP="${MAC_DMG%.dmg}.zip"
+  MAC_YML="$REPO/release/latest-mac.yml"
+fi
+
 # Clear quarantine on the DMG we ship.
 xattr -cr "$MAC_DMG" 2>/dev/null || true
 
