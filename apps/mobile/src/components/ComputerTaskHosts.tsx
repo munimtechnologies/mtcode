@@ -21,6 +21,7 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
+import { getBrandMark, getProductName } from "../lib/branding";
 import { computerEnvironment } from "../state/computers";
 import { useEnvironments } from "../state/environments";
 import { environmentPresentations } from "../state/presentation";
@@ -238,7 +239,7 @@ async function waitForTargetSnapshot(
   throw new ComputerTaskDispatchError(
     "computer_offline",
     lastPhase === "connected"
-      ? "That computer connected but T3 has not loaded its projects yet."
-      : "Could not reach that computer. Keep T3 Code running there, or pick it in Run on first.",
+      ? `That computer connected but ${getBrandMark()} has not loaded its projects yet.`
+      : `Could not reach that computer. Keep ${getProductName()} running there, or pick it in Run on first.`,
   );
 }

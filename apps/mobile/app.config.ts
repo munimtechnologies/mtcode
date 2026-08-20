@@ -192,7 +192,7 @@ const config: ExpoConfig = {
   slug: mobileDistro.slug,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
-  version: "1.0.5",
+  version: "1.0.6",
   runtimeVersion: {
     // Fingerprint (not appVersion) so an OTA only reaches binaries whose native
     // project — native deps, config plugins, AND patches/ — matches the update.
@@ -382,6 +382,14 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    branding: {
+      distroId: mobileDistro.id,
+      productName: mobileDistro.productName,
+      connectProductName: mobileDistro.id === "munim" ? "MT Connect" : "T3 Connect",
+      scheme: mobileDistro.scheme,
+      schemeDev: mobileDistro.schemeDev,
+      schemePreview: mobileDistro.schemePreview,
+    },
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },

@@ -14,6 +14,14 @@ export const SHOWCASE_TERMINAL_ID = "term-1";
 export const SHOWCASE_SCENES = ["threads", "thread", "terminal", "review", "environments"] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 
+const IS_MUNIM_SHOWCASE = process.env.T3CODE_MOBILE_DISTRO === "munim";
+const SHOWCASE_PRODUCT_NAME = IS_MUNIM_SHOWCASE ? "MT Code" : "T3 Code";
+const SHOWCASE_PRODUCT_SLUG = IS_MUNIM_SHOWCASE ? "mtcode" : "t3code";
+const SHOWCASE_REPO_URL = IS_MUNIM_SHOWCASE
+  ? "https://github.com/munimtechnologies/mtcode.git"
+  : "https://github.com/pingdotgg/t3code.git";
+const SHOWCASE_REPO_PATH = IS_MUNIM_SHOWCASE ? "~/Code/mtcode" : "~/Code/t3code";
+
 const PROJECTOR_NAMES = [
   "projection.projects",
   "projection.threads",
@@ -44,8 +52,7 @@ const PROJECT_SCRIPTS = JSON.stringify([
   },
 ]);
 
-const SHOWCASE_TERMINAL_PROMPT =
-  "\u001b[1;32m→\u001b[0m \u001b[1;36mt3code\u001b[0m \u001b[1;34mgit:(\u001b[1;31mfeat/remote-command-center\u001b[1;34m)\u001b[0m \u001b[1;33m✗\u001b[0m ";
+const SHOWCASE_TERMINAL_PROMPT = `\u001b[1;32m→\u001b[0m \u001b[1;36m${SHOWCASE_PRODUCT_SLUG}\u001b[0m \u001b[1;34mgit:(\u001b[1;31mfeat/remote-command-center\u001b[1;34m)\u001b[0m \u001b[1;33m✗\u001b[0m `;
 
 // A dev-server startup mirroring the web settings' terminal font preview:
 // zsh-style prompt, brand line, addresses, the thread's 612-test summary,
@@ -58,7 +65,7 @@ export const SHOWCASE_TERMINAL_BUFFER = [
   "",
   "  \u001b[32m→\u001b[0m  \u001b[2mLocal:\u001b[0m    \u001b[4;36mhttp://127.0.0.1:5173/\u001b[0m",
   "  \u001b[32m→\u001b[0m  \u001b[2mNetwork:\u001b[0m  \u001b[4;36mhttp://192.168.1.24:5173/\u001b[0m",
-  "  \u001b[32m→\u001b[0m  \u001b[2mProject:\u001b[0m  \u001b[1mt3code\u001b[0m \u001b[2m— ~/Code/t3code\u001b[0m",
+  `  \u001b[32m→\u001b[0m  \u001b[2mProject:\u001b[0m  \u001b[1m${SHOWCASE_PRODUCT_SLUG}\u001b[0m \u001b[2m— ${SHOWCASE_REPO_PATH}\u001b[0m`,
   "",
   "  \u001b[32m✓ 612 passed\u001b[0m   \u001b[33m△ 2 warnings\u001b[0m   \u001b[31m✗ 0 failed\u001b[0m",
   "",
@@ -115,9 +122,9 @@ const PROJECT_FAVICONS = {
 export const SHOWCASE_PROJECTS = [
   {
     id: "t3code",
-    title: "T3 Code",
+    title: SHOWCASE_PRODUCT_NAME,
     directory: "t3code",
-    repositoryUrl: "https://github.com/pingdotgg/t3code.git",
+    repositoryUrl: SHOWCASE_REPO_URL,
     favicon: PROJECT_FAVICONS.t3code,
   },
   {
@@ -161,10 +168,8 @@ export const SHOWCASE_THREADS = [
     title: "Make remote coding feel local ✦",
     branch: "feat/remote-command-center",
     minutesAgo: 3,
-    request:
-      "Give T3 Code a remote-first command center. Make three machines feel one tap away, keep agent work in sync, and make every handoff feel instant.",
-    response:
-      "T3 Code now treats every machine like it is right here in the room. ✦\n\n- Moonbase, Suspense Station, and Kernel Cabin stay live together\n- Terminal state follows you without losing a single line\n- Agent work remains perfectly in sync across devices\n- Handoffs land before your train of thought can wander\n\nI also ran the changed workspace: **612 tests passed**.",
+    request: `Give ${SHOWCASE_PRODUCT_NAME} a remote-first command center. Make three machines feel one tap away, keep agent work in sync, and make every handoff feel instant.`,
+    response: `${SHOWCASE_PRODUCT_NAME} now treats every machine like it is right here in the room. ✦\n\n- Moonbase, Suspense Station, and Kernel Cabin stay live together\n- Terminal state follows you without losing a single line\n- Agent work remains perfectly in sync across devices\n- Handoffs land before your train of thought can wander\n\nI also ran the changed workspace: **612 tests passed**.`,
   },
   {
     id: "pocket-command-center",
@@ -305,7 +310,7 @@ async function seedT3CodeWorkspace(workspaceRoot: string): Promise<void> {
   );
   await initializeRepository({
     workspaceRoot,
-    repositoryUrl: "https://github.com/pingdotgg/t3code.git",
+    repositoryUrl: SHOWCASE_REPO_URL,
     commitMessage: "Show connected environments",
   });
   await runGit(workspaceRoot, ["checkout", "-b", "feat/remote-command-center"]);
@@ -329,7 +334,7 @@ async function seedCompanionWorkspace(input: {
   await NodeFSP.writeFile(NodePath.join(input.workspaceRoot, "favicon.svg"), input.favicon);
   await NodeFSP.writeFile(
     NodePath.join(input.workspaceRoot, "README.md"),
-    `# ${input.title}\n\nSeeded by the T3 Code mobile screenshot harness.\n`,
+    `# ${input.title}\n\nSeeded by the ${SHOWCASE_PRODUCT_NAME} mobile screenshot harness.\n`,
   );
   await initializeRepository({
     workspaceRoot: input.workspaceRoot,
