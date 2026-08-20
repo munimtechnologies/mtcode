@@ -1151,7 +1151,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const rowSurfaceClassName = cn(
     props.isOverlay
       ? "relative w-full cursor-grabbing overflow-hidden rounded-md text-left outline-none select-none pointer-events-none"
-      : "group/sidebar-row relative w-full cursor-grab active:cursor-grabbing overflow-hidden rounded-md text-left outline-none select-none",
+      : "group/sidebar-row relative w-full cursor-default active:cursor-grabbing overflow-hidden rounded-md text-left outline-none select-none",
     props.isActive
       ? "bg-sidebar-row-active text-sidebar-foreground"
       : isSelected
