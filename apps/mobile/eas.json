@@ -49,6 +49,15 @@
       "channel": "production",
       "environment": "production",
       "autoIncrement": true
+    },
+    "production-munim": {
+      "extends": "production",
+      "env": {
+        "APP_VARIANT": "production",
+        "T3CODE_MOBILE_DISTRO": "munim",
+        "NODE_OPTIONS": "--max-old-space-size=4096"
+      },
+      "channel": "production-munim"
     }
   },
   "submit": {
@@ -56,6 +65,12 @@
       "ios": {
         "ascAppId": "6787819824"
       },
+      "android": {
+        "track": "internal"
+      }
+    },
+    "production-munim": {
+      "ios": {},
       "android": {
         "track": "internal"
       }

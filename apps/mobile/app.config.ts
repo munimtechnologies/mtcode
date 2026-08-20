@@ -1,6 +1,11 @@
 import type { ExpoConfig } from "expo/config";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
+import {
+  resolveMobileDistroIdentity,
+  resolveMobileDistroRaw,
+  resolveMobileUpdatesUrl,
+} from "../../scripts/lib/mobile-distro.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 type AppVariant = "development" | "preview" | "production";
@@ -9,6 +14,8 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+const mobileDistro = resolveMobileDistroIdentity(resolveMobileDistroRaw(repoEnv));
+const brandName = mobileDistro.productName;
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
@@ -30,6 +37,7 @@ const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
+  splashIconDark: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.developmentUniversalIconPng),
   androidAdaptiveBackgroundColor: "#00639B",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
@@ -41,6 +49,7 @@ const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
+  splashIconDark: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.nightlyLinuxIconPng),
   androidAdaptiveBackgroundColor: "#111533",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
@@ -52,6 +61,7 @@ const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
+  splashIconDark: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground: "./assets/android-icon-mark.png",
   androidAdaptiveBackgroundColor: "#000000",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
@@ -59,30 +69,45 @@ const RELEASE_ASSETS = {
   androidNotificationColor: "#FFFFFF",
 } as const;
 
+const MUNIM_RELEASE_ASSETS = {
+  appIcon: fromRepoRoot(BRAND_ASSET_PATHS.munimUniversalIconPng),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.munimIconComposerProject),
+  splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.munimIosIconPng),
+  splashIconDark: fromRepoRoot(BRAND_ASSET_PATHS.munimIosIconLightPng),
+  androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.munimUniversalIconPng),
+  androidAdaptiveBackgroundColor: "#000000",
+  androidMonochromeIcon: fromRepoRoot(BRAND_ASSET_PATHS.munimUniversalIconPng),
+  androidNotificationIcon: fromRepoRoot(BRAND_ASSET_PATHS.munimUniversalIconPng),
+  androidNotificationColor: "#FFFFFF",
+} as const;
+
 const VARIANT_CONFIG = {
   development: {
-    appName: "T3 Code Dev",
-    scheme: "t3code-dev",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
-    relyingParty: "clerk.t3.codes",
+    appName: `${brandName} Dev`,
+    scheme: mobileDistro.schemeDev,
+    iosBundleIdentifier: mobileDistro.iosBundleIdentifierDev,
+    androidPackage: mobileDistro.androidPackageDev,
+    relyingParty: mobileDistro.clerkRelyingParty,
+    hostedAppDomain: mobileDistro.hostedAppDomain,
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "T3 Code Preview",
-    scheme: "t3code-preview",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
-    relyingParty: "clerk.t3.codes",
+    appName: `${brandName} Preview`,
+    scheme: mobileDistro.schemePreview,
+    iosBundleIdentifier: mobileDistro.iosBundleIdentifierPreview,
+    androidPackage: mobileDistro.androidPackagePreview,
+    relyingParty: mobileDistro.clerkRelyingParty,
+    hostedAppDomain: mobileDistro.hostedAppDomain,
     assets: PREVIEW_ASSETS,
   },
   production: {
-    appName: "T3 Code",
-    scheme: "t3code",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
-    relyingParty: "clerk.t3.codes",
-    assets: RELEASE_ASSETS,
+    appName: brandName,
+    scheme: mobileDistro.scheme,
+    iosBundleIdentifier: mobileDistro.iosBundleIdentifier,
+    androidPackage: mobileDistro.androidPackage,
+    relyingParty: mobileDistro.clerkRelyingParty,
+    hostedAppDomain: mobileDistro.hostedAppDomain,
+    assets: mobileDistro.id === "munim" ? MUNIM_RELEASE_ASSETS : RELEASE_ASSETS,
   },
 } as const;
 
@@ -101,6 +126,12 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
+const mobileUpdatesUrl = resolveMobileUpdatesUrl(mobileDistro);
+const associatedDomains = [
+  `applinks:${variant.relyingParty}`,
+  `webcredentials:${variant.relyingParty}`,
+  ...(variant.hostedAppDomain ? [`applinks:${variant.hostedAppDomain}`] : []),
+];
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
@@ -121,7 +152,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
+        description: `Shows the current state of active ${brandName} agents.`,
         supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
       },
     ],
@@ -158,7 +189,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: mobileDistro.slug,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "1.0.4",
@@ -172,12 +203,16 @@ const config: ExpoConfig = {
   orientation: "portrait",
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
-  updates: {
-    enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    checkAutomatically: "ON_LOAD",
-    fallbackToCacheTimeout: 0,
-  },
+  updates: mobileUpdatesUrl
+    ? {
+        enabled: true,
+        url: mobileUpdatesUrl,
+        checkAutomatically: "ON_LOAD",
+        fallbackToCacheTimeout: 0,
+      }
+    : {
+        enabled: false,
+      },
   ios: {
     icon: variant.assets.iosIcon,
     supportsTablet: true,
@@ -188,17 +223,13 @@ const config: ExpoConfig = {
     // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
     // does not fall back to a personal team (which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    appleTeamId: mobileDistro.appleTeamId,
+    associatedDomains,
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
       },
-      NSLocalNetworkUsageDescription:
-        "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
+      NSLocalNetworkUsageDescription: `Allow ${brandName} to connect to ${brandName} servers on your local network or tailnet.`,
       ITSAppUsesNonExemptEncryption: false,
       // The App Store screenshot harness rotates the iPad interface from
       // inside the app (CI denies osascript the Accessibility access that
@@ -238,7 +269,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow T3 Code to access your microphone for voice dictation.",
+        microphonePermission: `Allow ${brandName} to access your microphone for voice dictation.`,
         enableBackgroundRecording: false,
       },
     ],
@@ -299,7 +330,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: `Allow ${brandName} to access your camera so you can scan pairing QR codes.`,
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,
@@ -314,7 +345,7 @@ const config: ExpoConfig = {
         backgroundColor: "#ffffff",
         imageWidth: 220,
         dark: {
-          image: variant.assets.splashIcon,
+          image: variant.assets.splashIconDark,
           backgroundColor: "#0a0a0a",
         },
       },
@@ -372,11 +403,15 @@ const config: ExpoConfig = {
       tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    },
+    ...(mobileDistro.easProjectId
+      ? {
+          eas: {
+            projectId: mobileDistro.easProjectId,
+          },
+        }
+      : {}),
   },
-  owner: "pingdotgg",
+  ...(mobileDistro.expoOwner ? { owner: mobileDistro.expoOwner } : {}),
 };
 
 export default config;

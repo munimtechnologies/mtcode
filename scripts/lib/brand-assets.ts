@@ -23,6 +23,9 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
 
+  munimIconComposerProject: "assets/munim/app-icon.icon",
+  munimIosIconPng: "assets/munim/munim-icon-dark-1024.png",
+  munimIosIconLightPng: "assets/munim/munim-icon-light-1024.png",
   munimMacIconPng: "assets/munim/munim-macos-1024.png",
   munimWebFaviconIco: "assets/munim/munim-web-favicon.ico",
   munimWebFavicon16Png: "assets/munim/munim-web-favicon-16x16.png",
