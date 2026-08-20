@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));
@@ -755,7 +754,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     outline: none;
   }
 
-  .chat-composer-stash-tab {
+  .chat-composer-shoulder-tab {
     border-color: var(
       --chat-composer-outline,
       color-mix(in srgb, var(--foreground) 8%, transparent)
@@ -778,11 +777,34 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     }
   }
 
-  :is(.chat-composer-drawer-slot, .chat-composer-drawer-host)
-    + .chat-composer-shell-slot
-    .chat-composer-stash-tab {
-    pointer-events: none;
-    visibility: hidden;
+  .chat-composer-banner-stack-cap {
+    --chat-composer-attached-surface: var(--chat-composer-glass-surface, var(--card));
+    --chat-composer-attached-outline: var(
+      --chat-composer-outline,
+      color-mix(in srgb, var(--foreground) 8%, transparent)
+    );
+    background: color-mix(
+      in srgb,
+      var(--chat-composer-attached-surface) var(--glass-opacity),
+      transparent
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+
+    @variant dark {
+      --chat-composer-attached-surface: var(
+        --chat-composer-glass-surface,
+        color-mix(in srgb, var(--background) 96%, var(--color-white))
+      );
+      --chat-composer-attached-outline: var(
+        --chat-composer-outline,
+        color-mix(in srgb, var(--color-white) 5%, transparent)
+      );
+    }
+
+    @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+      background: var(--chat-composer-attached-surface);
+    }
   }
 
   /* Mirror the run-context strip above the composer. These surfaces deliberately
@@ -838,10 +860,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     padding-bottom: var(--chat-composer-attachment-overlap);
   }
 
+  [data-chat-composer-form="true"],
+  .chat-composer-drawer-slot,
+  .chat-composer-top-drawer {
+    --chat-composer-drawer-inset: 1.375rem;
+  }
+
   .chat-composer-drawer-slot,
   .chat-composer-top-drawer {
     --chat-composer-attachment-overlap: calc(1rem + 1px);
-    width: calc(100% - 2.75rem);
+    width: calc(100% - var(--chat-composer-drawer-inset) - var(--chat-composer-drawer-inset));
+    max-width: calc(48rem - var(--chat-composer-drawer-inset) - var(--chat-composer-drawer-inset));
     margin-inline: auto;
     margin-bottom: calc(-1 * var(--chat-composer-attachment-overlap));
   }
@@ -874,7 +903,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
       background:
         linear-gradient(var(--chat-composer-attached-tint), var(--chat-composer-attached-tint)),
-        var(--chat-composer-attached-surface);
+        var(--chat-composer-attached-surface) !important;
     }
   }
 
@@ -1008,16 +1037,31 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      needs the composer surface and outline to paint in front of its overlap.
      Split the glass into exact surfaces while a drawer or tab is present; the
      default composer keeps the cheaper continuous layer. */
-  .chat-composer-glass-shell:has(:is(.chat-composer-top-drawer, .chat-composer-stash-tab))::before,
-  .chat-composer-glass-host:has(:is(.chat-composer-top-drawer, .chat-composer-stash-tab))::after {
+  .chat-composer-glass-shell:is(
+    .chat-composer-glass-shell-attached,
+    :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
+  )::before,
+  .chat-composer-glass-shell:is(
+      .chat-composer-glass-shell-attached,
+      :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
+    )
+    .chat-composer-glass-host::after {
     display: none;
   }
 
-  .chat-composer-glass-host:has(:is(.chat-composer-top-drawer, .chat-composer-stash-tab)) {
+  .chat-composer-glass-shell:is(
+      .chat-composer-glass-shell-attached,
+      :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
+    )
+    .chat-composer-glass-host {
     box-shadow: none;
   }
 
-  .chat-composer-glass-host:has(:is(.chat-composer-top-drawer, .chat-composer-stash-tab))
+  .chat-composer-glass-shell:is(
+      .chat-composer-glass-shell-attached,
+      :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
+    )
+    .chat-composer-glass-host
     [data-chat-composer-main-surface="true"] {
     background: color-mix(
       in srgb,
@@ -1051,14 +1095,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     }
   }
 
-  .chat-composer-glass-host:has(.chat-composer-top-drawer)
+  .chat-composer-glass-shell:is(
+      .chat-composer-glass-shell-attached,
+      :has(.chat-composer-top-drawer)
+    )
+    .chat-composer-glass-host
     [data-chat-composer-mobile-collapsed="true"] {
     min-height: var(--chat-composer-attachment-overlap);
   }
 
   .chat-composer-glass-shell-with-context .chat-composer-glass-host::after,
-  .chat-composer-glass-shell-with-context:has(
-      :is(.chat-composer-top-drawer, .chat-composer-stash-tab)
+  .chat-composer-glass-shell-with-context:is(
+      .chat-composer-glass-shell-attached,
+      :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
     )
     [data-chat-composer-main-surface="true"]::after {
     /* Keep the attachment seam open; the strip continues the outer outline below. */
@@ -1107,7 +1156,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     content: "";
   }
 
-  .chat-composer-glass-shell:has(:is(.chat-composer-top-drawer, .chat-composer-stash-tab))
+  .chat-composer-glass-shell:is(
+      .chat-composer-glass-shell-attached,
+      :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
+    )
     .chat-composer-context-strip {
     &::before {
       background: color-mix(
@@ -1567,12 +1619,13 @@ html[data-theme-id] .chat-composer-glass-shell {
   }
 }
 
-html[data-theme-id] :is(.chat-composer-drawer-surface, .chat-composer-top-drawer) {
+html[data-theme-id]
+  :is(.chat-composer-banner-stack-cap, .chat-composer-drawer-surface, .chat-composer-top-drawer) {
   --chat-composer-attached-surface: var(--app-theme-surface-raised);
 }
 
 html[data-theme-id]
-  :is(.chat-composer-drawer-surface, .chat-composer-top-drawer):is(
+  :is(.chat-composer-banner-stack-cap, .chat-composer-drawer-surface, .chat-composer-top-drawer):is(
     :not([data-variant]),
     [data-variant="default"]
   ) {
@@ -1596,7 +1649,7 @@ html[data-theme-id="t3-chat"] .chat-composer-glass-shell {
 }
 
 html[data-theme-id="t3-chat"]
-  :is(.chat-composer-drawer-surface, .chat-composer-top-drawer):is(
+  :is(.chat-composer-banner-stack-cap, .chat-composer-drawer-surface, .chat-composer-top-drawer):is(
     :not([data-variant]),
     [data-variant="default"]
   ) {
@@ -1697,16 +1750,15 @@ html[data-theme-id] [data-chat-header] [data-toolbar-control] {
 
 /* The panel layout toggles stay ghost: they render both inside the header and
    in the titlebar strip, so filling them would make them change appearance as
-   the panel opens. Their icons use the same themed foreground as the toolbar
-   action text; hover and pressed keep the base ghost accent. The tooltip
-   trigger's data-slot wins over the toggle's when it renders the toggle, so
-   match both. */
+   the panel opens. They only take the themed foreground; hover and pressed
+   keep the base ghost accent. The tooltip trigger's data-slot wins over the
+   toggle's when the trigger renders the toggle, so match both. */
 html[data-theme-id] [data-panel-layout-controls] [data-slot="toggle"],
 html[data-theme-id] [data-panel-layout-controls] [data-slot="tooltip-trigger"],
 html[data-theme-id] [data-workspace-titlebar-controls] [data-slot="toggle"],
 html[data-theme-id] [data-workspace-titlebar-controls] [data-slot="tooltip-trigger"] {
-  --control-icon-color: var(--toolbar-control-foreground);
-  color: var(--toolbar-control-foreground);
+  --control-icon-color: var(--toolbar-foreground);
+  color: var(--toolbar-foreground);
 }
 
 html[data-theme-id] [data-chat-header] [data-slot="button"]:hover,
@@ -1909,9 +1961,6 @@ code {
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
-  /* Height as well as width: without it a horizontal scroller kept the browser's default bar,
-     which is several times thicker than every vertical one in the app. */
-  height: var(--app-scrollbar-width);
 }
 
 ::-webkit-scrollbar-track {
@@ -1942,38 +1991,8 @@ code {
 .chat-markdown ol,
 .chat-markdown blockquote,
 .chat-markdown pre,
-.chat-markdown .chat-markdown-table-container,
-.chat-markdown .katex-display {
+.chat-markdown .chat-markdown-table-container {
   margin: 0.65rem 0;
-}
-
-.chat-markdown .katex-display,
-.chat-markdown :not(.katex-display) > .katex {
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--border) 78%, transparent) transparent;
-}
-
-.chat-markdown :not(.katex-display) > .katex {
-  display: inline-block;
-  vertical-align: middle;
-}
-
-.chat-markdown .katex-display > .katex {
-  text-align: left;
-}
-
-.chat-markdown .katex-display::-webkit-scrollbar,
-.chat-markdown :not(.katex-display) > .katex::-webkit-scrollbar {
-  height: 7px;
-}
-
-.chat-markdown .katex-display::-webkit-scrollbar-thumb,
-.chat-markdown :not(.katex-display) > .katex::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--border) 78%, transparent);
 }
 
 .chat-markdown h1,
@@ -2011,8 +2030,8 @@ code {
 }
 
 .chat-markdown ul {
-  /* Reset for nested uls under a widened ol. --list-gutter is an inherited
-     custom property, so without this a task-list under a multi-digit ordered
+  /* Reset for nested uls under a widened ol — --list-gutter is an inherited
+     custom property, so without this a task-list under a 3+ digit ordered
      list would inherit the outer gutter instead of its own default. */
   --list-gutter: 1.25rem;
   padding-left: 1.25rem;
@@ -2021,7 +2040,7 @@ code {
 
 /* --list-gutter defaults to the same 1.25rem as .chat-markdown ul, but
    ChatMarkdown's `ol` renderer widens it (via inline style) for lists whose
-   last marker has multiple digits so it isn't clipped by list-style-position:
+   last marker is 3+ digits, so item 100+ isn't clipped by list-style-position:
    outside painting the marker past the padding box. Reset it here too so a
    nested ol without its own widened marker doesn't inherit the outer one. */
 .chat-markdown ol {

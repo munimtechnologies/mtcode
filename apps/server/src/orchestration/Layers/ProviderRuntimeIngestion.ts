@@ -21,7 +21,6 @@ import {
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -37,7 +36,6 @@ import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
-import { TurnWatchdogService } from "../TurnWatchdog.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -46,7 +44,6 @@ import {
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { AccountLimitsService } from "../../usage/AccountLimitsService.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
@@ -301,7 +298,7 @@ function sessionStatusAllowsActiveTurn(
 
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
-): "command" | "file-read" | "file-change" | "tool" | "permissions" | undefined {
+): "command" | "file-read" | "file-change" | undefined {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -311,10 +308,6 @@ function requestKindFromCanonicalRequestType(
     case "file_change_approval":
     case "apply_patch_approval":
       return "file-change";
-    case "permissions_approval":
-      return "permissions";
-    case "tool_approval":
-      return "tool";
     default:
       return undefined;
   }
@@ -395,11 +388,7 @@ export function runtimeEventToActivities(
                 ? "File-read approval requested"
                 : requestKind === "file-change"
                   ? "File-change approval requested"
-                  : requestKind === "tool"
-                    ? "Tool approval requested"
-                    : requestKind === "permissions"
-                      ? "Permission requested"
-                      : "Approval requested",
+                  : "Approval requested",
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
@@ -803,33 +792,30 @@ export function runtimeEventToActivities(
       // per chunk, so persisting `data` verbatim writes O(N²) bytes per tool
       // call into both the event store and the projection table. No reader
       // needs it: ws.ts and http.ts apply `projectActivityPayload` before any
-      // payload reaches a client. Persist the projected form for in-progress
-      // updates. A late terminal `item.updated` (status completed/failed after
-      // `completeTurn` already force-completed the item) is the only place the
-      // result exists — persist that payload in full, like `item.completed`.
-      const activity = {
-        id: event.eventId,
-        createdAt: event.createdAt,
-        tone: "tool" as const,
-        kind: "tool.updated" as const,
-        summary: event.payload.title ?? "Tool updated",
-        payload: {
-          itemType: event.payload.itemType,
-          ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
-          ...(event.payload.status ? { status: event.payload.status } : {}),
-          ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-          ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
-          ...(event.payload.parentToolUseId
-            ? { parentToolUseId: event.payload.parentToolUseId }
-            : {}),
-        },
-        turnId: toTurnId(event.turnId) ?? null,
-        ...maybeSequence,
-      };
-      const isTerminalUpdate =
-        event.payload.status === "completed" || event.payload.status === "failed";
-      return [isTerminalUpdate ? activity : projectActivityPayload(activity)];
+      // payload reaches a client. Persist the projected form for non-terminal
+      // updates; `item.completed` below still persists the full payload.
+      return [
+        projectActivityPayload({
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "tool",
+          kind: "tool.updated",
+          summary: event.payload.title ?? "Tool updated",
+          payload: {
+            itemType: event.payload.itemType,
+            ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.parentToolUseId
+              ? { parentToolUseId: event.payload.parentToolUseId }
+              : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        }),
+      ];
     }
 
     case "item.completed": {
@@ -898,14 +884,12 @@ export function runtimeEventToActivities(
 const make = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
-  const turnWatchdog = yield* TurnWatchdogService;
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
-  const accountLimits = yield* AccountLimitsService;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1505,20 +1489,6 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
-      // Rate-limit payloads feed the server-wide limits cache, not a thread
-      // projection, so they are folded in before the thread lookup: a
-      // snapshot must not be lost because its thread is already gone.
-      if (event.type === "account.rate-limits.updated") {
-        yield* accountLimits.ingest({
-          provider: event.provider,
-          payload: event.payload.rateLimits,
-          createdAt: event.createdAt,
-          ...(event.providerInstanceId !== undefined
-            ? { providerInstanceId: event.providerInstanceId }
-            : {}),
-        });
-      }
-
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
@@ -2042,55 +2012,6 @@ const make = Effect.gen(function* () {
           break;
       }
 
-      // Turn watchdog: any runtime event is provider-liveness evidence.
-      // Lifecycle edges start/settle the watch, and blocking requests pause
-      // the clock while the human decides (a turn waiting on an approval or
-      // a user-input question is not stalled).
-      {
-        const eventAtMsRaw = Date.parse(event.createdAt);
-        const eventAtMs = Number.isFinite(eventAtMsRaw)
-          ? eventAtMsRaw
-          : yield* Clock.currentTimeMillis;
-        turnWatchdog.recordActivity({ threadId: thread.id, atMs: eventAtMs });
-        switch (event.type) {
-          case "turn.started":
-            turnWatchdog.recordTurnStarted({
-              threadId: thread.id,
-              turnId: toTurnId(event.turnId),
-              atMs: eventAtMs,
-            });
-            break;
-          case "turn.completed":
-          case "turn.aborted":
-            turnWatchdog.recordTurnSettled(thread.id);
-            break;
-          case "session.exited":
-            turnWatchdog.clearThread(thread.id);
-            break;
-          case "request.opened":
-          case "user-input.requested":
-            if (event.requestId !== undefined) {
-              turnWatchdog.recordBlockingRequestOpened({
-                threadId: thread.id,
-                requestId: event.requestId,
-              });
-            }
-            break;
-          case "request.resolved":
-          case "user-input.resolved":
-            if (event.requestId !== undefined) {
-              turnWatchdog.recordBlockingRequestResolved({
-                threadId: thread.id,
-                requestId: event.requestId,
-                atMs: eventAtMs,
-              });
-            }
-            break;
-          default:
-            break;
-        }
-      }
-
       let taskTitle: string | undefined;
       if (event.type === "task.completed") {
         taskTitle = yield* lookupTaskDescription(thread.id, event.payload.taskId);
@@ -2116,20 +2037,7 @@ const make = Effect.gen(function* () {
       ).pipe(Effect.asVoid);
     });
 
-  // Turn watchdog: watch from the moment the turn is REQUESTED, not from the
-  // runtime's turn.started — a provider that hangs at spawn never emits any
-  // runtime event at all, and that is precisely the hang worth catching.
-  const processDomainEvent = (event: TurnStartRequestedDomainEvent) =>
-    Effect.gen(function* () {
-      const requestedAtMsRaw = Date.parse(event.payload.createdAt);
-      const requestedAtMs = Number.isFinite(requestedAtMsRaw)
-        ? requestedAtMsRaw
-        : yield* Clock.currentTimeMillis;
-      turnWatchdog.recordTurnStarted({
-        threadId: event.payload.threadId,
-        atMs: requestedAtMs,
-      });
-    });
+  const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
 
   const processInput = (input: RuntimeIngestionInput) =>
     input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);

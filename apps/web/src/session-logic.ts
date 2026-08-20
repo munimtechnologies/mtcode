@@ -1,11 +1,8 @@
-import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
-import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
-import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   ApprovalRequestId,
-  isCorrectionMessage,
   isToolLifecycleItemType,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
@@ -16,8 +13,6 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-
-import { formatGoalActivityLabel } from "@t3tools/shared/composerTrigger";
 
 import type {
   ChatMessage,
@@ -39,12 +34,6 @@ export const PROVIDER_OPTIONS: Array<{
 }> = [
   { value: ProviderDriverKind.make("codex"), label: "Codex", available: true },
   { value: ProviderDriverKind.make("claudeAgent"), label: "Claude", available: true },
-  {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
@@ -120,7 +109,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 
 export interface PendingApproval {
   requestId: ApprovalRequestId;
-  requestKind: "command" | "file-read" | "file-change" | "tool" | "permissions";
+  requestKind: "command" | "file-read" | "file-change";
   createdAt: string;
   detail?: string;
 }
@@ -136,6 +125,7 @@ export interface ActivePlanState {
   turnId: TurnId | null;
   explanation?: string | null;
   steps: Array<{
+    durationMs?: number;
     step: string;
     status: "pending" | "inProgress" | "completed";
   }>;
@@ -358,36 +348,6 @@ export function isLatestTurnSettled(
   return true;
 }
 
-/**
- * Opening a project still lands on an unsettled latest thread when its
- * environment can serve (settle / send). When that machine is down, landing
- * there traps the user: settle and the t3.json new-thread read both wait on
- * the dead host.
- */
-export function shouldEscapeUnsettledThreadOnOfflineEnvironment(
-  latestTurn: LatestTurnTiming | null,
-  session: SessionActivityState | null,
-  connectionPhase: EnvironmentConnectionPhase | null | undefined,
-): boolean {
-  if (canCreateProjectInEnvironment(connectionPhase)) return false;
-  return latestTurn !== null && !isLatestTurnSettled(latestTurn, session);
-}
-
-export function shouldOpenLatestThreadForProject(
-  latestTurn: LatestTurnTiming | null,
-  session: SessionActivityState | null,
-  connectionPhase: EnvironmentConnectionPhase | null | undefined,
-): boolean {
-  return !shouldEscapeUnsettledThreadOnOfflineEnvironment(latestTurn, session, connectionPhase);
-}
-
-export function shouldReadProjectFileForNewThreadDefaults(
-  projectDefaultThreadEnvMode: string | null | undefined,
-  connectionPhase: EnvironmentConnectionPhase | null | undefined,
-): boolean {
-  return projectDefaultThreadEnvMode == null && canCreateProjectInEnvironment(connectionPhase);
-}
-
 export function deriveActiveWorkStartedAt(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
@@ -418,10 +378,6 @@ function requestKindFromRequestType(requestType: unknown): PendingApproval["requ
     case "file_change_approval":
     case "apply_patch_approval":
       return "file-change";
-    case "tool_approval":
-      return "tool";
-    case "permissions_approval":
-      return "permissions";
     default:
       return null;
   }
@@ -462,9 +418,7 @@ export function derivePendingApprovals(
       payload &&
       (payload.requestKind === "command" ||
         payload.requestKind === "file-read" ||
-        payload.requestKind === "file-change" ||
-        payload.requestKind === "tool" ||
-        payload.requestKind === "permissions")
+        payload.requestKind === "file-change")
         ? payload.requestKind
         : payload
           ? requestKindFromRequestType(payload.requestType)
@@ -641,6 +595,92 @@ function planStateFromActivity(activity: OrchestrationThreadActivity): ActivePla
   };
 }
 
+function addPlanStepDurations(
+  plan: ActivePlanState,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ActivePlanState {
+  const timings = new Map<string, { completedAt?: number; startedAt?: number }>();
+  let planStartedAt: number | undefined;
+
+  const keyedSteps = (steps: ActivePlanState["steps"]) => {
+    const occurrences = new Map<string, number>();
+    return steps.map((step) => {
+      const occurrence = occurrences.get(step.step) ?? 0;
+      occurrences.set(step.step, occurrence + 1);
+      return { key: `${step.step}:${occurrence}`, step };
+    });
+  };
+
+  for (const activity of activities) {
+    const snapshot = planStateFromActivity(activity);
+    const activityAt = Date.parse(activity.createdAt);
+    if (!snapshot || Number.isNaN(activityAt)) continue;
+    planStartedAt ??= activityAt;
+
+    for (const { key, step } of keyedSteps(snapshot.steps)) {
+      const timing = timings.get(key) ?? {};
+      if (step.status === "inProgress" && timing.startedAt === undefined) {
+        timing.startedAt = activityAt;
+      }
+      if (step.status === "completed" && timing.completedAt === undefined) {
+        timing.completedAt = activityAt;
+      }
+      timings.set(key, timing);
+    }
+  }
+
+  const durationByKey = new Map<string, number>();
+  let previousCompletedAt = planStartedAt;
+  for (const [key, timing] of [...timings.entries()].toSorted(
+    (left, right) => (left[1].completedAt ?? Infinity) - (right[1].completedAt ?? Infinity),
+  )) {
+    const completedAt = timing.completedAt;
+    const startedAt = timing.startedAt ?? previousCompletedAt;
+    if (completedAt === undefined) continue;
+    if (startedAt !== undefined && completedAt > startedAt) {
+      durationByKey.set(key, completedAt - startedAt);
+    }
+    previousCompletedAt = completedAt;
+  }
+
+  return {
+    ...plan,
+    steps: keyedSteps(plan.steps).map(({ key, step }) => {
+      if (step.status !== "completed") return step;
+      const durationMs = durationByKey.get(key);
+      return durationMs === undefined ? step : { ...step, durationMs };
+    }),
+  };
+}
+
+export function deriveActivePlanState(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): ActivePlanState | null {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
+  // Prefer plan from the current turn; fall back to the most recent plan from any turn
+  // so that TodoWrite tasks persist across follow-up messages.
+  const latest = Option.firstSomeOf([
+    ...(latestTurnId
+      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
+      : Option.none()),
+    Arr.last(allPlanActivities),
+  ]).pipe(Option.getOrNull);
+  if (!latest) {
+    return null;
+  }
+  const plan = planStateFromActivity(latest);
+  if (!plan) return null;
+  const matchingActivities = allPlanActivities.filter(
+    (activity) => activity.turnId === latest.turnId,
+  );
+  const latestClearIndex = matchingActivities.findLastIndex(
+    (activity) => planStateFromActivity(activity) === null,
+  );
+  return addPlanStepDurations(plan, matchingActivities.slice(latestClearIndex + 1));
+}
+
 export interface TurnPlanEntry {
   /** Stable per-turn row id (plans rewrite constantly; the row must not churn). */
   id: string;
@@ -659,7 +699,10 @@ export function deriveTurnPlans(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): TurnPlanEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const byTurn = new Map<string, TurnPlanEntry>();
+  const byTurn = new Map<
+    string,
+    { activities: OrchestrationThreadActivity[]; entry: TurnPlanEntry }
+  >();
   for (const activity of ordered) {
     if (activity.kind !== "turn.plan.updated") {
       continue;
@@ -674,17 +717,24 @@ export function deriveTurnPlans(
     }
     const existing = byTurn.get(key);
     if (existing) {
-      existing.plan = plan;
+      existing.entry.plan = plan;
+      existing.activities.push(activity);
     } else {
       byTurn.set(key, {
-        id: `turn-plan:${key}`,
-        createdAt: activity.createdAt,
-        turnId: activity.turnId,
-        plan,
+        activities: [activity],
+        entry: {
+          id: `turn-plan:${key}`,
+          createdAt: activity.createdAt,
+          turnId: activity.turnId,
+          plan,
+        },
       });
     }
   }
-  return [...byTurn.values()];
+  return [...byTurn.values()].map(({ activities: planActivities, entry }) => ({
+    ...entry,
+    plan: addPlanStepDurations(entry.plan, planActivities),
+  }));
 }
 
 export function findLatestProposedPlan(
@@ -790,6 +840,7 @@ export function deriveWorkLogEntries(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
+    if (activity.kind === "tool.started") continue;
     // Agent task.started rows are CTA seeds: they carry the true spawn turn,
     // which is the batch key (completions of background subagents arrive
     // under later synthetic turns and must not start new batches). They
@@ -798,13 +849,8 @@ export function deriveWorkLogEntries(
     if (activity.kind === "task.updated") continue;
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
-    // Plan updates have a dedicated task row. Keeping the raw activity here
-    // duplicates it as a legacy "Work Log / Plan updated" row when history
-    // is expanded.
-    if (activity.kind === "turn.plan.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
-    if (isCodexTerminalInteractionActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
     entries.push(toDerivedWorkLogEntry(activity));
   }
@@ -815,11 +861,7 @@ export function deriveWorkLogEntries(
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
-  if (
-    activity.kind !== "tool.started" &&
-    activity.kind !== "tool.updated" &&
-    activity.kind !== "tool.completed"
-  ) {
+  if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
     return false;
   }
 
@@ -828,28 +870,6 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
       ? (activity.payload as Record<string, unknown>)
       : null;
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
-}
-
-/**
- * Codex terminal interactions report bytes written to an already-running PTY.
- * Some thread histories contain them as generic tool.updated rows, so filter
- * their exact wire shape from the presentation model. This repairs existing
- * history without deleting or rewriting persisted activities.
- */
-function isCodexTerminalInteractionActivity(activity: OrchestrationThreadActivity): boolean {
-  if (activity.kind !== "tool.updated") {
-    return false;
-  }
-  const payload = asRecord(activity.payload);
-  const data = asRecord(payload?.data);
-  return (
-    payload?.itemType === "command_execution" &&
-    typeof data?.itemId === "string" &&
-    typeof data.processId === "string" &&
-    typeof data.stdin === "string" &&
-    typeof data.threadId === "string" &&
-    typeof data.turnId === "string"
-  );
 }
 
 function extractWorkLogToolLifecycleStatus(
@@ -904,12 +924,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       : null
     : extractToolDetail(payload, title ?? activity.summary);
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
-  const goalLabel = formatGoalActivityLabel(activity.kind);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
     turnId: activity.turnId,
-    label: goalLabel ?? (taskLabel || activity.summary),
+    label: taskLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
         ? "thinking"
@@ -951,9 +970,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.toolCallId = toolCallId;
   }
   let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload);
-  if (!toolLifecycleStatus && activity.kind === "tool.started") {
-    toolLifecycleStatus = "inProgress";
-  }
   if (!toolLifecycleStatus && activity.kind === "tool.completed") {
     toolLifecycleStatus = "completed";
   }
@@ -1010,11 +1026,7 @@ function agentSpawnGroupKey(entry: DerivedWorkLogEntry): string {
 }
 
 function toolLifecycleCollapseMapKey(entry: DerivedWorkLogEntry): string | undefined {
-  if (
-    entry.activityKind !== "tool.started" &&
-    entry.activityKind !== "tool.updated" &&
-    entry.activityKind !== "tool.completed"
-  ) {
+  if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
     return undefined;
   }
   return entry.toolCallId ? `tool:${entry.turnId ?? "no-turn"}:${entry.toolCallId}` : undefined;
@@ -1084,52 +1096,27 @@ function collapseDerivedWorkLogEntries(
     const lifecycleKey = toolLifecycleCollapseMapKey(entry);
     if (lifecycleKey !== undefined) {
       const matchingLifecycleIndex = toolLifecycleRowIndex.get(lifecycleKey);
-      if (matchingLifecycleIndex !== undefined) {
-        const matchingEntry = collapsed[matchingLifecycleIndex];
-        if (matchingEntry?.activityKind === "tool.completed") {
-          collapsed[matchingLifecycleIndex] =
-            entry.activityKind === "tool.completed"
-              ? mergeDerivedWorkLogEntries(matchingEntry, entry)
-              : mergeDerivedWorkLogEntries(entry, matchingEntry);
-          continue;
-        }
-        if (matchingEntry && shouldCollapseToolLifecycleEntries(matchingEntry, entry)) {
-          const merged = mergeDerivedWorkLogEntries(matchingEntry, entry);
-          collapsed[matchingLifecycleIndex] = merged;
-          toolLifecycleRowIndex.set(lifecycleKey, matchingLifecycleIndex);
-          continue;
-        }
-        toolLifecycleRowIndex.delete(lifecycleKey);
+      const matchingEntry =
+        matchingLifecycleIndex === undefined ? undefined : collapsed[matchingLifecycleIndex];
+      if (
+        matchingLifecycleIndex !== undefined &&
+        matchingEntry &&
+        shouldCollapseToolLifecycleEntries(matchingEntry, entry)
+      ) {
+        collapsed[matchingLifecycleIndex] = mergeDerivedWorkLogEntries(matchingEntry, entry);
+        continue;
       }
+      toolLifecycleRowIndex.delete(lifecycleKey);
     }
     const previous = collapsed.at(-1);
-    const hasCompetingIdlessCompletionTarget =
-      previous?.activityKind === "tool.started" &&
-      entry.activityKind === "tool.completed" &&
-      entry.toolCallId === undefined &&
-      collapsed
-        .slice(0, -1)
-        .some(
-          (candidate) =>
-            candidate.activityKind !== "tool.completed" &&
-            candidate.itemType === previous.itemType &&
-            normalizeCompactToolLabel(candidate.toolTitle ?? candidate.label) ===
-              normalizeCompactToolLabel(previous.toolTitle ?? previous.label),
-        );
-    if (
-      previous &&
-      !hasCompetingIdlessCompletionTarget &&
-      shouldCollapseToolLifecycleEntries(previous, entry)
-    ) {
+    if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
       const previousIndex = collapsed.length - 1;
       const previousKey = toolLifecycleCollapseMapKey(previous);
       if (previousKey !== undefined) toolLifecycleRowIndex.delete(previousKey);
       const merged = mergeDerivedWorkLogEntries(previous, entry);
       collapsed[previousIndex] = merged;
       const mergedKey = toolLifecycleCollapseMapKey(merged);
-      if (mergedKey !== undefined) {
-        toolLifecycleRowIndex.set(mergedKey, previousIndex);
-      }
+      if (mergedKey !== undefined) toolLifecycleRowIndex.set(mergedKey, previousIndex);
       continue;
     }
     collapsed.push(entry);
@@ -1144,18 +1131,10 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
-  if (
-    previous.activityKind !== "tool.started" &&
-    previous.activityKind !== "tool.updated" &&
-    previous.activityKind !== "tool.completed"
-  ) {
+  if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
     return false;
   }
-  if (
-    next.activityKind !== "tool.started" &&
-    next.activityKind !== "tool.updated" &&
-    next.activityKind !== "tool.completed"
-  ) {
+  if (next.activityKind !== "tool.updated" && next.activityKind !== "tool.completed") {
     return false;
   }
   if (previous.turnId !== next.turnId) {
@@ -1164,14 +1143,10 @@ function shouldCollapseToolLifecycleEntries(
   if (previous.activityKind === "tool.completed") {
     return false;
   }
-  if (next.activityKind === "tool.started") {
-    return false;
-  }
   if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
     return true;
   }
   return (
-    (previous.activityKind !== "tool.started" || next.activityKind === "tool.completed") &&
     previous.toolCallId !== undefined &&
     next.toolCallId === undefined &&
     previous.itemType === next.itemType &&
@@ -1232,11 +1207,7 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
   ) {
     return `task${entry.taskId}`;
   }
-  if (
-    entry.activityKind !== "tool.started" &&
-    entry.activityKind !== "tool.updated" &&
-    entry.activityKind !== "tool.completed"
-  ) {
+  if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
     return undefined;
   }
   if (entry.toolCallId) {
@@ -1439,8 +1410,6 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
-  const dataInput = asRecord(data?.input);
-  const stateInput = asRecord(asRecord(data?.state)?.input);
   const itemType = asTrimmedString(payload?.itemType);
   const detail = asTrimmedString(payload?.detail);
   const candidates: unknown[] = [
@@ -1448,8 +1417,6 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
     itemInput?.command,
     itemResult?.command,
     data?.command,
-    dataInput?.command,
-    stateInput?.command,
     itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
   ];
 
@@ -1707,9 +1674,7 @@ function extractWorkLogRequestKind(
   if (
     payload?.requestKind === "command" ||
     payload?.requestKind === "file-read" ||
-    payload?.requestKind === "file-change" ||
-    payload?.requestKind === "tool" ||
-    payload?.requestKind === "permissions"
+    payload?.requestKind === "file-change"
   ) {
     return payload.requestKind;
   }
@@ -1827,14 +1792,12 @@ export function deriveTimelineEntries(
   workEntries: ReadonlyArray<WorkLogEntry>,
   turnPlans: ReadonlyArray<TurnPlanEntry> = [],
 ): TimelineEntry[] {
-  const messageRows: TimelineEntry[] = messages
-    .filter((message) => !isCorrectionMessage(message))
-    .map((message) => ({
-      id: message.id,
-      kind: "message",
-      createdAt: message.createdAt,
-      message,
-    }));
+  const messageRows: TimelineEntry[] = messages.map((message) => ({
+    id: message.id,
+    kind: "message",
+    createdAt: message.createdAt,
+    message,
+  }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,
     kind: "proposed-plan",
@@ -1883,23 +1846,4 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
   if (session.status === "starting") return "connecting";
   if (session.status === "running") return "running";
   return "ready";
-}
-export function deriveActivePlanState(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
-): ActivePlanState | null {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
-  // Prefer plan from the current turn; fall back to the most recent plan from any turn
-  // so that TodoWrite tasks persist across follow-up messages.
-  const latest = Option.firstSomeOf([
-    ...(latestTurnId
-      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
-      : Option.none()),
-    Arr.last(allPlanActivities),
-  ]).pipe(Option.getOrNull);
-  if (!latest) {
-    return null;
-  }
-  return planStateFromActivity(latest);
 }

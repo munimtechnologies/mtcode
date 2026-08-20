@@ -4,33 +4,37 @@ import {
   type PullRequestComment,
   type PullRequestDetailView,
   type PullRequestReviewThread,
-  type PullRequestStackSummary,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  buildAskAboutLinesHandoff,
+  buildAddSelectionToAgentHandoff,
   buildAskAboutPullRequestHandoff,
   buildExplainPullRequestHandoff,
   buildFixFindingHandoff,
   buildFixFindingsHandoff,
-  buildPullRequestStackHandoffContext,
   groupPullRequestTimelineConversations,
   handoffPrompt,
   handoffReviewComments,
+  isPullRequestVerdictStale,
+  isStackedPullRequestBase,
   isThreadOwnPullRequest,
+  latestPullRequestReviewOutcomes,
+  newestPullRequestCommitAt,
+  mergePullRequestThreadComments,
   orderPullRequestComments,
+  pullRequestActionMenuHasGroup,
   pullRequestActionNeedsHostRefresh,
+  pullRequestComposerTarget,
   pullRequestFindingKey,
   pullRequestHandoffLabels,
+  pullRequestReviewOutcome,
   readableFailure,
+  shouldRefreshPullRequestActivity,
   resolveBaseFreshness,
   buildPullRequestTimeline,
   describePullRequestState,
-  findPullRequestStack,
-  nextOpenPullRequestStackStep,
-  pullRequestsMergedThrough,
-  pullRequestStackMergeCopy,
+  editPullRequestThreadComment,
 } from "./pullRequestDetail.logic";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 
@@ -59,6 +63,71 @@ const TIMELINE_SOURCE: Pick<
   closedAt: null,
 };
 
+describe("pull request activity refresh", () => {
+  const first = {
+    key: "project:acme/web#7",
+    updatedAt: "2026-08-13T13:00:00Z",
+  };
+
+  it("refreshes activity only after the same pull request changes", () => {
+    expect(
+      shouldRefreshPullRequestActivity(first, {
+        ...first,
+        updatedAt: "2026-08-13T13:01:00Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not duplicate the first activity read or carry a revision across pull requests", () => {
+    expect(shouldRefreshPullRequestActivity(null, first)).toBe(false);
+    expect(shouldRefreshPullRequestActivity(first, first)).toBe(false);
+    expect(
+      shouldRefreshPullRequestActivity(first, {
+        key: "project:acme/web#8",
+        updatedAt: "2026-08-13T13:01:00Z",
+      }),
+    ).toBe(false);
+  });
+});
+describe("review thread comment pages", () => {
+  it("appends new comments once and keeps refreshed base comments", () => {
+    expect(
+      mergePullRequestThreadComments(
+        [
+          { id: "c1", body: "refreshed" },
+          { id: "c2", body: "already in base" },
+        ],
+        [
+          { id: "c2", body: "stale page copy" },
+          { id: "c3", body: "next page" },
+        ],
+      ),
+    ).toEqual([
+      { id: "c1", body: "refreshed" },
+      { id: "c2", body: "already in base" },
+      { id: "c3", body: "next page" },
+    ]);
+  });
+
+  it("keeps a loaded comment after its body is edited", () => {
+    const loaded = [
+      { id: "c2", body: "old body" },
+      { id: "c3", body: "another loaded comment" },
+    ];
+
+    expect(editPullRequestThreadComment(loaded, "c2", "saved body")).toEqual([
+      { id: "c2", body: "saved body" },
+      { id: "c3", body: "another loaded comment" },
+    ]);
+  });
+});
+
+describe("pull request action menu", () => {
+  it("keeps the group divider when auto-merge is the only action", () => {
+    expect(pullRequestActionMenuHasGroup(false, true, false)).toBe(true);
+  });
+});
+
 describe("pull request state description", () => {
   it("keeps draft and conflicts orthogonal to the terminal states", () => {
     expect(describePullRequestState("open", true)).toBe("Draft");
@@ -68,81 +137,12 @@ describe("pull request state description", () => {
   });
 });
 
-const stack: PullRequestStackSummary = {
-  id: 9,
-  number: 3,
-  url: "https://api.github.com/repos/acme/app/stacks/3",
-  baseBranch: "main",
-  open: true,
-  steps: [
-    { position: 1, pullRequestNumber: 10, branch: "auth", state: "merged", draft: false },
-    { position: 2, pullRequestNumber: 11, branch: "api", state: "open", draft: false },
-    { position: 3, pullRequestNumber: 12, branch: "ui", state: "open", draft: true },
-  ],
-};
-
-describe("pull request stack selection", () => {
-  it("finds the stack containing the open pull request", () => {
-    expect(findPullRequestStack([stack], 11)).toBe(stack);
-    expect(findPullRequestStack([stack], 99)).toBeNull();
-  });
-
-  it("returns each open pull request merged through the selected step", () => {
-    expect(pullRequestsMergedThrough(stack, 12).map((step) => step.pullRequestNumber)).toEqual([
-      11, 12,
-    ]);
-    expect(pullRequestsMergedThrough(stack, 11).map((step) => step.pullRequestNumber)).toEqual([
-      11,
-    ]);
-    expect(pullRequestsMergedThrough(stack, 10)).toEqual([]);
-  });
-
-  it("uses PR counts instead of stack step jargon for merge actions", () => {
-    expect([pullRequestStackMergeCopy(1), pullRequestStackMergeCopy(2)]).toEqual([
-      {
-        action: "Merge this PR",
-        pending: "Merging this PR...",
-        confirmation: "Merge this PR?",
-      },
-      {
-        action: "Merge 2 PRs",
-        pending: "Merging 2 PRs...",
-        confirmation: "Merge 2 PRs?",
-      },
-    ]);
-  });
-
-  it("finds the next open step", () => {
-    expect(nextOpenPullRequestStackStep(stack, 10)?.pullRequestNumber).toBe(11);
-    expect(nextOpenPullRequestStackStep(stack, 11)?.pullRequestNumber).toBe(12);
-    expect(nextOpenPullRequestStackStep(stack, 12)).toBeNull();
-  });
-
-  it("gives agents the current step and its nearest neighbors", () => {
-    const context = buildPullRequestStackHandoffContext(stack, 11);
-
-    expect(context).toEqual(
-      expect.objectContaining({
-        id: "pull-request-stack:11",
-        filePath: "Stack 2/3",
-        rangeLabel: "api",
-      }),
-    );
-    expect(context?.text).toContain("targets `main`");
-    expect(context?.text).toContain("Previous step: #10 `auth`");
-    expect(context?.text).toContain("Next step: #12 `ui`");
-    expect(context?.text).toContain("Keep work in this step");
-  });
-});
-
 describe("pull request handoff labels", () => {
   it("names the open thread when actions write to its composer", () => {
     expect(pullRequestHandoffLabels(true)).toEqual({
       fixFinding: "Fix in this thread",
       fixCheck: "Fix in this thread",
       fixFindings: "Fix findings in this thread",
-      resolve: "Resolve in this thread",
-      resolveConflicts: "Resolve conflicts in this thread",
     });
   });
 
@@ -151,9 +151,57 @@ describe("pull request handoff labels", () => {
       fixFinding: "Fix in a thread",
       fixCheck: "Fix",
       fixFindings: "Fix findings in a thread",
-      resolve: "Resolve in a new thread",
-      resolveConflicts: "Resolve conflicts in a thread",
     });
+  });
+});
+
+describe("pull request composer target", () => {
+  it("rejects a page composer so agent comments cannot open another thread", () => {
+    const target = { environmentId: "env-1", threadId: "thread-1" };
+
+    expect(pullRequestComposerTarget("page", target)).toBeNull();
+    expect(pullRequestComposerTarget("thread", target)).toBe(target);
+  });
+});
+
+describe("stacked pull request classification", () => {
+  it("requires a known default branch", () => {
+    expect(isStackedPullRequestBase("main", [{ name: "main", isDefault: false }])).toBe(false);
+  });
+
+  it("recognizes local and remote forms of the default branch", () => {
+    expect(
+      isStackedPullRequestBase("main", [{ name: "main", isDefault: true, isRemote: false }]),
+    ).toBe(false);
+    expect(
+      isStackedPullRequestBase("main", [
+        { name: "origin/main", isDefault: true, isRemote: true, remoteName: "origin" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("classifies a non-default base as stacked once the default is known", () => {
+    expect(
+      isStackedPullRequestBase("feature-base", [
+        { name: "origin/main", isDefault: true, isRemote: true, remoteName: "origin" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not mistake a nested branch suffix for the default branch", () => {
+    expect(
+      isStackedPullRequestBase("main", [
+        {
+          name: "origin/feature/main",
+          isDefault: true,
+          isRemote: true,
+          remoteName: "origin",
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      isStackedPullRequestBase("1.0", [{ name: "release/1.0", isDefault: true, isRemote: false }]),
+    ).toBe(true);
   });
 });
 
@@ -168,6 +216,171 @@ describe("ordering comments", () => {
     expect(orderPullRequestComments(comments, "oldest")).toEqual(comments);
     // The source array is chronological input, not a mutation target.
     expect(comments).toEqual([{ createdAt: "a" }, { createdAt: "b" }, { createdAt: "c" }]);
+  });
+});
+
+describe("review verdicts", () => {
+  it("reads the same three verdicts however a host spells them", () => {
+    expect(pullRequestReviewOutcome("APPROVED")).toBe("approved");
+    expect(pullRequestReviewOutcome("approved")).toBe("approved");
+    expect(pullRequestReviewOutcome("CHANGES_REQUESTED")).toBe("changes-requested");
+    expect(pullRequestReviewOutcome("changes_requested")).toBe("changes-requested");
+    expect(pullRequestReviewOutcome("DISMISSED")).toBe("dismissed");
+  });
+
+  it("is not a verdict where the review only carried remarks", () => {
+    expect(pullRequestReviewOutcome("COMMENTED")).toBeNull();
+    expect(pullRequestReviewOutcome("PENDING")).toBeNull();
+    expect(pullRequestReviewOutcome(null)).toBeNull();
+  });
+
+  it("keeps each reviewer's last word, whatever order the host returned them in", () => {
+    const review = (
+      id: string,
+      login: string,
+      reviewState: string,
+      createdAt: string,
+    ): PullRequestComment => ({
+      id,
+      kind: "review",
+      author: { login, name: null, avatarUrl: null },
+      body: "",
+      createdAt,
+      url: null,
+      path: null,
+      reviewState,
+    });
+
+    expect(
+      latestPullRequestReviewOutcomes([
+        review("r3", "bilal", "APPROVED", "2026-07-03T00:00:00Z"),
+        review("r1", "bilal", "CHANGES_REQUESTED", "2026-07-01T00:00:00Z"),
+        review("r2", "octocat", "CHANGES_REQUESTED", "2026-07-02T00:00:00Z"),
+        // Not a verdict, so it neither adds a reviewer nor overwrites one.
+        review("r4", "octocat", "COMMENTED", "2026-07-04T00:00:00Z"),
+      ]).map((entry) => [entry.actor?.login, entry.outcome]),
+    ).toEqual([
+      ["bilal", "approved"],
+      ["octocat", "changes-requested"],
+    ]);
+  });
+
+  it("keeps two deleted accounts apart rather than counting them as one reviewer", () => {
+    expect(
+      latestPullRequestReviewOutcomes([
+        {
+          ...TIMELINE_SOURCE.comments[0]!,
+          id: "r1",
+          kind: "review",
+          author: null,
+          reviewState: "APPROVED",
+          createdAt: "2026-07-01T00:00:00Z",
+        },
+        {
+          ...TIMELINE_SOURCE.comments[0]!,
+          id: "r2",
+          kind: "review",
+          author: null,
+          reviewState: "APPROVED",
+          createdAt: "2026-07-02T00:00:00Z",
+        },
+      ]),
+    ).toHaveLength(2);
+  });
+
+  it("gives every entry a key that separates the reviewers it kept apart", () => {
+    const entries = latestPullRequestReviewOutcomes([
+      {
+        ...TIMELINE_SOURCE.comments[0]!,
+        id: "r1",
+        kind: "review",
+        author: null,
+        reviewState: "APPROVED",
+        createdAt: "2026-07-01T00:00:00Z",
+      },
+      {
+        ...TIMELINE_SOURCE.comments[0]!,
+        id: "r2",
+        kind: "review",
+        author: null,
+        reviewState: "APPROVED",
+        createdAt: "2026-07-01T00:00:00Z",
+      },
+    ]);
+    // Same author (none) and the same instant, so only the review's own id tells them apart.
+    expect(new Set(entries.map((entry) => entry.key)).size).toBe(2);
+  });
+
+  it("calls a verdict stale once commits land after it, and current before that", () => {
+    const commits = [
+      { oid: "c0ffee", messageHeadline: "later work", committedDate: "2026-07-05T00:00:00Z" },
+    ];
+    const review = (createdAt: string): PullRequestComment => ({
+      ...TIMELINE_SOURCE.comments[0]!,
+      kind: "review",
+      reviewState: "APPROVED",
+      createdAt,
+    });
+
+    expect(
+      latestPullRequestReviewOutcomes([review("2026-07-01T00:00:00Z")], commits)[0]?.stale,
+    ).toBe(true);
+    expect(
+      latestPullRequestReviewOutcomes([review("2026-07-06T00:00:00Z")], commits)[0]?.stale,
+    ).toBe(false);
+    // Nothing to be overtaken by, so nothing is stale.
+    expect(latestPullRequestReviewOutcomes([review("2026-07-01T00:00:00Z")], [])[0]?.stale).toBe(
+      false,
+    );
+  });
+
+  it("measures staleness against the newest commit, not the last one listed", () => {
+    expect(
+      newestPullRequestCommitAt([
+        { oid: "a", messageHeadline: "", committedDate: "2026-07-09T00:00:00Z" },
+        { oid: "b", messageHeadline: "", committedDate: "2026-07-02T00:00:00Z" },
+      ]),
+    ).toBe("2026-07-09T00:00:00Z");
+    expect(newestPullRequestCommitAt([])).toBeNull();
+  });
+
+  it("orders instants rather than their text, so a UTC offset cannot invert them", () => {
+    // 01:00+02:00 is 23:00 the previous day, so as text it sorts after the Z stamp and in time
+    // it falls well before it.
+    expect(
+      newestPullRequestCommitAt([
+        { oid: "a", messageHeadline: "", committedDate: "2026-07-05T00:30:00Z" },
+        { oid: "b", messageHeadline: "", committedDate: "2026-07-05T01:00:00+02:00" },
+      ]),
+    ).toBe("2026-07-05T00:30:00Z");
+    expect(isPullRequestVerdictStale("2026-07-05T00:30:00Z", "2026-07-05T01:00:00+02:00")).toBe(
+      false,
+    );
+    // A timestamp nothing can parse is not a position, so it settles nothing either way.
+    expect(isPullRequestVerdictStale("2026-07-01T00:00:00Z", "not a date")).toBe(false);
+    expect(
+      newestPullRequestCommitAt([{ oid: "a", messageHeadline: "", committedDate: "not a date" }]),
+    ).toBeNull();
+  });
+
+  it("shows nothing for a reviewer whose verdict was dismissed", () => {
+    expect(
+      latestPullRequestReviewOutcomes([
+        {
+          ...TIMELINE_SOURCE.comments[0]!,
+          kind: "review",
+          reviewState: "APPROVED",
+          createdAt: "2026-07-01T00:00:00Z",
+        },
+        {
+          ...TIMELINE_SOURCE.comments[0]!,
+          id: "c2",
+          kind: "review",
+          reviewState: "DISMISSED",
+          createdAt: "2026-07-02T00:00:00Z",
+        },
+      ]),
+    ).toEqual([]);
   });
 });
 
@@ -312,6 +525,47 @@ describe("pull request timeline", () => {
       ["comments", "new-comment-1", "new-comment-2"],
       ["event", "1baf7bdcafe"],
       ["comments", "old-comment-1", "old-comment-2"],
+      ["event", "created"],
+    ]);
+  });
+
+  it("keeps a verdict out of the collapsed conversation it was submitted in", () => {
+    const events = buildPullRequestTimeline({
+      ...TIMELINE_SOURCE,
+      comments: [
+        { ...TIMELINE_SOURCE.comments[0]!, id: "chatter-1", createdAt: "2026-07-05T00:00:00Z" },
+        {
+          ...TIMELINE_SOURCE.comments[0]!,
+          id: "approval",
+          kind: "review",
+          body: "",
+          reviewState: "APPROVED",
+          createdAt: "2026-07-04T00:00:00Z",
+        },
+        { ...TIMELINE_SOURCE.comments[0]!, id: "chatter-2", createdAt: "2026-07-03T00:00:00Z" },
+        // A review without a verdict is ordinary conversation and still groups.
+        {
+          ...TIMELINE_SOURCE.comments[0]!,
+          id: "remark",
+          kind: "review",
+          reviewState: "COMMENTED",
+          createdAt: "2026-07-02T12:00:00Z",
+        },
+      ],
+    });
+
+    const rows = groupPullRequestTimelineConversations(events);
+    expect(
+      rows.map((row) =>
+        row.kind === "comments"
+          ? [row.kind, ...row.events.map((event) => event.id)]
+          : [row.kind, row.event.id],
+      ),
+    ).toEqual([
+      ["comments", "chatter-1"],
+      ["event", "approval"],
+      ["comments", "chatter-2", "remark"],
+      ["event", "1baf7bdcafe"],
       ["event", "created"],
     ]);
   });
@@ -739,7 +993,7 @@ describe("asking about a change rather than working on it", () => {
     expect(handoff.reviewComments[0]?.text).toContain("Explain only. Do not change any code.");
   });
 
-  it("takes what the reader typed on the lines as the question", () => {
+  it("puts the reader's request in the composer and the selected lines in chips", () => {
     const comment = {
       id: "pull-request-selection:page.tsx:12:18",
       sectionId: "pull-request:42",
@@ -751,10 +1005,10 @@ describe("asking about a change rather than working on it", () => {
       text: "what is this for?",
       diff: "+const answer = 42;",
     };
-    const handoff = buildAskAboutLinesHandoff({
+    const handoff = buildAddSelectionToAgentHandoff({
       ...base,
       comment,
-      question: "what is this for?",
+      request: "what is this for?",
     });
     expect(handoff.prompt).toBe("what is this for?");
     // Two chips: which pull request, and which lines.
@@ -762,25 +1016,8 @@ describe("asking about a change rather than working on it", () => {
       "PR #42",
       "apps/web/src/page.tsx",
     ]);
-  });
-
-  it("leaves the composer empty where the reader marked lines and typed nothing", () => {
-    const handoff = buildAskAboutLinesHandoff({
-      ...base,
-      comment: {
-        id: "pull-request-selection:page.tsx:4:4",
-        sectionId: "pull-request:42",
-        sectionTitle: "PR #42 review",
-        filePath: "apps/web/src/page.tsx",
-        startIndex: 3,
-        endIndex: 3,
-        rangeLabel: "L4 (before)",
-        text: "",
-        diff: "-const answer = 41;",
-      },
-      question: "   ",
-    });
-    expect(handoff.prompt).toBe("");
+    expect(handoff.reviewComments[0]?.text).not.toContain("Do not change any code");
+    expect(handoff.reviewComments[1]?.text).toBe("");
   });
 });
 

@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { ProviderDriverKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu";
@@ -23,7 +24,7 @@ describe("ComposerCommandMenu", () => {
     expect(markup).not.toContain("dropdown-glass");
   });
 
-  it("groups built-in slash commands without inventing icons", () => {
+  it("renders commands without a category heading or invented icons", () => {
     const markup = renderToStaticMarkup(
       <ComposerCommandMenu
         items={[
@@ -46,10 +47,43 @@ describe("ComposerCommandMenu", () => {
 
     expect(markup).toContain("/model");
     expect(markup).toContain("Switch response model for this thread");
-    expect(markup).toContain("Built-in");
+    expect(markup).not.toContain("Built-in");
     expect(markup).not.toContain("<svg");
     expect(markup).toContain("font-sans text-xs font-medium");
     expect(markup).not.toContain("font-mono");
     expect(markup).toContain("text-right");
+  });
+
+  it("renders a skill source icon with an accessible source label", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerCommandMenu
+        items={[
+          {
+            id: "skill:codex:browser",
+            type: "skill",
+            provider: ProviderDriverKind.make("codex"),
+            skill: {
+              name: "browser",
+              path: "/Users/maria/.codex/plugins/browser/skills/browser/SKILL.md",
+              scope: "user",
+              enabled: true,
+            },
+            label: "Browser",
+            description: "Open and control the in-app browser",
+          },
+        ]}
+        resolvedTheme="dark"
+        isLoading={false}
+        triggerKind="skill"
+        activeItemId="skill:codex:browser"
+        onHighlightedItemChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Browser");
+    expect(markup).toContain('<span class="sr-only">App skill</span>');
+    expect(markup).toContain("<svg");
+    expect(markup).toContain("text-icon-muted");
   });
 });

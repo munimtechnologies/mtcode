@@ -1,24 +1,27 @@
 import {
-  type EnvironmentId,
+  resolveProviderSkillSourceKind,
+  type ProviderSkillSourceKind,
+} from "@t3tools/client-runtime/providerSkills";
+import {
   type ProjectEntry,
   type ProviderDriverKind,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
-  type ThreadId,
 } from "@t3tools/contracts";
-import { memo, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  BlocksIcon,
+  FolderGit2Icon,
+  FolderIcon,
+  PackageIcon,
+  SettingsIcon,
+  UserRoundIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { memo, useLayoutEffect, useRef } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
-import { formatProviderSkillInstallSource } from "~/providerSkillPresentation";
 import { cn } from "~/lib/utils";
-import {
-  Command,
-  CommandGroup,
-  CommandGroupLabel,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "../ui/command";
+import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 
 export type ComposerCommandItem =
@@ -52,68 +55,19 @@ export type ComposerCommandItem =
       skill: ServerProviderSkill;
       label: string;
       description: string;
-    }
-  | {
-      id: string;
-      type: "thread";
-      environmentId: EnvironmentId;
-      threadId: ThreadId;
-      title: string;
-      label: string;
-      description: string;
     };
-
-type ComposerCommandGroup = {
-  id: string;
-  label: string | null;
-  items: ComposerCommandItem[];
-};
-
-function groupCommandItems(
-  items: ComposerCommandItem[],
-  triggerKind: ComposerTriggerKind | null,
-  groupSlashCommandSections: boolean,
-): ComposerCommandGroup[] {
-  if (triggerKind === "skill") {
-    return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
-  }
-  if (triggerKind === "thread") {
-    return items.length > 0 ? [{ id: "threads", label: "Threads", items }] : [];
-  }
-  if (triggerKind !== "slash-command" || !groupSlashCommandSections) {
-    return [{ id: "default", label: null, items }];
-  }
-
-  const builtInItems = items.filter((item) => item.type === "slash-command");
-  const providerItems = items.filter((item) => item.type === "provider-slash-command");
-
-  const groups: ComposerCommandGroup[] = [];
-  if (builtInItems.length > 0) {
-    groups.push({ id: "built-in", label: "Built-in", items: builtInItems });
-  }
-  if (providerItems.length > 0) {
-    groups.push({ id: "provider", label: "Provider", items: providerItems });
-  }
-  return groups;
-}
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   items: ComposerCommandItem[];
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
-  groupSlashCommandSections?: boolean;
   emptyStateText?: string;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  const groups = useMemo(
-    () =>
-      groupCommandItems(props.items, props.triggerKind, props.groupSlashCommandSections ?? true),
-    [props.groupSlashCommandSections, props.items, props.triggerKind],
-  );
 
   useLayoutEffect(() => {
     if (!props.activeItemId || !listRef.current) return;
@@ -140,28 +94,18 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       >
         {props.items.length > 0 ? (
           <CommandList className="max-h-72 scroll-pb-6">
-            {groups.map((group, groupIndex) => (
-              <div key={group.id}>
-                {groupIndex > 0 ? <CommandSeparator className="my-0.5" /> : null}
-                <CommandGroup>
-                  {group.label ? (
-                    <CommandGroupLabel className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-secondary-label">
-                      {group.label}
-                    </CommandGroupLabel>
-                  ) : null}
-                  {group.items.map((item) => (
-                    <ComposerCommandMenuItem
-                      key={item.id}
-                      item={item}
-                      resolvedTheme={props.resolvedTheme}
-                      isActive={props.activeItemId === item.id}
-                      onHighlight={props.onHighlightedItemChange}
-                      onSelect={props.onSelect}
-                    />
-                  ))}
-                </CommandGroup>
-              </div>
-            ))}
+            <CommandGroup>
+              {props.items.map((item) => (
+                <ComposerCommandMenuItem
+                  key={item.id}
+                  item={item}
+                  resolvedTheme={props.resolvedTheme}
+                  isActive={props.activeItemId === item.id}
+                  onHighlight={props.onHighlightedItemChange}
+                  onSelect={props.onSelect}
+                />
+              ))}
+            </CommandGroup>
           </CommandList>
         ) : (
           <div className="px-5 pt-3.5 pb-7">
@@ -169,17 +113,13 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {props.isLoading
                 ? props.triggerKind === "skill"
                   ? "Searching workspace skills..."
-                  : props.triggerKind === "thread"
-                    ? "Searching threads..."
-                    : "Searching workspace files..."
+                  : "Searching workspace files..."
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
                     ? "No skills found. Try / to browse provider commands."
-                    : props.triggerKind === "thread"
-                      ? "No matching threads."
-                      : props.triggerKind === "path"
-                        ? "No matching files or folders."
-                        : "No matching command."))}
+                    : props.triggerKind === "path"
+                      ? "No matching files or folders."
+                      : "No matching command."))}
             </p>
           </div>
         )}
@@ -195,8 +135,8 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   onHighlight: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
-  const skillSourceLabel =
-    props.item.type === "skill" ? formatProviderSkillInstallSource(props.item.skill) : null;
+  const skillSourceKind =
+    props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
 
   return (
     <CommandItem
@@ -222,6 +162,8 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           kind={props.item.pathKind}
           theme={props.resolvedTheme}
         />
+      ) : skillSourceKind ? (
+        <SkillSourceIcon kind={skillSourceKind} />
       ) : null}
       <span className="flex min-w-0 flex-1 items-baseline gap-3">
         <span className="shrink-0 font-sans text-xs font-medium">{props.item.label}</span>
@@ -229,9 +171,34 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           {props.item.description}
         </span>
       </span>
-      {skillSourceLabel ? (
-        <span className="shrink-0 pl-2 text-secondary-label text-xs">{skillSourceLabel}</span>
-      ) : null}
     </CommandItem>
   );
 });
+
+const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
+  app: BlocksIcon,
+  repo: FolderGit2Icon,
+  project: FolderIcon,
+  personal: UserRoundIcon,
+  system: SettingsIcon,
+  other: PackageIcon,
+};
+
+const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
+  app: "App",
+  repo: "Repo",
+  project: "Project",
+  personal: "Personal",
+  system: "System",
+  other: "Other",
+};
+
+function SkillSourceIcon(props: { kind: ProviderSkillSourceKind }) {
+  const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];
+  return (
+    <>
+      <Icon aria-hidden="true" className="size-4 shrink-0 text-icon-muted" />
+      <span className="sr-only">{SKILL_SOURCE_LABEL_BY_KIND[props.kind]} skill</span>
+    </>
+  );
+}
