@@ -2,19 +2,15 @@
 # Build and submit MT Code iOS (Munim mobile distro) via EAS.
 #
 # Prerequisites:
-#   - eas CLI installed and logged into the Munim Expo account
+#   - eas CLI installed and logged into an account that can build @munimtechnologies/mt-code
 #   - ~/.mt/munim-connect.env with Munim Clerk keys (recommended)
-#   - ASC_APP_ID set after creating the App Store Connect listing
-#
-# First-time setup (once Munim Expo project exists):
-#   cd apps/mobile
-#   T3CODE_MOBILE_DISTRO=munim eas init
-#   # then set extra.eas.projectId in app.config.ts from the new project id
+#   - apps/mobile/eas.json submit.production-munim.ios configured (ascAppId + API key)
+#   - apps/mobile/credentials.json + credentials/ for local signing
 #
 # Usage:
 #   bash scripts/personal-publish-ios.sh build    # eas build only
-#   bash scripts/personal-publish-ios.sh submit   # eas submit only (needs ASC_APP_ID)
-#   bash scripts/personal-publish-ios.sh          # build, then submit when ASC_APP_ID is set
+#   bash scripts/personal-publish-ios.sh submit   # eas submit latest build
+#   bash scripts/personal-publish-ios.sh          # build, then submit
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -46,11 +42,8 @@ run_build() {
 }
 
 run_submit() {
-  if [[ -z "${ASC_APP_ID:-}" ]]; then
-    echo "ASC_APP_ID is required for App Store submit (create the MT Code app in ASC first)" >&2
-    exit 1
-  fi
-  eas submit --platform ios --profile production-munim --asc-app-id "$ASC_APP_ID" --non-interactive --latest
+  # ASC app id + API key come from apps/mobile/eas.json submit.production-munim.ios
+  eas submit --platform ios --profile production-munim --non-interactive --latest
 }
 
 case "$ACTION" in
@@ -62,12 +55,7 @@ case "$ACTION" in
     ;;
   all)
     run_build
-    if [[ -n "${ASC_APP_ID:-}" ]]; then
-      run_submit
-    else
-      echo "Skipping submit: set ASC_APP_ID after creating the App Store Connect app."
-      echo "  ASC_APP_ID=... eas submit --platform ios --profile production-munim --asc-app-id \"\$ASC_APP_ID\" --latest"
-    fi
+    run_submit
     ;;
   *)
     echo "usage: $0 [build|submit|all]" >&2
