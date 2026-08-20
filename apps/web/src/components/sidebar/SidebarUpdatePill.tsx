@@ -71,7 +71,10 @@ function SidebarUpdateReleaseNotesTooltip({
   readonly state: NonNullable<ReturnType<typeof useDesktopUpdateState>>;
   readonly tooltip: string;
 }) {
-  if (state.channel !== "nightly" || state.releaseNotes.length === 0) {
+  // Show the changelog whenever electron-updater supplied notes. Upstream
+  // originally gated this to nightly; MT Code (and latest) still get a useful
+  // hover once fullChangelog is enabled for every channel.
+  if (state.releaseNotes.length === 0) {
     return <>{tooltip}</>;
   }
 
@@ -336,7 +339,7 @@ function SidebarUpdateControl() {
         <TooltipPopup
           align="center"
           className={
-            showUpdateDetails && state?.channel === "nightly" && state.releaseNotes.length > 0
+            showUpdateDetails && state && state.releaseNotes.length > 0
               ? // pointer-events-auto overrides the positioner's pointer-events-none so the
                 // release notes stay open (and scrollable) when the cursor moves into them.
                 "pointer-events-auto max-w-none text-balance"

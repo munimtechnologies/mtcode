@@ -143,7 +143,29 @@ for a in "${ASSETS[@]}"; do
   UNIQUE_ASSETS+=("$a")
 done
 
+PREV_TAG=$(
+  gh release list -R "$RELEASE_REPO" --limit 30 --json tagName,isLatest \
+    --jq '[.[] | select(.tagName | startswith("munim-v"))] | map(.tagName) | .[0] // empty' 2>/dev/null || true
+)
+# When republishing the same tag, take the previous munim release for the log range.
+if [[ "$PREV_TAG" == "$TAG" ]]; then
+  PREV_TAG=$(
+    gh release list -R "$RELEASE_REPO" --limit 30 --json tagName \
+      --jq '[.[] | select(.tagName | startswith("munim-v"))] | .[1] // empty' 2>/dev/null || true
+  )
+fi
+CHANGELOG=$(
+  if [[ -n "$PREV_TAG" ]] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
+    git log --pretty=format:'- %s' "${PREV_TAG}..HEAD"
+  else
+    git log --pretty=format:'- %s' -15
+  fi | head -25
+)
 NOTES=$(cat <<EOF
+## What's changed
+
+${CHANGELOG}
+
 MT Code — public build from \`munimtechnologies/mtcode@main\`.
 
 - App ID: \`com.munim.t3code\`
