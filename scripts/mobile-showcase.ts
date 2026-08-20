@@ -36,13 +36,13 @@ const MOBILE_ROOT = NodePath.join(REPO_ROOT, "apps/mobile");
 const IS_MUNIM_SHOWCASE = NodeProcess.env.T3CODE_MOBILE_DISTRO === "munim";
 const ANDROID_PACKAGE = IS_MUNIM_SHOWCASE ? "com.munim.mtcode" : "com.t3tools.t3code";
 const APP_SCHEME = IS_MUNIM_SHOWCASE ? "mtcode" : "t3code";
+const IOS_NATIVE_NAME = IS_MUNIM_SHOWCASE ? "MTCode" : "T3Code";
 const IOS_READY_FILENAME = "T3ShowcaseReadyScene";
 const SERVER_HOST = "0.0.0.0";
 const IOS_SIMULATOR_ARCH = NodeProcess.arch === "arm64" ? "arm64" : "x86_64";
-// Native Xcode product stays T3Code; Munim only changes display name / bundle id.
 const IOS_APP_PATH = NodePath.join(
   MOBILE_ROOT,
-  ".showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app",
+  `.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/${IOS_NATIVE_NAME}.app`,
 );
 const ANDROID_APK_PATH = NodePath.join(
   MOBILE_ROOT,
@@ -718,9 +718,9 @@ async function buildIos(): Promise<string> {
     "xcodebuild",
     [
       "-workspace",
-      NodePath.join(MOBILE_ROOT, "ios/T3Code.xcworkspace"),
+      NodePath.join(MOBILE_ROOT, `ios/${IOS_NATIVE_NAME}.xcworkspace`),
       "-scheme",
-      "T3Code",
+      IOS_NATIVE_NAME,
       "-configuration",
       "Debug",
       "-sdk",
