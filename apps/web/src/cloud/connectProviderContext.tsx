@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
 import {
+  canEmbedClerkProvider,
   currentEmbedContext,
   readBakedConnectProviders,
   resolveDefaultConnectProviderId,

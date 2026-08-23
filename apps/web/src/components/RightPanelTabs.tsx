@@ -207,6 +207,23 @@ export function surfaceShortcutActionForKey<
   );
 }
 
+/**
+ * A focused editable is a typing context whether or not it has text yet: an
+ * empty chat composer at rest is still where the user's next keystrokes are
+ * meant to land, and claiming launcher letters from it would redirect prompts
+ * into whatever surface opens. The `:not` clause lets `closest` see past
+ * non-editable islands (`contenteditable="false"`) to an editable host around
+ * them, matching ComposerPendingUserInputPanel's typing guard.
+ */
+export function surfaceShortcutTargetsTypingContext(
+  target: { closest(selectors: string): unknown } | null,
+): boolean {
+  return (
+    target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !=
+    null
+  );
+}
+
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
   return (
     <Tooltip>
@@ -346,13 +363,7 @@ function RightPanelEmptyState(props: {
       if (!action) return;
       if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
       const target = event.target;
-      if (target instanceof HTMLElement) {
-        if (target.closest("input, textarea, select")) return;
-        // An empty contenteditable (the chat composer at rest) does not
-        // count as typing; letters only become text once a draft exists.
-        const editable = target.isContentEditable ? target : target.closest("[contenteditable]");
-        if (editable && (editable.textContent ?? "").trim().length > 0) return;
-      }
+      if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return;
       event.preventDefault();
       event.stopPropagation();
       action.onClick();
@@ -929,7 +940,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     // reveals the rest. The choice lives at open time because a
                     // tab's profile is fixed then - Electron only honours a
                     // partition before attach.
-                    if (action.label === "Browser" && action.available && browserProfiles.length > 0) {
+                    if (
+                      action.label === "Browser" &&
+                      action.available &&
+                      browserProfiles.length > 0
+                    ) {
                       return (
                         <MenuSub key={action.label}>
                           <MenuSubTrigger
@@ -940,7 +955,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           >
                             <Icon />
                             {action.label}
-                            {action.shortcut ? <MenuShortcut>{action.shortcut}</MenuShortcut> : null}
+                            {action.shortcut ? (
+                              <MenuShortcut>{action.shortcut}</MenuShortcut>
+                            ) : null}
                           </MenuSubTrigger>
                           {/*
                             Capped and truncated: profile names are user-supplied

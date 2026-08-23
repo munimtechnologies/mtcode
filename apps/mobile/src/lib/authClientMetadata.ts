@@ -3,10 +3,12 @@ import { Platform } from "react-native";
 
 import { getMobileClientLabel } from "./branding";
 
-export function authClientMetadata(): AuthClientPresentationMetadata {
+export function authClientMetadata(appVersion?: string): AuthClientPresentationMetadata {
   return {
     label: getMobileClientLabel(),
     deviceType: "mobile",
     ...(Platform.OS === "ios" ? { os: "iOS" } : Platform.OS === "android" ? { os: "Android" } : {}),
+    surface: "mobile",
+    ...(appVersion ? { appVersion } : {}),
   };
 }

@@ -38,6 +38,7 @@ import {
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
+import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTurnCompletionSound } from "../hooks/useTurnCompletionSound";
 import { PlanAgentSelectionHeal } from "../planAgentSelectionHeal";
@@ -140,6 +141,7 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <DocumentTitleSync />
+        <ContrastAppearanceSync />
         <GlassAppearanceSync />
         <FontAppearanceSync />
         <TurnCompletionSoundSync />
@@ -167,6 +169,16 @@ function RootRouteView() {
 
 function TurnCompletionSoundSync() {
   useTurnCompletionSound();
+
+  return null;
+}
+
+function ContrastAppearanceSync() {
+  const appearanceContrast = useClientSettings((settings) => settings.appearanceContrast);
+
+  useEffect(() => {
+    applyAppearanceContrast(document.documentElement, appearanceContrast);
+  }, [appearanceContrast]);
   return null;
 }
 

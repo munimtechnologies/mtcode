@@ -24,7 +24,6 @@ import { cn } from "~/lib/utils";
 interface Props {
   url: string;
   loading: boolean;
-  loadProgress: number;
   canGoBack: boolean;
   canGoForward: boolean;
   refreshDisabled: boolean;
@@ -70,7 +69,6 @@ const NOOP = () => {};
 export function PreviewChromeRow({
   url,
   loading,
-  loadProgress,
   canGoBack,
   canGoForward,
   refreshDisabled,
@@ -316,16 +314,12 @@ export function PreviewChromeRow({
         ) : null}
         {trailingActions}
       </form>
-      {loadProgress > 0 ? (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 rounded-r-full bg-primary transition-all duration-150 ease-out"
-          style={{
-            width: `${loadProgress}%`,
-            boxShadow: "0 0 6px 1px var(--color-ring)",
-          }}
-        />
-      ) : null}
+      <div
+        aria-hidden
+        data-loading={loading}
+        className="preview-loading-progress pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-full origin-left rounded-r-full bg-primary"
+        style={{ boxShadow: "0 0 6px 1px var(--color-ring)" }}
+      />
     </div>
   );
 }

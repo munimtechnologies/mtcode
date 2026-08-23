@@ -183,6 +183,9 @@ export interface CodexSessionRuntimeShape {
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  readonly uploadFeedback: (
+    reason?: string,
+  ) => Effect.Effect<EffectCodexSchema.V2FeedbackUploadResponse, CodexSessionRuntimeError>;
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -2196,7 +2199,10 @@ export const makeCodexSessionRuntime = (
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, "t3-code"),
-            desktopToolsAvailable: hasConfiguredMcpServerNamed(options.appServerArgs, DESKTOP_MCP_SERVER_NAME),
+            desktopToolsAvailable: hasConfiguredMcpServerNamed(
+              options.appServerArgs,
+              DESKTOP_MCP_SERVER_NAME,
+            ),
             computerHomeWorkspace: isComputerHomeCwd(options.cwd),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
@@ -2280,6 +2286,16 @@ export const makeCodexSessionRuntime = (
             activeTurnId: undefined,
           });
           return parseThreadSnapshot(response);
+        }),
+      uploadFeedback: (reason) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          return yield* client.request("feedback/upload", {
+            classification: "bug",
+            includeLogs: true,
+            ...(reason ? { reason } : {}),
+            threadId: providerThreadId,
+          });
         }),
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {

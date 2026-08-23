@@ -9,6 +9,9 @@ Pin a thread from its context menu to keep it in the pinned section above your a
 Pinned threads are shown independently of their project, including when you connect to more than
 one environment.
 
+Pinned threads still move to **Settled** when they become inactive. They also move when their pull
+request merges if **Auto-settle merged threads** is enabled.
+
 On web and desktop, drag a pinned thread to change its position. Drag an unsettled (active)
 thread the same way to rearrange the active list. On mobile, open a pinned thread's menu and
 choose **Move up** or **Move down**. The order is stored by the server and appears on your other

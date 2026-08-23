@@ -872,6 +872,20 @@ export const WINDOWS_SERVER_ASAR_IGNORE_GLOBS = [
 // node_modules tree or a stray source dir landing in the package. MT Code
 // ships three alternate app icons on top of upstream's payload (the icon the
 // user picks is applied to the running window), which is a deliberate +3.
+export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type) {
+  const unusedArch = arch === "arm64" ? "x64" : "arm64";
+  const unusedPrebuild = `**/node_modules/node-pty/prebuilds/win32-${unusedArch}`;
+  const unusedConpty = `**/node_modules/node-pty/third_party/conpty/*/win10-${unusedArch}`;
+
+  return [
+    ...WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
+    unusedPrebuild,
+    `${unusedPrebuild}/**`,
+    unusedConpty,
+    `${unusedConpty}/**`,
+  ];
+}
+
 export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 84;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
@@ -1860,7 +1874,7 @@ const stageDesktopMcpRust = Effect.fn("stageDesktopMcpRust")(function* (input: {
   }
 });
 
-const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input: {
+export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
   readonly platform: typeof BuildPlatform.Type;
@@ -1872,28 +1886,33 @@ const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input:
   const manifestPath = path.join(input.repoRoot, "native/resource-monitor/Cargo.toml");
   const executableName = resourceMonitorExecutableName(input.platform);
   const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
+  const reuseResourceMonitor = yield* Config.boolean("T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
+    Config.withDefault(false),
+  );
   const builtBinaries: string[] = [];
 
   for (const rustTarget of rustTargets) {
-    const spawnCommand = yield* resolveSpawnCommand("cargo", [
-      "build",
-      "--locked",
-      "--release",
-      "--manifest-path",
-      manifestPath,
-      "--target",
-      rustTarget,
-    ]);
-    yield* runCommand(
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        cwd: input.repoRoot,
-        shell: spawnCommand.shell,
-      }),
-      {
-        label: `cargo build resource monitor (${rustTarget})`,
-        verbose: input.verbose,
-      },
-    );
+    if (!reuseResourceMonitor) {
+      const spawnCommand = yield* resolveSpawnCommand("cargo", [
+        "build",
+        "--locked",
+        "--release",
+        "--manifest-path",
+        manifestPath,
+        "--target",
+        rustTarget,
+      ]);
+      yield* runCommand(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          cwd: input.repoRoot,
+          shell: spawnCommand.shell,
+        }),
+        {
+          label: `cargo build resource monitor (${rustTarget})`,
+          verbose: input.verbose,
+        },
+      );
+    }
 
     const binaryPath = path.join(
       input.repoRoot,
@@ -1909,6 +1928,9 @@ const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input:
         platform: input.platform,
         arch: input.arch,
       });
+    }
+    if (reuseResourceMonitor) {
+      yield* Effect.log(`[desktop-artifact] Reusing cached resource monitor (${rustTarget}).`);
     }
     builtBinaries.push(binaryPath);
   }
@@ -2686,6 +2708,7 @@ const waitForAsarWriteCompletion = Effect.fn("waitForAsarWriteCompletion")(funct
 export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function* (input: {
   readonly sourceDir: string;
   readonly asarPath: string;
+  readonly arch: typeof BuildArch.Type;
 }) {
   const fs = yield* FileSystem.FileSystem;
   yield* Effect.tryPromise({
@@ -2693,7 +2716,7 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
       createPackageWithOptions(input.sourceDir, input.asarPath, {
         dot: true,
         unpack: WINDOWS_SERVER_ASAR_UNPACK_GLOB,
-        globOptions: { ignore: [...WINDOWS_SERVER_ASAR_IGNORE_GLOBS] },
+        globOptions: { ignore: resolveWindowsServerAsarIgnoreGlobs(input.arch) },
       }),
     catch: (cause) => new WindowsServerSidecarPackError({ asarPath: input.asarPath, cause }),
   });
@@ -2788,7 +2811,11 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
 
   yield* Effect.log("[desktop-artifact] Packing server.asar...");
   yield* fs.makeDirectory(path.dirname(input.asarPath), { recursive: true });
-  yield* packWindowsServerAsar({ sourceDir: serverStageDir, asarPath: input.asarPath });
+  yield* packWindowsServerAsar({
+    sourceDir: serverStageDir,
+    asarPath: input.asarPath,
+    arch: input.arch,
+  });
   const packedStat = yield* fs.stat(input.asarPath);
   yield* Effect.log(
     `[desktop-artifact] Packed server.asar (${String(packedStat.size)} bytes) + unpacked natives.`,

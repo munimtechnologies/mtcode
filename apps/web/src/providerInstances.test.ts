@@ -175,6 +175,9 @@ describe("deriveProviderEntriesByEnvironment", () => {
     ]);
 
     expect(byEnvironment.get("empty")?.get("codex")).toBeUndefined();
+    // Every environment gets its own bucket, so an absent lookup is a real
+    // "this environment has no such instance", not a missing key.
+    expect(byEnvironment.get("empty")?.size).toBe(0);
   });
 });
 
