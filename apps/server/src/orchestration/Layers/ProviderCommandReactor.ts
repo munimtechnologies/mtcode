@@ -201,12 +201,15 @@ function buildGeneratedWorktreeBranchName(raw: string, prefix: string): string {
     .replace(/^refs\/heads\//, "")
     .replace(/['"`]/g, "");
 
+  const withoutLegacyPrefix =
+    normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`) &&
+    !(prefix.length > 0 && normalized.startsWith(`${prefix}/`))
+      ? normalized.slice(WORKTREE_BRANCH_PREFIX.length + 1)
+      : normalized;
   const withoutPrefix =
-    prefix.length > 0 && normalized.startsWith(`${prefix}/`)
-      ? normalized.slice(prefix.length + 1)
-      : normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-        ? normalized.slice(WORKTREE_BRANCH_PREFIX.length + 1)
-        : normalized;
+    prefix.length > 0 && withoutLegacyPrefix.startsWith(`${prefix}/`)
+      ? withoutLegacyPrefix.slice(prefix.length + 1)
+      : withoutLegacyPrefix;
 
   const safeFragment = sanitizeBranchFragment(withoutPrefix);
   return prefix.length > 0 ? `${prefix}/${safeFragment}` : safeFragment;

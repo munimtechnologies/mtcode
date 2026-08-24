@@ -2768,6 +2768,16 @@ describe("ProviderCommandReactor", () => {
       expected: "my-team/feature/reconnect-backoff",
     },
     {
+      prefix: "feature",
+      generated: "t3code/feature/reconnect-backoff",
+      expected: "feature/reconnect-backoff",
+    },
+    {
+      prefix: "teams/platform",
+      generated: "t3code/teams/platform/reconnect-backoff",
+      expected: "teams/platform/reconnect-backoff",
+    },
+    {
       prefix: "t3code/my-team",
       generated: "t3code/my-team/feature/reconnect-backoff",
       expected: "t3code/my-team/feature/reconnect-backoff",
