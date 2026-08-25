@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 if ($DesktopVersion) { $env:T3CODE_DESKTOP_VERSION = $DesktopVersion }
 if ($ForceRebuild) { $env:T3_FORCE_REBUILD = $ForceRebuild }
 $env:T3CODE_DESKTOP_DISTRO = "munim"
+$env:VITE_MT_TEAMS_URL = "https://reminiscent-ibis-360.convex.site"
 
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
   [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" +

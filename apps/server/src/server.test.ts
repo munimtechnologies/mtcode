@@ -160,6 +160,7 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
+import * as MtTeamsBridge from "./mtTeams/MtTeamsBridge.ts";
 import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as Data from "effect/Data";
@@ -1024,6 +1025,18 @@ const buildAppUnderTest = (options?: {
           searchWeb: () => Effect.die("Unexpected Parallel Search request."),
           extractWeb: () => Effect.die("Unexpected Parallel Extract request."),
           ...options?.layers?.voiceSessionService,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(MtTeamsBridge.MtTeamsBridge)({
+          configure: () => Effect.succeed({ ok: true }),
+          status: Effect.succeed({
+            configured: false,
+            serviceUrl: null,
+            lastPublishAt: null,
+            lastError: null,
+          }),
+          pollNow: Effect.void,
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),

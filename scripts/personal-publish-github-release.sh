@@ -26,6 +26,7 @@ personal_mt_export_desktop_version
 TAG="munim-v${T3CODE_DESKTOP_VERSION}"
 
 export T3CODE_DESKTOP_DISTRO=munim
+export VITE_MT_TEAMS_URL="https://reminiscent-ibis-360.convex.site"
 export T3CODE_DESKTOP_UPDATE_REPOSITORY="$RELEASE_REPO"
 export GITHUB_REPOSITORY="$RELEASE_REPO"
 
@@ -158,12 +159,14 @@ if [[ "$PREV_TAG" == "$TAG" ]]; then
       --jq '[.[] | select(.tagName | startswith("munim-v"))] | .[1] // empty' 2>/dev/null || true
   )
 fi
+# -25 instead of `| head`: head's early exit SIGPIPEs git log under
+# pipefail and set -e kills the whole publish with no error output.
 CHANGELOG=$(
   if [[ -n "$PREV_TAG" ]] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
-    git log --pretty=format:'- %s' "${PREV_TAG}..HEAD"
+    git log --pretty=format:'- %s' -25 "${PREV_TAG}..HEAD"
   else
     git log --pretty=format:'- %s' -15
-  fi | head -25
+  fi
 )
 NOTES=$(cat <<EOF
 ## What's changed
@@ -184,6 +187,7 @@ echo "-- publishing $TAG to $RELEASE_REPO --"
 
 if gh release view "$TAG" -R "$RELEASE_REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "${UNIQUE_ASSETS[@]}" -R "$RELEASE_REPO" --clobber
+  gh release edit "$TAG" -R "$RELEASE_REPO" --title "MT Code ${T3CODE_DESKTOP_VERSION}" --notes "$NOTES"
 else
   gh release create "$TAG" "${UNIQUE_ASSETS[@]}" \
     -R "$RELEASE_REPO" \

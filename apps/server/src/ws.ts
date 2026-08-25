@@ -102,6 +102,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as MtTeamsBridge from "./mtTeams/MtTeamsBridge.ts";
 import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -474,6 +475,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const mtTeamsBridge = yield* MtTeamsBridge.MtTeamsBridge;
       const voiceSessionService = yield* VoiceSessionService.VoiceSessionService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -1823,6 +1825,14 @@ const makeWsRpcLayer = (
         [WS_METHODS.voiceExtractWeb]: (input) =>
           observeRpcEffect(WS_METHODS.voiceExtractWeb, voiceSessionService.extractWeb(input), {
             "rpc.aggregate": "voice",
+          }),
+        [WS_METHODS.mtTeamsConfigure]: (input) =>
+          observeRpcEffect(WS_METHODS.mtTeamsConfigure, mtTeamsBridge.configure(input), {
+            "rpc.aggregate": "mtTeams",
+          }),
+        [WS_METHODS.mtTeamsStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.mtTeamsStatus, mtTeamsBridge.status, {
+            "rpc.aggregate": "mtTeams",
           }),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(

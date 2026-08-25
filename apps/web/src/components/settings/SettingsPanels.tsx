@@ -98,6 +98,7 @@ import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../.
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { MtTeamsSettings } from "../../mtTeams/MtTeamsSettings";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -3271,6 +3272,7 @@ export function GeneralSettingsPanel() {
 
       <DesktopNotificationsSettings />
       <VoiceDictationSettingsSection />
+      <MtTeamsSettings />
 
       <SettingsSection title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (

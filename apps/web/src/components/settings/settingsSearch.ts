@@ -348,6 +348,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "mt-teams",
+    title: "MT Teams",
+    to: "/settings/general",
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",

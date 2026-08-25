@@ -45,7 +45,8 @@ echo "web version $T3CODE_DESKTOP_VERSION"
 
 # Match the desktop munim distro: plain "MT Code", one release, no stage
 # suffix. Sidebar artwork is a setting now, not a side effect of a channel.
-APP_VERSION="$T3CODE_DESKTOP_VERSION" \
+VITE_MT_TEAMS_URL="https://reminiscent-ibis-360.convex.site" \
+  APP_VERSION="$T3CODE_DESKTOP_VERSION" \
   VITE_HOSTED_APP_URL="$HOSTED_URL" VITE_APP_BASE_NAME="MT Code" \
   VITE_APP_DISPLAY_NAME="MT Code" \
   vp run --filter @t3tools/web build
