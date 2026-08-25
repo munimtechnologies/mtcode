@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Sync T3 Code preference files from this Mac to Blade + Dell.
-# Source of truth: ~/.t3/userdata on the Mac.
+# Sync MT Code preference files from this Mac to Blade + Dell.
+# Source of truth: ~/.mt/userdata on the Mac (the MT distro home — the fleet
+# stopped using ~/.t3 at the 2026-08-18 rebrand; syncing the old home shipped
+# stale settings to a directory no app reads).
 #
 # Syncs: client-settings, keybindings, sanitized settings.json, and the
 #        durable asset-access signing key.
@@ -22,7 +24,7 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:$PATH"
 
-SRC="${T3_PERSONAL_SETTINGS_SRC:-$HOME/.t3/userdata}"
+SRC="${T3_PERSONAL_SETTINGS_SRC:-$HOME/.mt/userdata}"
 LOG_DIR="${T3_PERSONAL_LOG_DIR:-$HOME/Library/Logs/t3-personal}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/settings-sync-$(date +%Y%m%d).log"
@@ -86,24 +88,27 @@ done
 
 cat >"$STAGE/prepare-settings.ps1" <<'EOF'
 $ErrorActionPreference = "Stop"
-$userdata = Join-Path $env:USERPROFILE ".t3\userdata"
+$userdata = Join-Path $env:USERPROFILE ".mt\userdata"
 $secrets = Join-Path $userdata "secrets"
 New-Item -ItemType Directory -Force -Path $secrets | Out-Null
-Get-Process | Where-Object { $_.ProcessName -like "*T3*" } |
+Get-Process | Where-Object { $_.ProcessName -like "MT Code*" } |
   Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep 1
 Write-Output ("SETTINGS_PREP_OK " + $userdata)
 EOF
 
 cat >"$STAGE/relaunch-t3.ps1" <<'EOF'
-$exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\t3code\T3 Code*.exe") -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -notlike "Uninstall*" } |
-  Select-Object -First 1
-if ($exe) {
-  Start-Process $exe.FullName
-  Write-Output ("relaunched " + $exe.Name)
+# Relaunch through personal-launch-gui.ps1: a plain Start-Process from an SSH
+# shell lands in session 0 (no desktop) — the launcher registers a scheduled
+# task in the logged-on user's session and verifies a window actually exists.
+$launcher = Join-Path $env:USERPROFILE "dev\personal-launch-gui.ps1"
+$exe = Get-Item (Join-Path $env:LOCALAPPDATA "Programs\mtcode\MT Code.exe") -ErrorAction SilentlyContinue
+if (-not $exe) {
+  Write-Output "no MT Code exe to relaunch"
+} elseif (Test-Path $launcher) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher
 } else {
-  Write-Output "no T3 exe to relaunch"
+  Write-Output "launcher missing; skipping relaunch (app will start on next refresh)"
 }
 EOF
 
@@ -123,14 +128,14 @@ push_host() {
 
   for name in client-settings.json keybindings.json settings.json; do
     if [[ -f "$STAGE/$name" ]]; then
-      scp -o BatchMode=yes "$STAGE/$name" "${host}:.t3/userdata/${name}"
+      scp -o BatchMode=yes "$STAGE/$name" "${host}:.mt/userdata/${name}"
       echo "pushed $host $name"
     fi
   done
 
   for name in asset-access-signing-key.bin; do
     if [[ -f "$STAGE/secrets/$name" ]]; then
-      scp -o BatchMode=yes "$STAGE/secrets/$name" "${host}:.t3/userdata/secrets/${name}"
+      scp -o BatchMode=yes "$STAGE/secrets/$name" "${host}:.mt/userdata/secrets/${name}"
       echo "pushed $host secrets/$name"
     fi
   done
