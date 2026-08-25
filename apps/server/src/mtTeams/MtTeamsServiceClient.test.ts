@@ -35,7 +35,7 @@ describe("MtTeamsServiceClient", () => {
           threadId: "thread-1",
           title: "Fix login",
           status: "working" as const,
-          updatedAt: "2026-08-25T00:00:00.000Z",
+          updatedAt: 1787616000000,
         },
       ];
       const result = yield* harness.client.publish(threads);

@@ -266,7 +266,7 @@ describe("MtTeamsBridge", () => {
             threadId: "thread-1",
             title: "Fix login",
             status: "working",
-            updatedAt: "2026-08-25T00:00:00.000Z",
+            updatedAt: 1787616000000,
           },
         ],
       });

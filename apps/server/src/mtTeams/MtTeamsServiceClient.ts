@@ -26,7 +26,8 @@ export interface MtTeamsPublishThread {
   readonly threadId: string;
   readonly title: string;
   readonly status: MtTeamsThreadStatus;
-  readonly updatedAt: string;
+  /** Epoch milliseconds — the service validates this as a number. */
+  readonly updatedAt: number;
 }
 
 export const MtTeamsInboxMessage = Schema.Struct({

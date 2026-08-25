@@ -232,7 +232,7 @@ export const make = (options?: MtTeamsBridgeLiveOptions) =>
                   threadId,
                   title: thread.title,
                   status: mtTeamsThreadStatus(thread),
-                  updatedAt: thread.updatedAt,
+                  updatedAt: Date.parse(thread.updatedAt),
                 },
               ];
         });

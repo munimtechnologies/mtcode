@@ -48,11 +48,11 @@ All bodies JSON. Two auth schemes:
 
 ### Environment-key endpoints (the server bridge)
 
-| Method/path                | Body                                                | Returns                                                                                                                                    |
-| -------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| POST `/api/bridge/publish` | `{threads: [{threadId, title, status, updatedAt}]}` | `{sharedThreadIds: [threadId…]}` — the service updates status for its shared threads and tells the bridge which threads to keep publishing |
-| GET `/api/bridge/inbox`    | —                                                   | `{messages: [{id, threadId, fromUserName, teamName, text, createdAt}]}`                                                                    |
-| POST `/api/bridge/ack`     | `{messageIds: [id…]}`                               | `{ok: true}`                                                                                                                               |
+| Method/path                | Body                                                                 | Returns                                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| POST `/api/bridge/publish` | `{threads: [{threadId, title, status, updatedAt: epoch-ms number}]}` | `{sharedThreadIds: [threadId…]}` — the service updates status for its shared threads and tells the bridge which threads to keep publishing |
+| GET `/api/bridge/inbox`    | —                                                                    | `{messages: [{id, threadId, fromUserName, teamName, text, createdAt}]}`                                                                    |
+| POST `/api/bridge/ack`     | `{messageIds: [id…]}`                                                | `{ok: true}`                                                                                                                               |
 
 `status` is one of `"working" | "input-needed" | "done" | "idle"` (the bridge
 maps the projection's thread state).
