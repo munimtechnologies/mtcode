@@ -30,6 +30,16 @@ munim_connect_load
 
 export T3CODE_MOBILE_DISTRO=munim
 
+# Mobile bakes a single Connect identity, and Sheehan's decision (2026-08-25)
+# is that MT Code syncs through T3 Connect's relay — the same public
+# identifiers upstream bakes into official builds (repo .env.example). The
+# Munim Clerk stays for the hosted web app; the phone signs into T3 Connect
+# so environments registered on relay.t3.codes are reachable from anywhere.
+export T3CODE_CLERK_PUBLISHABLE_KEY="pk_live_Y2xlcmsudDMuY29kZXMk"
+export T3CODE_CLERK_JWT_TEMPLATE="t3-relay"
+export T3CODE_RELAY_URL="https://relay.t3.codes"
+echo "connect: baking T3 Connect identifiers (relay.t3.codes) for mobile"
+
 echo "T3CODE_MOBILE_DISTRO=$T3CODE_MOBILE_DISTRO"
 echo "bundle: com.munim.mtcode"
 echo "team: 6T5J6U2UVT"

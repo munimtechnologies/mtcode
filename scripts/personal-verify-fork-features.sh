@@ -95,6 +95,10 @@ require apps/web/index.html "boot-shell-wordmark" "MT wordmark boot splash"
 # --- PR upstream cards (27553c695) ---
 require apps/web/src/routes/_chat.pull-requests.tsx "PullRequestUpstreamCard" "upstream PR cards in pull-requests route"
 
+# --- Connect providers: T3 relay baked + relay-capable default (2026-08-25) ---
+require scripts/lib/connect-public-providers.ts "T3_CONNECT_PUBLIC_PROVIDER" "T3 Connect provider baked into every client build"
+require apps/web/src/cloud/connectProviders.ts "relayCapable" "relay-capable provider preferred as default identity"
+
 # --- munim new-thread env helpers (e51e0fc8e) ---
 require apps/web/src/hooks/useHandleNewThread.ts "shouldReadProjectFileForNewThreadDefaults" "new-thread project-file defaults"
 

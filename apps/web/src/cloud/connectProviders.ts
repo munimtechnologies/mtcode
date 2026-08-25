@@ -136,16 +136,19 @@ export function resolveDefaultConnectProviderId(
       if (fallback) writeStoredConnectProviderId(fallback);
     }
   }
-  // Prefer MT Connect whenever Munim keys are baked in — Electron and web.
-  // T3 Connect stays available via "Open T3 Connect" (hosted) or an in-app
-  // switch on Electron where T3 Clerk can embed.
+  // Prefer the provider that can actually tunnel (Sheehan, 2026-08-25):
+  // cross-machine sync goes through T3 Connect's relay, so a relay-capable
+  // provider outranks a Clerk-only one. MT Connect stays one switch away for
+  // mtcode.munimtech.com sign-in; on origins where T3 Clerk cannot embed
+  // (the hosted web app) the Clerk-only provider remains the default.
+  const relayCapable = providers.find(
+    (provider) => provider.relayUrl !== "" && canEmbedClerkProvider(provider, ctx),
+  );
+  if (relayCapable) return relayCapable.id;
   const mt = providers.find((provider) => provider.id === "mt");
   if (mt) return "mt";
-  const embeddableT3 = providers.find(
-    (provider) => provider.id === "t3" && canEmbedClerkProvider(provider, ctx),
-  );
-  if (embeddableT3) return "t3";
-  return providers[0]?.id ?? null;
+  const embeddable = providers.find((provider) => canEmbedClerkProvider(provider, ctx));
+  return embeddable?.id ?? providers[0]?.id ?? null;
 }
 
 /** Persist an in-app Connect identity only when Clerk can actually embed it. */

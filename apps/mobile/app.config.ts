@@ -385,7 +385,13 @@ const config: ExpoConfig = {
     branding: {
       distroId: mobileDistro.id,
       productName: mobileDistro.productName,
-      connectProductName: mobileDistro.id === "munim" ? "MT Connect" : "T3 Connect",
+      // The Connect name follows the baked identity, not the distro: MT Code
+      // ships with T3 Connect (T3's relay) as its sync backend.
+      connectProductName:
+        repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY === "pk_live_Y2xlcmsudDMuY29kZXMk" ||
+        mobileDistro.id !== "munim"
+          ? "T3 Connect"
+          : "MT Connect",
       scheme: mobileDistro.scheme,
       schemeDev: mobileDistro.schemeDev,
       schemePreview: mobileDistro.schemePreview,
