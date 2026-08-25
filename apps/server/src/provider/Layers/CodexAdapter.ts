@@ -65,6 +65,7 @@ import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
   describeMcpElicitation,
+  hasConfiguredMcpServerNamed,
   makeCodexSessionRuntime,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
@@ -73,7 +74,7 @@ import {
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
-import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { codexLaunchArgv, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -1879,9 +1880,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const launchArgs = resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment);
         // Offer Computer Use tools whenever the desktop MCP resolves and is
         // enabled — same as Claude/Cursor/Grok. Wire via Codex `-c mcp_servers.*`.
-        const desktopMcp = yield* resolveDesktopMcp();
+        // User config wins: launch args that already configure the server name
+        // skip injection, since session `-c` flags would override them.
+        const desktopMcp = hasConfiguredMcpServerNamed(
+          codexLaunchArgv(launchArgs),
+          DESKTOP_MCP_SERVER_NAME,
+        )
+          ? undefined
+          : yield* resolveDesktopMcp();
         const appServerArgs: string[] = [];
         if (mcpSession) {
           appServerArgs.push(
@@ -1921,7 +1930,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
+          launchArgs,
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)

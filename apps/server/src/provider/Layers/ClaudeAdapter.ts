@@ -61,6 +61,10 @@ import {
   getProviderOptionDescriptors,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
+import {
+  CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
+  formatClaudeResumeCompactionQuestion,
+} from "@t3tools/shared/claudeCompaction";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -82,6 +86,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as ComputerHistoryService from "../../computerHistory/service.ts";
 import { makeResolveEnabledDesktopMcp } from "../../desktopControl/desktopMcpLaunch.ts";
+import { makeClaudeUserDefinesDesktopMcp } from "../../desktopControl/desktopMcpUserConfig.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
@@ -689,6 +694,7 @@ function makeClaudeTokenUsageSnapshot(input: {
   readonly totalProcessedTokens?: number;
   readonly lastUsedTokens?: number;
   readonly compactsAutomatically?: boolean;
+  readonly autoCompactThreshold?: number;
 }): ThreadTokenUsageSnapshot | undefined {
   const activeTokens = finiteNonNegativeInteger(input.activeTokens);
   if (activeTokens === undefined || activeTokens <= 0) {
@@ -715,6 +721,9 @@ function makeClaudeTokenUsageSnapshot(input: {
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(input.compactsAutomatically !== undefined
       ? { compactsAutomatically: input.compactsAutomatically }
+      : {}),
+    ...(input.autoCompactThreshold !== undefined
+      ? { autoCompactThreshold: input.autoCompactThreshold }
       : {}),
   };
 }
@@ -750,11 +759,13 @@ function normalizeClaudeContextUsageApiSnapshot(
   value: SDKControlGetContextUsageResponse,
   totalProcessedTokens?: number,
 ): ThreadTokenUsageSnapshot | undefined {
+  const autoCompactThreshold = finitePositiveInteger(value.autoCompactThreshold);
   return makeClaudeTokenUsageSnapshot({
     activeTokens: value.totalTokens,
     contextWindow: value.maxTokens,
     ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
     compactsAutomatically: value.isAutoCompactEnabled,
+    ...(autoCompactThreshold !== undefined ? { autoCompactThreshold } : {}),
   });
 }
 
@@ -1980,6 +1991,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   // Re-resolve per session (settings toggles) without widening startSession's R.
   const resolveDesktopMcp = yield* makeResolveEnabledDesktopMcp();
+  const userDefinesDesktopMcp = yield* makeClaudeUserDefinesDesktopMcp();
 
   const createQuery =
     options?.createQuery ??
@@ -4578,6 +4590,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         callbackOptions.signal.addEventListener("abort", onAbort, {
           once: true,
         });
+        // The signal may have aborted during the awaited event emissions
+        // above, before the listener existed; settle now so the dialog
+        // cannot hang with a lingering pending question.
+        if (callbackOptions.signal.aborted) {
+          yield* settleAsAborted;
+        }
 
         // Block until the user provides answers.
         const answers = yield* Deferred.await(answersDeferred);
@@ -4624,6 +4642,76 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             answers,
           },
         } satisfies PermissionResult;
+      });
+
+      const handleResumeDialog = Effect.fn("handleResumeDialog")(function* (
+        request: Parameters<NonNullable<ClaudeQueryOptions["onUserDialog"]>>[0],
+        callbackOptions: Parameters<NonNullable<ClaudeQueryOptions["onUserDialog"]>>[1],
+      ) {
+        if (request.dialogKind !== "resume_return") {
+          return { behavior: "cancelled" as const };
+        }
+
+        const context = yield* Ref.get(contextRef);
+        if (!context) {
+          return { behavior: "cancelled" as const };
+        }
+
+        // The question copy lives in @t3tools/shared/claudeCompaction because
+        // the web client recognizes this exact text (and the "never" answer)
+        // to mirror a permanent dismissal.
+        const question = formatClaudeResumeCompactionQuestion({
+          ageMinutes: finiteNonNegativeInteger(request.payload.sessionAgeMinutes) ?? 0,
+          estimatedTokens: finiteNonNegativeInteger(request.payload.estimatedTokens) ?? 0,
+        });
+        const result = yield* handleAskUserQuestion(
+          context,
+          {
+            questions: [
+              {
+                header: "Resume session",
+                question,
+                options: [
+                  {
+                    label: "Compact and continue",
+                    description: "Resume with a summary and use fewer tokens.",
+                  },
+                  {
+                    label: "Keep full history",
+                    description: "Resume without changing the conversation.",
+                  },
+                  {
+                    label: CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
+                    description: "Keep full history and skip future resume prompts.",
+                  },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+          {
+            signal: callbackOptions.signal,
+            ...(request.toolUseID ? { toolUseID: request.toolUseID } : {}),
+          },
+        );
+
+        if (result.behavior !== "allow") {
+          return { behavior: "cancelled" as const };
+        }
+
+        const answers = result.updatedInput.answers;
+        const selection =
+          answers && typeof answers === "object" && !Array.isArray(answers)
+            ? (answers as Record<string, unknown>)[question]
+            : undefined;
+        const action =
+          selection === "Compact and continue"
+            ? "compact"
+            : selection === CLAUDE_RESUME_COMPACTION_NEVER_ANSWER
+              ? "never"
+              : "continue";
+
+        return { behavior: "completed" as const, result: action };
       });
 
       const canUseToolEffect = Effect.fn("canUseTool")(function* (
@@ -4730,6 +4818,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         callbackOptions.signal.addEventListener("abort", onAbort, {
           once: true,
         });
+        // Same late-listener race as handleAskUserQuestion: the signal may
+        // have aborted while the request event emissions were awaited.
+        if (callbackOptions.signal.aborted) {
+          onAbort();
+        }
 
         const decision = yield* Deferred.await(decisionDeferred);
         pendingApprovals.delete(requestId);
@@ -4785,6 +4878,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
         runPromise(canUseToolEffect(toolName, toolInput, callbackOptions));
+      const onUserDialog: NonNullable<ClaudeQueryOptions["onUserDialog"]> = (
+        request,
+        callbackOptions,
+      ) => runPromise(handleResumeDialog(request, callbackOptions));
 
       const claudeBinaryPath = claudeSdkExecutablePath;
       const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
@@ -4814,6 +4911,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
+        ...(claudeSettings.autoCompactWindow
+          ? { autoCompactWindow: Number(claudeSettings.autoCompactWindow) }
+          : {}),
       };
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
       // The attachments dir grant lets the agent Read/copy pasted images at
@@ -4826,8 +4926,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ];
       // Desktop MCP is offered when the platform binary resolves and Computer
       // Use is enabled. Re-resolve per session so Settings toggles apply without
-      // restarting the app.
-      const desktopMcp = yield* resolveDesktopMcp();
+      // restarting the app. User config wins: when the user's own Claude config
+      // already defines a `mt-desktop` server, skip injection so the
+      // SDK-supplied entry cannot shadow theirs.
+      const resolvedDesktopMcp = yield* resolveDesktopMcp();
+      const desktopMcp =
+        resolvedDesktopMcp !== undefined &&
+        !(yield* userDefinesDesktopMcp({
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          environment: claudeEnvironment,
+        }))
+          ? resolvedDesktopMcp
+          : undefined;
       const mcpServers = {
         ...(mcpSession
           ? {
@@ -4886,6 +4996,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        onUserDialog,
+        supportedDialogKinds: ["resume_return"],
         env: claudeEnvironment,
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),

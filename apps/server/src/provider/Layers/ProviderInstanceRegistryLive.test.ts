@@ -108,6 +108,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   homePath: "",
   customModels: [],
   launchArgs: "",
+  autoCompactWindow: "",
   ...overrides,
 });
 
@@ -379,11 +380,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       // union.
       const drivers: ReadonlyArray<
         AnyProviderDriver<
-          | CodexDriverEnv
-          | ClaudeDriverEnv
-          | CursorDriverEnv
-          | GrokDriverEnv
-          | OpenCodeDriverEnv
+          CodexDriverEnv | ClaudeDriverEnv | CursorDriverEnv | GrokDriverEnv | OpenCodeDriverEnv
         >
       > = [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver];
       const { registry } = yield* makeProviderInstanceRegistry({

@@ -78,6 +78,16 @@ require apps/server/src/serverRuntimeStartup.ts "sessionStartupReconciler" "star
 require native/t3-chrome-extension/background.js "paintCursor" "agent pointer painted into pages by the Chrome extension"
 require native/t3-desktop-mcp-rs/src/main.rs "agent_cursor" "native desktop pointer overlay driven by tool lifecycle"
 
+# --- Computer-use desktop MCP auto-injection into agent sessions (b671c08ef lineage, 2026-08-25) ---
+# Every spawned session gets the bundled `mt-desktop` MCP server; user-defined
+# servers with the same name win over injection.
+require apps/server/src/provider/Layers/ClaudeAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Claude sessions"
+require apps/server/src/provider/Layers/ClaudeAdapter.ts "userDefinesDesktopMcp" "user-config-wins guard on Claude desktop MCP injection"
+require apps/server/src/provider/Layers/CodexAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Codex sessions"
+require apps/server/src/provider/Layers/CodexAdapter.ts "hasConfiguredMcpServerNamed" "user-config-wins guard on Codex desktop MCP injection"
+require apps/server/src/provider/Layers/CursorAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Cursor sessions"
+require apps/server/src/provider/Layers/GrokAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Grok sessions"
+
 # --- Computer-use thread view (9c23b7fa6, eb1bdd5e2) ---
 require apps/server/src/ws.ts "computerViewStream" "computer view RPCs registered"
 require apps/web/src/components/chat/ChatHeader.tsx "ComputerViewDialog" "computer view mounted in chat header"

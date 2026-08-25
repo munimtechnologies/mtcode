@@ -14,7 +14,7 @@ import {
   codexDefaultModeDeveloperInstructions,
   codexPlanModeDeveloperInstructions,
 } from "../CodexDeveloperInstructions.ts";
-import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
+import { codexLaunchArgv, codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildMcpApprovalResponse,
   buildPermissionsApprovalResponse,
@@ -777,6 +777,19 @@ describe("hasConfiguredMcpServer", () => {
     const args = ["-c", `mcp_servers.${DESKTOP_MCP_SERVER_NAME}.command='/usr/bin/t3-desktop-mcp'`];
     NodeAssert.equal(hasConfiguredMcpServerNamed(args, DESKTOP_MCP_SERVER_NAME), true);
     NodeAssert.equal(hasConfiguredMcpServerNamed(args, "t3-code"), false);
+  });
+
+  it("detects a user launch-args desktop server so injection defers to it", () => {
+    // Same composition CodexAdapter uses to let user config win over the
+    // bundled desktop MCP injection.
+    const userArgs = codexLaunchArgv(
+      `-c mcp_servers.${DESKTOP_MCP_SERVER_NAME}.command='/Users/me/bin/my-desktop'`,
+    );
+    NodeAssert.equal(hasConfiguredMcpServerNamed(userArgs, DESKTOP_MCP_SERVER_NAME), true);
+    NodeAssert.equal(
+      hasConfiguredMcpServerNamed(codexLaunchArgv("--model gpt-5.4"), DESKTOP_MCP_SERVER_NAME),
+      false,
+    );
   });
 });
 

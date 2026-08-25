@@ -79,7 +79,9 @@ import { recordVisitForThread } from "../browserHistoryStore";
 import {
   PreferredEditorEnvironmentRequiredError,
   useOpenInPreferredEditor,
+  usePreferredEditor,
 } from "../editorPreferences";
+import { openInEditorMenuLabel } from "../editorLabels";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
@@ -112,6 +114,7 @@ import {
 import { readLocalApi } from "../localApi";
 import { useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
+import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
 import { readThreadShell, useProjects } from "../state/entities";
 import { serverEnvironment } from "../state/server";
@@ -137,6 +140,7 @@ import {
 } from "~/lib/openPullRequestLink";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
+import { resolvePathLinkTarget } from "../terminal-links";
 import {
   isBrowserPreviewFile,
   openFileInPreview,
@@ -159,6 +163,35 @@ interface ChatMarkdownProps {
   lineBreaks?: boolean;
   /** Parse sanitized raw HTML instead of displaying its source text. */
   parseRawHtml?: boolean;
+}
+
+export function canUseMarkdownFileShellActions(
+  environmentId: EnvironmentId | null,
+  remoteOpenMode: RemoteOpenMode,
+  isRemoteOpenResolved: boolean,
+): boolean {
+  return environmentId !== null && isRemoteOpenResolved && remoteOpenMode === "local-exec";
+}
+
+export function hasMarkdownFilePrimaryAction(input: {
+  canOpenInEditor: boolean;
+  canOpenInBrowser: boolean;
+  canOpenInPanel: boolean;
+}): boolean {
+  return input.canOpenInEditor || input.canOpenInBrowser || input.canOpenInPanel;
+}
+
+export function shouldUseMarkdownFileBrowserPrimaryAction(input: {
+  iconPath: string;
+  canOpenInEditor: boolean;
+  canOpenInBrowser: boolean;
+  canOpenInPanel: boolean;
+}): boolean {
+  return (
+    input.canOpenInBrowser &&
+    (shouldOpenMarkdownFileLinkInBrowserByDefault(input.iconPath) ||
+      (!input.canOpenInEditor && !input.canOpenInPanel))
+  );
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -903,8 +936,9 @@ interface MarkdownFileLinkProps {
   copyMarkdown: string;
   theme: "light" | "dark";
   threadRef?: ScopedThreadRef | undefined;
-  onOpen: (targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>;
+  onOpen?: ((targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (workspaceRelativePath: string, line: number | undefined) => void;
+  openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onReveal?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   /** Platform-specific menu label ("Reveal in Finder", ...); required for the
@@ -913,8 +947,8 @@ interface MarkdownFileLinkProps {
   className?: string | undefined;
 }
 
-const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
+const MARKDOWN_FILE_CHIP_CLASS_NAME = "chat-markdown-file-link";
+const MARKDOWN_FILE_LINK_CLASS_NAME = `${MARKDOWN_FILE_CHIP_CLASS_NAME} cursor-pointer transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70`;
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -1261,12 +1295,16 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   threadRef,
   onOpen,
   onOpenInPanel,
+  openInEditorMenuLabel,
   onOpenInBrowser,
   onReveal,
   revealLabel,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpenInEditor = useCallback(() => {
+    if (!onOpen) {
+      return;
+    }
     void (async () => {
       try {
         const result = await onOpen(targetPath);
@@ -1424,18 +1462,15 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [targetPath],
   );
 
-  const handleContextMenu = useCallback(
-    async (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-
+  const showFileContextMenu = useCallback(
+    async (position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
 
       try {
         const clicked = await api.contextMenu.show(
           [
-            { id: "open", label: "Open in editor" },
+            ...(onOpen ? ([{ id: "open", label: openInEditorMenuLabel }] as const) : []),
             ...(onOpenInBrowser
               ? ([{ id: "open-in-browser", label: "Open in integrated browser" }] as const)
               : []),
@@ -1443,7 +1478,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             { id: "copy-relative", label: "Copy relative path" },
             { id: "copy-full", label: "Copy full path" },
           ] as const,
-          { x: event.clientX, y: event.clientY },
+          position,
         );
 
         if (clicked === "open") {
@@ -1479,37 +1514,93 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       handleOpenInEditor,
       handleRevealInFileManager,
       onOpenInBrowser,
+      onOpen,
       onReveal,
+      openInEditorMenuLabel,
       revealLabel,
       targetPath,
     ],
   );
 
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const position =
+        event.clientX === 0 && event.clientY === 0
+          ? (() => {
+              const bounds = event.currentTarget.getBoundingClientRect();
+              return { x: bounds.left, y: bounds.bottom };
+            })()
+          : { x: event.clientX, y: event.clientY };
+      void showFileContextMenu(position);
+    },
+    [showFileContextMenu],
+  );
+
+  const canOpenInEditor = onOpen !== undefined;
+  const canOpenInBrowser = onOpenInBrowser !== undefined;
+  const canOpenInPanel = threadRef !== undefined && Boolean(workspaceRelativePath);
+  const hasPrimaryAction = hasMarkdownFilePrimaryAction({
+    canOpenInEditor,
+    canOpenInBrowser,
+    canOpenInPanel,
+  });
+  const useBrowserPrimaryAction = shouldUseMarkdownFileBrowserPrimaryAction({
+    iconPath,
+    canOpenInEditor,
+    canOpenInBrowser,
+    canOpenInPanel,
+  });
+
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <a
-            href={href}
-            className={cn(CHAT_FILE_TAG_CHIP_CLASS_NAME, MARKDOWN_FILE_LINK_CLASS_NAME, className)}
-            data-markdown-copy={copyMarkdown}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (shouldOpenMarkdownFileLinkInEditor(event)) {
-                handleOpenInEditor();
-                return;
-              }
-              if (onOpenInBrowser && shouldOpenMarkdownFileLinkInBrowserByDefault(iconPath)) {
-                handleOpenInBrowser();
-                return;
-              }
-              handleOpenInFilePreview();
-            }}
-            onContextMenu={handleContextMenu}
-          >
-            <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
-          </a>
+          hasPrimaryAction ? (
+            <a
+              href={href}
+              className={cn(
+                CHAT_FILE_TAG_CHIP_CLASS_NAME,
+                MARKDOWN_FILE_LINK_CLASS_NAME,
+                className,
+              )}
+              data-markdown-copy={copyMarkdown}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
+                  handleOpenInEditor();
+                  return;
+                }
+                if (useBrowserPrimaryAction) {
+                  handleOpenInBrowser();
+                  return;
+                }
+                handleOpenInFilePreview();
+              }}
+              onContextMenu={handleContextMenu}
+            >
+              <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
+            </a>
+          ) : (
+            <button
+              type="button"
+              aria-label={`File options for ${label}`}
+              aria-haspopup="menu"
+              className={cn(
+                CHAT_FILE_TAG_CHIP_CLASS_NAME,
+                MARKDOWN_FILE_LINK_CLASS_NAME,
+                "select-text",
+                className,
+              )}
+              data-markdown-copy={copyMarkdown}
+              onClick={handleContextMenu}
+              onContextMenu={handleContextMenu}
+            >
+              <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
+            </button>
+          )
         }
       />
       <TooltipPopup
@@ -1543,6 +1634,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.threadRef === next.threadRef &&
     previous.onOpen === next.onOpen &&
     previous.onOpenInPanel === next.onOpenInPanel &&
+    previous.openInEditorMenuLabel === next.openInEditorMenuLabel &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onReveal === next.onReveal &&
     previous.revealLabel === next.revealLabel &&
@@ -1577,16 +1669,22 @@ function ChatMarkdown({
     reportFailure: false,
   });
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
+  const remoteOpen = useRemoteOpenResolution(environmentId);
+  const canUseShellActions = canUseMarkdownFileShellActions(
+    environmentId,
+    remoteOpen.state.mode,
+    remoteOpen.isResolved,
+  );
   const preparedConnection = usePreparedConnection(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const threadServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(threadRef?.environmentId ?? environmentId),
   );
   const projects = useProjects();
-  const openInPreferredEditor = useOpenInPreferredEditor(
-    environmentId,
-    serverConfig?.availableEditors ?? [],
-  );
+  const availableEditors = serverConfig?.availableEditors ?? [];
+  const [preferredEditor] = usePreferredEditor(availableEditors);
+  const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
+  const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors);
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
   });
@@ -1770,6 +1868,26 @@ function ChatMarkdown({
     },
     [createAssetUrl, openPreview, preparedConnection, threadRef],
   );
+  const findWorkspaceBasenameMatch = useCallback(
+    async (workspaceRelativePath: string) => {
+      if (!cwd || environmentId === null || !needsWorkspaceBasenameLookup(workspaceRelativePath)) {
+        return null;
+      }
+      const result = await searchProjectEntries({
+        environmentId,
+        input: {
+          cwd,
+          query: workspaceRelativePath,
+          limit: WORKSPACE_BASENAME_LOOKUP_LIMIT,
+          kind: "file",
+        },
+      });
+      return result._tag === "Success"
+        ? pickWorkspaceBasenameMatch(workspaceRelativePath, result.value.entries)
+        : null;
+    },
+    [cwd, environmentId, searchProjectEntries],
+  );
   // A bare filename resolves to the workspace root, which is rarely where the
   // file is, so ask the index before opening.
   const openFileInPanel = useCallback(
@@ -1785,24 +1903,23 @@ function ChatMarkdown({
         return;
       }
       void (async () => {
-        const result = await searchProjectEntries({
-          environmentId: threadRef.environmentId,
-          input: {
-            cwd,
-            query: workspaceRelativePath,
-            limit: WORKSPACE_BASENAME_LOOKUP_LIMIT,
-            kind: "file",
-          },
-        });
-        const match =
-          result._tag === "Success"
-            ? pickWorkspaceBasenameMatch(workspaceRelativePath, result.value.entries)
-            : null;
+        const match = await findWorkspaceBasenameMatch(workspaceRelativePath);
         if (!isLatestLookup()) return;
         openAt(match ?? workspaceRelativePath);
       })();
     },
-    [cwd, searchProjectEntries, threadRef],
+    [cwd, findWorkspaceBasenameMatch, threadRef],
+  );
+  const revealMarkdownFileInFileManager = useCallback(
+    async (fileLinkMeta: MarkdownFileLinkMeta) => {
+      const workspaceRelativePath = fileLinkMeta.workspaceRelativePath;
+      const match = workspaceRelativePath
+        ? await findWorkspaceBasenameMatch(workspaceRelativePath)
+        : null;
+      const filePath = match && cwd ? resolvePathLinkTarget(match, cwd) : fileLinkMeta.filePath;
+      return revealFileInFileManager(filePath);
+    },
+    [cwd, findWorkspaceBasenameMatch, revealFileInFileManager],
   );
   /* eslint-disable react/no-unstable-nested-components -- ReactMarkdown requires component
    * renderers that close over this message's metadata. useMemo keeps them stable until that
@@ -1838,11 +1955,12 @@ function ChatMarkdown({
           copyMarkdown={copyMarkdown}
           theme={resolvedTheme}
           threadRef={threadRef}
-          onOpen={openInPreferredEditor}
+          {...(canUseShellActions ? { onOpen: openInPreferredEditor } : {})}
           onOpenInPanel={openFileInPanel}
+          openInEditorMenuLabel={preferredEditorMenuLabel}
           onReveal={
-            revealInFileManagerLabel !== undefined
-              ? () => revealFileInFileManager(fileLinkMeta.filePath)
+            canUseShellActions && revealInFileManagerLabel !== undefined
+              ? () => revealMarkdownFileInFileManager(fileLinkMeta)
               : undefined
           }
           revealLabel={revealInFileManagerLabel}
@@ -2161,6 +2279,7 @@ function ChatMarkdown({
       },
     };
   }, [
+    canUseShellActions,
     cwd,
     diffThemeName,
     fileLinkParentSuffixByPath,
@@ -2174,9 +2293,10 @@ function ChatMarkdown({
     openChangeRequestLink,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
+    preferredEditorMenuLabel,
     resolveThreadPullRequest,
     resolvedTheme,
-    revealFileInFileManager,
+    revealMarkdownFileInFileManager,
     revealInFileManagerLabel,
     skills,
     text,
