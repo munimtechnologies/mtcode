@@ -5,6 +5,7 @@ import type {
   ProjectId,
   PullRequestListInput,
   PullRequestListStatsInput,
+  PullRequestRankInput,
   PullRequestStackListInput,
   PullRequestStackSummary,
 } from "@t3tools/contracts";
@@ -118,6 +119,43 @@ export function usePullRequestList(
     [query.values],
   );
   return { data, error: query.error, isPending: query.isPending, refresh: query.refresh };
+}
+
+const usePullRequestRankQuery = createMergedEnvironmentQuery(
+  "web-pull-requests:rank",
+  pullRequestEnvironment.rank,
+);
+
+/**
+ * What an agent makes of the rows it was given, keyed the way the list keys its rows so a score
+ * survives the list being re-read, re-merged and re-sorted.
+ *
+ * Every candidate handed in is ranked — the server splits a long set across prompts rather than
+ * taking the first few — so a section reordered by this is reordered whole.
+ */
+export function usePullRequestUsefulness(
+  targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestRankInput>>,
+): {
+  readonly usefulness: ReadonlyMap<string, number>;
+  readonly reasons: ReadonlyMap<string, string>;
+  readonly isPending: boolean;
+  readonly error: string | null;
+} {
+  const query = usePullRequestRankQuery(targets);
+  return useMemo(() => {
+    const usefulness = new Map<string, number>();
+    const reasons = new Map<string, string>();
+    for (const [target, result] of query.values) {
+      for (const ranking of result.rankings) {
+        // Keyed exactly as `pullRequestEntryKey` keys its rows, so a score survives the list
+        // being re-read, re-merged and re-sorted.
+        const key = `${target.environmentId}:${result.host}:${result.repository}#${ranking.number}`;
+        usefulness.set(key, ranking.score);
+        if (ranking.reason !== undefined) reasons.set(key, ranking.reason);
+      }
+    }
+    return { usefulness, reasons, isPending: query.isPending, error: query.error };
+  }, [query.values, query.isPending, query.error]);
 }
 
 /** The line counts for the rows on screen, asked of each environment for its own rows. */
