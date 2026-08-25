@@ -54,6 +54,7 @@ vi.mock("../WorkspacePageContainer", () => ({ WorkspacePageContainer: "main" }))
 vi.mock("../WorkspacePageHeader", () => ({ WorkspacePageHeader: "header" }));
 vi.mock("./UsageProviderChart", () => ({ UsageProviderChart: "div" }));
 vi.mock("./usageProviders", () => ({
+  visibleLimitsProviders: () => [],
   PROVIDER_ORDER: ["codex", "claude"],
   PROVIDER_PRESENTATION: {
     codex: { color: "white", label: "Codex", mark: "span" },
@@ -90,7 +91,18 @@ beforeEach(() => {
         },
       ],
     },
-    environments: [],
+    environments: [
+      {
+        environmentId: "env-1",
+        label: "Mac",
+        phase: "connected",
+        isPending: false,
+        error: null,
+        summary: { ...mergeUsage([], USAGE_CONTRACT_VERSION), sources: [] },
+      },
+    ],
+    options: [{ environmentId: "env-1", label: "Mac" }],
+    selectedEnvironmentId: null,
     isPending: false,
     isPartial: false,
     refresh: vi.fn(),
