@@ -74,6 +74,10 @@ require apps/server/src/provider/Layers/CodexSessionRuntime.ts "mcpApprovalReque
 # --- Resume-on-restart (65d715fb2) ---
 require apps/server/src/serverRuntimeStartup.ts "sessionStartupReconciler" "startup reconciler runs at boot"
 
+# --- Computer-use agent cursor (b671c08ef) ---
+require native/t3-chrome-extension/background.js "paintCursor" "agent pointer painted into pages by the Chrome extension"
+require native/t3-desktop-mcp-rs/src/main.rs "agent_cursor" "native desktop pointer overlay driven by tool lifecycle"
+
 # --- Computer-use thread view (9c23b7fa6, eb1bdd5e2) ---
 require apps/server/src/ws.ts "computerViewStream" "computer view RPCs registered"
 require apps/web/src/components/chat/ChatHeader.tsx "ComputerViewDialog" "computer view mounted in chat header"
