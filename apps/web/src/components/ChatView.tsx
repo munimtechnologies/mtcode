@@ -7603,6 +7603,18 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeThreadActivities={activeThread?.activities}
+                            threadGoal={supportsGoal ? (activeThread?.goal ?? null) : null}
+                            onThreadGoalAction={
+                              supportsGoal && activeThread
+                                ? (action) => {
+                                    void runGoalAction({
+                                      environmentId,
+                                      threadId: activeThread.id,
+                                      action,
+                                    });
+                                  }
+                                : undefined
+                            }
                             resolvedTheme={resolvedTheme}
                             settings={settings}
                             keybindings={keybindings}

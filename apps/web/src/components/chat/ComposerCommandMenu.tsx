@@ -4,10 +4,12 @@ import {
   type ProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
 import {
+  type EnvironmentId,
   type ProjectEntry,
   type ProviderDriverKind,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
+  type ThreadId,
 } from "@t3tools/contracts";
 import {
   BlocksIcon,
@@ -54,6 +56,15 @@ export type ComposerCommandItem =
       type: "skill";
       provider: ProviderDriverKind;
       skill: ServerProviderSkill;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "thread";
+      environmentId: EnvironmentId;
+      threadId: ThreadId;
+      title: string;
       label: string;
       description: string;
     };
@@ -119,9 +130,11 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
                     ? "No skills found. Try / to browse provider commands."
-                    : props.triggerKind === "path"
-                      ? "No matching files or folders."
-                      : "No matching command."))}
+                    : props.triggerKind === "thread"
+                      ? "No matching threads."
+                      : props.triggerKind === "path"
+                        ? "No matching files or folders."
+                        : "No matching command."))}
             </p>
           </div>
         )}
