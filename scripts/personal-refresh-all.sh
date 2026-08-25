@@ -48,6 +48,14 @@ if [[ "$NEW" == "$OLD" && -z "${T3_FORCE_REBUILD:-}" ]]; then
   exit 0
 fi
 
+# Refuse to ship a build whose upstream merge silently dropped fork features
+# (kept modules, lost call sites — it has happened repeatedly). The check list
+# lives in the script; fix the wiring on fork/main, never delete the check.
+if ! "$REPO/scripts/personal-verify-fork-features.sh"; then
+  echo "fork-feature verification failed — NOT building or shipping this commit" >&2
+  exit 1
+fi
+
 # Bake T3 Connect public client config into desktop artifacts (gitignored .env).
 # Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
 if [[ ! -f .env ]]; then

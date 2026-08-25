@@ -35,6 +35,10 @@ export GITHUB_REPOSITORY="$RELEASE_REPO"
 # shellcheck source=lib/personal-munim-connect-env.sh
 source "$REPO/scripts/lib/personal-munim-connect-env.sh"
 munim_connect_load
+
+# Never publish a build whose upstream merge dropped fork features (kept
+# modules, lost call sites). Checks live in personal-verify-fork-features.sh.
+"$REPO/scripts/personal-verify-fork-features.sh"
 if [[ "$MUNIM_CONNECT_ACTIVE" == 1 ]]; then
   munim_connect_write_repo_env "$REPO"
 fi

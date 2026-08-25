@@ -28,6 +28,10 @@ fi
 # shellcheck source=lib/personal-munim-connect-env.sh
 source "$REPO/scripts/lib/personal-munim-connect-env.sh"
 munim_connect_load
+
+# Never publish a build whose upstream merge dropped fork features (kept
+# modules, lost call sites). Checks live in personal-verify-fork-features.sh.
+"$REPO/scripts/personal-verify-fork-features.sh"
 if [[ "$MUNIM_CONNECT_ACTIVE" != 1 ]]; then
   echo "building without Munim Clerk; T3 Connect will still be offered as an external option"
 fi

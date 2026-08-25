@@ -24,6 +24,10 @@ cd "$MOBILE"
 source "$REPO/scripts/lib/personal-munim-connect-env.sh"
 munim_connect_load
 
+# Never publish a build whose upstream merge dropped fork features (kept
+# modules, lost call sites). Checks live in personal-verify-fork-features.sh.
+"$REPO/scripts/personal-verify-fork-features.sh"
+
 export T3CODE_MOBILE_DISTRO=munim
 
 echo "T3CODE_MOBILE_DISTRO=$T3CODE_MOBILE_DISTRO"
