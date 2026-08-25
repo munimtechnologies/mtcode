@@ -399,6 +399,12 @@ const config: ExpoConfig = {
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },
+    // MT Teams service origin, baked into the build and never shown in the
+    // UI (docs/internals/mt-teams.md). Falls back to the web build's var so
+    // one env configures every surface.
+    mtTeams: {
+      url: repoEnv.EXPO_PUBLIC_MT_TEAMS_URL ?? repoEnv.VITE_MT_TEAMS_URL ?? null,
+    },
     clerk: {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,

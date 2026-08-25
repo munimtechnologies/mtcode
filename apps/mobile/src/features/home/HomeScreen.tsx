@@ -57,6 +57,7 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
+import { MtTeamsTeamShelf } from "../../mtTeams/MtTeamsTeamShelf";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
@@ -1146,19 +1147,22 @@ export function HomeScreen(props: HomeScreenProps) {
             extraData={v2ExtraData}
             ListHeaderComponent={v2ListHeader}
             ListFooterComponent={
-              settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Show ${Math.min(threadListV2Layout.hiddenSettledCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
-                  onPress={showMoreSettled}
-                  className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
-                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-                >
-                  <Text className="text-xs font-t3-medium text-foreground-muted">
-                    Show more ({threadListV2Layout.hiddenSettledCount} settled hidden)
-                  </Text>
-                </Pressable>
-              ) : null
+              <>
+                {settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${Math.min(threadListV2Layout.hiddenSettledCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
+                    onPress={showMoreSettled}
+                    className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
+                    style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                  >
+                    <Text className="text-xs font-t3-medium text-foreground-muted">
+                      Show more ({threadListV2Layout.hiddenSettledCount} settled hidden)
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <MtTeamsTeamShelf />
+              </>
             }
             ListEmptyComponent={v2ListEmpty}
             style={{ flex: 1 }}
@@ -1200,6 +1204,7 @@ export function HomeScreen(props: HomeScreenProps) {
           estimatedItemSize={ESTIMATED_THREAD_ROW_HEIGHT}
           extraData={extraData}
           ListHeaderComponent={listHeader}
+          ListFooterComponent={<MtTeamsTeamShelf />}
           ListEmptyComponent={listEmpty}
           style={{ flex: 1 }}
           automaticallyAdjustsScrollIndicatorInsets={NATIVE_LIQUID_GLASS_SUPPORTED}

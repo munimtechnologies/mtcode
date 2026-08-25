@@ -38,6 +38,8 @@ export T3CODE_MOBILE_DISTRO=munim
 export T3CODE_CLERK_PUBLISHABLE_KEY="pk_live_Y2xlcmsudDMuY29kZXMk"
 export T3CODE_CLERK_JWT_TEMPLATE="t3-relay"
 export T3CODE_RELAY_URL="https://relay.t3.codes"
+# MT Teams service for the mobile client (read via expo config extra).
+export EXPO_PUBLIC_MT_TEAMS_URL="https://reminiscent-ibis-360.convex.site"
 echo "connect: baking T3 Connect identifiers (relay.t3.codes) for mobile"
 
 echo "T3CODE_MOBILE_DISTRO=$T3CODE_MOBILE_DISTRO"
