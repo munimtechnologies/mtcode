@@ -46,11 +46,16 @@ export default defineSchema({
     ackedAt: v.optional(v.number()),
   }).index("by_environment", ["environmentId"]),
 
-  /** Short join code per team (keyed by the Better Auth organization id). */
-  teamInvites: defineTable({
+  /** Pending email invite: appears in the invitee's panel when they sign in
+   * with that email (lowercased). Invite codes are retired (2026-08-25). */
+  teamEmailInvites: defineTable({
+    // Better Auth organization id (organizations = teams).
     teamId: v.string(),
-    inviteCode: v.string(),
+    // Lowercased, trimmed invitee email.
+    email: v.string(),
+    invitedByUserId: v.string(),
+    createdAt: v.number(),
   })
     .index("by_team", ["teamId"])
-    .index("by_code", ["inviteCode"]),
+    .index("by_email", ["email"]),
 });

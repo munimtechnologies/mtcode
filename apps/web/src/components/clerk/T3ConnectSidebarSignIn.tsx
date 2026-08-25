@@ -117,7 +117,7 @@ function ConfiguredConnectSidebarSignIn() {
             }}
           >
             <LogInIcon />
-            <span>Use T3 Connect</span>
+            <span>Use {t3.label}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : null}
@@ -129,7 +129,7 @@ function ConfiguredConnectSidebarSignIn() {
             }}
           >
             <LogInIcon />
-            <span>Use MT Connect</span>
+            <span>Use {mt.label}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : null}
@@ -141,7 +141,7 @@ function ConfiguredConnectSidebarSignIn() {
             }}
           >
             <ExternalLinkIcon />
-            <span>Open T3 Connect</span>
+            <span>Open {t3.label}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : null}

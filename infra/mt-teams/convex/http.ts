@@ -102,6 +102,30 @@ function getAuthUserById(ctx: HttpCtx, userId: string) {
   });
 }
 
+function getAuthUserByEmail(ctx: HttpCtx, email: string) {
+  return ctx.runQuery(components.betterAuth.adapter.findOne, {
+    model: "user",
+    where: [{ field: "email", value: email }],
+  });
+}
+
+function removeMembership(ctx: HttpCtx, teamId: string, userId: string) {
+  return ctx.runMutation(components.betterAuth.adapter.deleteOne, {
+    input: {
+      model: "member",
+      where: [
+        { field: "organizationId", value: teamId },
+        { field: "userId", value: userId },
+      ],
+    },
+  });
+}
+
+/** The caller's account email, normalized the same way invites are stored. */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 async function listByField(
   ctx: HttpCtx,
   model: "member",
@@ -162,23 +186,120 @@ route("/api/teams/create", "POST", async (ctx, request) => {
   });
   if (!organization) return error(500, "Failed to create team");
 
-  const inviteCode = randomCode(8);
-  await ctx.runMutation(internal.data.createInvite, { teamId: organization.id, inviteCode });
-  return json(200, { teamId: organization.id, name: organization.name, inviteCode });
+  return json(200, { teamId: organization.id, name: organization.name });
 });
 
-route("/api/teams/join", "POST", async (ctx, request) => {
+// Invite codes are retired (2026-08-25); kept only so older clients get a
+// clear 410 instead of a router 404.
+route("/api/teams/join", "POST", async () => {
+  return error(410, "invite codes are retired");
+});
+
+// -- Email invites ----------------------------------------------------------
+
+route("/api/teams/invite", "POST", async (ctx, request) => {
   const user = await getSessionUser(ctx, request);
   if (!user) return error(401, "Not signed in");
-  const { inviteCode } = await readBody(request);
-  if (typeof inviteCode !== "string" || inviteCode.trim() === "") {
-    return error(400, "inviteCode is required");
+  const { teamId, email } = await readBody(request);
+  if (typeof teamId !== "string" || typeof email !== "string" || email.trim() === "") {
+    return error(400, "teamId and email are required");
   }
 
-  const invite = await ctx.runQuery(internal.data.getInviteByCode, {
-    inviteCode: inviteCode.trim().toUpperCase(),
+  const membership = await getMembership(ctx, teamId, user.id);
+  if (!membership) return error(403, "Not a member of this team");
+
+  const invitedEmail = normalizeEmail(email);
+  const invitedUser = await getAuthUserByEmail(ctx, invitedEmail);
+  if (invitedUser) {
+    const invitedMembership = await getMembership(ctx, teamId, invitedUser._id as string);
+    if (invitedMembership) {
+      return error(409, `${invitedEmail} is already a member of this team`);
+    }
+  }
+
+  const inviteId = await ctx.runMutation(internal.data.createEmailInvite, {
+    teamId,
+    email: invitedEmail,
+    invitedByUserId: user.id,
   });
-  if (!invite) return error(404, "Unknown invite code");
+  return json(200, { inviteId });
+});
+
+route("/api/teams/invites", "GET", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+  const teamId = new URL(request.url).searchParams.get("teamId");
+  if (!teamId) return error(400, "teamId is required");
+
+  const membership = await getMembership(ctx, teamId, user.id);
+  if (!membership) return error(403, "Not a member of this team");
+
+  const pending = await ctx.runQuery(internal.data.listEmailInvitesByTeam, { teamId });
+  const invites = [];
+  for (const invite of pending) {
+    const invitedBy = await getAuthUserById(ctx, invite.invitedByUserId);
+    invites.push({
+      inviteId: invite._id,
+      email: invite.email,
+      invitedByName: invitedBy?.name ?? "",
+      createdAt: invite.createdAt,
+    });
+  }
+  return json(200, { invites });
+});
+
+route("/api/teams/invites/revoke", "POST", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+  const { inviteId } = await readBody(request);
+  if (typeof inviteId !== "string") return error(400, "inviteId is required");
+
+  const invite = await ctx.runQuery(internal.data.getEmailInvite, {
+    inviteId: inviteId as Id<"teamEmailInvites">,
+  });
+  if (!invite) return error(404, "Invite not found");
+  const membership = await getMembership(ctx, invite.teamId, user.id);
+  if (!membership) return error(403, "Not a member of this team");
+
+  await ctx.runMutation(internal.data.deleteEmailInvite, { inviteId: invite._id });
+  return json(200, { ok: true });
+});
+
+route("/api/invites/mine", "GET", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+
+  const pending = await ctx.runQuery(internal.data.listEmailInvitesByEmail, {
+    email: normalizeEmail(user.email),
+  });
+  const invites = [];
+  for (const invite of pending) {
+    const organization = await getOrganization(ctx, invite.teamId);
+    const invitedBy = await getAuthUserById(ctx, invite.invitedByUserId);
+    invites.push({
+      inviteId: invite._id,
+      teamId: invite.teamId,
+      teamName: organization?.name ?? "",
+      invitedByName: invitedBy?.name ?? "",
+      createdAt: invite.createdAt,
+    });
+  }
+  return json(200, { invites });
+});
+
+route("/api/invites/accept", "POST", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+  const { inviteId } = await readBody(request);
+  if (typeof inviteId !== "string") return error(400, "inviteId is required");
+
+  const invite = await ctx.runQuery(internal.data.getEmailInvite, {
+    inviteId: inviteId as Id<"teamEmailInvites">,
+  });
+  if (!invite) return error(404, "Invite not found");
+  if (invite.email !== normalizeEmail(user.email)) {
+    return error(403, "This invite is for a different email");
+  }
 
   const membership = await getMembership(ctx, invite.teamId, user.id);
   if (!membership) {
@@ -187,8 +308,62 @@ route("/api/teams/join", "POST", async (ctx, request) => {
       body: { userId: user.id, organizationId: invite.teamId, role: "member" },
     });
   }
+  await ctx.runMutation(internal.data.deleteEmailInvite, { inviteId: invite._id });
   const organization = await getOrganization(ctx, invite.teamId);
   return json(200, { teamId: invite.teamId, name: organization?.name ?? "" });
+});
+
+route("/api/invites/decline", "POST", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+  const { inviteId } = await readBody(request);
+  if (typeof inviteId !== "string") return error(400, "inviteId is required");
+
+  const invite = await ctx.runQuery(internal.data.getEmailInvite, {
+    inviteId: inviteId as Id<"teamEmailInvites">,
+  });
+  if (!invite) return error(404, "Invite not found");
+  if (invite.email !== normalizeEmail(user.email)) {
+    return error(403, "This invite is for a different email");
+  }
+
+  await ctx.runMutation(internal.data.deleteEmailInvite, { inviteId: invite._id });
+  return json(200, { ok: true });
+});
+
+// -- Membership -------------------------------------------------------------
+
+route("/api/teams/leave", "POST", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+  const { teamId } = await readBody(request);
+  if (typeof teamId !== "string") return error(400, "teamId is required");
+
+  const membership = await getMembership(ctx, teamId, user.id);
+  if (!membership) return error(403, "Not a member of this team");
+
+  await removeMembership(ctx, teamId, user.id);
+  return json(200, { ok: true });
+});
+
+route("/api/teams/members/remove", "POST", async (ctx, request) => {
+  const user = await getSessionUser(ctx, request);
+  if (!user) return error(401, "Not signed in");
+  const { teamId, userId } = await readBody(request);
+  if (typeof teamId !== "string" || typeof userId !== "string") {
+    return error(400, "teamId and userId are required");
+  }
+
+  const membership = await getMembership(ctx, teamId, user.id);
+  if (!membership) return error(403, "Not a member of this team");
+  if (userId === user.id) {
+    return error(400, "Use /api/teams/leave to remove yourself");
+  }
+  const targetMembership = await getMembership(ctx, teamId, userId);
+  if (!targetMembership) return error(404, "That user is not a member of this team");
+
+  await removeMembership(ctx, teamId, userId);
+  return json(200, { ok: true });
 });
 
 route("/api/teams/me", "GET", async (ctx, request) => {
@@ -201,7 +376,6 @@ route("/api/teams/me", "GET", async (ctx, request) => {
     const teamId = membership.organizationId as string;
     const organization = await getOrganization(ctx, teamId);
     if (!organization) continue;
-    const invite = await ctx.runQuery(internal.data.getInviteByTeam, { teamId });
     const teamMembers = await listByField(ctx, "member", "organizationId", teamId);
     const members = [];
     for (const teamMember of teamMembers) {
@@ -215,7 +389,6 @@ route("/api/teams/me", "GET", async (ctx, request) => {
     teams.push({
       id: teamId,
       name: organization.name,
-      inviteCode: invite?.inviteCode ?? "",
       members,
     });
   }

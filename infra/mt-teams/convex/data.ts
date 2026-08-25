@@ -3,32 +3,53 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { threadStatus } from "./schema";
 
-// -- Team invites -----------------------------------------------------------
+// -- Team email invites -----------------------------------------------------
 
-export const createInvite = internalMutation({
-  args: { teamId: v.string(), inviteCode: v.string() },
+/** Idempotent per (team, email): re-inviting returns the existing pending invite. */
+export const createEmailInvite = internalMutation({
+  args: { teamId: v.string(), email: v.string(), invitedByUserId: v.string() },
   handler: async (ctx, args) => {
-    await ctx.db.insert("teamInvites", args);
+    const existing = await ctx.db
+      .query("teamEmailInvites")
+      .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
+      .filter((q) => q.eq(q.field("email"), args.email))
+      .first();
+    if (existing) return existing._id;
+    return await ctx.db.insert("teamEmailInvites", { ...args, createdAt: Date.now() });
   },
 });
 
-export const getInviteByCode = internalQuery({
-  args: { inviteCode: v.string() },
+export const getEmailInvite = internalQuery({
+  args: { inviteId: v.id("teamEmailInvites") },
   handler: async (ctx, args) => {
-    return await ctx.db
-      .query("teamInvites")
-      .withIndex("by_code", (q) => q.eq("inviteCode", args.inviteCode))
-      .unique();
+    return await ctx.db.get(args.inviteId);
   },
 });
 
-export const getInviteByTeam = internalQuery({
+export const listEmailInvitesByTeam = internalQuery({
   args: { teamId: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
-      .query("teamInvites")
+      .query("teamEmailInvites")
       .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
-      .first();
+      .collect();
+  },
+});
+
+export const listEmailInvitesByEmail = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("teamEmailInvites")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .collect();
+  },
+});
+
+export const deleteEmailInvite = internalMutation({
+  args: { inviteId: v.id("teamEmailInvites") },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.inviteId);
   },
 });
 

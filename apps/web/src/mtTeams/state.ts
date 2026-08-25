@@ -1,26 +1,33 @@
 /**
  * MT Teams client state: one module-level zustand store (the fork's pattern
  * for cross-component state, see threadSelectionStore) holding the session,
- * `/api/teams/me`, and the merged shared-thread list. `useMtTeamsSync()`
- * refcounts mounted consumers and drives the 30s shared-thread poll while a
- * user is signed in (docs/internals/mt-teams.md, flow step 5).
+ * `/api/teams/me`, the caller's pending invites (`/api/invites/mine`), each
+ * team's outstanding invites, and the merged shared-thread list.
+ * `useMtTeamsSync()` refcounts mounted consumers and drives the 30s poll
+ * (teams/me + invites/mine + shared threads) while a user is signed in
+ * (docs/internals/mt-teams.md, flow step 5).
+ *
+ * The service URL is never state: it is baked into the build
+ * (`VITE_MT_TEAMS_URL`) and read through `defaultServiceUrl()`.
  */
 import { useEffect, useSyncExternalStore } from "react";
 import { create } from "zustand";
 
 import {
   clearStoredSession,
-  createTeam,
   defaultServiceUrl,
   fetchMe,
   fetchMyEnvironments,
+  fetchMyInvites,
   fetchSharedThreads,
-  joinTeam,
+  fetchTeamInvites,
   loadStoredSession,
   type MtTeamsEnvironment,
+  type MtTeamsIncomingInvite,
   type MtTeamsMe,
   type MtTeamsSharedThread,
   type MtTeamsStoredSession,
+  type MtTeamsTeamInvite,
   saveStoredSession,
   signIn,
   signOut,
@@ -31,24 +38,30 @@ export const MT_TEAMS_POLL_INTERVAL_MS = 30_000;
 
 const EMPTY_THREADS: ReadonlyArray<MtTeamsSharedThread> = Object.freeze([]);
 const EMPTY_ENVIRONMENTS: ReadonlyArray<MtTeamsEnvironment> = Object.freeze([]);
+const EMPTY_MY_INVITES: ReadonlyArray<MtTeamsIncomingInvite> = Object.freeze([]);
+const EMPTY_TEAM_INVITES: Readonly<Record<string, ReadonlyArray<MtTeamsTeamInvite>>> =
+  Object.freeze({});
 
 interface MtTeamsStore {
-  readonly serviceUrl: string;
   readonly sessionToken: string;
   readonly userName: string;
   readonly me: MtTeamsMe | null;
+  /** Pending invites addressed to the signed-in account's email. */
+  readonly myInvites: ReadonlyArray<MtTeamsIncomingInvite>;
+  /** Outstanding invites per team the user belongs to, keyed by team id. */
+  readonly teamInvites: Readonly<Record<string, ReadonlyArray<MtTeamsTeamInvite>>>;
   readonly environments: ReadonlyArray<MtTeamsEnvironment>;
   readonly sharedThreads: ReadonlyArray<MtTeamsSharedThread>;
   readonly authPending: boolean;
   readonly authError: string | null;
   readonly syncError: string | null;
 
-  setServiceUrl: (serviceUrl: string) => void;
   signIn: (email: string, password: string) => Promise<boolean>;
   signUp: (name: string, email: string, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
   refreshSharedThreads: () => Promise<void>;
+  refreshTeamInvites: () => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
@@ -57,12 +70,11 @@ function errorMessage(error: unknown): string {
 }
 
 function currentSession(state: {
-  readonly serviceUrl: string;
   readonly sessionToken: string;
   readonly userName: string;
 }): MtTeamsStoredSession {
   return {
-    serviceUrl: state.serviceUrl.trim(),
+    serviceUrl: defaultServiceUrl(),
     sessionToken: state.sessionToken,
     userName: state.userName,
   };
@@ -70,6 +82,11 @@ function currentSession(state: {
 
 export function isMtTeamsSignedIn(state: { readonly sessionToken: string }): boolean {
   return state.sessionToken.length > 0;
+}
+
+/** Whether this build carries a team service origin at all. */
+export function isMtTeamsConfigured(): boolean {
+  return defaultServiceUrl().length > 0;
 }
 
 /** Snapshot of the signed-in session for one-off client calls in event handlers. */
@@ -80,27 +97,21 @@ export function getMtTeamsSession(): MtTeamsStoredSession {
 const storedSession = loadStoredSession();
 
 export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
-  serviceUrl: storedSession?.serviceUrl ?? defaultServiceUrl(),
   sessionToken: storedSession?.sessionToken ?? "",
   userName: storedSession?.userName ?? "",
   me: null,
+  myInvites: EMPTY_MY_INVITES,
+  teamInvites: EMPTY_TEAM_INVITES,
   environments: EMPTY_ENVIRONMENTS,
   sharedThreads: EMPTY_THREADS,
   authPending: false,
   authError: null,
   syncError: null,
 
-  setServiceUrl: (serviceUrl) => {
-    set({ serviceUrl });
-    // Persist the URL even while signed out so the Settings field survives a
-    // reload; an empty token in the stored record means "signed out".
-    saveStoredSession(currentSession({ ...get(), serviceUrl }));
-  },
-
   signIn: async (email, password) => {
-    const serviceUrl = get().serviceUrl.trim();
+    const serviceUrl = defaultServiceUrl();
     if (serviceUrl.length === 0) {
-      set({ authError: "Enter the MT Teams service URL first." });
+      set({ authError: "Team service not configured in this build." });
       return false;
     }
     set({ authPending: true, authError: null });
@@ -121,9 +132,9 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
   },
 
   signUp: async (name, email, password) => {
-    const serviceUrl = get().serviceUrl.trim();
+    const serviceUrl = defaultServiceUrl();
     if (serviceUrl.length === 0) {
-      set({ authError: "Enter the MT Teams service URL first." });
+      set({ authError: "Team service not configured in this build." });
       return false;
     }
     set({ authPending: true, authError: null });
@@ -144,20 +155,19 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
   },
 
   signOut: async () => {
-    const state = get();
-    const session = currentSession(state);
+    const session = currentSession(get());
     set({
       sessionToken: "",
       userName: "",
       me: null,
+      myInvites: EMPTY_MY_INVITES,
+      teamInvites: EMPTY_TEAM_INVITES,
       environments: EMPTY_ENVIRONMENTS,
       sharedThreads: EMPTY_THREADS,
       authError: null,
       syncError: null,
     });
     clearStoredSession();
-    // Keep the service URL for the next sign-in.
-    saveStoredSession({ serviceUrl: state.serviceUrl, sessionToken: "", userName: "" });
     if (isMtTeamsSignedIn(session)) await signOut(session);
   },
 
@@ -166,9 +176,13 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
     if (!isMtTeamsSignedIn(state)) return;
     const session = currentSession(state);
     try {
-      const [me, mine] = await Promise.all([fetchMe(session), fetchMyEnvironments(session)]);
-      set({ me, environments: mine.environments, syncError: null });
-      await get().refreshSharedThreads();
+      const [me, mine, invites] = await Promise.all([
+        fetchMe(session),
+        fetchMyEnvironments(session),
+        fetchMyInvites(session),
+      ]);
+      set({ me, environments: mine.environments, myInvites: invites.invites, syncError: null });
+      await Promise.all([get().refreshSharedThreads(), get().refreshTeamInvites()]);
     } catch (error) {
       set({ syncError: errorMessage(error) });
     }
@@ -199,6 +213,28 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
       set({ syncError: errorMessage(error) });
     }
   },
+
+  refreshTeamInvites: async () => {
+    const state = get();
+    if (!isMtTeamsSignedIn(state)) return;
+    const teams = state.me?.teams ?? [];
+    if (teams.length === 0) {
+      if (Object.keys(state.teamInvites).length > 0) set({ teamInvites: EMPTY_TEAM_INVITES });
+      return;
+    }
+    const session = currentSession(state);
+    try {
+      const results = await Promise.all(
+        teams.map(async (team) => {
+          const result = await fetchTeamInvites(session, { teamId: team.id });
+          return [team.id, result.invites] as const;
+        }),
+      );
+      set({ teamInvites: Object.fromEntries(results), syncError: null });
+    } catch (error) {
+      set({ syncError: errorMessage(error) });
+    }
+  },
 }));
 
 /**
@@ -221,17 +257,16 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 function pollTick(): void {
   const state = useMtTeamsStore.getState();
   if (!isMtTeamsSignedIn(state)) return;
-  // Re-pull membership when it never loaded (e.g. the app started offline).
-  if (state.me === null) {
-    void state.refreshMe();
-    return;
-  }
-  void state.refreshSharedThreads();
+  // One refresh covers membership, invites/mine, shared threads, and each
+  // team's outstanding invites, so accepted invites and new teammates appear
+  // without a reload.
+  void state.refreshMe();
 }
 
 /**
  * Keeps MT Teams data fresh while any consumer (sidebar section, settings
- * panel) is mounted: `/api/teams/me` on mount, shared threads every 30s.
+ * panel or nav badge) is mounted: `/api/teams/me` + `/api/invites/mine` on
+ * mount and every 30s alongside shared threads.
  */
 export function useMtTeamsSync(): void {
   useEffect(() => {

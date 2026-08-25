@@ -4,6 +4,10 @@
  * management. All user-session endpoints authenticate with
  * `Authorization: Bearer <session token>`.
  *
+ * The service origin is baked into the build as `VITE_MT_TEAMS_URL` and never
+ * shown in the UI; membership flows through email invites (invite codes are
+ * retired, 2026-08-25).
+ *
  * Better Auth token handling (bearer plugin conventions, better-auth 1.6.x):
  * sign-in/sign-up responses expose the session token via the
  * `set-auth-token` response header; some deployments also include `token` in
@@ -27,13 +31,29 @@ export interface MtTeamsMember {
 export interface MtTeamsTeam {
   readonly id: string;
   readonly name: string;
-  readonly inviteCode: string;
   readonly members: ReadonlyArray<MtTeamsMember>;
 }
 
 export interface MtTeamsMe {
   readonly user: MtTeamsUser;
   readonly teams: ReadonlyArray<MtTeamsTeam>;
+}
+
+/** A pending invite on a team the caller belongs to (`/api/teams/invites`). */
+export interface MtTeamsTeamInvite {
+  readonly inviteId: string;
+  readonly email: string;
+  readonly invitedByName: string;
+  readonly createdAt: number;
+}
+
+/** A pending invite addressed to the caller's account email (`/api/invites/mine`). */
+export interface MtTeamsIncomingInvite {
+  readonly inviteId: string;
+  readonly teamId: string;
+  readonly teamName: string;
+  readonly invitedByName: string;
+  readonly createdAt: number;
 }
 
 export interface MtTeamsEnvironment {
@@ -63,12 +83,13 @@ export interface MtTeamsStoredSession {
 
 export const MT_TEAMS_STORAGE_KEY = "mtcode.mt-teams";
 
+/** The baked service origin. Empty in builds without MT Teams (e.g. dev). */
 export function defaultServiceUrl(): string {
   // VITE_MT_TEAMS_URL is not declared in vite-env.d.ts (that file is owned
   // elsewhere); read it via an index access so typecheck stays clean.
   const env = import.meta.env as unknown as Record<string, string | undefined>;
   const fromEnv = env.VITE_MT_TEAMS_URL;
-  return typeof fromEnv === "string" ? fromEnv : "";
+  return typeof fromEnv === "string" ? fromEnv.trim() : "";
 }
 
 /** Join a service origin and an API path without doubling slashes. */
@@ -85,6 +106,10 @@ export function mtTeamsAuthHeaders(sessionToken: string): Record<string, string>
   };
 }
 
+/**
+ * Only the session survives reloads; the service URL always comes from the
+ * build (`defaultServiceUrl`), so a stale stored origin can never shadow it.
+ */
 export function loadStoredSession(): MtTeamsStoredSession | null {
   try {
     const raw = localStorage.getItem(MT_TEAMS_STORAGE_KEY);
@@ -92,11 +117,11 @@ export function loadStoredSession(): MtTeamsStoredSession | null {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
     const record = parsed as Record<string, unknown>;
-    if (typeof record.serviceUrl !== "string" || typeof record.sessionToken !== "string") {
+    if (typeof record.sessionToken !== "string" || record.sessionToken.length === 0) {
       return null;
     }
     return {
-      serviceUrl: record.serviceUrl,
+      serviceUrl: defaultServiceUrl(),
       sessionToken: record.sessionToken,
       userName: typeof record.userName === "string" ? record.userName : "",
     };
@@ -107,7 +132,10 @@ export function loadStoredSession(): MtTeamsStoredSession | null {
 
 export function saveStoredSession(session: MtTeamsStoredSession): void {
   try {
-    localStorage.setItem(MT_TEAMS_STORAGE_KEY, JSON.stringify(session));
+    localStorage.setItem(
+      MT_TEAMS_STORAGE_KEY,
+      JSON.stringify({ sessionToken: session.sessionToken, userName: session.userName }),
+    );
   } catch {
     // Storage full or unavailable; the session just won't survive a reload.
   }
@@ -250,19 +278,95 @@ export function fetchMe(session: MtTeamsStoredSession): Promise<MtTeamsMe> {
 export function createTeam(
   session: MtTeamsStoredSession,
   input: { readonly name: string },
-): Promise<{ teamId: string; name: string; inviteCode: string }> {
-  return requestJson<{ teamId: string; name: string; inviteCode: string }>(
+): Promise<{ teamId: string; name: string }> {
+  return requestJson<{ teamId: string; name: string }>(session.serviceUrl, "/api/teams/create", {
+    method: "POST",
+    sessionToken: session.sessionToken,
+    body: input,
+  }).then((result) => result.data);
+}
+
+export function inviteToTeam(
+  session: MtTeamsStoredSession,
+  input: { readonly teamId: string; readonly email: string },
+): Promise<{ inviteId: string }> {
+  return requestJson<{ inviteId: string }>(session.serviceUrl, "/api/teams/invite", {
+    method: "POST",
+    sessionToken: session.sessionToken,
+    body: input,
+  }).then((result) => result.data);
+}
+
+export function fetchTeamInvites(
+  session: MtTeamsStoredSession,
+  input: { readonly teamId: string },
+): Promise<{ invites: ReadonlyArray<MtTeamsTeamInvite> }> {
+  return requestJson<{ invites: ReadonlyArray<MtTeamsTeamInvite> }>(
     session.serviceUrl,
-    "/api/teams/create",
-    { method: "POST", sessionToken: session.sessionToken, body: input },
+    `/api/teams/invites?teamId=${encodeURIComponent(input.teamId)}`,
+    { method: "GET", sessionToken: session.sessionToken },
   ).then((result) => result.data);
 }
 
-export function joinTeam(
+export function revokeInvite(
   session: MtTeamsStoredSession,
-  input: { readonly inviteCode: string },
+  input: { readonly inviteId: string },
+): Promise<{ ok: true }> {
+  return requestJson<{ ok: true }>(session.serviceUrl, "/api/teams/invites/revoke", {
+    method: "POST",
+    sessionToken: session.sessionToken,
+    body: input,
+  }).then((result) => result.data);
+}
+
+export function fetchMyInvites(
+  session: MtTeamsStoredSession,
+): Promise<{ invites: ReadonlyArray<MtTeamsIncomingInvite> }> {
+  return requestJson<{ invites: ReadonlyArray<MtTeamsIncomingInvite> }>(
+    session.serviceUrl,
+    "/api/invites/mine",
+    { method: "GET", sessionToken: session.sessionToken },
+  ).then((result) => result.data);
+}
+
+export function acceptInvite(
+  session: MtTeamsStoredSession,
+  input: { readonly inviteId: string },
 ): Promise<{ teamId: string; name: string }> {
-  return requestJson<{ teamId: string; name: string }>(session.serviceUrl, "/api/teams/join", {
+  return requestJson<{ teamId: string; name: string }>(session.serviceUrl, "/api/invites/accept", {
+    method: "POST",
+    sessionToken: session.sessionToken,
+    body: input,
+  }).then((result) => result.data);
+}
+
+export function declineInvite(
+  session: MtTeamsStoredSession,
+  input: { readonly inviteId: string },
+): Promise<{ ok: true }> {
+  return requestJson<{ ok: true }>(session.serviceUrl, "/api/invites/decline", {
+    method: "POST",
+    sessionToken: session.sessionToken,
+    body: input,
+  }).then((result) => result.data);
+}
+
+export function leaveTeam(
+  session: MtTeamsStoredSession,
+  input: { readonly teamId: string },
+): Promise<{ ok: true }> {
+  return requestJson<{ ok: true }>(session.serviceUrl, "/api/teams/leave", {
+    method: "POST",
+    sessionToken: session.sessionToken,
+    body: input,
+  }).then((result) => result.data);
+}
+
+export function removeTeamMember(
+  session: MtTeamsStoredSession,
+  input: { readonly teamId: string; readonly userId: string },
+): Promise<{ ok: true }> {
+  return requestJson<{ ok: true }>(session.serviceUrl, "/api/teams/members/remove", {
     method: "POST",
     sessionToken: session.sessionToken,
     body: input,

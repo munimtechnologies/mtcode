@@ -4,11 +4,15 @@ import {
   canEmbedClerkProvider,
   parseConnectProviders,
   providerHasRelay,
+  readBakedConnectProviders,
   resolveDefaultConnectProviderId,
   resolveEmbeddedClerkProvider,
   selectEmbeddableConnectProviderId,
 } from "./connectProviders.ts";
 
+// Clerk-based MT Connect is retired (2026-08-25): builds bake only the T3
+// provider (scripts/lib/connect-public-providers.ts). The `mt` fixture below
+// exercises the source's inert mt branches, which stay for parse-compat.
 const mt = {
   id: "mt" as const,
   label: "MT Connect",
@@ -65,8 +69,31 @@ describe("canEmbedClerkProvider", () => {
   });
 });
 
+describe("readBakedConnectProviders", () => {
+  it("returns only the T3 provider from the baked provider list", () => {
+    vi.stubEnv("VITE_CONNECT_PROVIDERS", JSON.stringify([t3]));
+    const providers = readBakedConnectProviders();
+    expect(providers).toEqual([t3]);
+    expect(providers.find((provider) => provider.id === "mt")).toBeUndefined();
+  });
+});
+
 describe("resolveDefaultConnectProviderId", () => {
-  it("defaults to MT Connect on the hosted web", () => {
+  it("resolves the single baked T3 provider everywhere", () => {
+    // Electron / relay-capable path.
+    expect(resolveDefaultConnectProviderId([t3], { origin: "file://", isElectron: true })).toBe(
+      "t3",
+    );
+    // Origins where T3 Clerk cannot embed still fall back to the only provider.
+    expect(
+      resolveDefaultConnectProviderId([t3], {
+        origin: "https://mtcode.munimtech.com",
+        isElectron: false,
+      }),
+    ).toBe("t3");
+  });
+
+  it("defaults to MT Connect on the hosted web (legacy two-provider input)", () => {
     expect(
       resolveDefaultConnectProviderId([mt, t3], {
         origin: "https://mtcode.munimtech.com",

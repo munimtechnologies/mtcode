@@ -34,53 +34,17 @@ export const T3_CONNECT_PUBLIC_PROVIDER: ConnectProviderPublicConfig = {
   hostedAppUrl: T3_CONNECT_HOSTED_APP_URL,
 };
 
-function firstNonEmpty(
-  env: Readonly<Record<string, string | undefined>>,
-  ...names: readonly string[]
-): string {
-  for (const name of names) {
-    const value = env[name]?.trim();
-    if (value) return value;
-  }
-  return "";
-}
-
 export function isT3ConnectPublishableKey(value: string | undefined): boolean {
   return value?.trim() === T3_CONNECT_PUBLISHABLE_KEY;
 }
 
 export function buildConnectProviders(
-  env: Readonly<Record<string, string | undefined>>,
+  _env: Readonly<Record<string, string | undefined>>,
 ): ConnectProviderPublicConfig[] {
-  const processPublishableKey = firstNonEmpty(
-    env,
-    "T3CODE_CLERK_PUBLISHABLE_KEY",
-    "VITE_CLERK_PUBLISHABLE_KEY",
-  );
-  const providers: ConnectProviderPublicConfig[] = [];
-
-  if (processPublishableKey && !isT3ConnectPublishableKey(processPublishableKey)) {
-    providers.push({
-      id: "mt",
-      label: "MT Connect",
-      clerkPublishableKey: processPublishableKey,
-      clerkJwtTemplate:
-        firstNonEmpty(env, "T3CODE_CLERK_JWT_TEMPLATE", "VITE_CLERK_JWT_TEMPLATE") ||
-        T3_CONNECT_JWT_TEMPLATE,
-      clerkCliOAuthClientId: firstNonEmpty(
-        env,
-        "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
-        "VITE_CLERK_CLI_OAUTH_CLIENT_ID",
-      ),
-      relayUrl: firstNonEmpty(env, "T3CODE_RELAY_URL", "VITE_T3CODE_RELAY_URL"),
-      hostedAppUrl:
-        firstNonEmpty(env, "T3CODE_HOSTED_APP_URL", "VITE_HOSTED_APP_URL") ||
-        MT_CONNECT_HOSTED_APP_URL,
-    });
-  }
-
-  providers.push(T3_CONNECT_PUBLIC_PROVIDER);
-  return providers;
+  // Clerk-based MT Connect is retired (2026-08-25): teams run on MT Teams
+  // (Better Auth + Convex) and machine sync runs on T3 Connect. One Connect
+  // identity means no identity switch and no "Use MT Connect" affordance.
+  return [T3_CONNECT_PUBLIC_PROVIDER];
 }
 
 export function serializeConnectProviders(
