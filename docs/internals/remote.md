@@ -52,6 +52,13 @@ launcher owns it; a server it discovered already running must survive a client
 disconnect. Reconnection restores the forward before opening the application
 transport.
 
+SSH agent forwarding is an explicit per-target opt-in. The manager disables forwarding on ordinary
+SSH commands (`ssh -a`), opens one retained `ssh -A` channel when requested, publishes that channel's
+remote socket under the launch state directory, and starts the launcher-managed server with the socket
+in `SSH_AUTH_SOCK`. The agent channel and port tunnel share the environment connection scope, so
+disconnect and reconnect replace both. Pre-existing external servers are rejected for this mode
+because their process environment cannot be updated safely.
+
 Remote servers can outlive several client releases. Clients must use advertised
 capabilities and handle their absence, rather than assume their own version
 describes the server. Process replacement belongs to the launcher's
