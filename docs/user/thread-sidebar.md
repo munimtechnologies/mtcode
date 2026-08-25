@@ -12,6 +12,10 @@ one environment.
 Pinned threads still move to **Settled** when they become inactive. They also move when their pull
 request merges if **Auto-settle merged threads** is enabled.
 
+Right-click a pull request link in a thread and choose **Link to thread** to show that pull request
+in the sidebar. The thread settles when the linked pull request merges if **Auto-settle merged
+threads** is enabled. Right-click the same link and choose **Unlink from thread** to remove it.
+
 On web and desktop, drag a pinned thread to change its position. Drag an unsettled (active)
 thread the same way to rearrange the active list. On mobile, open a pinned thread's menu and
 choose **Move up** or **Move down**. The order is stored by the server and appears on your other

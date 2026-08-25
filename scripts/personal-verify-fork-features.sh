@@ -67,6 +67,10 @@ require apps/web/src/components/chat/ChatComposer.tsx "VoiceTranscriptionPanel" 
 require apps/web/src/components/chat/ChatComposer.tsx "prependMtModelPickerEntry" "MT Auto entry in composer model picker"
 require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "mtModel" "MT Auto routing in provider reactor"
 
+# --- Computer-use permission/tool approvals (b671c08ef lineage) ---
+require apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts 'case "permissions_approval"' "permissions approval request kind mapping"
+require apps/server/src/provider/Layers/CodexSessionRuntime.ts "mcpApprovalRequestKind" "MCP tool/permissions approval routing in Codex runtime"
+
 # --- Resume-on-restart (65d715fb2) ---
 require apps/server/src/serverRuntimeStartup.ts "sessionStartupReconciler" "startup reconciler runs at boot"
 

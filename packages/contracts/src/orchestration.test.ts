@@ -287,6 +287,47 @@ it.effect("decodes PDF attachments in thread.turn.start", () =>
   }),
 );
 
+it.effect("accepts both inline and uploaded image attachments from clients", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-attachments",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-attachments",
+        role: "user",
+        text: "hello",
+        attachments: [
+          {
+            type: "image",
+            name: "legacy.png",
+            mimeType: "image/png",
+            sizeBytes: 3,
+            dataUrl: "data:image/png;base64,YWJj",
+          },
+          {
+            type: "image",
+            id: "pending-00000000-0000-4000-8000-000000000001",
+            name: "uploaded.png",
+            mimeType: "image/png",
+            sizeBytes: 3,
+          },
+        ],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    if (command.type !== "thread.turn.start") {
+      assert.fail(`Expected thread.turn.start, received ${command.type}.`);
+    }
+    assert.strictEqual(command.message.attachments.length, 2);
+    assert.strictEqual("dataUrl" in command.message.attachments[0]!, true);
+    assert.strictEqual("id" in command.message.attachments[1]!, true);
+  }),
+);
+
 it.effect("preserves explicit provider and runtime mode in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
@@ -822,6 +863,28 @@ it.effect("accepts a title regeneration intent in thread.meta.update", () =>
     assert.strictEqual(parsed.type, "thread.meta.update");
     if (parsed.type === "thread.meta.update") {
       assert.strictEqual(parsed.regenerateTitle, true);
+    }
+  }),
+);
+
+it.effect("accepts a linked pull request in thread.meta.update", () =>
+  Effect.gen(function* () {
+    const linkedPullRequest = {
+      projectId: "project-1",
+      repository: "pingdotgg/t3code",
+      number: 42,
+      url: "https://github.com/pingdotgg/t3code/pull/42",
+    };
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-link-pull-request",
+      threadId: "thread-1",
+      linkedPullRequest,
+    });
+
+    assert.strictEqual(parsed.type, "thread.meta.update");
+    if (parsed.type === "thread.meta.update") {
+      assert.deepStrictEqual(parsed.linkedPullRequest, linkedPullRequest);
     }
   }),
 );

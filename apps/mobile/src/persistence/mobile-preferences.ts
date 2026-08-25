@@ -44,6 +44,10 @@ export interface Preferences {
   readonly planModeEnabled?: boolean;
   /** When false, messages sent during active work wait on the server for the next turn. */
   readonly steerActiveTurns?: boolean;
+  /** Undefined preserves the default expanded Settled shelf. */
+  readonly threadListV2SettledShelfExpanded?: boolean;
+  /** Undefined preserves the default collapsed Snoozed shelf. */
+  readonly threadListV2SnoozedShelfExpanded?: boolean;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
@@ -103,6 +107,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     steerActiveTurns?: boolean;
+    threadListV2SettledShelfExpanded?: boolean;
+    threadListV2SnoozedShelfExpanded?: boolean;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -175,6 +181,12 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.steerActiveTurns === "boolean") {
     preferences.steerActiveTurns = parsed.steerActiveTurns;
+  }
+  if (typeof parsed.threadListV2SettledShelfExpanded === "boolean") {
+    preferences.threadListV2SettledShelfExpanded = parsed.threadListV2SettledShelfExpanded;
+  }
+  if (typeof parsed.threadListV2SnoozedShelfExpanded === "boolean") {
+    preferences.threadListV2SnoozedShelfExpanded = parsed.threadListV2SnoozedShelfExpanded;
   }
   return preferences;
 }

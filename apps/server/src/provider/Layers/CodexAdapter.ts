@@ -64,6 +64,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
+  describeMcpElicitation,
   makeCodexSessionRuntime,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
@@ -389,6 +390,8 @@ function toRequestTypeFromMethod(method: string): CanonicalRequestType {
       return "file_change_approval";
     case "item/permissions/requestApproval":
       return "permissions_approval";
+    case "mcpServer/elicitation/request":
+      return "mcp_elicitation_approval";
     case "applyPatchApproval":
       return "apply_patch_approval";
     case "execCommandApproval":
@@ -416,6 +419,8 @@ function toRequestTypeFromKind(kind: ProviderRequestKind | undefined): Canonical
       return "permissions_approval";
     case "tool":
       return "tool_approval";
+    case "mcp-elicitation":
+      return "mcp_elicitation_approval";
     default:
       return "unknown";
   }
@@ -977,6 +982,11 @@ function mapToRuntimeEvents(
       ];
     }
 
+    const elicitation =
+      event.method === "mcpServer/elicitation/request"
+        ? readPayload(EffectCodexSchema.McpServerElicitationRequestParams, event.payload)
+        : undefined;
+    const elicitationApproval = elicitation ? describeMcpElicitation(elicitation) : undefined;
     const detail = (() => {
       switch (event.method) {
         case "item/commandExecution/requestApproval": {
@@ -1042,6 +1052,12 @@ function mapToRuntimeEvents(
             ? toRequestTypeFromKind(event.requestKind)
             : toRequestTypeFromMethod(event.method),
           ...(detail ? { detail } : {}),
+          ...(elicitationApproval
+            ? {
+                appName: elicitationApproval.appName,
+                options: elicitationApproval.options,
+              }
+            : {}),
           ...(event.payload !== undefined ? { args: event.payload } : {}),
         },
       },

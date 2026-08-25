@@ -8,6 +8,7 @@ import {
   ProviderDriverKind,
   type OrchestrationEvent,
   type OrchestrationThread,
+  type ProviderApprovalDecision,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -203,14 +204,14 @@ export interface OrchestrationIntegrationHarness {
     requestId: string,
     predicate: (row: {
       readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
+      readonly decision: ProviderApprovalDecision | null;
       readonly resolvedAt: string | null;
     }) => boolean,
     timeoutMs?: number,
   ) => Effect.Effect<
     {
       readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
+      readonly decision: ProviderApprovalDecision | null;
       readonly resolvedAt: string | null;
     },
     never
@@ -511,7 +512,7 @@ export const makeOrchestrationIntegrationHarness = (
           row,
         ): row is {
           readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
+          readonly decision: ProviderApprovalDecision | null;
           readonly resolvedAt: string | null;
         } => row !== null && predicate(row),
         `pending approval '${requestId}'`,
@@ -519,7 +520,7 @@ export const makeOrchestrationIntegrationHarness = (
       ) as Effect.Effect<
         {
           readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
+          readonly decision: ProviderApprovalDecision | null;
           readonly resolvedAt: string | null;
         },
         never

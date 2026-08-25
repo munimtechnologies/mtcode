@@ -35,6 +35,7 @@ import {
   SERVICE_STOP_MARKER_FILE,
   SERVICE_STOP_REQUEST_FILE,
 } from "./cloud/serviceProtocol.ts";
+import { isEntrypoint } from "./entrypoint.ts";
 
 const HANDOFF_DELAY_MS = 2_000;
 const PREPARED_TIMEOUT_MS = 120_000;
@@ -1068,7 +1069,13 @@ async function main(): Promise<void> {
   await new Launcher(baseDir, state).run();
 }
 
-if (import.meta.main) {
+if (
+  isEntrypoint({
+    moduleUrl: import.meta.url,
+    entryPath: process.argv[1],
+    runtimeMain: import.meta.main,
+  })
+) {
   main().catch((cause: unknown) => {
     const error = cause instanceof Error ? cause : new Error(String(cause));
     process.stderr.write(`[service-launcher] ${error.message}\n`);

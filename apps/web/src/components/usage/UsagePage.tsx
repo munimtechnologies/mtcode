@@ -10,7 +10,7 @@ import {
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
-import { useAccountLimits, useEnabledUsageProviders } from "../../state/accountLimits";
+import { useAccountLimits } from "../../state/accountLimits";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { isEnvironmentUsageStillReporting } from "../../state/usageEnvironmentScope";
 import {
@@ -41,7 +41,7 @@ import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
 import { AccountLimitsSection } from "./AccountLimits";
-import { PROVIDER_ORDER, PROVIDER_PRESENTATION } from "./usageProviders";
+import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 
 const WINDOW_OPTIONS = [
   { days: 1, label: "Past 24h" },
@@ -64,21 +64,6 @@ export function UsagePage() {
   const { merged, options, environments, selectedEnvironmentId, isPending, isPartial, refresh } =
     useUsage(window, environmentFilter);
   const { refresh: refreshLimits } = useAccountLimits();
-  const enabledProviders = useEnabledUsageProviders();
-  // A provider switched off in Settings is not part of this workspace, so it
-  // has no row here. One that ran before being switched off keeps its row:
-  // hiding it would leave its spend inside the headline with nothing to
-  // attribute it to.
-  const visibleProviders = useMemo(
-    () =>
-      PROVIDER_ORDER.filter(
-        (provider) =>
-          enabledProviders === null ||
-          enabledProviders.has(provider) ||
-          (merged.providers.find((entry) => entry.provider === provider)?.sessions ?? 0) > 0,
-      ),
-    [enabledProviders, merged.providers],
-  );
 
   useEffect(() => {
     if (environmentFilter !== null && selectedEnvironmentId === null) {
@@ -116,6 +101,17 @@ export function UsagePage() {
     () => (isPast24Hours ? merged.hourly : merged.daily).toReversed(),
     [isPast24Hours, merged.daily, merged.hourly],
   );
+  const breakdownModels = useMemo(
+    () =>
+      breakdown === "model" && metric === "tokens"
+        ? merged.models.toSorted(
+            (left, right) => right.totalTokens - left.totalTokens || right.costUsd - left.costUsd,
+          )
+        : merged.models,
+    [breakdown, merged.models, metric],
+  );
+  const activeProviders = useMemo(() => providersWithUsage(merged.providers), [merged.providers]);
+  const timeValueColumnWidth = `${60 / (activeProviders.length + 2)}%`;
 
   const selectWindow = (days: number) => {
     setWindowSelection({
@@ -311,7 +307,7 @@ export function UsagePage() {
                   isPartial={isPartial}
                 />
 
-                <section className="grid gap-6 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+                <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
                   <div className="flex min-w-0 flex-col gap-5">
                     <div className="flex flex-col gap-1">
                       <span className="text-4xl font-semibold text-foreground tabular-nums">
@@ -328,7 +324,7 @@ export function UsagePage() {
                       </span>
                     </div>
 
-                    {visibleProviders.map((provider) => {
+                    {activeProviders.map((provider) => {
                       const totals = merged.providers.find((entry) => entry.provider === provider);
                       const share =
                         metric === "cost" && !costUnavailable
@@ -385,6 +381,7 @@ export function UsagePage() {
                       {metric === "tokens" ? "processed tokens" : "cost"}
                     </h2>
                     <UsageProviderChart
+                      providers={activeProviders}
                       days={days}
                       daily={merged.daily}
                       hours={hours}
@@ -440,7 +437,13 @@ export function UsagePage() {
                   </div>
 
                   {breakdown === "model" ? (
-                    <table className="w-full text-sm">
+                    <table className="w-full table-fixed text-sm">
+                      <colgroup>
+                        <col className="w-2/5" />
+                        <col className="w-1/5" />
+                        <col className="w-1/5" />
+                        <col className="w-1/5" />
+                      </colgroup>
                       <thead>
                         <tr className="border-b border-border text-left text-xs text-muted-foreground">
                           <th className="py-2 font-normal">Model</th>
@@ -450,14 +453,14 @@ export function UsagePage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {merged.models.length === 0 ? (
+                        {breakdownModels.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="py-6 text-center text-muted-foreground">
                               No activity in this window.
                             </td>
                           </tr>
                         ) : (
-                          merged.models.map((model) => (
+                          breakdownModels.map((model) => (
                             <tr
                               key={`${model.provider}:${model.model}`}
                               className="border-b border-border/50 transition-colors hover:bg-muted/50"
@@ -483,11 +486,19 @@ export function UsagePage() {
                       </tbody>
                     </table>
                   ) : (
-                    <table className="w-full text-sm">
+                    <table className="w-full table-fixed text-sm">
+                      <colgroup>
+                        <col className="w-2/5" />
+                        {activeProviders.map((provider) => (
+                          <col key={provider} style={{ width: timeValueColumnWidth }} />
+                        ))}
+                        <col style={{ width: timeValueColumnWidth }} />
+                        <col style={{ width: timeValueColumnWidth }} />
+                      </colgroup>
                       <thead>
                         <tr className="border-b border-border text-left text-xs text-muted-foreground">
                           <th className="py-2 font-normal">{isPast24Hours ? "Hour" : "Day"}</th>
-                          {visibleProviders.map((provider) => (
+                          {activeProviders.map((provider) => (
                             <th key={provider} className="py-2 text-right font-normal">
                               {PROVIDER_PRESENTATION[provider].label}
                             </th>
@@ -499,7 +510,10 @@ export function UsagePage() {
                       <tbody>
                         {breakdownPeriods.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                            <td
+                              colSpan={activeProviders.length + 3}
+                              className="py-6 text-center text-muted-foreground"
+                            >
                               No activity in this window.
                             </td>
                           </tr>
@@ -514,7 +528,7 @@ export function UsagePage() {
                                   ? formatHourShort(period.hourStart, window.timeZone)
                                   : formatDayShort(period.day)}
                               </td>
-                              {visibleProviders.map((provider) => (
+                              {activeProviders.map((provider) => (
                                 <td
                                   key={provider}
                                   className="py-2 text-right text-muted-foreground tabular-nums"
@@ -737,7 +751,7 @@ function UsageDeviceStrip({
 function UsageSkeleton() {
   return (
     <>
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-1">
             <div className="h-10 w-36 rounded-sm bg-muted" />
@@ -747,12 +761,8 @@ function UsageSkeleton() {
             <div key={provider} className="flex flex-col gap-1">
               <div className="flex min-h-5 items-center justify-between gap-4">
                 <span className="flex items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: PROVIDER_PRESENTATION[provider].color }}
-                  />
-                  <ProviderMark provider={provider} className="size-4" />
+                  <span className="size-2 shrink-0 rounded-full bg-muted" />
+                  <span className="size-4 shrink-0 rounded-full bg-muted" />
                   <div className="h-3.5 w-20 rounded-sm bg-muted" />
                 </span>
                 <div className="h-3.5 w-14 rounded-sm bg-muted" />
@@ -766,7 +776,7 @@ function UsageSkeleton() {
           <div className="h-5 w-24 rounded-sm bg-muted" />
           <div className="flex flex-col gap-1">
             <div className="ml-16 h-56 rounded-sm bg-muted/35" />
-            <div className="ml-16 h-3 rounded-sm bg-muted/35" />
+            <div className="ml-16 h-4 rounded-sm bg-muted/35" />
           </div>
         </div>
       </section>
@@ -778,11 +788,19 @@ function UsageSkeleton() {
             (label) => (
               <div key={label} className="flex flex-col gap-0.5">
                 <span className="text-xs text-muted-foreground">{label}</span>
-                <div className="my-0.5 h-4 w-16 rounded-sm bg-muted" />
+                <div className="h-6 w-16 rounded-sm bg-muted" />
               </div>
             ),
           )}
         </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-foreground">Breakdown</h2>
+          <div className="h-7 w-28 rounded-lg bg-input/40" />
+        </div>
+        <div className="h-44 rounded-sm bg-muted/35" />
       </section>
     </>
   );

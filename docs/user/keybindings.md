@@ -52,6 +52,9 @@ successful pick; its hover glow and badge preview the element and color family t
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
 
+`thread.settle` settles the active thread or restores it when it is already settled. Its default
+shortcut is `mod+shift+s`, and it does not run while the terminal has focus.
+
 `recentThreads.next` and `recentThreads.previous` cycle through the threads you opened this
 session, most recent first, defaulting to `ctrl+tab` and `ctrl+shift+tab`. Keep the modifier held
 to preview the list in a small switcher: repeated presses move through it, releasing the modifier

@@ -120,6 +120,7 @@ export const CodexAppServerIdentifierPurpose = Schema.Literals([
   "file-change-approval-request",
   "permissions-approval-request",
   "mcp-approval-request",
+  "mcp-elicitation-request",
   "user-input-request",
 ]);
 export type CodexAppServerIdentifierPurpose = typeof CodexAppServerIdentifierPurpose.Type;

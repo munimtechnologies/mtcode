@@ -163,6 +163,7 @@ export const make = Effect.gen(function* () {
     capabilities: {
       repositoryIdentity: true,
       connectionProbe: true,
+      attachmentUploads: true,
       pullRequests: true,
       pullRequestStacks: true,
       threadSettlement: true,
@@ -176,6 +177,7 @@ export const make = Effect.gen(function* () {
       providerHandoff: true,
       threadMessageCorrection: true,
       modelRouting: true,
+      threadPullRequestLinking: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
       ...(desktopMcpPath === undefined ? {} : { computerView: true }),

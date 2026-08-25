@@ -62,4 +62,17 @@ describe("ExecutionEnvironmentDescriptor", () => {
       }).homeDirectory,
     ).toBe("/Users/me");
   });
+
+  it("treats a missing attachment upload capability as unsupported", () => {
+    expect(decodeDescriptor(descriptor).capabilities.attachmentUploads).toBeUndefined();
+  });
+
+  it("preserves an advertised attachment upload capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, attachmentUploads: true },
+      }).capabilities.attachmentUploads,
+    ).toBe(true);
+  });
 });
