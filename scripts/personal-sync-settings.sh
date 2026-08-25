@@ -106,7 +106,9 @@ $exe = Get-Item (Join-Path $env:LOCALAPPDATA "Programs\mtcode\MT Code.exe") -Err
 if (-not $exe) {
   Write-Output "no MT Code exe to relaunch"
 } elseif (Test-Path $launcher) {
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher
+  # This script runs locally via -File, so the quoted path survives; passing
+  # it skips Find-T3Exe, whose PS 5.1 -Include globbing picks bogus files.
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -ExePath $exe.FullName
 } else {
   Write-Output "launcher missing; skipping relaunch (app will start on next refresh)"
 }
