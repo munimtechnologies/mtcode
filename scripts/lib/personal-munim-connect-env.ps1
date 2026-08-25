@@ -15,7 +15,8 @@ $script:MunimConnectVarNames = @(
   "T3CODE_CLERK_PUBLISHABLE_KEY",
   "T3CODE_CLERK_JWT_TEMPLATE",
   "T3CODE_RELAY_URL",
-  "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID"
+  "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
+  "T3CODE_HOSTED_APP_URL"
 )
 
 function Read-MunimConnectValues {
@@ -41,7 +42,11 @@ function Import-MunimConnectEnv {
   $values = Read-MunimConnectValues
   if ($values.Count -eq 0) { return $false }
 
-  $required = @("T3CODE_CLERK_PUBLISHABLE_KEY", "T3CODE_CLERK_JWT_TEMPLATE", "T3CODE_RELAY_URL")
+  # Relay URL is optional, matching the bash loader: Clerk-only mode is a
+  # supported state (MT Connect sign-in, computers paired locally). Requiring
+  # it here made Windows builds fall back to T3's .env.example identifiers
+  # while every other surface carried Munim's.
+  $required = @("T3CODE_CLERK_PUBLISHABLE_KEY", "T3CODE_CLERK_JWT_TEMPLATE")
   $missing = @($required | Where-Object { -not $values[$_] })
   if ($missing.Count -gt 0) {
     Write-Warning "munim-connect: $($script:MunimConnectEnvFile) is missing $($missing -join ', ') - building without Munim Connect"

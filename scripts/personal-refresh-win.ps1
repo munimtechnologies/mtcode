@@ -99,7 +99,10 @@ $munimConnectLib = Join-Path $repo "scripts\lib\personal-munim-connect-env.ps1"
 if (Test-Path $munimConnectLib) {
   . $munimConnectLib
   $munimConnect = Import-MunimConnectEnv -Repo $repo
-  if ($munimConnect) { Log "munim-connect: building with Munim Connect config (relay: $($env:T3CODE_RELAY_URL))" }
+  if ($munimConnect) {
+    if ($env:T3CODE_RELAY_URL) { Log "munim-connect: building with Munim Connect config (relay: $($env:T3CODE_RELAY_URL))" }
+    else { Log "munim-connect: building with Munim Connect config (Clerk only - pair computers locally)" }
+  }
 }
 if (-not $munimConnect -and -not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"

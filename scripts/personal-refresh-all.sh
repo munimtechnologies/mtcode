@@ -56,9 +56,18 @@ if ! "$REPO/scripts/personal-verify-fork-features.sh"; then
   exit 1
 fi
 
-# Bake T3 Connect public client config into desktop artifacts (gitignored .env).
-# Without this, hasCloudPublicConfig() is false and Connect UI is omitted.
-if [[ ! -f .env ]]; then
+# Bake Connect public client config into desktop artifacts (gitignored .env).
+# ~/.mt/munim-connect.env (Munim-owned Clerk identifiers) wins when present —
+# the Mac build must carry MT Connect, same as personal-refresh-mac.sh and the
+# Windows refresh; falling back silently to T3's .env(.example) identifiers
+# shipped a T3-Connect Mac build on 2026-08-25. T3 fallback only when no
+# Munim config exists at all.
+# shellcheck source=lib/personal-munim-connect-env.sh
+source "$REPO/scripts/lib/personal-munim-connect-env.sh"
+munim_connect_load
+if [[ "$MUNIM_CONNECT_ACTIVE" == 1 ]]; then
+  munim_connect_write_repo_env "$REPO"
+elif [[ ! -f .env ]]; then
   cp .env.example .env
   echo "created .env from .env.example for T3 Connect"
 fi
