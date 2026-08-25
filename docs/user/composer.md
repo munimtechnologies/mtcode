@@ -7,6 +7,9 @@ multiple messages, then send again in the same thread.
 On servers that support direct uploads, images upload as soon as you add them. The send button
 becomes available after every upload finishes. Failed uploads can be retried or removed.
 
+On web and desktop, HEIC and HEIF photos are automatically converted to JPEG when you drag them into
+the composer or paste them into a message.
+
 On mobile, **Settings → General → Steer active turns** controls messages sent while an agent is
 working. Leave it on to steer the active turn immediately. Turn it off to store the message on the
 server and run it after the active turn finishes. Server-queued messages remain visible in the
