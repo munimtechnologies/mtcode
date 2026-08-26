@@ -41,7 +41,6 @@ export const claudeUserDefinesDesktopMcp = Effect.fn("desktopControl.claudeUserD
       fileSystem.readFileString(file).pipe(
         Effect.map((contents): unknown => {
           try {
-            // @effect-diagnostics-next-line preferSchemaOverJson:off - optional local Claude config.
             return JSON.parse(contents) as unknown;
           } catch {
             return undefined;
