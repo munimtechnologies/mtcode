@@ -101,38 +101,52 @@ fi
 # Clear quarantine on the DMG we ship.
 xattr -cr "$MAC_DMG" 2>/dev/null || true
 
-# --- Windows x64 via Blade (PS1 file avoids nested $env escaping bugs) ---
-echo "-- building Munim Windows x64 on Blade --"
-munim_connect_sync_to_windows_host blade
-scp -o BatchMode=yes "$REPO/scripts/personal-publish-munim-win.ps1" blade:dev/personal-publish-munim-win.ps1
-ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
-  -File C:/Users/muhha/dev/personal-publish-munim-win.ps1 \
+# --- Windows x64 via the Windows build host (PS1 file avoids nested $env escaping bugs) ---
+# Host/user are overridable so a second Windows box can cover for Blade when it
+# is offline; the remote paths are derived from the user, not hardcoded.
+WIN_HOST="${T3_MUNIM_WIN_HOST:-blade}"
+WIN_USER="${T3_MUNIM_WIN_USER:-muhha}"
+WIN_HOME="C:/Users/$WIN_USER"
+WIN_RELEASE_DIR="$WIN_HOME/dev/t3code-personal/release"
+
+# Skipping Windows publishes a Mac-only release; re-running later with
+# T3_MUNIM_SKIP_MAC=1 uploads the exe onto the same tag (upload --clobber).
+WIN_LOCAL=""
+if [[ "${T3_MUNIM_SKIP_WIN:-}" == "1" ]]; then
+  echo "-- skipping Windows build (T3_MUNIM_SKIP_WIN=1) --"
+else
+echo "-- building Munim Windows x64 on $WIN_HOST --"
+munim_connect_sync_to_windows_host "$WIN_HOST"
+scp -o BatchMode=yes "$REPO/scripts/personal-publish-munim-win.ps1" "$WIN_HOST:dev/personal-publish-munim-win.ps1"
+ssh -o BatchMode=yes "$WIN_HOST" powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -File "$WIN_HOME/dev/personal-publish-munim-win.ps1" \
   -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
   -UpdateRepository "$RELEASE_REPO"
 
-WIN_REMOTE=$(ssh -o BatchMode=yes blade 'powershell.exe -NoProfile -Command "Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/MT-Code-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName"')
+WIN_REMOTE=$(ssh -o BatchMode=yes "$WIN_HOST" "powershell.exe -NoProfile -Command \"Get-ChildItem $WIN_RELEASE_DIR/MT-Code-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName\"")
 WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1 | tr '\\' '/')
 if [[ -z "$WIN_REMOTE" ]]; then
-  echo "Windows exe not found on Blade" >&2
+  echo "Windows exe not found on $WIN_HOST" >&2
   exit 1
 fi
 echo "WIN_REMOTE=$WIN_REMOTE"
 WIN_LOCAL="$REPO/release/$(basename "$WIN_REMOTE")"
-scp -o BatchMode=yes "blade:$WIN_REMOTE" "$WIN_LOCAL"
+scp -o BatchMode=yes "$WIN_HOST:$WIN_REMOTE" "$WIN_LOCAL"
 # Also pull yml/blockmap if present
-ssh -o BatchMode=yes blade "powershell.exe -NoProfile -Command \"Get-ChildItem C:/Users/muhha/dev/t3code-personal/release/*MT-Code*, C:/Users/muhha/dev/t3code-personal/release/*Munim*, C:/Users/muhha/dev/t3code-personal/release/nightly.yml -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name\"" | tr -d '\r' | while read -r name; do
+ssh -o BatchMode=yes "$WIN_HOST" "powershell.exe -NoProfile -Command \"Get-ChildItem $WIN_RELEASE_DIR/*MT-Code*, $WIN_RELEASE_DIR/*Munim*, $WIN_RELEASE_DIR/nightly.yml -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name\"" | tr -d '\r' | while read -r name; do
   [[ -z "$name" ]] && continue
   [[ "$name" == *.exe ]] && continue
-  scp -o BatchMode=yes "blade:C:/Users/muhha/dev/t3code-personal/release/$name" "$REPO/release/$name" || true
+  scp -o BatchMode=yes "$WIN_HOST:$WIN_RELEASE_DIR/$name" "$REPO/release/$name" || true
 done
+fi
 
 ASSETS=("$MAC_DMG")
 [[ -n "$MAC_ZIP" && -f "$MAC_ZIP" ]] && ASSETS+=("$MAC_ZIP")
 [[ -f "${MAC_DMG}.blockmap" ]] && ASSETS+=("${MAC_DMG}.blockmap")
 [[ -n "$MAC_ZIP" && -f "${MAC_ZIP}.blockmap" ]] && ASSETS+=("${MAC_ZIP}.blockmap")
 [[ -n "$MAC_YML" && -f "$MAC_YML" ]] && ASSETS+=("$MAC_YML")
-ASSETS+=("$WIN_LOCAL")
-[[ -f "${WIN_LOCAL}.blockmap" ]] && ASSETS+=("${WIN_LOCAL}.blockmap")
+[[ -n "$WIN_LOCAL" && -f "$WIN_LOCAL" ]] && ASSETS+=("$WIN_LOCAL")
+[[ -n "$WIN_LOCAL" && -f "${WIN_LOCAL}.blockmap" ]] && ASSETS+=("${WIN_LOCAL}.blockmap")
 for y in "$REPO"/release/latest.yml "$REPO"/release/nightly.yml "$REPO"/release/*Munim*.yml "$REPO"/release/*MT-Code*.yml; do
   [[ -f "$y" ]] && ASSETS+=("$y")
 done
