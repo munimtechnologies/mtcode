@@ -258,6 +258,65 @@ func walk(_ el: AXUIElement, depth: Int, lines: inout [String], budget: inout In
 //   * click/drag by coordinates  -> SkyLight background path, cursor stays put
 //   * any of the above, degraded -> global HID tap, takes over the pointer
 
+/// Whether a human is currently using this machine.
+///
+/// Everything below degrades to the global HID tap when the background path
+/// does not apply, and that path takes over: it warps the physical cursor and
+/// delivers events to whatever window the user has focused. Pulling the pointer
+/// out from under someone mid-sentence is the worst thing this tool can do, so
+/// a takeover yields to a human who is mid-action instead of fighting them for
+/// it. Background-routed actions are unaffected — they never disturb anyone.
+///
+/// Tune with `T3_DESKTOP_COMPUTER_USE_YIELD_SECS`; `0` disables the guard.
+enum UserPresence {
+    static let yieldWindow: TimeInterval = {
+        if let raw = ProcessInfo.processInfo.environment["T3_DESKTOP_COMPUTER_USE_YIELD_SECS"],
+            let parsed = Double(raw), parsed >= 0
+        {
+            return parsed
+        }
+        return 2.0
+    }()
+
+    /// `kCGAnyInputEventType` has no CGEventType case in Swift, so take the most
+    /// recent of the event types a person actually produces.
+    private static let humanEvents: [CGEventType] = [
+        .keyDown, .flagsChanged, .mouseMoved, .leftMouseDown, .rightMouseDown,
+        .otherMouseDown, .leftMouseDragged, .scrollWheel,
+    ]
+
+    /// Monotonic timestamp of our own last takeover, so the guard can tell the
+    /// user's input apart from the events we just synthesized.
+    private static var lastTakeoverAt: TimeInterval = -.greatestFiniteMagnitude
+
+    static func secondsSinceInput() -> TimeInterval {
+        humanEvents
+            .map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }
+            .min() ?? .greatestFiniteMagnitude
+    }
+
+    static func noteTakeover() { lastTakeoverAt = ProcessInfo.processInfo.systemUptime }
+
+    /// Non-nil when a takeover should be refused, carrying the message to return.
+    static func refuseTakeover(_ action: String) -> String? {
+        guard yieldWindow > 0 else { return nil }
+        let idle = secondsSinceInput()
+        guard idle < yieldWindow else { return nil }
+        // Events we post to the global tap also reset the HID idle timer, so a
+        // multi-step takeover would otherwise block itself after its first
+        // click. When our own takeover is at least as recent as the newest
+        // input, that input was ours and no human is being interrupted.
+        let sinceOurs = ProcessInfo.processInfo.systemUptime - lastTakeoverAt
+        if sinceOurs <= idle + 0.25 { return nil }
+        return
+            "error: not taking over the pointer to \(action) — the user typed or moved the mouse "
+            + String(format: "%.1f", idle)
+            + "s ago, and the background path does not apply here, so this would warp the real "
+            + "cursor and steal focus. Wait a moment and retry, or target a window "
+            + "(get_app_state, or an element_id) so it runs in the background instead."
+    }
+}
+
 /// Deliver an event to a specific process when we know one, otherwise to the
 /// global HID tap.
 ///
@@ -873,6 +932,8 @@ func toolClick(_ args: [String: Any]) -> String {
         if let target = windowTarget(for: el), backgroundClick(target, at: center, clickCount: clickCount) {
             return "clicked \(id) at (\(Int(center.x)), \(Int(center.y))) in background"
         }
+        if let refusal = UserPresence.refuseTakeover("click \(id)") { return refusal }
+        UserPresence.noteTakeover()
         postClick(at: center, clickCount: clickCount, pid: nil)
         return "clicked \(id) at (\(Int(center.x)), \(Int(center.y))) via cursor"
     }
@@ -907,6 +968,10 @@ func toolClick(_ args: [String: Any]) -> String {
         if let target, backgroundClick(target, at: point, clickCount: clickCount) {
             return "clicked at (\(Int(x)), \(Int(y))) in background"
         }
+        if let refusal = UserPresence.refuseTakeover("click (\(Int(x)), \(Int(y)))") {
+            return refusal
+        }
+        UserPresence.noteTakeover()
         postClick(at: point, clickCount: clickCount, pid: nil)
         return "clicked at (\(Int(x)), \(Int(y))) via cursor"
     }
@@ -918,6 +983,7 @@ func toolTypeText(_ args: [String: Any]) -> String {
     var element: AXUIElement?
     if let id = args["element_id"] as? String {
         guard let el = Registry.get(id) else { return "error: unknown element_id \(id)" }
+        if let refusal = refuseSecureFieldInput(el, id) { return refusal }
         element = el
         // Focus the field within its own app rather than raising the app, so a
         // background window still receives the text.
@@ -1262,6 +1328,12 @@ func toolRightClick(_ args: [String: Any]) -> String {
     if let target, backgroundRightClick(target, at: point) {
         return "right-clicked at (\(Int(point.x)), \(Int(point.y))) in background"
     }
+    if let refusal = UserPresence.refuseTakeover(
+        "right-click (\(Int(point.x)), \(Int(point.y)))")
+    {
+        return refusal
+    }
+    UserPresence.noteTakeover()
     postRightClick(at: point, pid: nil)
     return "right-clicked at (\(Int(point.x)), \(Int(point.y))) via cursor"
 }
@@ -1321,14 +1393,36 @@ func toolDrag(_ args: [String: Any]) -> String {
     if let target, backgroundDrag(target, from: start, to: end) {
         return "dragged from (\(Int(start.x)), \(Int(start.y))) to (\(Int(end.x)), \(Int(end.y))) in background"
     }
+    if let refusal = UserPresence.refuseTakeover("drag") { return refusal }
+    UserPresence.noteTakeover()
     postDrag(from: start, to: end, pid: nil)
     return "dragged from (\(Int(start.x)), \(Int(start.y))) to (\(Int(end.x)), \(Int(end.y))) via cursor"
+}
+
+/// Refuse to write into a macOS password field unless explicitly allowed.
+///
+/// `AXSecureTextField` is the role AppKit gives password inputs. Driving one
+/// from an agent means a credential is being produced by a model and typed
+/// somewhere the user cannot see it echoed, and the transcript may keep it —
+/// so the default is to stop and let the human type it. Operator-style agents
+/// take the same line and hand control back at password prompts.
+///
+/// Set `T3_DESKTOP_ALLOW_SECURE_FIELD_INPUT=1` to opt out.
+func refuseSecureFieldInput(_ element: AXUIElement, _ id: String) -> String? {
+    if ProcessInfo.processInfo.environment["T3_DESKTOP_ALLOW_SECURE_FIELD_INPUT"] == "1" {
+        return nil
+    }
+    guard axString(element, kAXRoleAttribute as String) == "AXSecureTextField" else { return nil }
+    return "error: \(id) is a password field — refusing to type into it. Ask the user to enter it "
+        + "themselves, or set T3_DESKTOP_ALLOW_SECURE_FIELD_INPUT=1 if this is a throwaway "
+        + "credential you intend the agent to handle."
 }
 
 func toolSetValue(_ args: [String: Any]) -> String {
     guard let id = args["element_id"] as? String else { return "error: missing required argument 'element_id'" }
     guard let value = args["value"] as? String else { return "error: missing required argument 'value'" }
     guard let el = Registry.get(id) else { return "error: unknown element_id \(id)" }
+    if let refusal = refuseSecureFieldInput(el, id) { return refusal }
     // Setting AXValue replaces field contents atomically, which is far more
     // reliable than select-all-then-type for long strings.
     let err = AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, value as CFString)
