@@ -18,7 +18,16 @@ here=$(cd "$(dirname "$0")" && pwd)
 # macOS builds the Swift package; Linux builds the Rust crate that also covers
 # Windows. Either way the binary is called t3-desktop-mcp.
 case "$(uname -s)" in
-  Darwin) default_binary="$here/../t3-desktop-mcp/.build/apple/Products/Release/t3-desktop-mcp" ;;
+  Darwin)
+    for candidate in \
+      "$here/../t3-desktop-mcp/.build/apple/Products/Release/t3-desktop-mcp" \
+      "$here/../t3-desktop-mcp/.build/release/t3-desktop-mcp"; do
+      if [ -x "$candidate" ]; then
+        default_binary="$candidate"
+        break
+      fi
+    done
+    ;;
   *)      default_binary="$here/../t3-desktop-mcp-rs/target/release/t3-desktop-mcp" ;;
 esac
 binary="${T3CODE_DESKTOP_MCP_PATH:-$default_binary}"

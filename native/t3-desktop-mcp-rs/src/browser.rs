@@ -176,7 +176,7 @@ impl BrowserBridge {
     pub fn call(&mut self, command: &str, args: &Value) -> Result<String, String> {
         if !self.connected() {
             return Err(format!(
-                "browser_{command} needs the MT Code Chrome extension, which is not connected. \
+                "browser_{command} needs the MT Desktop MCP Chrome extension, which is not connected. \
                  Install it from native/t3-chrome-extension, or use the desktop tools instead: \
                  get_app_state on the browser window, then click"
             ));

@@ -7,7 +7,7 @@
         "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,ui-automation,debugging,logging"
       }
     },
-    "desktop": {
+    "mt-desktop": {
       "command": "native/t3-desktop-mcp/.build/release/t3-desktop-mcp"
     }
   }

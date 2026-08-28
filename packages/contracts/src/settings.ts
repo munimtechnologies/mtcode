@@ -800,15 +800,15 @@ export const BackgroundActivitySettings = Schema.Struct({
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
 /**
- * MCP server name for the local desktop/browser control server. Spawn-time
+ * MCP server name for MT Desktop MCP (local desktop/browser control). Spawn-time
  * only - providers pass it when they launch, so nothing on disk carries the
  * old name and renaming it costs nothing but a rebuild.
  */
 export const DESKTOP_MCP_SERVER_NAME = "mt-desktop";
 
-/** Local desktop / browser computer-use MCP (`mt-desktop`). */
+/** Local desktop / browser computer-use MCP (MT Desktop MCP / `mt-desktop`). */
 export const DesktopControlSettings = Schema.Struct({
-  /** When false, providers do not inject the mt-desktop MCP server. Default on. */
+  /** When false, providers do not inject MT Desktop MCP. Default on. */
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Show the agent pointer overlay while controlling the desktop. */
   agentCursorEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),

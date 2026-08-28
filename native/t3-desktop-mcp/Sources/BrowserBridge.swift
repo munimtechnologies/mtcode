@@ -39,6 +39,11 @@ let bridgeSocketPath: String = {
     return candidate
 }()
 
+/// Secondary MCP processes (Cursor, extra dev servers) forward browser commands
+/// here when another instance already owns `bridge.sock` for Chrome native
+/// messaging.
+let bridgeRpcSocketPath: String = bridgeSocketPath + ".rpc"
+
 /// Reply from the extension. A custom type rather than `Result` because the
 /// failure carries a human-readable message, not an `Error`.
 enum BridgeOutcome {
@@ -263,31 +268,46 @@ final class BrowserBridge {
     static let shared = BrowserBridge()
 
     private var listenFD: Int32 = -1
+    private var rpcListenFD: Int32 = -1
     private var ownershipLockFD: Int32 = -1
     private var clientFD: Int32 = -1
+    private var rpcClientFD: Int32 = -1
     private var connectionGeneration = 0
     private let lock = NSLock()
     private var nextID = 0
+    private var rpcNextID = 0
     private var pending: [Int: (BridgeOutcome) -> Void] = [:]
+    private var rpcPending: [Int: (BridgeOutcome) -> Void] = [:]
     /// Serializes newline-delimited JSON writes so concurrent `call`s cannot interleave.
     private let writeLock = NSLock()
+    private let rpcWriteLock = NSLock()
 
     var isConnected: Bool {
         lock.lock(); defer { lock.unlock() }
-        return clientFD >= 0
+        return clientFD >= 0 || rpcClientFD >= 0
     }
 
     private var ownershipLockPath: String { bridgeSocketPath + ".lock" }
 
-    /// Bind the socket and accept the host connection. Silently does nothing if
-    /// another server already owns it.
+    private func rpcAddress() -> sockaddr_un {
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        _ = withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
+            bridgeRpcSocketPath.withCString { src in
+                strncpy(UnsafeMutableRawPointer(pathPtr).assumingMemoryBound(to: CChar.self), src, 103)
+            }
+        }
+        return addr
+    }
+
+    /// Bind the Chrome bridge when this process is first, otherwise attach to
+    /// the owner as an RPC client so Cursor and MT Code can share one extension.
     func start() {
-        // Cross-process exclusive lock closes the live-check / unlink / bind
-        // race where two servers could both think they own the bridge.
         let lockFd = open(ownershipLockPath, O_CREAT | O_RDWR, 0o600)
         guard lockFd >= 0 else { return }
         if flock(lockFd, LOCK_EX | LOCK_NB) != 0 {
             close(lockFd)
+            startRpcClient()
             return
         }
 
@@ -295,13 +315,16 @@ final class BrowserBridge {
         case .live:
             flock(lockFd, LOCK_UN)
             close(lockFd)
+            startRpcClient()
             return
         case .unknown:
             flock(lockFd, LOCK_UN)
             close(lockFd)
+            startRpcClient()
             return
         case .stale:
             unlink(bridgeSocketPath)
+            unlink(bridgeRpcSocketPath)
         }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -314,8 +337,6 @@ final class BrowserBridge {
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, size) }
         }
-        // Backlog of several: Chrome relaunches the host on every extension
-        // reload, and a full queue makes the next connect fail outright.
         guard bound == 0, listen(fd, 8) == 0 else {
             close(fd)
             flock(lockFd, LOCK_UN)
@@ -324,19 +345,146 @@ final class BrowserBridge {
         }
         listenFD = fd
         ownershipLockFD = lockFd
+        startRpcListener()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             while true {
                 let client = accept(fd, nil, nil)
                 if client < 0 {
-                    // A transient error must not retire the listener for good —
-                    // that silently strands every later host launch.
                     if errno == EINTR || errno == ECONNABORTED { continue }
                     return
                 }
                 enableNoSigPipe(client)
                 self?.serve(client)
             }
+        }
+    }
+
+    private func startRpcListener() {
+        unlink(bridgeRpcSocketPath)
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return }
+        var addr = rpcAddress()
+        let size = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, size) }
+        }
+        guard bound == 0, listen(fd, 8) == 0 else {
+            close(fd)
+            return
+        }
+        rpcListenFD = fd
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            while true {
+                let peer = accept(fd, nil, nil)
+                if peer < 0 {
+                    if errno == EINTR || errno == ECONNABORTED { continue }
+                    return
+                }
+                enableNoSigPipe(peer)
+                self?.serveRpc(peer)
+            }
+        }
+    }
+
+    private func startRpcClient() {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return }
+        enableNoSigPipe(fd)
+        var addr = rpcAddress()
+        let size = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, size) }
+        }
+        guard connected == 0 else {
+            close(fd)
+            return
+        }
+        lock.lock()
+        rpcClientFD = fd
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.readRpcResponses(fd)
+        }
+    }
+
+    private func readRpcResponses(_ fd: Int32) {
+        var buffer = Data()
+        var chunk = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let n = Darwin.read(fd, &chunk, chunk.count)
+            if n <= 0 { break }
+            buffer.append(contentsOf: chunk[0..<n])
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[buffer.startIndex..<newline])
+                buffer = buffer[buffer.index(after: newline)...]
+                handleRpcResponse(line)
+            }
+        }
+        lock.lock()
+        if rpcClientFD == fd { rpcClientFD = -1 }
+        let stranded = rpcPending
+        rpcPending.removeAll()
+        lock.unlock()
+        for (_, resume) in stranded {
+            resume(.failure("disconnected from the desktop browser bridge"))
+        }
+        close(fd)
+    }
+
+    private func handleRpcResponse(_ line: Data) {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let id = object["id"] as? Int else { return }
+        lock.lock()
+        let resume = rpcPending.removeValue(forKey: id)
+        lock.unlock()
+        guard let resume else { return }
+        if object["ok"] as? Bool == true {
+            resume(.success(object["result"] as? [String: Any] ?? [:]))
+        } else {
+            resume(.failure((object["error"] as? String) ?? "the browser bridge reported an error"))
+        }
+    }
+
+    private func serveRpc(_ fd: Int32) {
+        var buffer = Data()
+        var chunk = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let n = Darwin.read(fd, &chunk, chunk.count)
+            if n <= 0 { break }
+            buffer.append(contentsOf: chunk[0..<n])
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[buffer.startIndex..<newline])
+                buffer = buffer[buffer.index(after: newline)...]
+                if line.isEmpty { continue }
+                let response = handleRpcRequest(line)
+                var payload = response
+                payload.append(0x0A)
+                _ = writeAll(fd, payload)
+            }
+        }
+        close(fd)
+    }
+
+    private func handleRpcRequest(_ line: Data) -> Data {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let id = object["id"] as? Int,
+              let command = object["command"] as? String else {
+            return (try? JSONSerialization.data(withJSONObject: [
+                "id": -1, "ok": false, "error": "invalid RPC request",
+            ])) ?? Data()
+        }
+        let params = object["params"] as? [String: Any] ?? [:]
+        let outcome = performDirectCall(command, params)
+        switch outcome {
+        case .success(let result):
+            return (try? JSONSerialization.data(withJSONObject: [
+                "id": id, "ok": true, "result": result,
+            ])) ?? Data()
+        case .failure(let message):
+            return (try? JSONSerialization.data(withJSONObject: [
+                "id": id, "ok": false, "error": message,
+            ])) ?? Data()
         }
     }
 
@@ -390,13 +538,68 @@ final class BrowserBridge {
     func call(_ command: String, _ params: [String: Any] = [:], timeout: TimeInterval = 20)
         -> BridgeOutcome
     {
+        lock.lock()
+        let rpcFd = rpcClientFD
+        lock.unlock()
+        if rpcFd >= 0 {
+            return callViaRpc(rpcFd, command, params, timeout: timeout)
+        }
+        return performDirectCall(command, params, timeout: timeout)
+    }
+
+    private func callViaRpc(
+        _ fd: Int32, _ command: String, _ params: [String: Any], timeout: TimeInterval
+    ) -> BridgeOutcome {
+        let semaphore = DispatchSemaphore(value: 0)
+        var outcome: BridgeOutcome = .failure("timed out")
+        lock.lock()
+        rpcNextID += 1
+        let id = rpcNextID
+        let payload: [String: Any] = ["id": id, "command": command, "params": params]
+        guard var data = try? JSONSerialization.data(withJSONObject: payload) else {
+            lock.unlock()
+            return .failure("could not encode the command")
+        }
+        data.append(0x0A)
+        rpcPending[id] = { result in
+            outcome = result
+            semaphore.signal()
+        }
+        lock.unlock()
+
+        let writeDeadline = DispatchTime.now() + timeout
+        rpcWriteLock.lock()
+        lock.lock()
+        let stillConnected = rpcClientFD == fd
+        lock.unlock()
+        guard stillConnected else {
+            rpcWriteLock.unlock()
+            lock.lock(); rpcPending.removeValue(forKey: id); lock.unlock()
+            return .failure("disconnected from the desktop browser bridge")
+        }
+        let wrote = writeAll(fd, data, deadline: writeDeadline)
+        rpcWriteLock.unlock()
+        if !wrote {
+            lock.lock(); rpcPending.removeValue(forKey: id); lock.unlock()
+            return .failure("disconnected from the desktop browser bridge")
+        }
+        if semaphore.wait(timeout: writeDeadline) == .timedOut {
+            lock.lock(); rpcPending.removeValue(forKey: id); lock.unlock()
+            return .failure("the extension did not respond in \(Int(timeout))s")
+        }
+        return outcome
+    }
+
+    private func performDirectCall(
+        _ command: String, _ params: [String: Any], timeout: TimeInterval = 20
+    ) -> BridgeOutcome {
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: BridgeOutcome = .failure("timed out")
 
         lock.lock()
         guard clientFD >= 0 else {
             lock.unlock()
-            return .failure("the MT Code Chrome extension is not connected")
+            return .failure("the MT Desktop MCP Chrome extension is not connected")
         }
         nextID += 1
         let id = nextID
@@ -408,14 +611,10 @@ final class BrowserBridge {
             return .failure("could not encode the command")
         }
         data.append(0x0A)
-        // Register before unlocking so a disconnect that races the write still
-        // drains this waiter with a disconnect failure instead of a timeout.
         pending[id] = { result in
             outcome = result
             semaphore.signal()
         }
-        // Release `lock` before writing so `serve` can still drain replies or a
-        // disconnect while the write waits on a full socket buffer.
         lock.unlock()
 
         let writeDeadline = DispatchTime.now() + timeout
@@ -432,8 +631,6 @@ final class BrowserBridge {
         writeLock.unlock()
 
         if !wrote {
-            // A partial write corrupts newline framing for every later request —
-            // shut the socket down so `serve` tears down and the host reconnects.
             lock.lock()
             if clientFD == fd && connectionGeneration == generation {
                 pending.removeValue(forKey: id)
