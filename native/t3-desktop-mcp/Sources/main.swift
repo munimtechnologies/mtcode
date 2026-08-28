@@ -929,6 +929,14 @@ func toolTypeText(_ args: [String: Any]) -> String {
     case .failure(let message):
         return message
     case .success(let resolved):
+        // No resolved app means post() would fall through to the global HID
+        // tap, which types into whatever window the USER currently has
+        // focused — the one outcome background control exists to avoid.
+        // Coordinate clicks still degrade that way by design; keystrokes
+        // never should, so refuse and tell the caller how to target.
+        guard let resolved else {
+            return "error: no target app to type into — call get_app_state (or pass `app`) first. Refusing to send keystrokes through the global input tap, which would type into whatever window the user is working in."
+        }
         pid = resolved
     }
     typeText(text, pid: pid)
@@ -943,6 +951,14 @@ func toolPressKey(_ args: [String: Any]) -> String {
     case .failure(let message):
         return message
     case .success(let resolved):
+        // No resolved app means post() would fall through to the global HID
+        // tap, which types into whatever window the USER currently has
+        // focused — the one outcome background control exists to avoid.
+        // Coordinate clicks still degrade that way by design; keystrokes
+        // never should, so refuse and tell the caller how to target.
+        guard let resolved else {
+            return "error: no target app to type into — call get_app_state (or pass `app`) first. Refusing to send keystrokes through the global input tap, which would type into whatever window the user is working in."
+        }
         pid = resolved
     }
     if let err = pressKey(key, modifiers: mods, pid: pid) { return "error: \(err)" }
