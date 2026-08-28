@@ -162,6 +162,8 @@ export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 /** @deprecated Use PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES. */
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES;
+/** Max size for non-image file attachments (PDF/ZIP/etc.) on a provider turn. */
+export const PROVIDER_SEND_TURN_MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES = [
   "image/gif",
   "image/jpeg",

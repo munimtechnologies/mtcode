@@ -43,6 +43,10 @@ export interface ChatPdfAttachment extends ContractChatPdfAttachment {
 
 export type ChatAttachment = ChatImageAttachment | ChatPdfAttachment;
 
+export function isImageAttachment(attachment: ChatAttachment): attachment is ChatImageAttachment {
+  return attachment.type === "image";
+}
+
 export interface ChatMessage extends Omit<OrchestrationMessage, "attachments"> {
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
 }
