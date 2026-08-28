@@ -4281,10 +4281,10 @@ export default function Sidebar() {
                             ) : null}
                           </ComboboxItem>
                         );
-                      })}
-                    </MenuRadioGroup>
-                  </MenuPopup>
-                </Menu>
+                      }}
+                    </ComboboxList>
+                  </ComboboxPopup>
+                </Combobox>
                 <Menu>
                   <Tooltip>
                     <TooltipTrigger
