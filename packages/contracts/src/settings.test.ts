@@ -247,12 +247,17 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     expect(decoded.providers.codex.enabled).toBe(true);
   });
 
-  it("enables every built-in provider by default", () => {
+  it("enables the stable providers by default and leaves the opt-in ones off", () => {
     const decoded = decodeServerSettings({});
-    expect(decoded.providers.cursor.enabled).toBe(true);
+    // Codex and Claude probe cheaply and are on out of the box.
+    expect(decoded.providers.codex.enabled).toBe(true);
     expect(decoded.providers.claudeAgent.enabled).toBe(true);
-    expect(decoded.providers.grok.enabled).toBe(true);
-    expect(decoded.providers.opencode.enabled).toBe(true);
+    // Cursor, Grok and OpenCode are deliberately opt-in: each schema defaults
+    // `enabled` to false so a fresh install does not probe binaries the user
+    // may not have. Flipping these on belongs in Settings, not in the default.
+    expect(decoded.providers.cursor.enabled).toBe(false);
+    expect(decoded.providers.grok.enabled).toBe(false);
+    expect(decoded.providers.opencode.enabled).toBe(false);
   });
 
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {

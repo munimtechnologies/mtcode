@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   USAGE_CONTRACT_VERSION,
+  USAGE_MERGE_COMPATIBLE_SINCE,
   type UsageDay,
   type UsageSummary,
 } from "@t3tools/contracts";
@@ -125,9 +126,12 @@ describe("usage state", () => {
   });
 
   it("keeps the initial placeholder when only an incompatible environment has answered", () => {
+    // USAGE_CONTRACT_VERSION - 1 is still INSIDE the merge compatibility window
+    // (that is the point of the window: an additive bump keeps merging), so pin
+    // this to a version below the window or the environment is not stale at all.
     const incompatible = status(
       ENVIRONMENT_A,
-      AsyncResult.success(summary(10, USAGE_CONTRACT_VERSION - 1)),
+      AsyncResult.success(summary(10, USAGE_MERGE_COMPATIBLE_SINCE - 1)),
     );
     const state = deriveUsageState([
       incompatible,

@@ -170,9 +170,15 @@ export class UsageAggregator {
     bucket.totals = addTotals(bucket.totals, record.totals);
     bucket.costUsd += priced.costUsd;
     bucket.cacheSavingsUsd += cacheSavingsUsd(this.#options.rates, record.model, record.totals);
-    bucket.records += 1;
-    if (priced.costSource === "unpriced") bucket.unpricedRecords += 1;
-    if (priced.costSource === "providerReported") bucket.providerReportedRecords += 1;
+    // One parsed record can stand for several model responses (Grok reports
+    // `modelCalls` per model on a turn), so weight by recordCount rather than
+    // counting rows. The provenance counters use the same weight: resolveCostSource
+    // compares them against `records` for equality, and mixing weights there would
+    // report "mixed" provenance for a bucket that is uniformly priced.
+    const recordWeight = Math.max(1, record.recordCount);
+    bucket.records += recordWeight;
+    if (priced.costSource === "unpriced") bucket.unpricedRecords += recordWeight;
+    if (priced.costSource === "providerReported") bucket.providerReportedRecords += recordWeight;
     if (record.sessionId.length > 0) bucket.sessions.add(record.sessionId);
     return true;
   }

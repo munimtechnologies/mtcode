@@ -8,7 +8,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { isEntrypoint } from "./entrypoint.ts";
 
-const makeTempDir = () => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-entrypoint-test-"));
+// realpath the temp dir: on macOS os.tmpdir() is /var/... which is itself a
+// symlink to /private/var/..., so an un-canonicalized path would make the
+// symlink case below compare a raw path against a resolved one and fail for
+// reasons that have nothing to do with entrypoint detection.
+const makeTempDir = () =>
+  NodeFS.realpathSync(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-entrypoint-test-")));
 
 describe("isEntrypoint", () => {
   it("uses the runtime answer when Node provides one", () => {

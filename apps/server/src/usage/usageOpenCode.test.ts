@@ -45,6 +45,7 @@ describe("parseOpenCodeUsageRow", () => {
         outputTokens: 354,
         reasoningTokens: 263,
       },
+      recordCount: 1,
       reportedCostUsd: 0.42,
       dedupeKey: "opencode:msg_01",
     });
@@ -267,6 +268,7 @@ describe("readOpenCodeUsage", () => {
               outputTokens: 10,
               reasoningTokens: 6,
             },
+            recordCount: 1,
             reportedCostUsd: 0.5,
             dedupeKey: "opencode:msg_current",
           },

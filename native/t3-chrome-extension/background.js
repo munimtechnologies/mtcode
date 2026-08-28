@@ -713,8 +713,21 @@ const handlers = {
   list_tabs: async () => listTabs(),
   select_tab: async (p) => {
     assertOwned(p.tabId);
-    await chrome.tabs.update(p.tabId, { active: true });
-    return { tabId: p.tabId };
+    // The tool contract is "make one of the agent's tabs the visible one. Does
+    // not affect the user's tabs" — but activating unconditionally yanked the
+    // window away from whatever the user was doing, mid-typing, which is the
+    // one thing openTab's `active:false` exists to prevent. Everything the
+    // agent needs (insertText, dispatchKeyEvent, Page.captureScreenshot) works
+    // on a background tab, so focus only moves when the user is already
+    // looking at an agent tab; otherwise the switch is recorded silently and
+    // the user keeps typing where they were.
+    const target = await chrome.tabs.get(p.tabId);
+    const [active] = await chrome.tabs.query({ active: true, windowId: target.windowId });
+    const userIsOnAgentTab = active?.id !== undefined && ownedTabs.has(active.id);
+    if (userIsOnAgentTab) {
+      await chrome.tabs.update(p.tabId, { active: true });
+    }
+    return { tabId: p.tabId, activated: userIsOnAgentTab };
   },
   close_all_tabs: async () => closeAllTabs(),
   close_tab: async (p) => {

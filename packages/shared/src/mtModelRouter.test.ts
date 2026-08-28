@@ -73,7 +73,7 @@ describe("routeMtModel", () => {
       candidates: pool,
     });
     expect(decision?.model).toMatch(/auto|grok|luna|composer/i);
-    expect(decision?.reason).toContain("MT Model →");
+    expect(decision?.reason).toContain("MT Auto →");
   });
 
   it("sends hard architecture work to a frontier model in intelligence mode", () => {

@@ -45,6 +45,7 @@ import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
+import * as AccountLimitsService from "../../usage/AccountLimitsService.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -813,29 +814,34 @@ export function runtimeEventToActivities(
       // per chunk, so persisting `data` verbatim writes O(N²) bytes per tool
       // call into both the event store and the projection table. No reader
       // needs it: ws.ts and http.ts apply `projectActivityPayload` before any
-      // payload reaches a client. Persist the projected form for non-terminal
-      // updates; `item.completed` below still persists the full payload.
+      // payload reaches a client. Persist the projected form for in-progress
+      // updates. A late terminal `item.updated` (status completed/failed after
+      // `completeTurn` already force-completed the item) is the only place the
+      // result exists — persist that payload in full, like `item.completed`.
+      const toolUpdatedActivity = {
+        id: event.eventId,
+        createdAt: event.createdAt,
+        tone: "tool" as const,
+        kind: "tool.updated" as const,
+        summary: event.payload.title ?? "Tool updated",
+        payload: {
+          itemType: event.payload.itemType,
+          ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
+          ...(event.payload.status ? { status: event.payload.status } : {}),
+          ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+          ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+          ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+          ...(event.payload.parentToolUseId
+            ? { parentToolUseId: event.payload.parentToolUseId }
+            : {}),
+        },
+        turnId: toTurnId(event.turnId) ?? null,
+        ...maybeSequence,
+      };
+      const isTerminalToolUpdate =
+        event.payload.status === "completed" || event.payload.status === "failed";
       return [
-        projectActivityPayload({
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "tool",
-          kind: "tool.updated",
-          summary: event.payload.title ?? "Tool updated",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.itemId !== undefined ? { toolCallId: event.itemId } : {}),
-            ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
-            ...(event.payload.parentToolUseId
-              ? { parentToolUseId: event.payload.parentToolUseId }
-              : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        }),
+        isTerminalToolUpdate ? toolUpdatedActivity : projectActivityPayload(toolUpdatedActivity),
       ];
     }
 
@@ -911,6 +917,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const accountLimits = yield* AccountLimitsService.AccountLimitsService;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1510,6 +1517,22 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      // Account limits are an account-level cache, not a thread projection, so
+      // they are ingested before the thread lookup below: the emitting thread
+      // is often already gone (session ended, thread deleted) and the limits
+      // still have to land.
+      if (event.type === "account.rate-limits.updated") {
+        yield* accountLimits.ingest({
+          provider: event.provider,
+          payload: event.payload.rateLimits,
+          createdAt: event.createdAt,
+          ...(event.providerInstanceId === undefined
+            ? {}
+            : { providerInstanceId: event.providerInstanceId }),
+        });
+        return;
+      }
+
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
