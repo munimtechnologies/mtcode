@@ -75,6 +75,8 @@ steps. This helps the agent keep a change in the correct pull request.
   leaving the conversation
 - Merging a linked review updates the thread immediately so it can move to the settled list
 - Open the review directly in your browser with one click
+- If T3 Code cannot load a GitHub pull request, including when GitHub rate limits requests, use
+  **Open on GitHub** in the error view
 - Command-click (Control-click on Windows and Linux) a pull request number in the sidebar to open it in your browser instead of in T3 Code
 - Check out a teammate's branch to review code locally
 

@@ -7,7 +7,6 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { useThemeColor } from "../../lib/useThemeColor";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { getConnectName } from "../../lib/branding";
@@ -38,10 +37,6 @@ export function ConnectionEnvironmentRow(props: {
   ) => Promise<AtomCommandResult<unknown, unknown>>;
 }) {
   const [url, setUrl] = useState(props.environment.displayUrl);
-
-  const mutedColor = useThemeColor("--color-icon-subtle");
-  const primaryFg = useThemeColor("--color-primary-foreground");
-  const dangerFg = useThemeColor("--color-danger-foreground");
   const statusLabel = connectionStatusLabel(props.environment);
   const statusTraceId = props.environment.connectionErrorTraceId;
   const hasConnectionFailure = props.environment.connectionError !== null;
@@ -93,7 +88,7 @@ export function ConnectionEnvironmentRow(props: {
             <Text
               className={cn(
                 "text-xs",
-                hasConnectionFailure ? "text-rose-500 dark:text-rose-400" : "text-foreground-muted",
+                hasConnectionFailure ? "text-adaptive-rose-500-400" : "text-foreground-muted",
               )}
               numberOfLines={props.expanded ? undefined : 1}
               selectable={props.expanded}
@@ -183,7 +178,12 @@ export function ConnectionEnvironmentRow(props: {
                 className="min-h-[42px] flex-1 flex-row items-center justify-center gap-1.5 rounded-[14px] bg-primary px-3.5 py-2.5 active:opacity-70"
                 onPress={handleSave}
               >
-                <SymbolView name="checkmark" size={13} tintColor={primaryFg} type="monochrome" />
+                <SymbolView
+                  name="checkmark"
+                  size={13}
+                  tintColorClassName={"accent-primary-foreground"}
+                  type="monochrome"
+                />
                 <Text className="text-xs font-t3-bold tracking-[0.8px] uppercase text-primary-foreground">
                   Save
                 </Text>
@@ -197,7 +197,7 @@ export function ConnectionEnvironmentRow(props: {
               <SymbolView
                 name="arrow.clockwise"
                 size={14}
-                tintColor={mutedColor}
+                tintColorClassName={"accent-icon-subtle"}
                 type="monochrome"
               />
             </Pressable>
@@ -206,7 +206,12 @@ export function ConnectionEnvironmentRow(props: {
               className="h-[42px] w-[42px] items-center justify-center rounded-[14px] border border-danger-border bg-danger active:opacity-70"
               onPress={() => props.onRemove(props.environment.environmentId)}
             >
-              <SymbolView name="trash" size={14} tintColor={dangerFg} type="monochrome" />
+              <SymbolView
+                name="trash"
+                size={14}
+                tintColorClassName={"accent-danger-foreground"}
+                type="monochrome"
+              />
             </Pressable>
           </View>
         </Animated.View>

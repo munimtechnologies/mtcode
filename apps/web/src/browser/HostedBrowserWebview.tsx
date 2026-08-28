@@ -11,6 +11,7 @@ import { cn } from "~/lib/utils";
 import { useThreadPreviewState } from "~/previewStateStore";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
+import { useActiveBrowserRecordingTabIds } from "./browserRecording";
 import {
   browserViewportSettingKey,
   resolveBrowserViewportLayout,
@@ -78,6 +79,10 @@ export function HostedBrowserWebview(props: {
       };
     }),
   );
+  const backgroundActivity = useBrowserSurfaceStore(
+    (state) => (state.activityByTabId[runtimeTabId] ?? 0) > 0,
+  );
+  const recordingActive = useActiveBrowserRecordingTabIds().has(runtimeTabId);
   usePreviewBridge({ threadRef, tabId, runtimeTabId });
   const hasWebContents =
     useThreadPreviewState(threadRef).desktopByTabId[tabId]?.hasWebContents === true;
@@ -102,7 +107,6 @@ export function HostedBrowserWebview(props: {
 
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
-    if (node && !node.hasAttribute("allowpopups")) node.setAttribute("allowpopups", "true");
   }, []);
 
   useEffect(() => {
@@ -262,8 +266,10 @@ export function HostedBrowserWebview(props: {
 
   if (!config) return null;
 
+  const renderingActive = active || backgroundActivity || pictureInPicture || recordingActive;
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
     active,
+    renderingActive,
     cornerRadius: presentation.cornerRadius,
     rect: lastRect,
     hiddenSize,
@@ -275,6 +281,7 @@ export function HostedBrowserWebview(props: {
       className="fixed overflow-hidden bg-muted/35"
       style={{ ...wrapperStyle, overscrollBehavior: "contain" }}
       onScroll={syncContentPresentation}
+      data-preview-rendering={renderingActive ? "active" : "suspended"}
       data-preview-viewport={runtimeTabId}
     >
       <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>
@@ -290,6 +297,12 @@ export function HostedBrowserWebview(props: {
         <webview
           key={webviewGeneration}
           ref={setWebviewRef}
+          // Must be an attribute on the element itself: Electron reads it when the
+          // guest attaches, so setting it from the ref callback lands too late and
+          // the guest attaches with popups disabled. React types `allowpopups` as a
+          // boolean, but react-dom drops boolean values for unrecognized attributes,
+          // so the literal string has to be spread past the type.
+          {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}
           partition={config.partition}
           webpreferences={config.webPreferences}

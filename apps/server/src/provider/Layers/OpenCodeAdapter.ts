@@ -1816,6 +1816,8 @@ export function makeOpenCodeAdapter(
       }
 
       const text = input.input?.trim();
+      // OpenCode ingests images, text, and PDFs natively; formats its model
+      // paths reject ride only as the prompt's file path line.
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
         resolveAttachmentPath: (attachment) =>

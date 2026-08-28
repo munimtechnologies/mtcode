@@ -1,4 +1,5 @@
 import type {
+  ChatAttachment as ContractChatAttachment,
   ChatImageAttachment as ContractChatImageAttachment,
   ChatPdfAttachment as ContractChatPdfAttachment,
   OrchestrationCheckpointFile,
