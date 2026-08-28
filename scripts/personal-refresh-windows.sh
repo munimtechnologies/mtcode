@@ -28,11 +28,22 @@ scp -o BatchMode=yes "$REPO/scripts/personal-refresh-win.ps1" blade:dev/personal
 # Beside it: both Windows machines launch through this, so that the app lands in the logged-on
 # user's session rather than in session 0, where it runs with no window on any screen.
 scp -o BatchMode=yes "$REPO/scripts/personal-launch-gui.ps1" blade:dev/personal-launch-gui.ps1
-# Pass version/force as -File args (cmd env inheritance to PowerShell is unreliable over SSH).
-ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
-  C:/Users/muhha/dev/personal-refresh-win.ps1 \
-  -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
-  -ForceRebuild "${T3_FORCE_REBUILD:-1}"
+# -File args do NOT reliably survive ssh -> cmd -> PowerShell: on 2026-08-28 the
+# refresh logged "args DesktopVersion= ForceRebuild=" and Blade fell back to
+# resolving the version from its own clone, building 0.0.36 while the release
+# was 0.0.39. EncodedCommand (base64 UTF-16LE) is the one form cmd cannot chew
+# up, so build the whole invocation and hand it over pre-encoded.
+ps_encoded_command() {
+  printf '%s' "$1" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n'
+}
+
+blade_refresh_cmd="\$env:T3CODE_DESKTOP_VERSION='$T3CODE_DESKTOP_VERSION'; \
+\$env:T3_FORCE_REBUILD='${T3_FORCE_REBUILD:-1}'; \
+& 'C:/Users/muhha/dev/personal-refresh-win.ps1' \
+-DesktopVersion '$T3CODE_DESKTOP_VERSION' \
+-ForceRebuild '${T3_FORCE_REBUILD:-1}'"
+ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
+  -EncodedCommand "$(ps_encoded_command "$blade_refresh_cmd")"
 
 # --- Dell (install only from Blade-staged installer via this Mac) ---
 # One machine being off, asleep, or behind a tunnel that is not up must not undo the refresh for
