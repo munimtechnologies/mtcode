@@ -1,4 +1,4 @@
-# Build public Munim Windows installer (appId com.munim.t3code) on Blade.
+# Build public Munim Windows installer (appId com.munim.mtcode) on a Windows build host.
 param(
   [Parameter(Mandatory = $true)][string]$DesktopVersion,
   [string]$UpdateRepository = "munimtechnologies/mtcode"

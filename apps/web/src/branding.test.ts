@@ -55,6 +55,10 @@ describe("branding", () => {
   });
 
   it("normalizes hosted app channel metadata", async () => {
+    // Hosted channel labels only apply to a build that HAS update tracks; the
+    // fork's default base name (MT Code) deliberately has none, so name the
+    // tracked build explicitly rather than leaning on the default.
+    vi.stubEnv("VITE_APP_BASE_NAME", "T3 Code");
     vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "nightly");
 
     const branding = await import("./branding");
@@ -66,6 +70,7 @@ describe("branding", () => {
   });
 
   it("does not label the latest hosted app channel", async () => {
+    vi.stubEnv("VITE_APP_BASE_NAME", "T3 Code");
     vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "latest");
 
     const branding = await import("./branding");

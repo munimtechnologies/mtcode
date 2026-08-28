@@ -31,6 +31,7 @@ import type { ServerSettingsService } from "../../serverSettings.ts";
 import type { PtyAdapter } from "../../terminal/PtyAdapter.ts";
 import { deriveProviderInstanceConfigMap } from "../Layers/ProviderInstanceRegistryHydration.ts";
 import type { ProviderAccountLoginFlow, ProviderAccountLoginSupport } from "../ProviderDriver.ts";
+import { resolveAppDisplayName } from "../../appDisplayName.ts";
 
 export const CLAUDE_OAUTH_TOKEN_ENV_VAR = "CLAUDE_CODE_OAUTH_TOKEN";
 export const CLAUDE_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY";
@@ -237,7 +238,7 @@ export function makeClaudeAccountLogin(
     );
     if (!managed) {
       return yield* failure(
-        "This account was signed in outside T3 Code. Run `claude /logout` in a terminal to sign it out.",
+        `This account was signed in outside ${resolveAppDisplayName()}. Run \`claude /logout\` in a terminal to sign it out.`,
       );
     }
     yield* persistInstanceEnvironmentVariable({

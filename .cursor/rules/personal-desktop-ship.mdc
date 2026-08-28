@@ -28,7 +28,7 @@ For **public** downloads (munimtech.com), also publish Munim-identity installers
 bash scripts/personal-publish-github-release.sh
 ```
 
-`personal-ship-desktop.sh` runs that after the fleet refresh unless `T3_SKIP_MUNIM_PUBLISH=1`. Munim builds use `T3CODE_DESKTOP_DISTRO=munim` → appId `com.munim.t3code`, product name "T3 Code Munim", updater repo `sheehanmunim/t3code`.
+`personal-ship-desktop.sh` runs that after the fleet refresh unless `T3_SKIP_MUNIM_PUBLISH=1`. Munim builds use `T3CODE_DESKTOP_DISTRO=munim` → appId `com.munim.mtcode`, product name "MT Code", updater repo `munimtechnologies/mtcode`.
 
 ## app.t3.codes + ahead fork
 

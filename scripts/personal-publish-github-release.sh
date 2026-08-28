@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish public Munim desktop installers to GitHub Releases on munimtechnologies/mtcode.
 #
-# Builds with T3CODE_DESKTOP_DISTRO=munim so appId=com.munim.t3code and the
+# Builds with T3CODE_DESKTOP_DISTRO=munim so appId=com.munim.mtcode and the
 # updater feed points at this fork. Then uploads assets for munimtech.com.
 #
 # Mac: Developer ID sign when available. Windows: unsigned in v1.
@@ -190,7 +190,7 @@ ${CHANGELOG}
 
 MT Code — public build from \`munimtechnologies/mtcode@main\`.
 
-- App ID: \`com.munim.t3code\`
+- App ID: \`com.munim.mtcode\`
 - Downloads: https://munimtech.com/mt-code
 - Updates come from this repository (not pingdotgg/t3code)
 

@@ -32,6 +32,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { APP_DISPLAY_NAME } from "~/branding";
+import { APP_BASE_NAME } from "../../branding";
 
 /** Shown when the desktop host lacks the Computer Use permissions bridge API. */
 const BRIDGE_UNSUPPORTED_MESSAGE = `Update ${APP_DISPLAY_NAME} to check Computer Use permissions`;
@@ -429,8 +430,9 @@ export function ComputerUseSettings() {
           <DialogHeader>
             <DialogTitle>Allow {permissionPrompt?.label ?? "permission"}</DialogTitle>
             <DialogDescription>
-              T3 Code needs this macOS privacy permission for Computer Use. System Settings will
-              open to the right Privacy &amp; Security list — turn on the switch for T3 Code.
+              {APP_BASE_NAME} needs this macOS privacy permission for Computer Use. System
+              Settings will open to the right Privacy &amp; Security list — turn on the switch for{" "}
+              {APP_BASE_NAME}.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="text-sm text-muted-foreground">

@@ -28,6 +28,7 @@ import { ThreadRelayToolkitHandlersLive } from "./toolkits/threads/handlers.ts";
 import { ThreadRelayToolkit } from "./toolkits/threads/tools.ts";
 import { ComputerToolkitHandlersLive } from "./toolkits/computers/handlers.ts";
 import { ComputerToolkit } from "./toolkits/computers/tools.ts";
+import { DEFAULT_APP_DISPLAY_NAME } from "../appDisplayName.ts";
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -235,7 +236,7 @@ export const ComputerToolkitRegistrationLive = McpServer.toolkit(ComputerToolkit
 );
 
 const McpTransportLive = McpServer.layerHttp({
-  name: "T3 Code",
+  name: DEFAULT_APP_DISPLAY_NAME,
   version: packageJson.version,
   path: "/mcp",
   protocols: [McpProtocol.v2025_06_18],

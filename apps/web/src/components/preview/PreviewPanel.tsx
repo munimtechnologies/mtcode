@@ -7,6 +7,7 @@ import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
 import { PreviewView } from "./PreviewView";
+import { APP_BASE_NAME } from "../../branding";
 
 interface Props {
   mode: PreviewPanelMode;
@@ -33,7 +34,7 @@ export function PreviewPanel({
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <p className="max-w-sm text-sm text-muted-foreground">
-            Preview is only available in the T3 Code desktop app.
+            Preview is only available in the {APP_BASE_NAME} desktop app.
           </p>
         </div>
       </PreviewPanelShell>

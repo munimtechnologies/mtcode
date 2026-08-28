@@ -26,6 +26,7 @@ import {
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
 import { providerDisabledMessage } from "../../appDisplayName.ts";
+import { resolveAppDisplayName } from "../../appDisplayName.ts";
 
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
@@ -397,7 +398,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     if (!version) {
       return fallback(
         new Error(
-          `Unable to determine OpenCode version from \`opencode --version\` output. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          `Unable to determine OpenCode version from \`opencode --version\` output. ${resolveAppDisplayName()} requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
         ),
         null,
       );

@@ -9,7 +9,7 @@ MT Code is a free, open-source desktop app for running and controlling coding ag
 - **macOS** (Apple Silicon): `MT-Code-<version>-arm64.dmg`
 - **Windows** (x64): `MT-Code-<version>-x64.exe`
 
-Builds are currently unsigned:
+macOS builds are signed with a Developer ID but not yet notarized; Windows builds are unsigned:
 
 - macOS: if Gatekeeper warns, right-click the app → **Open** (first launch only).
 - Windows: if SmartScreen warns, choose **More info → Run anyway**.
@@ -77,7 +77,7 @@ Compared to [T3 Code](https://github.com/pingdotgg/t3code). MT Code started as a
 | **Reveal chat file chips** in Finder / Explorer                                                                                                                                       |                           ✅                            |                   ❌                    |
 | **`t3 .` opens a folder** in the desktop app or a running server                                                                                                                      |                           ✅                            |                   ❌                    |
 | **Better Open in editor on macOS** — finds Cursor, VS Code Insiders, VSCodium, Trae, Kiro, Zed, and JetBrains by app bundle, even without CLI shims                                   |                           ✅                            |                   ❌                    |
-| **Installs alongside T3 Code** — own bundle ID (`com.munim.t3code`) and data directory (`~/.mt`)                                                                                      |                           ✅                            |                   ❌                    |
+| **Installs alongside T3 Code** — own bundle ID (`com.munim.mtcode`) and data directory (`~/.mt`)                                                                                      |                           ✅                            |                   ❌                    |
 | **Hosted web app**                                                                                                                                                                    | ✅ [mtcode.munimtech.com](https://mtcode.munimtech.com) | ✅ [app.t3.codes](https://app.t3.codes) |
 
 Everything else T3 Code does — multi-provider agent control, checkpoints and diffs, remote access from the [web](https://app.t3.codes) and [mobile apps](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), Connect tunnels — works here too.

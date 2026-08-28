@@ -13,9 +13,24 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 /** Bundle / window names electron-builder ships for stable and nightly. */
-export const DESKTOP_APP_NAMES = ["T3 Code (Alpha)", "T3 Code (Nightly)", "T3 Code"] as const;
+// MT names come first so a Munim install is found before any legacy T3 bundle
+// left on the same machine; the T3 entries stay for official installs.
+export const DESKTOP_APP_NAMES = [
+  "MT Code",
+  "MT Code (Alpha)",
+  "MT Code (Dev)",
+  "T3 Code (Alpha)",
+  "T3 Code (Nightly)",
+  "T3 Code",
+] as const;
 
-const FIXED_LINUX_DESKTOP_ENTRY_IDS = ["com.t3tools.t3code", "t3-code", "t3code"] as const;
+const FIXED_LINUX_DESKTOP_ENTRY_IDS = [
+  "com.munim.mtcode",
+  "mtcode",
+  "com.t3tools.t3code",
+  "t3-code",
+  "t3code",
+] as const;
 
 const DETACHED_IGNORE_STDIO_OPTIONS = {
   detached: true,

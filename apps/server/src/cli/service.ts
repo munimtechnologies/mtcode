@@ -10,6 +10,7 @@ import * as BootService from "../cloud/bootService.ts";
 import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) => {
   const input = {
@@ -60,15 +61,15 @@ export function formatServiceStatus(
   cliVersion: string,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, or Windows";
+    return `${resolveAppDisplayName()} service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, or Windows`;
   }
   if (!status.installed) {
-    return "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return `${resolveAppDisplayName()} service\n  Status: not installed\n  Next: Run \`t3 service install\`.`;
   }
   const locationLabel =
     status.kind === "systemd" ? "Unit" : status.kind === "launchd" ? "LaunchAgent" : "Shortcut";
   return [
-    "T3 Code service",
+    `${resolveAppDisplayName()} service`,
     `  Status: ${status.current ? `installed · t3@${cliVersion}` : "needs an update or repair"}`,
     `  ${locationLabel}: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
@@ -87,7 +88,7 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
 
 /** Windows only. The blink at sign-in looks alarming until you know what it is. */
 const WINDOWS_SERVICE_NOTICE = [
-  'A small window named "T3 Code Server" blinks once when you sign in. That is expected.',
+  'A small window named `${resolveAppDisplayName()} Server` blinks once when you sign in. That is expected.',
   "It appears under Startup apps in Windows Settings, where you can switch it off.",
   "It starts at sign-in, not at boot, and it stops when you sign out.",
 ].join("\n");
@@ -102,7 +103,7 @@ const reportReconcileResult = Effect.fn("cli.service.report")(function* (
     return;
   }
   yield* Console.log(
-    `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+    `${result.previouslyInstalled ? "Updated" : "Installed"} ${resolveAppDisplayName()} service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
   );
   if ((yield* HostProcessPlatform) === "win32") {
     yield* Console.log(WINDOWS_SERVICE_NOTICE);
@@ -110,7 +111,7 @@ const reportReconcileResult = Effect.fn("cli.service.report")(function* (
 });
 
 const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe(
-  Command.withDescription("Install T3 Code as a background service for this user."),
+  Command.withDescription(`Install ${resolveAppDisplayName()} as a background service for this user.`),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -118,7 +119,7 @@ const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe
         const result = yield* reconcileService();
         yield* reportReconcileResult(
           result,
-          `T3 Code service is already installed with t3@${packageJson.version}.`,
+          `${resolveAppDisplayName()} service is already installed with t3@${packageJson.version}.`,
         );
       }),
     ),
@@ -136,7 +137,7 @@ const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
         const result = yield* reconcileService();
         yield* reportReconcileResult(
           result,
-          `T3 Code service is already using t3@${packageJson.version}.`,
+          `${resolveAppDisplayName()} service is already using t3@${packageJson.version}.`,
         );
       }),
     ),
@@ -144,7 +145,7 @@ const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
 );
 
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
-  Command.withDescription("Stop and remove the T3 Code background service."),
+  Command.withDescription(`Stop and remove the ${resolveAppDisplayName()} background service.`),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -152,7 +153,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
         const service = yield* BootService.BootService;
         const removed = yield* service.uninstall;
         yield* Console.log(
-          removed ? "Removed the T3 Code service." : "T3 Code service is not installed.",
+          removed ? `Removed the ${resolveAppDisplayName()} service.` : `${resolveAppDisplayName()} service is not installed.`,
         );
       }),
     ),
@@ -160,7 +161,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 );
 
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
-  Command.withDescription("Show whether the T3 Code background service is installed."),
+  Command.withDescription(`Show whether the ${resolveAppDisplayName()} background service is installed.`),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -179,7 +180,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     return false;
   }
   if (installed && current) {
-    yield* Console.log("T3 Code is already set up to run in the background on this machine.");
+    yield* Console.log(`${resolveAppDisplayName()} is already set up to run in the background on this machine.`);
     return true;
   }
   // A LaunchAgent (macOS) and a Startup shortcut (Windows) both start at
@@ -189,14 +190,14 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
   const wanted = yield* Prompt.run(
     Prompt.confirm({
       message: installed
-        ? "The installed T3 Code service needs an update or repair. Update it now?"
+        ? `The installed ${resolveAppDisplayName()} service needs an update or repair. Update it now?`
         : platform === "darwin"
-          ? "Run T3 Code in the background whenever you log in to this Mac? " +
+          ? `Run ${resolveAppDisplayName()} in the background whenever you log in to this Mac? ` +
             "It stays reachable through T3 Connect while you are logged in."
           : platform === "win32"
-            ? "Run T3 Code in the background whenever you sign in to Windows? " +
+            ? `Run ${resolveAppDisplayName()} in the background whenever you sign in to Windows? ` +
               "It starts again after every reboot, and stops when you sign out."
-            : "Run T3 Code in the background whenever this machine boots? " +
+            : `Run ${resolveAppDisplayName()} in the background whenever this machine boots? ` +
               "It stays reachable through T3 Connect even after you log out.",
       initial: true,
     }),
@@ -238,7 +239,7 @@ export const recoverServiceOnboardingOffer = <R>(
   );
 
 export const serviceCommand = Command.make("service").pipe(
-  Command.withDescription("Manage the T3 Code background service."),
+  Command.withDescription(`Manage the ${resolveAppDisplayName()} background service.`),
   Command.withSubcommands([
     serviceInstallCommand,
     serviceUninstallCommand,

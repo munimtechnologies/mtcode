@@ -19,6 +19,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 export class ComputerTaskBroker extends Context.Service<
   ComputerTaskBroker,
@@ -153,7 +154,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
           deferred,
           new ComputerTaskError({
             code: "no_client",
-            detail: "The T3 Code client that could reach that computer disconnected.",
+            detail: `The ${resolveAppDisplayName()} client that could reach that computer disconnected.`,
           }),
         ),
       { discard: true },
@@ -257,7 +258,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
           code: response.error?.code ?? "dispatch_failed",
           detail:
             response.error?.detail ??
-            "The T3 Code client could not start the task on that computer.",
+            `The ${resolveAppDisplayName()} client could not start the task on that computer.`,
         }),
       );
     },
@@ -295,7 +296,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
         return yield* new ComputerTaskError({
           code: "no_client",
           detail:
-            "No T3 Code client is connected that can reach another computer. Keep the desktop or web app open.",
+            `No ${resolveAppDisplayName()} client is connected that can reach another computer. Keep the desktop or web app open.`,
         });
       }
       const offered = yield* Queue.offer(route.client.queue, {
@@ -312,7 +313,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
         yield* removePending;
         return yield* new ComputerTaskError({
           code: "no_client",
-          detail: "The T3 Code client disconnected before the task could be sent.",
+          detail: `The ${resolveAppDisplayName()} client disconnected before the task could be sent.`,
         });
       }
       const result = yield* Deferred.await(deferred).pipe(

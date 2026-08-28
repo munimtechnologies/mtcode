@@ -35,7 +35,7 @@ export function getProductName(): string {
   return (
     readString(brandingExtra().productName) ??
     readString(Constants.expoConfig?.name)?.replace(/\s+(Dev|Preview)$/, "") ??
-    "T3 Code"
+    "MT Code"
   );
 }
 

@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 
 import { formatServiceStatus } from "./service.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 const status = {
   supported: true,
@@ -22,7 +23,7 @@ it("reports the installed service version and host paths", () => {
   assert.equal(
     formatServiceStatus(status, "0.0.29"),
     [
-      "T3 Code service",
+      `${resolveAppDisplayName()} service`,
       "  Status: installed · t3@0.0.29",
       "  Unit: /home/me/.config/systemd/user/t3code.service",
       "  Logs: /home/me/.t3/userdata/logs/boot-service.log",

@@ -9,7 +9,7 @@
  * @module appDisplayName
  */
 
-export const DEFAULT_APP_DISPLAY_NAME = "T3 Code";
+export const DEFAULT_APP_DISPLAY_NAME = "MT Code";
 
 export function resolveAppDisplayName(
   env: Record<string, string | undefined> = process.env,

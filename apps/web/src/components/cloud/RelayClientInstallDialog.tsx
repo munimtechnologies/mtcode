@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { APP_DISPLAY_NAME } from "~/branding";
+import { APP_BASE_NAME } from "../../branding";
 const installSteps: ReadonlyArray<{
   readonly stage: RelayClientInstallProgressStage;
   readonly label: string;
@@ -99,7 +100,7 @@ export function RelayClientInstallDialog() {
             <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
               <p className="text-sm font-medium text-foreground">Managed relay client</p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                T3 Code will download and install version{" "}
+                {APP_BASE_NAME} will download and install version{" "}
                 {view.status === "confirming" ? view.version : ""} locally.
               </p>
             </div>
