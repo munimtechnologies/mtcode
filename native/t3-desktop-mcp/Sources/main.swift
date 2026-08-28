@@ -1413,9 +1413,26 @@ func refuseSecureFieldInput(_ element: AXUIElement, _ id: String) -> String? {
         return nil
     }
     guard axString(element, kAXRoleAttribute as String) == "AXSecureTextField" else { return nil }
-    return "error: \(id) is a password field — refusing to type into it. Ask the user to enter it "
-        + "themselves, or set T3_DESKTOP_ALLOW_SECURE_FIELD_INPUT=1 if this is a throwaway "
-        + "credential you intend the agent to handle."
+
+    // Hand back rather than just refusing. Operator-class agents solve password
+    // prompts by pausing and giving the human the keyboard — the credential is
+    // never produced by the model and never lands in the transcript — and a
+    // refusal the user cannot act on just strands the task. So put the caret in
+    // the field and bring its app forward: the user can type immediately, and
+    // the agent picks the task back up afterwards.
+    AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    var handedBackTo = "the app"
+    if let pid = pidOf(element),
+        let app = NSRunningApplication(processIdentifier: pid)
+    {
+        DispatchQueue.main.sync { app.activate(options: []) }
+        handedBackTo = app.localizedName ?? handedBackTo
+    }
+    return "handed control to the user: \(id) is a password field, so it was focused in "
+        + "\(handedBackTo) and brought to the front for them to type into. The credential is "
+        + "deliberately not routed through the model. Tell the user it is ready, wait for them to "
+        + "say they are done, then continue — do not retry this call. "
+        + "(T3_DESKTOP_ALLOW_SECURE_FIELD_INPUT=1 lets the agent type throwaway credentials.)"
 }
 
 func toolSetValue(_ args: [String: Any]) -> String {

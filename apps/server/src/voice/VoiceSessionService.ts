@@ -17,6 +17,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 const OPENAI_REALTIME_API_KEY_SECRET = "openai-realtime-api-key";
 const LEGACY_XAI_VOICE_API_KEY_SECRET = "xai-voice-api-key";
@@ -70,7 +71,7 @@ function bytesToString(value: Uint8Array): string {
 function secretStoreFailure(provider: "OpenAI Realtime" | "Parallel"): VoiceApiError {
   return new VoiceApiError({
     reason: "secret_store_failed",
-    message: `T3 Code could not access the saved ${provider} credential.`,
+    message: `${resolveAppDisplayName()} could not access the saved ${provider} credential.`,
   });
 }
 
@@ -212,7 +213,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "upstream_unavailable",
-            message: "T3 Code could not prepare the OpenAI Realtime request.",
+            message: `${resolveAppDisplayName()} could not prepare the OpenAI Realtime request.`,
           }),
       ),
     );
@@ -221,7 +222,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "upstream_unavailable",
-            message: "T3 Code could not reach the OpenAI Realtime API.",
+            message: `${resolveAppDisplayName()} could not reach the OpenAI Realtime API.`,
           }),
       ),
     );
@@ -310,7 +311,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "invalid_web_tool_request",
-            message: "T3 Code could not prepare the Parallel Search request.",
+            message: `${resolveAppDisplayName()} could not prepare the Parallel Search request.`,
           }),
       ),
     );
@@ -319,7 +320,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "web_tool_unavailable",
-            message: "T3 Code could not reach Parallel Search.",
+            message: `${resolveAppDisplayName()} could not reach Parallel Search.`,
           }),
       ),
     );
@@ -382,7 +383,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "invalid_web_tool_request",
-            message: "T3 Code could not prepare the Parallel Extract request.",
+            message: `${resolveAppDisplayName()} could not prepare the Parallel Extract request.`,
           }),
       ),
     );
@@ -391,7 +392,7 @@ export const make = Effect.gen(function* () {
         () =>
           new VoiceApiError({
             reason: "web_tool_unavailable",
-            message: "T3 Code could not reach Parallel Extract.",
+            message: `${resolveAppDisplayName()} could not reach Parallel Extract.`,
           }),
       ),
     );

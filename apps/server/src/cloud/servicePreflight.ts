@@ -1,5 +1,6 @@
 import packageJson from "../../package.json" with { type: "json" };
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 export type ServicePreflightResult =
   | {
@@ -25,7 +26,7 @@ export function runServicePreflight(input: {
       status: "blocked",
       version,
       reason:
-        "This release requires a newer T3 Code service launcher. Update it on the server machine.",
+        `This release requires a newer ${resolveAppDisplayName()} service launcher. Update it on the server machine.`,
     };
   }
 

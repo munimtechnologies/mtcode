@@ -54,6 +54,7 @@ import {
   offerServiceDuringOnboarding,
   recoverServiceOnboardingOffer,
 } from "./service.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 const jsonFlag = Flag.boolean("json").pipe(
   Flag.withDescription("Emit JSON instead of human-readable output."),
@@ -700,10 +701,10 @@ export const connectCommand = Command.make("connect", {
           const platform = yield* HostProcessPlatform;
           const reach =
             platform === "darwin"
-              ? "T3 Code will stay reachable while you are logged in to this Mac."
+              ? `${resolveAppDisplayName()} will stay reachable while you are logged in to this Mac.`
               : platform === "win32"
-                ? "T3 Code will start again every time you sign in to Windows."
-                : "T3 Code will stay reachable after you log out.";
+                ? `${resolveAppDisplayName()} will start again every time you sign in to Windows.`
+                : `${resolveAppDisplayName()} will stay reachable after you log out.`;
           yield* Console.log(`\n✓ Background service ready\n\n${reach}`);
           return;
         }

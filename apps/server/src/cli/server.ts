@@ -4,6 +4,7 @@ import { Command, GlobalFlag } from "effect/unstable/cli";
 import { ServerConfig, type StartupPresentation } from "../config.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+import { resolveAppDisplayName } from "../appDisplayName.ts";
 
 export const runServerCommand = (
   flags: CliServerFlags,
@@ -19,13 +20,13 @@ export const runServerCommand = (
   });
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
+  Command.withDescription(`Run the ${resolveAppDisplayName()} server.`),
   Command.withHandler((flags) => runServerCommand(flags)),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription(
-    "Run the T3 Code server without opening a browser and print headless pairing details.",
+    `Run the ${resolveAppDisplayName()} server without opening a browser and print headless pairing details.`,
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {
