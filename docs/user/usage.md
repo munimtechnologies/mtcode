@@ -7,6 +7,9 @@ billing is separate from the raw token cost shown here. If the model rate table
 cannot be loaded, the page says cost is unavailable instead of $0.00. Token
 counts are still valid.
 
+Grok Build totals come from persisted session updates. Interactive turns that never wrote a
+completed-turn record will not appear.
+
 | Provider    | Source                                                                                |
 | ----------- | ------------------------------------------------------------------------------------- |
 | Claude Code | Local Claude session transcripts under the Claude home                                |

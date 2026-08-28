@@ -30,11 +30,6 @@ if (isElectron) {
   syncDocumentWindowControlsOverlayClass();
 }
 
-// First Clerk UI build containing https://github.com/clerk/javascript/pull/9500.
-const electronClerkUI = {
-  __internal_clerkUIVersion: "1.30.5-canary.v20260819050620",
-};
-
 function ClerkGate({ children }: { readonly children: React.ReactNode }) {
   const { embedded } = useConnectProviders();
   const publishableKey =
@@ -57,7 +52,6 @@ function ClerkGate({ children }: { readonly children: React.ReactNode }) {
     return (
       <ElectronClerkProvider
         key={embedded?.id ?? "clerk"}
-        {...electronClerkUI}
         appearance={clerkAppearance}
         publishableKey={publishableKey}
         passkeys={passkeys}

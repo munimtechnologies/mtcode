@@ -1033,6 +1033,41 @@ describe("sortActiveThreadsForSidebar", () => {
 
     expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
   });
+
+  it("surfaces an un-settled thread at the top via its re-entry stamp", () => {
+    const sorted = sortActiveThreadsForSidebar(
+      [
+        {
+          id: "old-unsettled",
+          createdAt: "2026-03-09T08:00:00.000Z",
+          latestUserMessageAt: null,
+          unsettledAt: "2026-03-09T13:00:00.000Z",
+        },
+        { id: "newest", createdAt: "2026-03-09T12:00:00.000Z", latestUserMessageAt: null },
+        { id: "middle", createdAt: "2026-03-09T10:00:00.000Z", latestUserMessageAt: null },
+      ],
+      "created_at",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual(["old-unsettled", "newest", "middle"]);
+  });
+
+  it("ignores a re-entry stamp older than the thread's creation", () => {
+    const sorted = sortActiveThreadsForSidebar(
+      [
+        {
+          id: "stale-stamp",
+          createdAt: "2026-03-09T10:00:00.000Z",
+          latestUserMessageAt: null,
+          unsettledAt: "2026-03-09T09:00:00.000Z",
+        },
+        { id: "newest", createdAt: "2026-03-09T12:00:00.000Z", latestUserMessageAt: null },
+      ],
+      "created_at",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual(["newest", "stale-stamp"]);
+  });
 });
 
 describe("pinOrderKeyBetween", () => {

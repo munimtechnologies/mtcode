@@ -27,7 +27,8 @@ export default defineConfig({
     // Matched to what oxfmt can parse rather than "*": handed only files it
     // does not recognise it exits non-zero ("Expected at least one target
     // file"), which failed every commit touching just native/ sources.
-    "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,md,css,html,yml,yaml}": "vp fmt",
+    "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,md,css,html,yml,yaml}":
+      "vp fmt --no-error-on-unmatched-pattern",
   },
   fmt: {
     ignorePatterns: [

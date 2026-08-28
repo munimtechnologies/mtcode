@@ -41,14 +41,15 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import type { BuiltInDriversEnv } from "../builtInDrivers.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ClaudeDriver, type ClaudeDriverEnv } from "../Drivers/ClaudeDriver.ts";
-import { CodexDriver, type CodexDriverEnv } from "../Drivers/CodexDriver.ts";
-import { CursorDriver, type CursorDriverEnv } from "../Drivers/CursorDriver.ts";
-import { GrokDriver, type GrokDriverEnv } from "../Drivers/GrokDriver.ts";
-import { OpenCodeDriver, type OpenCodeDriverEnv } from "../Drivers/OpenCodeDriver.ts";
-import type { AnyProviderDriver } from "../ProviderDriver.ts";
+import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
+import { CodexDriver } from "../Drivers/CodexDriver.ts";
+import { CursorDriver } from "../Drivers/CursorDriver.ts";
+import { GrokDriver } from "../Drivers/GrokDriver.ts";
+import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
+import * as ModelManifest from "../ModelManifest.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
@@ -150,6 +151,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(TestHttpClientLive),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(ModelManifest.layerTest),
   );
 
   it.live("boots two independent codex instances from a ProviderInstanceConfigMap", () =>
@@ -323,6 +325,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(TestHttpClientLive),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(ModelManifest.layerTest),
   );
 
   it.live("boots one instance of every shipped driver from a single config map", () =>
@@ -375,16 +378,8 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         },
       };
 
-      // Spelled out so the array is not inferred from its first element:
-      // each driver asks for its own services, and the registry takes their
-      // union.
-      const drivers: ReadonlyArray<
-        AnyProviderDriver<
-          CodexDriverEnv | ClaudeDriverEnv | CursorDriverEnv | GrokDriverEnv | OpenCodeDriverEnv
-        >
-      > = [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver];
-      const { registry } = yield* makeProviderInstanceRegistry({
-        drivers,
+      const { registry } = yield* makeProviderInstanceRegistry<BuiltInDriversEnv>({
+        drivers: [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver],
         configMap,
       });
 

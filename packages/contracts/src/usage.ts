@@ -28,6 +28,15 @@ import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 export const USAGE_CONTRACT_VERSION = 6 as const;
 
 /**
+ * Oldest {@link UsageSummary} version a current client will still merge.
+ *
+ * v5 adds `grok` and v6 adds `cursor`/`opencode` to {@link UsageProviderKind};
+ * v4 Claude/Codex buckets remain valid, so mixed-version environments keep
+ * those totals instead of treating every older server as stale.
+ */
+export const USAGE_MERGE_COMPATIBLE_SINCE = 4 as const;
+
+/**
  * Contract version currently shipped by https://app.t3.codes (pingdotgg/t3code
  * main). Personal / ahead servers project down to this shape when the client
  * does not advertise a newer {@link UsageSummaryInput.clientContractVersion},

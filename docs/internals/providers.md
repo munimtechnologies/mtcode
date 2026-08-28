@@ -63,6 +63,18 @@ New drivers with a probe deadline should raise `ProviderProbeTimeoutError` rathe
 failure snapshot. A probe that reaches a real verdict, such as an unreachable configured server,
 should keep reporting that verdict.
 
+## Model manifest
+
+The model picker's legacy section is driven by `apps/server/src/provider/model-manifest.json`, which
+lists the current (non-legacy) model slugs per driver kind. The `ModelManifest` service
+(`apps/server/src/provider/ModelManifest.ts`) refreshes that data from the same file on `main` via
+raw.githubusercontent.com, so moving a model in or out of the legacy section is a commit, not a
+release. Preference order is remote fetch, then the on-disk copy of the last successful fetch (in
+the state directory), then the bundled copy. Fetches are TTL-gated, run concurrently with provider
+probes, respect the `enableProviderUpdateChecks` setting, and never fail a provider check. The
+Codex and Claude drivers apply the classification to every snapshot with `applyModelManifest`;
+driver kinds absent from the manifest have no legacy concept.
+
 ## How provider work is requested
 
 Clients never call a provider directly. They dispatch orchestration commands over the RPC method

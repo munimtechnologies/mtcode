@@ -1,4 +1,4 @@
-import { type GrokSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { type GrokSettings, ProviderDriverKind, type RuntimeMode } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -27,16 +27,33 @@ interface GrokAcpRuntimeInput extends Omit<
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly grokSettings: GrokAcpRuntimeGrokSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly runtimeMode?: RuntimeMode;
+}
+
+export function grokAcpSpawnArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string> {
+  switch (runtimeMode) {
+    case "approval-required":
+      return ["--permission-mode", "default", "agent", "stdio"];
+    case "auto-accept-edits":
+      return ["--permission-mode", "acceptEdits", "agent", "stdio"];
+    case "auto":
+      return ["--permission-mode", "auto", "agent", "stdio"];
+    case "full-access":
+      return ["agent", "--always-approve", "stdio"];
+    default:
+      return ["agent", "stdio"];
+  }
 }
 
 export function buildGrokAcpSpawnInput(
   grokSettings: GrokAcpRuntimeGrokSettings | null | undefined,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
+  runtimeMode?: RuntimeMode,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
     command: grokSettings?.binaryPath || "grok",
-    args: ["agent", "stdio"],
+    args: [...grokAcpSpawnArgs(runtimeMode)],
     cwd,
     env: {
       ...environment,
@@ -62,7 +79,12 @@ export const makeGrokAcpRuntime = (
     const acpContext = yield* Layer.build(
       AcpSessionRuntime.layer({
         ...input,
-        spawn: buildGrokAcpSpawnInput(input.grokSettings, input.cwd, input.environment),
+        spawn: buildGrokAcpSpawnInput(
+          input.grokSettings,
+          input.cwd,
+          input.environment,
+          input.runtimeMode,
+        ),
         authMethodId: resolveGrokAuthMethodId(input.environment),
       }).pipe(
         Layer.provide(
@@ -82,6 +104,17 @@ export function resolveGrokAcpBaseModelId(model: string | null | undefined): str
   return normalizeModelSlug(base, GROK_DRIVER_KIND) ?? "grok-build";
 }
 
+const GROK_REASONING_EFFORT_TOKEN = /^[a-z0-9][a-z0-9._-]{0,31}$/i;
+
+export function isValidGrokReasoningEffortToken(value: string): boolean {
+  return GROK_REASONING_EFFORT_TOKEN.test(value);
+}
+
+export function normalizeGrokReasoningEffort(value: string | undefined): string | undefined {
+  const effort = value?.trim();
+  return effort && isValidGrokReasoningEffortToken(effort) ? effort : undefined;
+}
+
 export function currentGrokModelIdFromSessionSetup(
   sessionSetupResult:
     | EffectAcpSchema.LoadSessionResponse
@@ -91,88 +124,6 @@ export function currentGrokModelIdFromSessionSetup(
   return sessionSetupResult.models?.currentModelId?.trim() || undefined;
 }
 
-/**
- * Provider option id for the Grok reasoning picker. Grok advertises the levels
- * per model through `ModelInfo._meta.reasoningEfforts` and applies them through
- * `session/set_model` with `_meta.reasoningEffort`.
- */
-export const GROK_REASONING_EFFORT_OPTION_ID = "reasoningEffort";
-const GROK_REASONING_EFFORT_META_KEY = "reasoningEffort";
-const GROK_REASONING_EFFORTS_META_KEY = "reasoningEfforts";
-
-export interface GrokReasoningEffortLevel {
-  readonly value: string;
-  readonly label: string;
-  readonly description?: string;
-  readonly isDefault?: boolean;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function trimmedString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-/** Reads the effort currently applied to a model from its ACP `_meta`. */
-export function grokCurrentReasoningEffortFromModelMeta(
-  meta: unknown | null | undefined,
-): string | undefined {
-  return isRecord(meta) ? trimmedString(meta[GROK_REASONING_EFFORT_META_KEY]) : undefined;
-}
-
-/**
- * Reads the selectable reasoning levels from a model's ACP `_meta`. Grok marks
- * more than one entry as `default`, so the level currently applied to the model
- * wins and the `default` flags are only a fallback.
- */
-export function grokReasoningEffortLevelsFromModelMeta(
-  meta: unknown | null | undefined,
-): ReadonlyArray<GrokReasoningEffortLevel> {
-  if (!isRecord(meta)) {
-    return [];
-  }
-  const rawLevels = meta[GROK_REASONING_EFFORTS_META_KEY];
-  if (!Array.isArray(rawLevels)) {
-    return [];
-  }
-  const levels = rawLevels.flatMap((entry): ReadonlyArray<GrokReasoningEffortLevel> => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-    const value = trimmedString(entry.value) ?? trimmedString(entry.id);
-    if (!value) {
-      return [];
-    }
-    const description = trimmedString(entry.description);
-    return [
-      {
-        value,
-        label: trimmedString(entry.label) ?? value,
-        ...(description ? { description } : {}),
-        ...(entry.default === true ? { isDefault: true } : {}),
-      },
-    ];
-  });
-  if (levels.length === 0) {
-    return [];
-  }
-  const currentEffort = grokCurrentReasoningEffortFromModelMeta(meta);
-  const defaultValue =
-    levels.find((level) => level.value === currentEffort)?.value ??
-    levels.find((level) => level.isDefault)?.value ??
-    levels[0]?.value;
-  return levels.map((level) =>
-    level.value === defaultValue ? { ...level, isDefault: true } : { ...level, isDefault: false },
-  );
-}
-
-/** Reads the effort Grok already applies to the session's current model. */
 export function currentGrokReasoningEffortFromSessionSetup(
   sessionSetupResult:
     | EffectAcpSchema.LoadSessionResponse
@@ -183,58 +134,47 @@ export function currentGrokReasoningEffortFromSessionSetup(
   if (!modelState) {
     return undefined;
   }
-  const currentModelId = modelState.currentModelId?.trim();
+  const currentModelId = modelState.currentModelId.trim();
+  if (currentModelId.length === 0) {
+    return undefined;
+  }
   const currentModel = modelState.availableModels.find(
     (model) => model.modelId.trim() === currentModelId,
   );
-  return grokCurrentReasoningEffortFromModelMeta(currentModel?._meta);
+  const reasoningEffort = currentModel?._meta?.reasoningEffort;
+  return typeof reasoningEffort === "string"
+    ? normalizeGrokReasoningEffort(reasoningEffort)
+    : undefined;
 }
 
 export function applyGrokAcpModelSelection<E>(input: {
   readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setSessionModel">;
   readonly currentModelId: string | undefined;
-  readonly requestedModelId: string | undefined;
   readonly currentReasoningEffort?: string | undefined;
+  readonly requestedModelId: string | undefined;
   readonly requestedReasoningEffort?: string | undefined;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
-}): Effect.Effect<
-  { readonly modelId: string | undefined; readonly reasoningEffort: string | undefined },
-  E
-> {
-  const shouldSwitchModel =
+}): Effect.Effect<string | undefined, E> {
+  const modelChanged =
     input.requestedModelId !== undefined && input.requestedModelId !== input.currentModelId;
-  const shouldSwitchReasoningEffort =
-    input.requestedReasoningEffort !== undefined &&
-    input.requestedReasoningEffort !== input.currentReasoningEffort;
-  if (!shouldSwitchModel && !shouldSwitchReasoningEffort) {
-    return Effect.succeed({
-      modelId: input.currentModelId,
-      reasoningEffort: input.currentReasoningEffort,
-    });
+  const reasoningProvided = input.requestedReasoningEffort !== undefined;
+  const reasoningEffort = reasoningProvided
+    ? normalizeGrokReasoningEffort(input.requestedReasoningEffort)
+    : undefined;
+  const reasoningEffortChanged =
+    reasoningProvided && reasoningEffort !== input.currentReasoningEffort;
+  const targetModelId = input.requestedModelId ?? input.currentModelId;
+  if ((!modelChanged && !reasoningEffortChanged) || targetModelId === undefined) {
+    return Effect.succeed(input.currentModelId);
   }
-  // `session/set_model` carries the effort, so an effort-only change still
-  // resends the model Grok already has selected.
-  const modelId = input.requestedModelId ?? input.currentModelId;
-  if (modelId === undefined) {
-    return Effect.succeed({
-      modelId: input.currentModelId,
-      reasoningEffort: input.currentReasoningEffort,
-    });
-  }
-  // An explicit request always wins. Without one, the effort carries over only
-  // when the model does not change: levels are per model, so carrying (say)
-  // `xhigh` from Grok 4.6 onto Grok 4.5 applies a level that model never
-  // advertised and leaves its session config with nothing selected. Sending no
-  // effort lets Grok apply the target model's own default instead.
-  const reasoningEffort =
-    input.requestedReasoningEffort ??
-    (shouldSwitchModel ? undefined : input.currentReasoningEffort);
+  const reasoningMeta =
+    reasoningProvided && reasoningEffort !== undefined ? { reasoningEffort } : undefined;
+  // When reasoning was explicitly provided but invalid (normalize => undefined), we deliberately
+  // send no meta so the invalid value is dropped rather than forwarded. When reasoning was not
+  // provided at all, we also send no meta, but we only reach this call when the model itself
+  // changed - an omitted reasoning preference must not be treated as an explicit clear of the
+  // CLI-advertised default (e.g. Extra High) on same-model reselections.
   return input.runtime
-    .setSessionModel(
-      modelId,
-      reasoningEffort === undefined
-        ? {}
-        : { meta: { [GROK_REASONING_EFFORT_META_KEY]: reasoningEffort } },
-    )
-    .pipe(Effect.mapError(input.mapError), Effect.as({ modelId, reasoningEffort }));
+    .setSessionModel(targetModelId, reasoningMeta)
+    .pipe(Effect.mapError(input.mapError), Effect.as(targetModelId));
 }

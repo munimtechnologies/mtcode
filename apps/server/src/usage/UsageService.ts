@@ -1,9 +1,9 @@
 /**
  * UsageService - scans provider transcripts and returns priced usage buckets.
  *
- * Claude and Codex are scanned from on-disk session transcripts. Cursor has no
- * local token ledger, so usage comes from the dashboard CSV export when Cursor
- * desktop is signed in on this machine.
+ * Claude, Codex, Grok, and OpenCode are scanned from on-disk session data.
+ * Cursor has no local token ledger, so usage comes from the dashboard CSV
+ * export when Cursor desktop is signed in on this machine.
  *
  * Transcripts are append-only, so parsed records are memoised per file by
  * `(size, mtime)`. A cold 30-day scan of ~1.4 GB lands around 2-3 seconds; warm

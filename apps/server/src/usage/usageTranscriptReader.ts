@@ -115,6 +115,10 @@ async function* readBoundedLines(
  * Errors on individual entries are swallowed: session files rotate and get
  * removed while the walk is in flight, and a partial listing is far better than
  * failing the page.
+ *
+ * For Grok, the walk is restricted to the `updates.jsonl` basename. Grok
+ * sessions also ship multi-megabyte `chat_history` and `events` logs that
+ * never carry usage, so the basename filter keeps a cold scan off those files.
  */
 export async function listTranscriptFiles(
   root: string,
@@ -209,7 +213,7 @@ export async function readTranscriptRecords(
 
       if (provider === "grok") {
         if (!mightCarryUsage(line, provider)) continue;
-        records.push(...parseGrokLine(line));
+        for (const grokRecord of parseGrokLine(line)) records.push(grokRecord);
         continue;
       }
 

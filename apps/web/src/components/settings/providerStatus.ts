@@ -7,7 +7,7 @@ import { APP_DISPLAY_NAME } from "~/branding";
  */
 export const PROVIDER_STATUS_STYLES = {
   disabled: {
-    dot: "bg-amber-400",
+    dot: "bg-muted-foreground/50",
   },
   error: {
     dot: "bg-destructive",
@@ -40,7 +40,8 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
     return {
       headline: "Disabled",
       detail:
-        provider.message ?? `This provider is installed but disabled for new sessions in ${APP_DISPLAY_NAME}.`,
+        provider.message ??
+        `This provider is installed but disabled for new sessions in ${APP_DISPLAY_NAME}.`,
     };
   }
   if (!provider.installed) {

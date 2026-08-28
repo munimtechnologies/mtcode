@@ -4,6 +4,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
+  activeThreadAnchorTimestampMs,
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -542,20 +543,27 @@ export function firstValidTimestamp(
 
 /** Orders active, unpinned sidebar threads. User-arranged activeOrderKey
     values win when present; keyless threads keep the selected timestamp
-    sort underneath so mixed-version fleets stay stable. */
+    sort underneath so mixed-version fleets stay stable. The timestamp is
+    re-anchored to unsettledAt when the thread last re-entered the active
+    list (see activeThreadAnchorTimestampMs), so an un-settled thread
+    surfaces at the top instead of sinking back to its old slot. */
 export function sortActiveThreadsForSidebar<
   T extends {
     readonly id: string;
     readonly createdAt: string;
     readonly latestUserMessageAt: string | null;
+    readonly unsettledAt?: string | null | undefined;
     readonly activeOrderKey?: string | null | undefined;
     readonly environmentId?: string | undefined;
   },
 >(threads: readonly T[], sortOrder: SidebarThreadSortOrder): T[] {
   const timestamp = (thread: T) =>
     sortOrder === "updated_at"
-      ? firstValidTimestampMs(thread.latestUserMessageAt, thread.createdAt)
-      : parseTimestampMs(thread.createdAt);
+      ? Math.max(
+          firstValidTimestampMs(thread.latestUserMessageAt, thread.createdAt),
+          activeThreadAnchorTimestampMs(thread),
+        )
+      : activeThreadAnchorTimestampMs(thread);
   const identityTiebreak = (left: T, right: T) =>
     left.id.localeCompare(right.id) ||
     (left.environmentId ?? "").localeCompare(right.environmentId ?? "");
