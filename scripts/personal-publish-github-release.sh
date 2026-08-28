@@ -21,7 +21,8 @@ cd "$REPO"
 
 # shellcheck source=lib/personal-mt-version.sh
 source "$REPO/scripts/lib/personal-mt-version.sh"
-personal_mt_export_desktop_version
+# Publishing must never reuse a published tag; fleet refreshes must match one.
+T3_MT_VERSION_NEXT=1 personal_mt_export_desktop_version
 # GitHub release tag is prefixed with munim-.
 TAG="munim-v${T3CODE_DESKTOP_VERSION}"
 

@@ -42,12 +42,21 @@ personal_mt_resolve_version() {
   fi
 
   # Upstream's nightly base can sit BELOW what this fork has already shipped
-  # (MT releases have run ahead before). Reusing that number silently republishes
-  # an existing tag: gh release upload --clobber then swaps one platform's assets
-  # and leaves the other platform's older build in place, under one version.
-  # Never go backwards — bump past the highest published release instead.
+  # (MT releases have run ahead before), so never resolve behind the newest
+  # published release — a fleet build that used the lower number would install
+  # something different from what is on GitHub under the same version.
   published=$(personal_mt_published_version)
-  if [[ -n "$published" ]] && [[ "$(personal_mt_max_version "$candidate" "$published")" != "$candidate" || "$candidate" == "$published" ]]; then
+  if [[ -n "$published" ]]; then
+    candidate=$(personal_mt_max_version "$candidate" "$published")
+  fi
+
+  # Publishing needs the NEXT free number instead of the current one. Reusing a
+  # published tag is destructive: the publish script takes its "release exists"
+  # branch and 'gh release upload --clobber' swaps only the platform being
+  # built, leaving the other platform's older installer under one version.
+  # Fleet refreshes deliberately do NOT set this — they build the version that
+  # is actually released, so Mac/Blade/Dell match the download page.
+  if [[ "${T3_MT_VERSION_NEXT:-}" == "1" && -n "$published" && "$candidate" == "$published" ]]; then
     local major minor patch
     IFS=. read -r major minor patch <<<"$published"
     candidate="${major:-0}.${minor:-0}.$(( ${patch:-0} + 1 ))"
