@@ -23,6 +23,7 @@ const clientSettings: ClientSettings = {
   confirmQuit: true,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
+  confirmThreadUnpin: false,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   desktopNotifications: {

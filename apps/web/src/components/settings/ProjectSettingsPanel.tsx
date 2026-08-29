@@ -419,6 +419,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const pickerProviders = useMemo(() => withMtModelProvider(serverProviders), [serverProviders]);
   const storedSelection = representative.defaultModelSelection;
   const resolvedSelection = resolveDefaultProviderModelSelection(pickerProviders, storedSelection);
+  const resolvedInstanceId = resolvedSelection?.instanceId ?? null;
+  const resolvedModel = resolvedSelection?.model ?? null;
   const instanceEntries = useMemo(
     () =>
       prependMtModelPickerEntry(
@@ -429,12 +431,11 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     [serverProviders, settings],
   );
   const modelOptionsByInstance = useMemo(
-    () => getCustomModelOptionsByInstance(settings, pickerProviders),
-    [pickerProviders, settings],
+    () =>
+      getCustomModelOptionsByInstance(settings, pickerProviders, resolvedInstanceId, resolvedModel),
+    [resolvedInstanceId, resolvedModel, pickerProviders, settings],
   );
-  const activeEntry = instanceEntries.find(
-    (entry) => entry.instanceId === resolvedSelection?.instanceId,
-  );
+  const activeEntry = instanceEntries.find((entry) => entry.instanceId === resolvedInstanceId);
   const setDefaultModel = useCallback(
     (selection: ModelSelection | null) =>
       void updateAllMembers({ defaultModelSelection: selection }, "Failed to update default model"),

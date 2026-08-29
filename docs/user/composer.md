@@ -33,6 +33,9 @@ both the conversation and workspace to the state before that message.
 Type `/` to open the command menu. Type `$` to find and add a skill. Skill rows show their source,
 such as System, Personal, Project, or App.
 
+On mobile, these menus are available on the **New task** screen before you start a thread. They
+use the skills and commands from the selected environment and provider.
+
 By default, the `/` menu includes skills. To keep this menu command-only, turn off **Show skills in
 slash menu** in **Settings → General**. Skill results use the `/skill:Skill Name` label and add the
 same `$name` skill token to your message. The original skill name remains searchable. If the provider

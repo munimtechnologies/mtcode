@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay, resolveTraitsSelectChange } from "./TraitsPicker";
+import {
+  buildTraitsTriggerDisplay,
+  buildUnavailableModelOptionDescriptors,
+  resolveTraitsSelectChange,
+} from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -204,5 +208,38 @@ describe("resolveTraitsSelectChange", () => {
         { id: "contextWindow", value: "200k" },
       ],
     });
+  });
+});
+
+describe("buildUnavailableModelOptionDescriptors", () => {
+  it("shows only saved values without inventing alternatives", () => {
+    expect(
+      buildUnavailableModelOptionDescriptors([
+        { id: "variant", value: "max" },
+        { id: "agent", value: "build" },
+        { id: "fastMode", value: true },
+      ]),
+    ).toEqual([
+      {
+        id: "variant",
+        label: "Variant",
+        type: "select",
+        options: [{ id: "max", label: "max" }],
+        currentValue: "max",
+      },
+      {
+        id: "agent",
+        label: "Agent",
+        type: "select",
+        options: [{ id: "build", label: "build" }],
+        currentValue: "build",
+      },
+      {
+        id: "fastMode",
+        label: "Fast Mode",
+        type: "boolean",
+        currentValue: true,
+      },
+    ]);
   });
 });

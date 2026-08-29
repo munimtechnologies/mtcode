@@ -64,6 +64,21 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
     promptInjectionState = "none",
     planModeEnabled,
   } = input;
+  if (provider === "opencode") {
+    const normalizedModel = normalizeModelSlug(model, provider);
+    const modelIsInCatalog = models.some((candidate) => candidate.slug === normalizedModel);
+    if (!modelIsInCatalog) {
+      const preservedOptions = modelOptions?.filter(
+        (option) => planModeEnabled || option.id !== "agent" || option.value !== "plan",
+      );
+      return {
+        provider,
+        promptEffort: null,
+        modelOptionsForDispatch:
+          preservedOptions && preservedOptions.length > 0 ? preservedOptions : undefined,
+      };
+    }
+  }
   const caps = getProviderModelCapabilities(models, model, provider, planModeEnabled);
   // MT Auto routes per turn, so the thread's model can name a backend this
   // instance does not list. Keep the caller's selections in that case instead
