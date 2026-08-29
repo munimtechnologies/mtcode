@@ -4,8 +4,17 @@ Messages can contain up to 120,000 characters. If a draft is longer, T3 Code kee
 composer and shows how many characters need to be removed. Shorten the draft or split it into
 multiple messages, then send again in the same thread.
 
-On servers that support direct uploads, images upload as soon as you add them. The send button
-becomes available after every upload finishes. Failed uploads can be retried or removed.
+You can attach images up to 10 MB. On servers that support file uploads, web and desktop can also
+attach text files, PDFs, ZIP archives, and other files. Each file can be up to the limit advertised
+by the server, capped at 50 MB. Each message can contain up to eight attachments in total. Files
+upload directly to the environment, where your agent can read, copy, or edit them by their file path.
+
+On web and desktop, attachments upload as soon as you add them. The send button becomes available
+after every upload finishes. Failed uploads can be retried or removed. On mobile, attachments are
+currently limited to images.
+
+If you reload before a file finishes uploading, the draft keeps the file's name and shows **Attach
+again** next to it. Attach the file again or remove it, then send.
 
 On web and desktop, HEIC and HEIF photos are automatically converted to JPEG when you drag them into
 the composer or paste them into a message.
@@ -27,6 +36,15 @@ sends a corrective follow-up.
 
 On web and desktop, Revert remains available on completed turns that have a checkpoint. It returns
 both the conversation and workspace to the state before that message.
+
+## Prompt stash
+
+Use the default shortcut, `Cmd+S` on macOS or `Ctrl+S` on Windows and Linux, to stash the current
+prompt and its attachments after all file uploads finish. Restore the entry later from the stash
+menu. Stashes that contain files must be restored in the environment where those files were
+uploaded. Stashed files stay uploaded on the server for 24 hours. If you restore an entry after
+that, the file comes back with **Attach again** next to it. Attach the file again or remove it, then
+send.
 
 ## Commands and skills
 

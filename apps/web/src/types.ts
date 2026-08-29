@@ -1,7 +1,6 @@
 import type {
-  ChatAttachment as ContractChatAttachment,
-  ChatImageAttachment as ContractChatImageAttachment,
   ChatFileAttachment as ContractChatFileAttachment,
+  ChatImageAttachment as ContractChatImageAttachment,
   ChatUnknownAttachment as ContractChatUnknownAttachment,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointSummary,
@@ -41,17 +40,22 @@ export interface ChatImageAttachment extends ContractChatImageAttachment {
 /** Any non-image attachment: PDFs, archives, source files. */
 export interface ChatFileAttachment extends ContractChatFileAttachment {
   readonly previewUrl?: string;
+  readonly downloadable?: boolean;
 }
 
 /** An attachment type this build does not know; rendered as unsupported. */
-export interface ChatUnknownAttachment extends ContractChatUnknownAttachment {
-  readonly previewUrl?: string;
-}
+export type ChatUnknownAttachment = ContractChatUnknownAttachment;
 
 export type ChatAttachment = ChatImageAttachment | ChatFileAttachment | ChatUnknownAttachment;
 
+// The union has an open member (`type: string`), so a literal comparison does
+// not narrow. Use these guards wherever type-specific fields are read.
 export function isImageAttachment(attachment: ChatAttachment): attachment is ChatImageAttachment {
   return attachment.type === "image";
+}
+
+export function isFileAttachment(attachment: ChatAttachment): attachment is ChatFileAttachment {
+  return attachment.type === "file";
 }
 
 export interface ChatMessage extends Omit<OrchestrationMessage, "attachments"> {

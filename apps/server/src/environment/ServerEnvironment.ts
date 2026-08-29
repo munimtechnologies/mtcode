@@ -174,6 +174,7 @@ export const make = Effect.gen(function* () {
       threadSettlement: true,
       threadSnooze: true,
       threadGoal: true,
+      environmentThemes: true,
       threadPinning: true,
       threadPinReorder: true,
       threadActiveReorder: true,
