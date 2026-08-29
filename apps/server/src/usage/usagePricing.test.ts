@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  lookupRate,
-  normalizeModelName,
-  parseRateTable,
-  priceUsage,
-} from "./usagePricing.ts";
+import { lookupRate, normalizeModelName, parseRateTable, priceUsage } from "./usagePricing.ts";
 
 const EMPTY_TOTALS = {
   uncachedInputTokens: 1_000_000,
@@ -30,6 +25,52 @@ describe("parseRateTable", () => {
 
     expect(table.has("auto")).toBe(false);
     expect(table.get("claude-sonnet-4-5")?.inputCostPerToken).toBe(3e-6);
+  });
+
+  it("keeps cache pricing when a reseller row collides with the canonical id", () => {
+    // LiteLLM's DeepInfra rows carry no cache pricing and sort after the
+    // first-party listing, so last-write-wins used to charge cache reads at
+    // the full input rate.
+    const table = parseRateTable({
+      "claude-opus-5": {
+        input_cost_per_token: 5e-6,
+        output_cost_per_token: 2.5e-5,
+        cache_read_input_token_cost: 5e-7,
+        cache_creation_input_token_cost: 6.25e-6,
+      },
+      "deepinfra/anthropic/claude-opus-5": {
+        input_cost_per_token: 5e-6,
+        output_cost_per_token: 2.5e-5,
+      },
+    });
+
+    expect(table.get("claude-opus-5")?.cacheReadCostPerToken).toBe(5e-7);
+    expect(table.get("claude-opus-5")?.cacheCreationCostPerToken).toBe(6.25e-6);
+  });
+
+  it("takes cache pricing from a prefixed row when the canonical row lacks it", () => {
+    const table = parseRateTable({
+      "claude-fable-5": {
+        input_cost_per_token: 1e-5,
+        output_cost_per_token: 5e-5,
+      },
+      "vertex_ai/claude-fable-5": {
+        input_cost_per_token: 1e-5,
+        output_cost_per_token: 5e-5,
+        cache_read_input_token_cost: 1e-6,
+      },
+    });
+
+    expect(table.get("claude-fable-5")?.cacheReadCostPerToken).toBe(1e-6);
+  });
+
+  it("does not let a later equal-quality row overwrite an earlier one", () => {
+    const table = parseRateTable({
+      "gpt-5.5": { input_cost_per_token: 5e-6, output_cost_per_token: 3e-5 },
+      "azure_ai/gpt-5.5": { input_cost_per_token: 9e-6, output_cost_per_token: 9e-5 },
+    });
+
+    expect(table.get("gpt-5.5")?.inputCostPerToken).toBe(5e-6);
   });
 });
 

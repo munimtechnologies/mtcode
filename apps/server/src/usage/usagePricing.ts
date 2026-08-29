@@ -90,6 +90,26 @@ const CURSOR_PARAM_SUFFIXES = [
 ] as const;
 
 /**
+ * Ranks competing LiteLLM rows that collapse onto the same normalized id.
+ *
+ * LiteLLM publishes one model under several provider keys — `claude-opus-5`,
+ * `azure_ai/claude-opus-5`, `vertex_ai/claude-opus-5`,
+ * `deepinfra/anthropic/claude-opus-5` — and `normalizeModelName` strips the
+ * prefix, so they all land on `claude-opus-5`. They are not interchangeable:
+ * some resale rows carry only input/output and omit cache pricing entirely,
+ * and the `?? input` fallback below then charges cache reads at the full input
+ * rate. On a cache-heavy agent transcript that is a ~10x overcharge decided by
+ * nothing but JSON key order, so pick deliberately instead of last-write-wins.
+ *
+ * Higher wins; ties keep the first row seen.
+ */
+function ratePrecedence(rawName: string, hasCacheRates: boolean): number {
+  // A bare id is the first-party listing; a `provider/` prefix is a reseller.
+  const canonical = !rawName.includes("/");
+  return (hasCacheRates ? 2 : 0) + (canonical ? 1 : 0);
+}
+
+/**
  * Projects the LiteLLM document into a rate table.
  *
  * Entries without both an input and an output rate are dropped: a half-priced
@@ -99,6 +119,7 @@ const CURSOR_PARAM_SUFFIXES = [
  */
 export function parseRateTable(document: unknown): RateTable {
   const table = new Map<string, ModelRate>();
+  const precedence = new Map<string, number>();
   if (typeof document !== "object" || document === null) return table;
 
   for (const [name, raw] of Object.entries(document as Record<string, unknown>)) {
@@ -109,14 +130,23 @@ export function parseRateTable(document: unknown): RateTable {
     if (input === null || output === null) continue;
     if (input === 0 && output === 0) continue;
 
-    table.set(normalizeModelName(name), {
+    const cacheRead = finiteNumber(entry.cache_read_input_token_cost);
+    const cacheCreation = finiteNumber(entry.cache_creation_input_token_cost);
+
+    const id = normalizeModelName(name);
+    const rank = ratePrecedence(name, cacheRead !== null || cacheCreation !== null);
+    const seen = precedence.get(id);
+    if (seen !== undefined && seen >= rank) continue;
+    precedence.set(id, rank);
+
+    table.set(id, {
       inputCostPerToken: input,
       outputCostPerToken: output,
       // Anthropic bills cache reads at a discount and cache writes at a
       // premium. When a model omits them, cached input is priced as plain
       // input rather than as free.
-      cacheReadCostPerToken: finiteNumber(entry.cache_read_input_token_cost) ?? input,
-      cacheCreationCostPerToken: finiteNumber(entry.cache_creation_input_token_cost) ?? input,
+      cacheReadCostPerToken: cacheRead ?? input,
+      cacheCreationCostPerToken: cacheCreation ?? input,
     });
   }
   return table;
