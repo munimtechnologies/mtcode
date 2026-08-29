@@ -1573,9 +1573,15 @@ const makeWsRpcLayer = (
 
               // Attach live delivery before reading either replay or snapshot state.
               // Otherwise an event published while the snapshot is loading is lost.
+              // `startImmediately` is what makes "before" true: a plain forkScoped
+              // only queues the fiber, so the subscription attaches on a later tick
+              // and events published in the meantime never reach this buffer. The
+              // thread stream was left without it when subscribeShell gained it,
+              // which dropped live turns behind a slow snapshot read.
               const liveBuffer = yield* Queue.unbounded<OrchestrationThreadStreamItem>();
               yield* Effect.forkScoped(
                 liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
+                { startImmediately: true },
               );
               const bufferedLiveStream = Stream.fromQueue(liveBuffer);
 
