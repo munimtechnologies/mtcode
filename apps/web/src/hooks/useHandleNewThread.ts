@@ -29,6 +29,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import {
   resolveAvailableNewThreadProjectRef,
   resolveNewDraftStartFromOrigin,
+  resolveNewThreadModelSelectionOverride,
   resolveWorkspaceOptionsAfterEnvironmentRetarget,
 } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
@@ -198,6 +199,14 @@ export function useNewThreadHandler() {
             candidate.id === projectRef.projectId &&
             candidate.environmentId === projectRef.environmentId,
         ) ?? requestedProject;
+      const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
+        resolveNewThreadModelSelectionOverride({
+          projectDefaultSelection: project?.defaultModelSelection ?? null,
+          carrySelection: carryModelSelection,
+          carrySourceDraftId:
+            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+          destinationDraftId,
+        });
       const workspaceOptions = resolveWorkspaceOptionsAfterEnvironmentRetarget({
         requestedEnvironmentId: requestedProjectRef.environmentId,
         targetEnvironmentId: projectRef.environmentId,

@@ -10,6 +10,7 @@ import {
   resolveAvailableNewThreadProjectRef,
   resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
+  resolveNewThreadModelSelectionOverride,
   resolveWorkspaceOptionsAfterEnvironmentRetarget,
   resolveNewThreadEnvironmentId,
   isComputerHomeWorkspace,

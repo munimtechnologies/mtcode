@@ -4764,6 +4764,8 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true;
+  const supportsPinning = serverConfig?.environment.capabilities.threadPinning === true;
+  const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsGoal = serverConfig?.environment.capabilities.threadGoal === true;
   const nowMinute = useNowMinute();
   const snoozeNow = new Date().toISOString();
