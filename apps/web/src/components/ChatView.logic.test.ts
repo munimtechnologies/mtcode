@@ -36,6 +36,7 @@ import {
   replaceEditableUserText,
   resolveDraftHeroState,
   scheduleEnvironmentReconnectWarning,
+  shoulderTabReserve,
   splitEditableUserMessage,
   startNewThreadForProject,
   shouldDockDraftHeroForSubmission,
@@ -165,6 +166,24 @@ describe("attachment preview handoff", () => {
     };
 
     expect(collectUserMessageBlobPreviewUrls(message)).toEqual(["blob:image", "blob:pdf"]);
+  });
+});
+
+describe("shoulderTabReserve", () => {
+  it("ignores the top drawer when measuring the shoulder tab band", () => {
+    const elementAt = (top: number) => ({ getBoundingClientRect: () => ({ top }) }) as HTMLElement;
+    const elements = new Map<string, HTMLElement>([
+      ['[data-chat-composer-form="true"]', elementAt(20)],
+      [".chat-composer-shoulder-tab", elementAt(100)],
+      ['[data-chat-composer-main-surface="true"]', elementAt(128)],
+    ]);
+    const overlay = {
+      querySelector: (selector: string) => elements.get(selector) ?? null,
+    } as HTMLElement;
+
+    expect(shoulderTabReserve(overlay)).toBe(28);
+    elements.set(".chat-composer-tasks-tab", elementAt(100));
+    expect(shoulderTabReserve(overlay)).toBe(0);
   });
 });
 
