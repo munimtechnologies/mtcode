@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import { HttpClientError } from "effect/unstable/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -18,6 +19,27 @@ const retrySchedule = Schedule.exponential("1 second").pipe(
   ),
   Schedule.upTo({ duration: "10 minutes" }),
 );
+
+/**
+ * A relay that answers 4xx has given a final answer: the route is missing on
+ * the deployed relay (404), or it refuses this environment's credential
+ * (401/403). Retrying cannot change any of those, and the schedule above would
+ * otherwise spend ten minutes re-asking on every backend start — the label sync
+ * runs at startup, so a relay without this route turned every boot into ~34
+ * failed requests. Only 408/429 (timeout, rate limit) and 5xx/transport faults
+ * are worth another attempt.
+ */
+export const isRetryableRelayFailure = (error: unknown): boolean => {
+  if (!HttpClientError.isHttpClientError(error) || error.response === undefined) {
+    // Transport faults and non-HTTP failures stay retryable.
+    return true;
+  }
+  const { status } = error.response;
+  if (status === 408 || status === 429) {
+    return true;
+  }
+  return status < 400 || status >= 500;
+};
 
 const readSecretString = (secrets: ServerSecretStore.ServerSecretStore["Service"], name: string) =>
   secrets.get(name).pipe(
@@ -72,9 +94,13 @@ export const runEnvironmentLabelRelaySync = Effect.fn("runEnvironmentLabelRelayS
   const initialSettings = yield* settings.getSettings;
   const synchronizeWithRetry = (environmentLabel: string) =>
     synchronize(environmentLabel).pipe(
-      Effect.retry({ schedule: retrySchedule }),
+      Effect.retry({ schedule: retrySchedule, while: isRetryableRelayFailure }),
       Effect.catch((cause) =>
-        Effect.logWarning("failed to synchronize environment label with relay", { cause }),
+        isRetryableRelayFailure(cause)
+          ? Effect.logWarning("failed to synchronize environment label with relay", { cause })
+          : // Expected against a relay deployment without the label route; the
+            // label is cosmetic, so stay quiet rather than warn on every boot.
+            Effect.logDebug("relay does not accept environment label updates", { cause }),
       ),
     );
 

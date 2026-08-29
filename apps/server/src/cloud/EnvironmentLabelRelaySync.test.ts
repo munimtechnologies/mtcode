@@ -20,6 +20,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { RELAY_ENVIRONMENT_CREDENTIAL_SECRET, RELAY_URL_SECRET } from "./config.ts";
 import {
+  isRetryableRelayFailure,
   runEnvironmentLabelRelaySync,
   synchronizeCurrentEnvironmentLabelWithRelay,
 } from "./EnvironmentLabelRelaySync.ts";
@@ -56,6 +57,16 @@ function response(request: HttpClientRequest.HttpClientRequest) {
     request,
     new Response(JSON.stringify({ ok: true }), {
       status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+}
+
+function statusResponse(request: HttpClientRequest.HttpClientRequest, status: number) {
+  return HttpClientResponse.fromWeb(
+    request,
+    new Response(JSON.stringify({ error: "nope" }), {
+      status,
       headers: { "content-type": "application/json" },
     }),
   );
@@ -159,3 +170,63 @@ it.effect("cancels an older synchronization when a newer label arrives", () =>
     }),
   ),
 );
+
+// A relay deployment without the label route answers 404. That status is not in
+// the endpoint's declared error union, so it reaches us as an HttpClientError
+// decode failure rather than a typed error — the shape the retry predicate has
+// to classify correctly, or every backend start burns ten minutes of retries.
+it.effect("classifies a relay 404 as a final answer, not a transient fault", () =>
+  Effect.gen(function* () {
+    let requestCount = 0;
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requestCount += 1;
+        return statusResponse(request, 404);
+      }),
+    );
+
+    const result = yield* synchronizeCurrentEnvironmentLabelWithRelay().pipe(
+      Effect.provideService(ServerSecretStore.ServerSecretStore, makeSecretStore()),
+      Effect.provideService(ServerEnvironment.ServerEnvironment, {
+        getEnvironmentId: Effect.succeed(environmentId),
+        getDescriptor: Effect.succeed(descriptor("Current label")),
+        setEnvironmentLabel: () => Effect.void,
+      }),
+      Effect.provideService(HttpClient.HttpClient, client),
+      Effect.result,
+    );
+
+    assert.equal(requestCount, 1);
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.equal(isRetryableRelayFailure(result.failure), false);
+    }
+  }),
+);
+
+it.effect("still retries a relay 503", () =>
+  Effect.gen(function* () {
+    const client = HttpClient.make((request) => Effect.sync(() => statusResponse(request, 503)));
+
+    const result = yield* synchronizeCurrentEnvironmentLabelWithRelay().pipe(
+      Effect.provideService(ServerSecretStore.ServerSecretStore, makeSecretStore()),
+      Effect.provideService(ServerEnvironment.ServerEnvironment, {
+        getEnvironmentId: Effect.succeed(environmentId),
+        getDescriptor: Effect.succeed(descriptor("Current label")),
+        setEnvironmentLabel: () => Effect.void,
+      }),
+      Effect.provideService(HttpClient.HttpClient, client),
+      Effect.result,
+    );
+
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.equal(isRetryableRelayFailure(result.failure), true);
+    }
+  }),
+);
+
+it("treats transport faults and non-HTTP failures as retryable", () => {
+  assert.equal(isRetryableRelayFailure(new Error("socket hang up")), true);
+  assert.equal(isRetryableRelayFailure(undefined), true);
+});
