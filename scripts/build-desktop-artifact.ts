@@ -915,6 +915,53 @@ export const WINDOWS_SERVER_EXTRA_RESOURCES = [
     filter: [WINDOWS_SERVER_ASAR_RESOURCE, `${WINDOWS_SERVER_ASAR_RESOURCE}.unpacked/**/*`],
   },
 ] as const;
+export const WSL_RUNTIME_ARCHIVE_NAME = "wsl-runtime.tar.gz";
+export const WSL_RUNTIME_ARCHIVE_HASH_NAME = `${WSL_RUNTIME_ARCHIVE_NAME}.sha256`;
+export const WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE = {
+  from: `apps/desktop/prod-resources/${WSL_RUNTIME_ARCHIVE_NAME}`,
+  to: WSL_RUNTIME_ARCHIVE_NAME,
+} as const;
+export const WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE = {
+  from: `apps/desktop/prod-resources/${WSL_RUNTIME_ARCHIVE_HASH_NAME}`,
+  to: WSL_RUNTIME_ARCHIVE_HASH_NAME,
+} as const;
+export const WSL_RUNTIME_ARCHIVE_CONTENT_ROOTS = ["apps/server/dist", "node_modules"] as const;
+
+// The WSL runtime uses only the Linux half of the shared Windows/WSL sidecar.
+// Keep build/install metadata and target-native packages that cannot run in
+// WSL out of the compressed archive.
+export const WSL_RUNTIME_ARCHIVE_EXCLUDED_PREFIXES = [
+  "node_modules/@anthropic-ai/claude-agent-sdk-",
+  "node_modules/.bin",
+  "node_modules/.pnpm",
+  "node_modules/.modules.yaml",
+  "node_modules/.pnpm-workspace-state-v1.json",
+  "node_modules/node-pty/prebuilds/darwin-",
+  "node_modules/node-pty/prebuilds/win32-",
+  "node_modules/node-pty/build",
+  "node_modules/node-pty/third_party/conpty",
+  "node_modules/@ff-labs/fff-bin-win32-",
+  "node_modules/@yuuang/ffi-rs-win32-",
+  "node_modules/@msgpackr-extract/msgpackr-extract-win32-",
+] as const;
+// WSL runs the same CPU arch as the Windows host; universal is mac-only.
+export const resolveWslPrebuildArch = (arch: typeof BuildArch.Type): "x64" | "arm64" | undefined =>
+  arch === "x64" ? "x64" : arch === "arm64" ? "arm64" : undefined;
+
+// A packaged WSL runtime is only usable when a Linux pty.node is bundled with
+// it, so this one predicate decides both whether the archive is built and
+// whether the packaging config ships it. Without it the build would produce an
+// archive that can never pass the install script's payload check, and every
+// launch would extract a few hundred MB from /mnt/c only to throw it away.
+export const bundlesWslRuntime = (input: {
+  readonly arch: typeof BuildArch.Type;
+  readonly prebuildPath: string | undefined;
+}): boolean => input.prebuildPath !== undefined && resolveWslPrebuildArch(input.arch) !== undefined;
+
+export const WSL_RUNTIME_EXTRA_RESOURCES = [
+  WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
+  WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
+] as const;
 /** Icon files the App icon setting can switch the running app to. */
 export const ALTERNATE_APP_ICON_FILES = [
   "munim-macos-1024.png",
@@ -2473,6 +2520,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         readonly provisioningProfilePath: string;
       }
     | undefined,
+  // Windows only, and false when no Linux node-pty prebuild was bundled: the
+  // sidecar staging skips the archive in that case, and listing a resource
+  // whose source file was never written fails the electron-builder step.
+  wslRuntimeBundled = false,
   distro: DesktopDistroIdentity = resolveDesktopDistroIdentity(),
 ) {
   const productName = resolveDesktopProductName(version);
@@ -3598,6 +3649,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
             provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
           }
         : undefined,
+      bundlesWslRuntime({ arch: options.arch, prebuildPath: options.wslPrebuild }),
       distro,
     ),
     dependencies: stageDependencies,
