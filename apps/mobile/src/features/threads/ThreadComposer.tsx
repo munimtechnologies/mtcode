@@ -83,9 +83,11 @@ export interface ThreadComposerProps {
   /**
    * Message sync phase for the selected thread (drives the status pill):
    * "loading" = first fetch, nothing to show yet; "syncing" = cached messages
-   * are on screen while they reconcile with the server.
+   * are on screen while they reconcile with the server; "reconnecting" = the
+   * subscription is failing its retries, so the sync is not actually
+   * progressing.
    */
-  readonly threadSyncPhase?: "loading" | "syncing" | null;
+  readonly threadSyncPhase?: "loading" | "syncing" | "reconnecting" | null;
   readonly selectedThread: OrchestrationThreadShell;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
@@ -163,7 +165,7 @@ function composerConnectionStatus(input: {
   readonly connectionError: string | null;
   readonly connectionState: RemoteClientConnectionState;
   readonly environmentLabel: string | null;
-  readonly threadSyncPhase?: "loading" | "syncing" | null;
+  readonly threadSyncPhase?: "loading" | "syncing" | "reconnecting" | null;
 }): ComposerStatusPillState | null {
   const environmentLabel = input.environmentLabel ?? "Environment";
 
@@ -200,6 +202,8 @@ function composerConnectionStatus(input: {
       return { kind: "syncing", label: "Loading messages..." };
     case "syncing":
       return { kind: "syncing", label: "Syncing messages..." };
+    case "reconnecting":
+      return { kind: "syncing", label: "Reconnecting..." };
     default:
       return null;
   }

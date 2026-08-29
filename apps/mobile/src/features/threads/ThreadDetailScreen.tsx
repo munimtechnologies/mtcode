@@ -115,6 +115,12 @@ export interface ThreadDetailScreenProps {
   readonly connectionStateLabel: EnvironmentConnectionPhase;
   /** Message sync status for the selected thread (drives the composer status pill). */
   readonly threadSyncStatus?: EnvironmentThreadStatus;
+  /**
+   * Unresolved thread-subscription failure. With cached messages on screen the
+   * content presentation stays "ready", so without this a failing stream reads
+   * as a sync that never finishes.
+   */
+  readonly threadSyncError?: string | null;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
   readonly environmentId: EnvironmentId;
@@ -447,6 +453,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       case "empty":
       case "cached":
       case "synchronizing":
+        if (props.threadSyncError != null) {
+          return "reconnecting" as const;
+        }
         if (contentPresentationKind === "ready") {
           return "syncing" as const;
         }

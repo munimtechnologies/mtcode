@@ -7,6 +7,7 @@ describe("ThreadSyncStatusPill", () => {
   it.each([
     ["loading", "Loading messages..."],
     ["syncing", "Syncing messages..."],
+    ["reconnecting", "Reconnecting..."],
   ] as const)("renders the %s message sync phase", (phase, label) => {
     const markup = renderToStaticMarkup(<ThreadSyncStatusPill phase={phase} />);
 
@@ -18,5 +19,20 @@ describe("ThreadSyncStatusPill", () => {
     expect(markup).toContain("pb-[calc(var(--chat-composer-attachment-overlap)_+_0.375rem)]");
     expect(markup).toContain(label);
     expect(markup).not.toContain("animate-");
+  });
+
+  it("surfaces the underlying failure while reconnecting", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadSyncStatusPill detail="Thread was not found" phase="reconnecting" />,
+    );
+
+    expect(markup).toContain('title="Thread was not found"');
+    expect(markup).toContain("Reconnecting...");
+  });
+
+  it("omits the title when there is no failure detail", () => {
+    const markup = renderToStaticMarkup(<ThreadSyncStatusPill phase="syncing" />);
+
+    expect(markup).not.toContain("title=");
   });
 });
