@@ -29,7 +29,7 @@ function compactTimeLabel(label: string): string {
 export const MtTeamsSidebarSection = memo(function MtTeamsSidebarSection() {
   useMtTeamsSync();
   const signedIn = useMtTeamsSelector((state) => state.sessionToken.length > 0);
-  const meUserId = useMtTeamsSelector((state) => state.me?.user.id ?? null);
+  const meUserId = useMtTeamsSelector((state) => state.me?.user?.id ?? null);
   const sharedThreads = useMtTeamsSelector((state) => state.sharedThreads);
   const [expanded, setExpanded] = useLocalStorage(TEAM_SHELF_EXPANDED_KEY, true, Schema.Boolean);
 

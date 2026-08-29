@@ -67,6 +67,16 @@ describe("MtTeamsInvitationsRow", () => {
     expect(renderToStaticMarkup(<MtTeamsInvitationsRow />)).toBe("");
   });
 
+  it("tolerates a partial invite response without an invites array", () => {
+    forbidFetch();
+    useMtTeamsStore.setState({
+      sessionToken: "tok",
+      myInvites: undefined as unknown as ReturnType<typeof useMtTeamsStore.getState>["myInvites"],
+    });
+
+    expect(renderToStaticMarkup(<MtTeamsInvitationsRow />)).toBe("");
+  });
+
   it("lists invites to my email with who invited, Accept, and Decline", () => {
     forbidFetch();
     useMtTeamsStore.setState({

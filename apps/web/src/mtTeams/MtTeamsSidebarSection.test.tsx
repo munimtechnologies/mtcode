@@ -36,6 +36,20 @@ describe("MtTeamsSidebarSection", () => {
     expect(renderToStaticMarkup(<MtTeamsSidebarSection />)).toBe("");
   });
 
+  it("tolerates a partial team profile without user details", () => {
+    vi.stubGlobal("fetch", () => {
+      throw new Error("unexpected fetch");
+    });
+    useMtTeamsStore.setState({
+      sessionToken: "tok",
+      me: { teams: [] } as unknown as NonNullable<
+        ReturnType<typeof useMtTeamsStore.getState>["me"]
+      >,
+    });
+
+    expect(renderToStaticMarkup(<MtTeamsSidebarSection />)).toContain("No teammate threads");
+  });
+
   it("lists teammates' shared threads with status dot, owner, and relative time", () => {
     vi.stubGlobal("fetch", () => {
       throw new Error("unexpected fetch");

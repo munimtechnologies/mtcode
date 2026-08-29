@@ -39,6 +39,7 @@ export const MT_TEAMS_POLL_INTERVAL_MS = 30_000;
 const EMPTY_THREADS: ReadonlyArray<MtTeamsSharedThread> = Object.freeze([]);
 const EMPTY_ENVIRONMENTS: ReadonlyArray<MtTeamsEnvironment> = Object.freeze([]);
 const EMPTY_MY_INVITES: ReadonlyArray<MtTeamsIncomingInvite> = Object.freeze([]);
+const EMPTY_TEAM_INVITE_LIST: ReadonlyArray<MtTeamsTeamInvite> = Object.freeze([]);
 const EMPTY_TEAM_INVITES: Readonly<Record<string, ReadonlyArray<MtTeamsTeamInvite>>> =
   Object.freeze({});
 
@@ -181,7 +182,24 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
         fetchMyEnvironments(session),
         fetchMyInvites(session),
       ]);
-      set({ me, environments: mine.environments, myInvites: invites.invites, syncError: null });
+      const normalizedMe: MtTeamsMe | null =
+        me && typeof me === "object"
+          ? {
+              ...me,
+              // Live team responses can omit `user` or send a non-array `teams`.
+              // Keep those shapes renderable instead of crashing the sidebar.
+              teams: (Array.isArray(me.teams) ? me.teams : []).filter(
+                (team): team is NonNullable<typeof team> =>
+                  Boolean(team && typeof team === "object" && typeof team.id === "string"),
+              ),
+            }
+          : null;
+      set({
+        me: normalizedMe,
+        environments: Array.isArray(mine?.environments) ? mine.environments : EMPTY_ENVIRONMENTS,
+        myInvites: Array.isArray(invites?.invites) ? invites.invites : EMPTY_MY_INVITES,
+        syncError: null,
+      });
       await Promise.all([get().refreshSharedThreads(), get().refreshTeamInvites()]);
     } catch (error) {
       set({ syncError: errorMessage(error) });
@@ -203,7 +221,9 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
       );
       const byId = new Map<string, MtTeamsSharedThread>();
       for (const result of results) {
-        for (const thread of result.threads) byId.set(thread.sharedThreadId, thread);
+        for (const thread of Array.isArray(result.threads) ? result.threads : EMPTY_THREADS) {
+          byId.set(thread.sharedThreadId, thread);
+        }
       }
       const merged = [...byId.values()].sort((left, right) =>
         right.updatedAt.localeCompare(left.updatedAt),
@@ -227,7 +247,10 @@ export const useMtTeamsStore = create<MtTeamsStore>((set, get) => ({
       const results = await Promise.all(
         teams.map(async (team) => {
           const result = await fetchTeamInvites(session, { teamId: team.id });
-          return [team.id, result.invites] as const;
+          return [
+            team.id,
+            Array.isArray(result.invites) ? result.invites : EMPTY_TEAM_INVITE_LIST,
+          ] as const;
         }),
       );
       set({ teamInvites: Object.fromEntries(results), syncError: null });

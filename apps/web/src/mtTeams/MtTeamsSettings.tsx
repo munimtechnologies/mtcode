@@ -220,8 +220,8 @@ function MtTeamsSignedInRows() {
         description="Signed in to the team service."
         status={
           <span>
-            {me?.user.name ?? userName}
-            {me?.user.email ? ` · ${me.user.email}` : ""}
+            {me?.user?.name ?? userName}
+            {me?.user?.email ? ` · ${me.user.email}` : ""}
           </span>
         }
         control={
@@ -247,11 +247,12 @@ function MtTeamsSignedInRows() {
  */
 export function MtTeamsInvitationsRow() {
   const myInvites = useMtTeamsSelector((state) => state.myInvites);
+  const invites = myInvites ?? [];
   const refreshMe = useMtTeamsSelector((state) => state.refreshMe);
   const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (myInvites.length === 0) return null;
+  if (invites.length === 0) return null;
 
   const respond = async (inviteId: string, action: "accept" | "decline") => {
     if (pendingInviteId !== null) return;
@@ -278,7 +279,7 @@ export function MtTeamsInvitationsRow() {
     >
       <div className="max-w-md space-y-3 pb-2">
         <ul className="space-y-1.5">
-          {myInvites.map((invite) => (
+          {invites.map((invite) => (
             <li
               key={invite.inviteId}
               className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-2.5 py-1.5"
@@ -316,6 +317,7 @@ export function MtTeamsInvitationsRow() {
 
 export function MtTeamsTeamsRow() {
   const me = useMtTeamsSelector((state) => state.me);
+  const teams = me?.teams ?? [];
   const refreshMe = useMtTeamsSelector((state) => state.refreshMe);
   const [teamName, setTeamName] = useState("");
   const [pending, setPending] = useState(false);
@@ -341,10 +343,10 @@ export function MtTeamsTeamsRow() {
       description="Teammates in a team see each other's shared threads and can message into them. Invite teammates by the email they use for their team account."
     >
       <div className="max-w-md space-y-3 pb-2">
-        {me && me.teams.length > 0 ? (
+        {teams.length > 0 ? (
           <ul className="space-y-2">
-            {me.teams.map((team) => (
-              <MtTeamsTeamCard key={team.id} team={team} meUserId={me.user.id} />
+            {teams.map((team) => (
+              <MtTeamsTeamCard key={team.id} team={team} meUserId={me?.user?.id ?? ""} />
             ))}
           </ul>
         ) : (
@@ -618,7 +620,10 @@ function MtTeamsSharedThreadsRow() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ownThreads = me ? sharedThreads.filter((thread) => thread.ownerUserId === me.user.id) : [];
+  const meUserId = me?.user?.id ?? null;
+  const ownThreads = meUserId
+    ? sharedThreads.filter((thread) => thread.ownerUserId === meUserId)
+    : [];
   const teams = me?.teams ?? [];
   const selectedTeam = teams.find((team) => team.id === teamId) ?? teams[0];
   const selectedEnvironment =

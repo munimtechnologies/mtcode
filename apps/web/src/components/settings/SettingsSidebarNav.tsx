@@ -88,7 +88,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
 function MtTeamsInviteCountBadge() {
   useMtTeamsSync();
   const count = useMtTeamsSelector((state) =>
-    state.sessionToken.length > 0 ? state.myInvites.length : 0,
+    state.sessionToken.length > 0 ? (state.myInvites?.length ?? 0) : 0,
   );
   if (count === 0) return null;
   return <SidebarMenuBadge>{count}</SidebarMenuBadge>;
