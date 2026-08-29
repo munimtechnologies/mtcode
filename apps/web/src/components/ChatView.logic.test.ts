@@ -149,7 +149,7 @@ describe("attachment preview handoff", () => {
           previewUrl: "blob:image",
         },
         {
-          type: "pdf" as const,
+          type: "file" as const,
           id: "pdf-attachment",
           name: "spec.pdf",
           mimeType: "application/pdf" as const,

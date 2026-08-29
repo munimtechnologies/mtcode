@@ -1,7 +1,8 @@
 import type {
   ChatAttachment as ContractChatAttachment,
   ChatImageAttachment as ContractChatImageAttachment,
-  ChatPdfAttachment as ContractChatPdfAttachment,
+  ChatFileAttachment as ContractChatFileAttachment,
+  ChatUnknownAttachment as ContractChatUnknownAttachment,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointSummary,
   OrchestrationLatestTurn,
@@ -37,11 +38,17 @@ export interface ChatImageAttachment extends ContractChatImageAttachment {
   readonly previewUrl?: string;
 }
 
-export interface ChatPdfAttachment extends ContractChatPdfAttachment {
+/** Any non-image attachment: PDFs, archives, source files. */
+export interface ChatFileAttachment extends ContractChatFileAttachment {
   readonly previewUrl?: string;
 }
 
-export type ChatAttachment = ChatImageAttachment | ChatPdfAttachment;
+/** An attachment type this build does not know; rendered as unsupported. */
+export interface ChatUnknownAttachment extends ContractChatUnknownAttachment {
+  readonly previewUrl?: string;
+}
+
+export type ChatAttachment = ChatImageAttachment | ChatFileAttachment | ChatUnknownAttachment;
 
 export function isImageAttachment(attachment: ChatAttachment): attachment is ChatImageAttachment {
   return attachment.type === "image";

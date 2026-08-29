@@ -110,8 +110,10 @@ export function attachmentRelativePath(attachment: ChatAttachment): string | nul
       });
       return `${attachment.id}${extension}`;
     }
-    case "pdf":
-      return `${attachment.id}.pdf`;
+    case "file":
+      return `${attachment.id}${attachmentFileExtension(attachment.name)}`;
+    default:
+      return null;
   }
 }
 

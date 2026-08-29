@@ -124,6 +124,21 @@ require apps/mobile/src/features/home/HomeScreen.tsx "MtTeamsTeamShelf" "Team sh
 # --- munim new-thread env helpers (e51e0fc8e) ---
 require apps/web/src/hooks/useHandleNewThread.ts "shouldReadProjectFileForNewThreadDefaults" "new-thread project-file defaults"
 
+# --- File/PDF attachments (c32c7e223, restored 2026-08-29) ---
+# A 2026-08-17 integrate left contracts on the old "pdf" attachment model while
+# the server moved to upstream's generic "file" type, so the server bundle threw
+# "PROVIDER_SEND_TURN_MAX_FILE_BYTES is not defined" on boot and crash-looped.
+require packages/contracts/src/orchestration.ts "ChatFileAttachment" "generic file attachment schema"
+require packages/contracts/src/orchestration.ts "ChatUnknownAttachment" "forward-compatible unknown attachment schema"
+require apps/server/src/attachmentStore.ts 'case "file"' "file attachments get a stored path"
+require apps/server/src/provider/Layers/CursorAdapter.ts 'attachment.type !== "image"' "non-image attachments sent as ACP resource links"
+require apps/web/src/components/chat/MessagesTimeline.tsx "filter(isImageAttachment)" "timeline image grid filters non-images"
+
+# --- WS client analytics props (restored 2026-08-29) ---
+# The merge dropped this argument from the makeWsRpcLayer call, so per-client
+# telemetry never reached the RPC layer.
+require apps/server/src/ws.ts "clientAnalyticsProps," "client analytics props passed into the ws rpc layer"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2

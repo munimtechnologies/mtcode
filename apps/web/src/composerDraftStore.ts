@@ -37,7 +37,7 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ChatImageAttachment,
-  type ChatPdfAttachment,
+  type ChatFileAttachment,
 } from "./types";
 import {
   type TerminalContextDraft,
@@ -86,7 +86,9 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 
 export const PersistedComposerImageAttachment = Schema.Struct({
   id: Schema.String,
-  type: Schema.optional(Schema.Literals(["image", "pdf"])),
+  // "pdf" stays accepted so drafts persisted before the "file" unification
+  // still decode instead of being dropped on load.
+  type: Schema.optional(Schema.Literals(["image", "pdf", "file"])),
   name: Schema.String,
   mimeType: Schema.String,
   sizeBytes: Schema.Number,
@@ -103,10 +105,10 @@ interface ComposerAttachmentPreviewState {
 export interface ComposerImageAttachment
   extends Omit<ChatImageAttachment, "previewUrl">, ComposerAttachmentPreviewState {}
 
-export interface ComposerPdfAttachment
-  extends Omit<ChatPdfAttachment, "previewUrl">, ComposerAttachmentPreviewState {}
+export interface ComposerFileAttachment
+  extends Omit<ChatFileAttachment, "previewUrl">, ComposerAttachmentPreviewState {}
 
-type ComposerAttachment = ComposerImageAttachment | ComposerPdfAttachment;
+type ComposerAttachment = ComposerImageAttachment | ComposerFileAttachment;
 
 const PersistedTerminalContextDraft = Schema.Struct({
   id: Schema.String,
@@ -270,7 +272,7 @@ const PersistedComposerDraftStoreStorage = Schema.Struct({
 export interface ComposerThreadDraftState {
   prompt: string;
   images: ComposerImageAttachment[];
-  pdfs: ComposerPdfAttachment[];
+  pdfs: ComposerFileAttachment[];
   nonPersistedImageIds: string[];
   nonPersistedPdfIds: string[];
   persistedAttachments: PersistedComposerImageAttachment[];
@@ -501,7 +503,7 @@ interface ComposerDraftStoreState {
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => void;
   addImages: (threadRef: ComposerThreadTarget, images: ComposerImageAttachment[]) => void;
   removeImage: (threadRef: ComposerThreadTarget, imageId: string) => void;
-  addPdfs: (threadRef: ComposerThreadTarget, pdfs: ComposerPdfAttachment[]) => void;
+  addPdfs: (threadRef: ComposerThreadTarget, pdfs: ComposerFileAttachment[]) => void;
   removePdf: (threadRef: ComposerThreadTarget, pdfId: string) => void;
   insertTerminalContext: (
     threadRef: ComposerThreadTarget,
@@ -634,7 +636,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
 });
 
 const EMPTY_IMAGES: ComposerImageAttachment[] = [];
-const EMPTY_PDFS: ComposerPdfAttachment[] = [];
+const EMPTY_PDFS: ComposerFileAttachment[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_PERSISTED_ATTACHMENTS: PersistedComposerImageAttachment[] = [];
 const EMPTY_TERMINAL_CONTEXTS: TerminalContextDraft[] = [];
@@ -1206,9 +1208,14 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
   }
   return {
     id,
+    // Drafts persisted before non-image attachments unified under "file" still
+    // say "pdf"; normalise on read so old drafts keep hydrating.
     type:
-      type === "pdf" || mimeType === "application/pdf" || name.toLowerCase().endsWith(".pdf")
-        ? "pdf"
+      type === "pdf" ||
+      type === "file" ||
+      mimeType === "application/pdf" ||
+      name.toLowerCase().endsWith(".pdf")
+        ? "file"
         : "image",
     name,
     mimeType,
@@ -2279,18 +2286,18 @@ function hydratePersistedComposerImageAttachment(
 
 function hydrateComposerAttachmentsFromPersisted(
   attachments: ReadonlyArray<PersistedComposerImageAttachment>,
-): Array<ComposerImageAttachment | ComposerPdfAttachment> {
-  const hydrated: Array<ComposerImageAttachment | ComposerPdfAttachment> = [];
+): Array<ComposerImageAttachment | ComposerFileAttachment> {
+  const hydrated: Array<ComposerImageAttachment | ComposerFileAttachment> = [];
   for (const attachment of attachments) {
     const file = hydratePersistedComposerImageAttachment(attachment);
     if (!file) continue;
 
-    if (attachment.type === "pdf" || attachment.mimeType === "application/pdf") {
+    if (attachment.type !== "image") {
       hydrated.push({
-        type: "pdf",
+        type: "file",
         id: attachment.id,
         name: attachment.name,
-        mimeType: "application/pdf",
+        mimeType: attachment.mimeType,
         sizeBytes: attachment.sizeBytes,
         previewUrl: attachment.dataUrl,
         file,
@@ -2320,9 +2327,9 @@ export function hydrateImagesFromPersisted(
 
 export function hydratePdfsFromPersisted(
   attachments: ReadonlyArray<PersistedComposerImageAttachment>,
-): ComposerPdfAttachment[] {
+): ComposerFileAttachment[] {
   return hydrateComposerAttachmentsFromPersisted(attachments).filter(
-    (attachment): attachment is ComposerPdfAttachment => attachment.type === "pdf",
+    (attachment): attachment is ComposerFileAttachment => attachment.type === "file",
   );
 }
 

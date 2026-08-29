@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -61,6 +62,7 @@ describe("deriveProviderModelsForDisplay", () => {
     const markup = renderToStaticMarkup(
       createElement(ProviderInstanceCard, {
         instanceId,
+        environmentId: EnvironmentId.make("environment-test"),
         instance: { driver },
         driverOption: undefined,
         liveProvider,

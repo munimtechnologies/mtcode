@@ -85,23 +85,26 @@ describe("canonicalizeClientCommandTimestamps", () => {
     expect(result.bootstrap?.createThread?.createdAt).toBe(serverReceivedAt);
   });
 
-  it.effect("persists PDF turn attachments with PDF metadata and extension", () =>
+  // Inline data-URL attachments are images only. PDFs and other files are
+  // uploaded through the attachment endpoint first and arrive as claimed
+  // "file" attachments, so they never reach this branch.
+  it.effect("persists inline image turn attachments with image metadata and extension", () =>
     Effect.gen(function* () {
       const command: ClientOrchestrationCommand = {
         type: "thread.turn.start",
-        commandId: CommandId.make("normalizer-pdf-command"),
-        threadId: ThreadId.make("normalizer-pdf-thread"),
+        commandId: CommandId.make("normalizer-image-command"),
+        threadId: ThreadId.make("normalizer-image-thread"),
         message: {
-          messageId: MessageId.make("normalizer-pdf-message"),
+          messageId: MessageId.make("normalizer-image-message"),
           role: "user",
-          text: "Read this document",
+          text: "Look at this",
           attachments: [
             {
-              type: "pdf",
-              name: "spec.pdf",
-              mimeType: "application/pdf",
-              sizeBytes: 6,
-              dataUrl: "data:application/pdf;base64,JVBERi0x",
+              type: "image",
+              name: "shot.png",
+              mimeType: "image/png",
+              sizeBytes: 4,
+              dataUrl: "data:image/png;base64,iVBORw==",
             },
           ],
         },
@@ -118,20 +121,21 @@ describe("canonicalizeClientCommandTimestamps", () => {
 
       const attachment = result.message.attachments[0];
       if (!attachment) {
-        throw new Error("Expected a persisted PDF attachment");
+        throw new Error("Expected a persisted image attachment");
       }
       expect(attachment).toMatchObject({
-        type: "pdf",
-        name: "spec.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 6,
+        type: "image",
+        name: "shot.png",
+        mimeType: "image/png",
       });
+      const relativePath = attachmentRelativePath(attachment);
+      if (relativePath === null) {
+        throw new Error("Expected a storable attachment path");
+      }
       const config = yield* ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const info = yield* fileSystem.stat(
-        path.join(config.attachmentsDir, attachmentRelativePath(attachment)),
-      );
+      const info = yield* fileSystem.stat(path.join(config.attachmentsDir, relativePath));
       expect(info.type).toBe("File");
     }).pipe(Effect.provide(normalizeTestLayer)),
   );

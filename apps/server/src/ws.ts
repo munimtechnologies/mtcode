@@ -3032,6 +3032,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             makeWsRpcLayer(
               session,
               clientOrigin,
+              clientAnalyticsProps,
               previewAutomationBroker,
               computerTaskBroker,
               computerViewBroker,

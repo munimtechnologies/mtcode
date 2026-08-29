@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  attachmentFileExtension,
   attachmentRelativePath,
   createAttachmentId,
   createPendingAttachmentId,
@@ -18,16 +19,32 @@ import {
 } from "./attachmentStore.ts";
 
 describe("attachmentStore", () => {
+  // PDFs ride the generic "file" attachment type; the extension still comes
+  // from the file name, so a spec.pdf lands as <id>.pdf on disk.
   it("stores PDF attachments with a stable PDF extension", () => {
     expect(
       attachmentRelativePath({
-        type: "pdf",
+        type: "file",
         id: "thread-1-attachment",
         name: "spec.pdf",
         mimeType: "application/pdf",
         sizeBytes: 4,
       }),
     ).toBe("thread-1-attachment.pdf");
+  });
+
+  // Attachment types this build does not know are skipped rather than stored
+  // under a guessed path.
+  it("has no path for unknown attachment types", () => {
+    expect(
+      attachmentRelativePath({
+        type: "hologram",
+        id: "thread-1-attachment",
+        name: "scene.holo",
+        mimeType: "application/x-holo",
+        sizeBytes: 4,
+      }),
+    ).toBeNull();
   });
 
   it("sanitizes thread ids when creating attachment ids", () => {

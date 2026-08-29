@@ -71,7 +71,7 @@ import {
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
   type ComposerImageAttachment,
-  type ComposerPdfAttachment,
+  type ComposerFileAttachment,
   useComposerDraftStore,
   DraftId,
 } from "./composerDraftStore";
@@ -110,11 +110,11 @@ function makeImage(input: {
   };
 }
 
-function makePdf(input: { id: string; previewUrl: string; name?: string }): ComposerPdfAttachment {
+function makePdf(input: { id: string; previewUrl: string; name?: string }): ComposerFileAttachment {
   const name = input.name ?? "document.pdf";
   const file = new File([new Uint8Array([1, 2, 3, 4])], name, { type: "application/pdf" });
   return {
-    type: "pdf",
+    type: "file",
     id: input.id,
     name,
     mimeType: "application/pdf",

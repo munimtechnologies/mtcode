@@ -165,11 +165,11 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
               });
             }
 
-            // Lowercasing must not widen the pdf literal mime type.
-            const normalizedAttachment =
-              attachment.type === "pdf"
-                ? { ...attachment, id: claim.finalId }
-                : { ...attachment, id: claim.finalId, mimeType: attachment.mimeType.toLowerCase() };
+            const normalizedAttachment = {
+              ...attachment,
+              id: claim.finalId,
+              mimeType: attachment.mimeType.toLowerCase(),
+            };
             const expectedPath = resolveAttachmentPath({
               attachmentsDir: serverConfig.attachmentsDir,
               attachment: normalizedAttachment,
@@ -199,14 +199,9 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           }
 
           const parsed = parseBase64DataUrl(attachment.dataUrl);
-          const isValidPayload =
-            parsed !== null &&
-            (attachment.type === "image"
-              ? parsed.mimeType.startsWith("image/")
-              : parsed.mimeType === "application/pdf");
-          if (!isValidPayload || !parsed) {
+          if (!parsed || !parsed.mimeType.startsWith("image/")) {
             return yield* new OrchestrationDispatchCommandError({
-              message: `Invalid ${attachment.type} attachment payload for '${attachment.name}'.`,
+              message: `Invalid image attachment payload for '${attachment.name}'.`,
             });
           }
 
@@ -216,7 +211,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             bytes.byteLength > PROVIDER_SEND_TURN_MAX_ATTACHMENT_BYTES
           ) {
             return yield* new OrchestrationDispatchCommandError({
-              message: `${attachment.type === "pdf" ? "PDF" : "Image"} attachment '${attachment.name}' is empty or too large.`,
+              message: `Image attachment '${attachment.name}' is empty or too large.`,
             });
           }
 
@@ -227,22 +222,13 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             });
           }
 
-          const persistedAttachment =
-            attachment.type === "pdf"
-              ? {
-                  type: "pdf" as const,
-                  id: attachmentId,
-                  name: attachment.name,
-                  mimeType: "application/pdf" as const,
-                  sizeBytes: bytes.byteLength,
-                }
-              : {
-                  type: "image" as const,
-                  id: attachmentId,
-                  name: attachment.name,
-                  mimeType: parsed.mimeType.toLowerCase(),
-                  sizeBytes: bytes.byteLength,
-                };
+          const persistedAttachment = {
+            type: "image" as const,
+            id: attachmentId,
+            name: attachment.name,
+            mimeType: parsed.mimeType.toLowerCase(),
+            sizeBytes: bytes.byteLength,
+          };
 
           const attachmentPath = resolveAttachmentPath({
             attachmentsDir: serverConfig.attachmentsDir,

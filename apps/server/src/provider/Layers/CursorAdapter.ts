@@ -1155,7 +1155,9 @@ export function makeCursorAdapter(
                   detail: `Invalid attachment id '${attachment.id}'.`,
                 });
               }
-              if (attachment.type === "pdf") {
+              // Anything that is not an inline image — files and attachment
+              // types this build does not know — rides as a resource link.
+              if (attachment.type !== "image") {
                 promptParts.push(
                   makeAcpFileResourceLink({
                     path: attachmentPath,

@@ -1571,17 +1571,19 @@ describe("ClaudeAdapterLive", () => {
         sizeBytes: 4,
       };
       const pdfAttachment = {
-        type: "pdf" as const,
+        type: "file" as const,
         id: "thread-claude-pdf-12345678-1234-1234-1234-123456789abc",
         name: "spec.pdf",
         mimeType: "application/pdf" as const,
         sizeBytes: 4,
       };
-      const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
-      const pdfAttachmentPath = NodePath.join(
-        attachmentsDir,
-        attachmentRelativePath(pdfAttachment),
-      );
+      const attachmentRelative = attachmentRelativePath(attachment);
+      const pdfAttachmentRelative = attachmentRelativePath(pdfAttachment);
+      if (attachmentRelative === null || pdfAttachmentRelative === null) {
+        throw new Error("Expected storable attachment paths");
+      }
+      const attachmentPath = NodePath.join(attachmentsDir, attachmentRelative);
+      const pdfAttachmentPath = NodePath.join(attachmentsDir, pdfAttachmentRelative);
       NodeFS.mkdirSync(NodePath.dirname(attachmentPath), { recursive: true });
       NodeFS.writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
       NodeFS.writeFileSync(pdfAttachmentPath, Uint8Array.from([5, 6, 7, 8]));
