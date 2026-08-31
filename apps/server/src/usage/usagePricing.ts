@@ -90,36 +90,20 @@ const CURSOR_PARAM_SUFFIXES = [
 ] as const;
 
 /**
- * Ranks competing LiteLLM rows that collapse onto the same normalized id.
- *
- * LiteLLM publishes one model under several provider keys — `claude-opus-5`,
- * `azure_ai/claude-opus-5`, `vertex_ai/claude-opus-5`,
- * `deepinfra/anthropic/claude-opus-5` — and `normalizeModelName` strips the
- * prefix, so they all land on `claude-opus-5`. They are not interchangeable:
- * some resale rows carry only input/output and omit cache pricing entirely,
- * and the `?? input` fallback below then charges cache reads at the full input
- * rate. On a cache-heavy agent transcript that is a ~10x overcharge decided by
- * nothing but JSON key order, so pick deliberately instead of last-write-wins.
- *
- * Higher wins; ties keep the first row seen.
- */
-function ratePrecedence(rawName: string, hasCacheRates: boolean): number {
-  // A bare id is the first-party listing; a `provider/` prefix is a reseller.
-  const canonical = !rawName.includes("/");
-  return (hasCacheRates ? 2 : 0) + (canonical ? 1 : 0);
-}
-
-/**
  * Projects the LiteLLM document into a rate table.
  *
  * Entries without both an input and an output rate are dropped: a half-priced
  * model would silently under-report cost, which is worse than reporting the
  * model as unpriced. Zero/zero rows (OpenRouter `auto`) are also dropped so
  * they cannot mask a later Cursor-native rate.
+ *
+ * Entries keep their full normalized key; a bare name is aliased only when no
+ * canonical entry exists and every qualified entry has the same rate. That stops
+ * reseller rows without cache pricing from collapsing onto a first-party id and
+ * overcharging cache reads at the full input rate.
  */
 export function parseRateTable(document: unknown): RateTable {
   const table = new Map<string, ModelRate>();
-  const precedence = new Map<string, number>();
   if (typeof document !== "object" || document === null) return table;
 
   for (const [name, raw] of Object.entries(document as Record<string, unknown>)) {
@@ -130,39 +114,64 @@ export function parseRateTable(document: unknown): RateTable {
     if (input === null || output === null) continue;
     if (input === 0 && output === 0) continue;
 
-    const cacheRead = finiteNumber(entry.cache_read_input_token_cost);
-    const cacheCreation = finiteNumber(entry.cache_creation_input_token_cost);
-
-    const id = normalizeModelName(name);
-    const rank = ratePrecedence(name, cacheRead !== null || cacheCreation !== null);
-    const seen = precedence.get(id);
-    if (seen !== undefined && seen >= rank) continue;
-    precedence.set(id, rank);
-
-    table.set(id, {
+    const key = normalizeRateKey(name);
+    if (key.length === 0) continue;
+    table.set(key, {
       inputCostPerToken: input,
       outputCostPerToken: output,
       // Anthropic bills cache reads at a discount and cache writes at a
       // premium. When a model omits them, cached input is priced as plain
       // input rather than as free.
-      cacheReadCostPerToken: cacheRead ?? input,
-      cacheCreationCostPerToken: cacheCreation ?? input,
+      cacheReadCostPerToken: finiteNumber(entry.cache_read_input_token_cost) ?? input,
+      cacheCreationCostPerToken: finiteNumber(entry.cache_creation_input_token_cost) ?? input,
     });
   }
+
+  // `null` marks a bare name claimed at conflicting rates: no alias for it.
+  const aliasCandidates = new Map<string, ModelRate | null>();
+  for (const [key, rate] of table) {
+    const alias = bareModelName(key);
+    if (alias.length === 0 || alias === key || table.has(alias)) continue;
+    const held = aliasCandidates.get(alias);
+    if (held === undefined) {
+      aliasCandidates.set(alias, rate);
+    } else if (held !== null && !sameRate(held, rate)) {
+      aliasCandidates.set(alias, null);
+    }
+  }
+  for (const [alias, rate] of aliasCandidates) {
+    if (rate !== null) table.set(alias, rate);
+  }
+
   return table;
+}
+
+function sameRate(a: ModelRate, b: ModelRate): boolean {
+  return (
+    a.inputCostPerToken === b.inputCostPerToken &&
+    a.outputCostPerToken === b.outputCostPerToken &&
+    a.cacheReadCostPerToken === b.cacheReadCostPerToken &&
+    a.cacheCreationCostPerToken === b.cacheCreationCostPerToken
+  );
+}
+
+function normalizeRateKey(model: string): string {
+  return model.trim().toLowerCase();
 }
 
 /**
  * Canonicalises a model name for lookup.
  *
- * Strips a `provider/` prefix (LiteLLM publishes both `claude-opus-5` and
- * `anthropic/claude-opus-5`) and lowercases, since transcripts are inconsistent
- * about casing.
+ * Strips a `provider/` prefix and lowercases, since transcripts are
+ * inconsistent about casing.
  */
 export function normalizeModelName(model: string): string {
-  const trimmed = model.trim().toLowerCase();
-  const slash = trimmed.lastIndexOf("/");
-  return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+  return bareModelName(normalizeRateKey(model));
+}
+
+function bareModelName(key: string): string {
+  const slash = key.lastIndexOf("/");
+  return slash === -1 ? key : key.slice(slash + 1);
 }
 
 /**
@@ -267,16 +276,24 @@ const UNPRICEABLE_MODELS = new Set([
 ]);
 
 export function lookupRate(table: RateTable, model: string): ModelRate | null {
-  const normalized = normalizeModelName(model);
-  if (normalized.length === 0 || UNPRICEABLE_MODELS.has(normalized)) return null;
+  const key = normalizeRateKey(model);
+  const bareName = bareModelName(key);
+  if (bareName.length === 0 || UNPRICEABLE_MODELS.has(bareName)) return null;
+
+  const exact = table.get(key);
+  if (exact) return exact;
+
+  // A missing provider-qualified key must stay unpriced so reseller rows
+  // cannot leak through bare aliases (upstream cache-pricing contract).
+  if (key.includes("/")) return null;
 
   // Cursor product rates win over LiteLLM collisions (notably `auto`).
   // Only the exact export slug is checked — never a stripped candidate — so
   // `composer-2.5-fast` cannot fall through to standard Composer rates.
-  const native = cursorNativeRate(normalized);
+  const native = cursorNativeRate(bareName);
   if (native !== null) return native;
 
-  for (const candidate of modelLookupCandidates(normalized)) {
+  for (const candidate of modelLookupCandidates(bareName)) {
     const fromTable = table.get(candidate);
     if (fromTable) return fromTable;
   }

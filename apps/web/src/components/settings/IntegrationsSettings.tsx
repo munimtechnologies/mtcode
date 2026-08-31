@@ -11,8 +11,10 @@ import {
   BROWSER_PROFILE_MAX_COUNT,
   type BrowserProfile,
   BROWSER_PROFILE_NAME_MAX_LENGTH,
+  BROWSER_RECORDING_FRAME_RATES,
   DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
   DEFAULT_BROWSER_PROFILE_ID,
+  DEFAULT_BROWSER_RECORDING_FRAME_RATE,
   DEFAULT_BROWSER_VIEWPORT,
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_UNIFIED_SETTINGS,
@@ -396,6 +398,51 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
             {Object.entries(APPEARANCE_LABELS).map(([value, label]) => (
               <SelectItem hideIndicator key={value} value={value}>
                 {label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boolean }) {
+  const frameRate = useClientSettings((settings) => settings.browserRecordingFrameRate);
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsRow
+      {...searchableSetting("browser-recording-frame-rate")}
+      description="Maximum frame rate for browser recordings. 30 fps is the default and uses less CPU and storage; 60 fps captures smoother motion."
+      resetAction={
+        !disabled && frameRate !== DEFAULT_BROWSER_RECORDING_FRAME_RATE ? (
+          <SettingResetButton
+            label="browser recording frame rate"
+            onClick={() =>
+              updateSettings({ browserRecordingFrameRate: DEFAULT_BROWSER_RECORDING_FRAME_RATE })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          disabled={disabled}
+          value={String(frameRate)}
+          onValueChange={(value) => {
+            const next = BROWSER_RECORDING_FRAME_RATES.find((rate) => String(rate) === value);
+            if (next !== undefined) {
+              updateSettings({ browserRecordingFrameRate: next });
+            }
+          }}
+        >
+          <SelectTrigger className="w-full sm:w-40" aria-label="Browser recording frame rate">
+            <SelectValue>{frameRate} fps</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {BROWSER_RECORDING_FRAME_RATES.map((rate) => (
+              <SelectItem hideIndicator key={rate} value={String(rate)}>
+                {rate} fps
               </SelectItem>
             ))}
           </SelectPopup>
@@ -873,6 +920,7 @@ export function IntegrationsSettingsPanel() {
       <BrowserViewportSetting disabled={previewDefaultsDisabled} />
       <BrowserZoomSetting disabled={previewDefaultsDisabled} />
       <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
+      <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
       <BrowserAutoShowFloatingPreviewSetting disabled={previewDefaultsDisabled} />
     </>
   );

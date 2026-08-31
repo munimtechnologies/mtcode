@@ -98,7 +98,6 @@ function ChatThreadRouteView() {
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}
           routeKind="server"
-          threadSyncDetail={serverThreadError}
           threadSyncPhase={threadSyncPhase}
         />
       ) : null}

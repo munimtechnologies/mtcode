@@ -89,7 +89,7 @@ describe("scan cache round trip", () => {
 
   it("rejects the whole cache when an intern table holds a non-string", () => {
     // models: [1] would pass the undefined guard, put a number in a record's
-    // model, and crash normalizeModelName at aggregate time.
+    // model, and crash lookupRate at aggregate time.
     const encoded = encodeScanCache(cacheWith([["/a.jsonl", 100, [record()]]]));
     const poisoned = { ...encoded, models: [1] };
 
@@ -199,6 +199,20 @@ describe("pruneScanCache with an unwalked root", () => {
     // A missing provider root or failed settings read leaves livePaths without
     // that provider's files. Its warm entries must survive the pass.
     const cache = cacheWith([["/codex/sessions/a.jsonl", 5000, [record()]]]);
+
+    const removed = pruneScanCache(cache, {
+      livePaths: new Set(),
+      walkedRoots: ["/claude/projects"],
+      windowStartMs: 4000,
+      retentionCutoffMs: 1000,
+    });
+
+    expect(removed).toBe(0);
+    expect(cache.size).toBe(1);
+  });
+
+  it("keeps entries under a sibling path that only shares the walked root prefix", () => {
+    const cache = cacheWith([["/claude/projects-copy/a.jsonl", 5000, [record()]]]);
 
     const removed = pruneScanCache(cache, {
       livePaths: new Set(),

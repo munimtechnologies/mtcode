@@ -45,8 +45,8 @@ class FakeElement {
     return this.attributes[name] ?? null;
   }
 
-  hasAttribute(): boolean {
-    return false;
+  hasAttribute(name: string): boolean {
+    return Object.hasOwn(this.attributes, name);
   }
 
   querySelector(selector: string): FakeElement | null {
@@ -136,6 +136,21 @@ describe("serializeRenderedMarkdownFragment", () => {
 
     expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
       "\\[\nA_t = \\lambda_t A_t^{\\text{local}}\n\\]",
+    );
+  });
+
+  it("uses a rendered card's explicit Markdown copy representation", () => {
+    const card = new FakeElement("DIV", [], {
+      "data-markdown-copy": "Hello World (Document template)\n\n",
+    }).append(
+      new FakeElement("SPAN").append(new FakeText("Hello World")),
+      new FakeElement("SPAN").append(new FakeText("Document template")),
+      new FakeElement("BUTTON").append(new FakeText("Use template")),
+    );
+    const container = new FakeElement("DIV").append(card);
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
+      "Hello World (Document template)",
     );
   });
 });

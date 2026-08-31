@@ -39,6 +39,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   type ChatFileAttachment,
   type ChatImageAttachment,
+  videoMimeType,
 } from "./types";
 import {
   type TerminalContextDraft,
@@ -87,16 +88,12 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 
 export const PersistedComposerImageAttachment = Schema.Struct({
   id: Schema.String,
-  // "pdf" stays accepted so drafts persisted before the "file" unification
-  // still decode instead of being dropped on load.
-  type: Schema.optional(Schema.Literals(["image", "pdf", "file"])),
   name: Schema.String,
   mimeType: Schema.String,
   sizeBytes: Schema.Number,
   dataUrl: Schema.String,
 });
 export type PersistedComposerImageAttachment = typeof PersistedComposerImageAttachment.Type;
-export type PersistedComposerAttachment = PersistedComposerImageAttachment;
 
 export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "previewUrl"> {
   previewUrl: string;
@@ -749,14 +746,24 @@ function composerImageDedupKey(image: ComposerImageAttachment): string {
   return `${image.mimeType}\u0000${image.sizeBytes}\u0000${image.name}`;
 }
 
-function composerAttachmentDedupKey(attachment: {
-  readonly mimeType: string;
-  readonly sizeBytes: number;
-  readonly name: string;
-}): string {
-  // Keep this independent from File.lastModified so dedupe is stable for hydrated
-  // attachments reconstructed from localStorage (which get a fresh lastModified value).
-  return `${attachment.mimeType}\u0000${attachment.sizeBytes}\u0000${attachment.name}`;
+export function composerFileDedupKey(
+  file: Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">,
+): string {
+  return `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`;
+}
+
+export function composerFileMatchesReattachMarker(
+  marker: Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">,
+  file: Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">,
+): boolean {
+  if (marker.name !== file.name || marker.sizeBytes !== file.sizeBytes) return false;
+  if (marker.mimeType === file.mimeType) return true;
+  const markerMimeType = marker.mimeType.toLowerCase();
+  return (
+    (markerMimeType === "" || markerMimeType === "application/octet-stream") &&
+    videoMimeType(marker) !== null &&
+    videoMimeType(file) !== null
+  );
 }
 
 function terminalContextDedupKey(context: TerminalContextDraft): string {
@@ -1101,26 +1108,17 @@ export function deriveEffectiveComposerModelState(input: {
    * collapsing to the default Codex bucket.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;
-  /** Keep a persisted thread's routing key even when live discovery temporarily omits it. */
-  preserveExistingThreadModel?: boolean | undefined;
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
   const baseModelCandidate =
     input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null;
-  const preservedThreadModel =
-    input.preserveExistingThreadModel === true &&
-    input.threadModelSelection &&
-    input.threadModelSelection.instanceId === input.selectedInstanceId
-      ? input.threadModelSelection.model
-      : null;
   const preserveThreadModel =
     input.selectedInstanceId !== null &&
     input.selectedInstanceId !== undefined &&
     input.threadModelSelection?.instanceId === input.selectedInstanceId;
   const baseModel =
-    preservedThreadModel ??
     (input.selectedInstanceId
       ? resolveAppModelSelectionForInstance(
           input.selectedInstanceId,
@@ -1151,15 +1149,8 @@ export function deriveEffectiveComposerModelState(input: {
   const activeSelectionInstanceId = instanceSelection
     ? (input.selectedInstanceId ?? ProviderInstanceId.make(input.selectedProvider))
     : ProviderInstanceId.make(input.selectedProvider);
-  const preservedActiveModel =
-    input.preserveExistingThreadModel === true &&
-    activeSelection &&
-    activeSelection.instanceId === input.selectedInstanceId
-      ? activeSelection.model
-      : null;
   const selectedModel = activeSelection?.model
-    ? (preservedActiveModel ??
-      resolveAppModelSelectionForInstance(
+    ? (resolveAppModelSelectionForInstance(
         activeSelectionInstanceId,
         input.settings,
         input.providers,
@@ -1210,7 +1201,6 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
   }
   const candidate = value as Record<string, unknown>;
   const id = candidate.id;
-  const type = candidate.type;
   const name = candidate.name;
   const mimeType = candidate.mimeType;
   const sizeBytes = candidate.sizeBytes;
@@ -1229,15 +1219,6 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
   }
   return {
     id,
-    // Drafts persisted before non-image attachments unified under "file" still
-    // say "pdf"; normalise on read so old drafts keep hydrating.
-    type:
-      type === "pdf" ||
-      type === "file" ||
-      mimeType === "application/pdf" ||
-      name.toLowerCase().endsWith(".pdf")
-        ? "file"
-        : "image",
     name,
     mimeType,
     sizeBytes,
@@ -3229,29 +3210,32 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
             const knownIds = new Set(existing.files.map((file) => file.id));
             const knownFiles = new Map<string, ComposerFileAttachment>(
-              existing.files.map((file) => [
-                `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`,
-                file,
-              ]),
+              existing.files.map((file) => [composerFileDedupKey(file), file]),
             );
             const accepted: ComposerFileAttachment[] = [];
             // Needs-reattach markers replaced in place by a re-pick, keyed by
             // the marker's id.
             const replacements = new Map<string, ComposerFileAttachment>();
             for (const file of files) {
-              const key = `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`;
+              const key = composerFileDedupKey(file);
               if (knownIds.has(file.id)) {
                 continue;
               }
-              const duplicate = knownFiles.get(key);
+              const duplicate =
+                knownFiles.get(key) ??
+                existing.files.find(
+                  (candidate) =>
+                    composerFileNeedsReattach(candidate) &&
+                    !replacements.has(candidate.id) &&
+                    composerFileMatchesReattachMarker(candidate, file),
+                );
               if (duplicate) {
-                // A needs-reattach marker persists exactly the metadata this
-                // key hashes, so re-picking the same file matches its marker.
-                // Dropping the pick as a duplicate would leave the draft
-                // blocked forever; replace the marker so the upload restarts.
+                // A needs-reattach marker is not a usable duplicate. Replace
+                // it so the upload restarts.
                 if (composerFileNeedsReattach(duplicate) && !replacements.has(duplicate.id)) {
                   replacements.set(duplicate.id, file);
                   knownIds.add(file.id);
+                  knownFiles.set(key, file);
                 }
                 continue;
               }
@@ -3842,18 +3826,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             // A file the destination already holds (same id, or same
             // metadata key) stays behind instead of duplicating there.
             const destinationFileIds = new Set(destination.files.map((file) => file.id));
-            const destinationFileKeys = new Set(
-              destination.files.map(
-                (file) => `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`,
-              ),
-            );
+            const destinationFileKeys = new Set(destination.files.map(composerFileDedupKey));
             const transferableFiles = source.files.filter(
               (file) =>
                 (file.file !== null || file.uploadEnvironmentId === destinationEnvironmentId) &&
                 !destinationFileIds.has(file.id) &&
-                !destinationFileKeys.has(
-                  `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`,
-                ),
+                !destinationFileKeys.has(composerFileDedupKey(file)),
             );
             const remainingAttachmentSlots = Math.max(
               0,
@@ -4103,8 +4081,6 @@ export function useEffectiveComposerModelState(input: {
    * instance reads its own model, not the default Codex's.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;
-  /** Keep a persisted thread's routing key even when live discovery temporarily omits it. */
-  preserveExistingThreadModel?: boolean | undefined;
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
@@ -4118,7 +4094,6 @@ export function useEffectiveComposerModelState(input: {
         providers: input.providers,
         selectedProvider: input.selectedProvider,
         selectedInstanceId: input.selectedInstanceId,
-        preserveExistingThreadModel: input.preserveExistingThreadModel,
         threadModelSelection: input.threadModelSelection,
         projectModelSelection: input.projectModelSelection,
         settings: input.settings,
@@ -4128,7 +4103,6 @@ export function useEffectiveComposerModelState(input: {
       input.providers,
       input.settings,
       input.projectModelSelection,
-      input.preserveExistingThreadModel,
       input.selectedInstanceId,
       input.selectedProvider,
       input.threadModelSelection,

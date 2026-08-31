@@ -1,3 +1,4 @@
+import { SearchIcon } from "lucide-react";
 import { memo } from "react";
 import { LayersIcon } from "lucide-react";
 
@@ -48,7 +49,7 @@ function PullRequestRowImpl({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(entry)}
       className={cn(
-        "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         // Offscreen rows are skipped for style, layout and paint: a long list costs what the
         // viewport shows, not what the pages have loaded. The intrinsic size keeps the
         // scrollbar honest while a row is skipped.
@@ -62,8 +63,8 @@ function PullRequestRowImpl({
         mergeability={entry.mergeability}
         baseBranch={entry.baseBranch}
       />
-      <span className="min-w-0">
-        <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+      <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5">
+        <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
           <span className="truncate">{entry.title}</span>
           {stackPosition ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
@@ -72,7 +73,26 @@ function PullRequestRowImpl({
             </span>
           ) : null}
         </span>
-        <PullRequestMetaLine className="mt-0.5 text-xs text-muted-foreground/70">
+        <span className="col-start-2 row-start-1 justify-self-end whitespace-nowrap text-xs text-muted-foreground/70 tabular-nums">
+          {formatRelativeTimeLabel(entry.updatedAt)}
+        </span>
+        <PullRequestMetaLine className="@container/pr-row-meta col-start-1 row-start-2 overflow-hidden text-xs text-muted-foreground/70">
+          {matchedElsewhere ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="flex min-w-6 items-center gap-1 overflow-hidden rounded-full border border-border/60 px-1 text-[10px]" />
+                }
+              >
+                <span className="sr-only">matched in the description</span>
+                <SearchIcon aria-hidden className="size-3 shrink-0" />
+                <span aria-hidden className="hidden truncate @xs/pr-row-meta:block">
+                  matched in the description
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">Matched in the description</TooltipPopup>
+            </Tooltip>
+          ) : null}{" "}
           <span className="flex shrink-0 items-center gap-1">
             {showProvider ? (
               <Tooltip>
@@ -100,15 +120,19 @@ function PullRequestRowImpl({
           </span>
           {showProjectTitle ? <span className="truncate">{entry.repository}</span> : null}
           {environmentLabel ? (
-            <span className="max-w-32 shrink-0 truncate">{environmentLabel}</span>
+            <span className="min-w-0 max-w-32 truncate">{environmentLabel}</span>
           ) : null}
-          <PullRequestActorLabel actor={entry.author} className="max-w-40 shrink-0" />
+          <PullRequestActorLabel
+            actor={entry.author}
+            className="min-w-4 max-w-40"
+            labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
+          />
           {/* Only a verdict somebody has actually given: "review required" is the absence of
               one, and saying so on every unreviewed row would say nothing. */}
           {entry.reviewDecision === "approved" || entry.reviewDecision === "changes-requested" ? (
             <span
               className={cn(
-                "shrink-0",
+                "min-w-0 truncate",
                 entry.reviewDecision === "approved"
                   ? "text-emerald-600/90 dark:text-emerald-400/80"
                   : "text-amber-600/90 dark:text-amber-400/80",
@@ -128,16 +152,12 @@ function PullRequestRowImpl({
               }}
             />
           )}
-          {matchedElsewhere ? (
-            <span className="shrink-0 rounded-full border border-border/60 px-1.5 text-[10px]">
-              matched in the description
-            </span>
-          ) : null}
         </PullRequestMetaLine>
-      </span>
-      <span className="flex shrink-0 flex-col items-end gap-0.5 text-xs text-muted-foreground/70 tabular-nums">
-        <span>{formatRelativeTimeLabel(entry.updatedAt)}</span>
-        <PullRequestDiffStat additions={entry.additions} deletions={entry.deletions} />
+        <PullRequestDiffStat
+          additions={entry.additions}
+          deletions={entry.deletions}
+          className="col-start-2 row-start-2 justify-self-end text-xs"
+        />
       </span>
     </button>
   );

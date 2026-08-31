@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
 
 import { lookupRate, normalizeModelName, parseRateTable, priceUsage } from "./usagePricing.ts";
 
@@ -10,7 +10,57 @@ const EMPTY_TOTALS = {
   reasoningTokens: 0,
 };
 
-describe("parseRateTable", () => {
+const rate = (input: number, cacheRead?: number) => ({
+  input_cost_per_token: input,
+  output_cost_per_token: input * 5,
+  ...(cacheRead === undefined ? {} : { cache_read_input_token_cost: cacheRead }),
+});
+
+describe("usage pricing", () => {
+  it("keeps the existing model-name normalization contract", () => {
+    expect(normalizeModelName(" Anthropic/Claude-Opus-5 ")).toBe("claude-opus-5");
+  });
+
+  it("keeps the canonical Fable rate separate from DeepInfra in either order", () => {
+    const canonical = ["claude-fable-5", rate(1e-5, 1e-6)] as const;
+    const deepInfra = ["deepinfra/anthropic/claude-fable-5", rate(1e-5)] as const;
+
+    for (const entries of [
+      [canonical, deepInfra],
+      [deepInfra, canonical],
+    ]) {
+      const table = parseRateTable(Object.fromEntries(entries));
+
+      expect(lookupRate(table, "claude-fable-5")?.cacheReadCostPerToken).toBe(1e-6);
+      expect(lookupRate(table, "deepinfra/anthropic/claude-fable-5")?.cacheReadCostPerToken).toBe(
+        1e-5,
+      );
+      expect(lookupRate(table, "other/claude-fable-5")).toBeNull();
+    }
+  });
+
+  it("adds a bare alias when every qualified entry has the same rate", () => {
+    const table = parseRateTable({
+      "provider-a/example-model": rate(1),
+      "provider-b/example-model": rate(1),
+    });
+
+    expect(lookupRate(table, "example-model")).toEqual(
+      lookupRate(table, "provider-a/example-model"),
+    );
+  });
+
+  it("leaves an ambiguous bare name unpriced", () => {
+    const table = parseRateTable({
+      "provider-a/example-model": rate(1),
+      "provider-b/example-model": rate(3),
+    });
+
+    expect(lookupRate(table, "provider-a/example-model")?.inputCostPerToken).toBe(1);
+    expect(lookupRate(table, "provider-b/example-model")?.inputCostPerToken).toBe(3);
+    expect(lookupRate(table, "example-model")).toBeNull();
+  });
+
   it("drops zero/zero LiteLLM rows so they cannot mask Cursor auto rates", () => {
     const table = parseRateTable({
       "openrouter/openrouter/auto": {
@@ -27,50 +77,14 @@ describe("parseRateTable", () => {
     expect(table.get("claude-sonnet-4-5")?.inputCostPerToken).toBe(3e-6);
   });
 
-  it("keeps cache pricing when a reseller row collides with the canonical id", () => {
-    // LiteLLM's DeepInfra rows carry no cache pricing and sort after the
-    // first-party listing, so last-write-wins used to charge cache reads at
-    // the full input rate.
-    const table = parseRateTable({
-      "claude-opus-5": {
-        input_cost_per_token: 5e-6,
-        output_cost_per_token: 2.5e-5,
-        cache_read_input_token_cost: 5e-7,
-        cache_creation_input_token_cost: 6.25e-6,
-      },
-      "deepinfra/anthropic/claude-opus-5": {
-        input_cost_per_token: 5e-6,
-        output_cost_per_token: 2.5e-5,
-      },
-    });
-
-    expect(table.get("claude-opus-5")?.cacheReadCostPerToken).toBe(5e-7);
-    expect(table.get("claude-opus-5")?.cacheCreationCostPerToken).toBe(6.25e-6);
-  });
-
-  it("takes cache pricing from a prefixed row when the canonical row lacks it", () => {
-    const table = parseRateTable({
-      "claude-fable-5": {
-        input_cost_per_token: 1e-5,
-        output_cost_per_token: 5e-5,
-      },
-      "vertex_ai/claude-fable-5": {
-        input_cost_per_token: 1e-5,
-        output_cost_per_token: 5e-5,
-        cache_read_input_token_cost: 1e-6,
-      },
-    });
-
-    expect(table.get("claude-fable-5")?.cacheReadCostPerToken).toBe(1e-6);
-  });
-
-  it("does not let a later equal-quality row overwrite an earlier one", () => {
+  it("does not let a reseller overwrite a canonical bare id", () => {
     const table = parseRateTable({
       "gpt-5.5": { input_cost_per_token: 5e-6, output_cost_per_token: 3e-5 },
       "azure_ai/gpt-5.5": { input_cost_per_token: 9e-6, output_cost_per_token: 9e-5 },
     });
 
     expect(table.get("gpt-5.5")?.inputCostPerToken).toBe(5e-6);
+    expect(lookupRate(table, "gpt-5.5")?.inputCostPerToken).toBe(5e-6);
   });
 });
 
@@ -102,10 +116,10 @@ describe("lookupRate", () => {
   });
 
   it("prices Cursor Auto Cost flat rates", () => {
-    const rate = lookupRate(table, "auto");
-    expect(rate?.inputCostPerToken).toBeCloseTo(1.25 / 1_000_000);
-    expect(rate?.outputCostPerToken).toBeCloseTo(6 / 1_000_000);
-    expect(rate?.cacheReadCostPerToken).toBeCloseTo(0.25 / 1_000_000);
+    const autoRate = lookupRate(table, "auto");
+    expect(autoRate?.inputCostPerToken).toBeCloseTo(1.25 / 1_000_000);
+    expect(autoRate?.outputCostPerToken).toBeCloseTo(6 / 1_000_000);
+    expect(autoRate?.cacheReadCostPerToken).toBeCloseTo(0.25 / 1_000_000);
   });
 
   it("prices Composer and Grok from Cursor docs", () => {
