@@ -37,6 +37,15 @@ use serde_json::{Value, json};
 /// Timeout for extension replies; a stuck call must not wedge a turn.
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
+fn new_browser_client_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("mcp-{nanos}-{}", std::process::id())
+}
+
 /// User-private filesystem socket (Unix) or user-scoped named pipe (Windows).
 /// Abstract / global names are intentionally avoided — they have no ownership.
 #[cfg(unix)]
@@ -134,6 +143,9 @@ pub struct BrowserBridge {
     next_id: AtomicU64,
     /// Bumped on every accept so disconnect sentinels from a prior host are ignored.
     connection_gen: Arc<AtomicU64>,
+    /// Stable id for this MCP process — the Chrome extension keys tab ownership
+    /// by client so one process's exit cleanup cannot close another's tabs.
+    client_id: String,
 }
 
 impl BrowserBridge {
@@ -147,6 +159,7 @@ impl BrowserBridge {
             replies,
             next_id: AtomicU64::new(1),
             connection_gen,
+            client_id: new_browser_client_id(),
         }
     }
 
@@ -161,6 +174,7 @@ impl BrowserBridge {
             replies,
             next_id: AtomicU64::new(1),
             connection_gen,
+            client_id: new_browser_client_id(),
         }
     }
 
@@ -232,6 +246,11 @@ impl BrowserBridge {
 
     fn dispatch(&mut self, command: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut params = params;
+        if let Some(map) = params.as_object_mut() {
+            map.entry("clientId".to_string())
+                .or_insert_with(|| json!(self.client_id.clone()));
+        }
         let request = json!({ "id": id, "command": command, "params": params });
 
         // Sample connection generation under the outgoing lock so a reconnect

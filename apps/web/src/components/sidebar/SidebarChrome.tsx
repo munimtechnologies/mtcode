@@ -34,7 +34,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AccountLimitsHoverCard } from "../usage/AccountLimits";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
-import { useUnreadBackgroundThreadCount } from "../../hooks/useUnreadBackgroundThreadCount";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -53,7 +52,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
       : null;
-  const unreadCount = useUnreadBackgroundThreadCount();
 
   return (
     <SidebarHeader
@@ -64,7 +62,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
       <SidebarTrigger
-        unreadCount={unreadCount}
         className={cn(
           "relative z-10 md:hidden",
           backdropVariant &&
@@ -206,11 +203,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         ? "settings"
         : location.pathname === "/status"
           ? "status"
-        : location.pathname === "/usage"
-          ? "usage"
-          : location.pathname === "/pull-requests"
-            ? "pull-requests"
-            : null,
+          : location.pathname === "/usage"
+            ? "usage"
+            : location.pathname === "/pull-requests"
+              ? "pull-requests"
+              : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for

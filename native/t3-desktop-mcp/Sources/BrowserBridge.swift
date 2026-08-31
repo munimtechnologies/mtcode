@@ -44,6 +44,10 @@ let bridgeSocketPath: String = {
 /// messaging.
 let bridgeRpcSocketPath: String = bridgeSocketPath + ".rpc"
 
+/// Stable id for this MCP process. The Chrome extension keys tab ownership by
+/// client so one process's exit cleanup cannot close another agent's tabs.
+let mcpBrowserClientId: String = UUID().uuidString
+
 /// Reply from the extension. A custom type rather than `Result` because the
 /// failure carries a human-readable message, not an `Error`.
 enum BridgeOutcome {
@@ -449,6 +453,9 @@ final class BrowserBridge {
     private func serveRpc(_ fd: Int32) {
         var buffer = Data()
         var chunk = [UInt8](repeating: 0, count: 65536)
+        /// Client ids observed on this peer — released when the peer disconnects
+        /// so only that MCP process's tabs close.
+        var peerClientIds = Set<String>()
         while true {
             let n = Darwin.read(fd, &chunk, chunk.count)
             if n <= 0 { break }
@@ -457,16 +464,19 @@ final class BrowserBridge {
                 let line = Data(buffer[buffer.startIndex..<newline])
                 buffer = buffer[buffer.index(after: newline)...]
                 if line.isEmpty { continue }
-                let response = handleRpcRequest(line)
+                let response = handleRpcRequest(line, peerClientIds: &peerClientIds)
                 var payload = response
                 payload.append(0x0A)
                 _ = writeAll(fd, payload)
             }
         }
+        for clientId in peerClientIds {
+            _ = performDirectCall("close_all_tabs", ["clientId": clientId], timeout: 2)
+        }
         close(fd)
     }
 
-    private func handleRpcRequest(_ line: Data) -> Data {
+    private func handleRpcRequest(_ line: Data, peerClientIds: inout Set<String>) -> Data {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let id = object["id"] as? Int,
               let command = object["command"] as? String else {
@@ -474,7 +484,17 @@ final class BrowserBridge {
                 "id": -1, "ok": false, "error": "invalid RPC request",
             ])) ?? Data()
         }
-        let params = object["params"] as? [String: Any] ?? [:]
+        var params = object["params"] as? [String: Any] ?? [:]
+        if let clientId = params["clientId"] as? String, !clientId.isEmpty {
+            peerClientIds.insert(clientId)
+        } else {
+            // Older peers omitted clientId — reuse one minted id for this
+            // connection so disconnect cleanup still scopes correctly.
+            let minted = peerClientIds.first(where: { $0.hasPrefix("rpc-") })
+                ?? "rpc-\(UUID().uuidString)"
+            params["clientId"] = minted
+            peerClientIds.insert(minted)
+        }
         let outcome = performDirectCall(command, params)
         switch outcome {
         case .success(let result):
@@ -538,6 +558,10 @@ final class BrowserBridge {
     func call(_ command: String, _ params: [String: Any] = [:], timeout: TimeInterval = 20)
         -> BridgeOutcome
     {
+        var params = params
+        if params["clientId"] == nil {
+            params["clientId"] = mcpBrowserClientId
+        }
         lock.lock()
         let rpcFd = rpcClientFD
         lock.unlock()
@@ -593,6 +617,10 @@ final class BrowserBridge {
     private func performDirectCall(
         _ command: String, _ params: [String: Any], timeout: TimeInterval = 20
     ) -> BridgeOutcome {
+        var params = params
+        if params["clientId"] == nil {
+            params["clientId"] = mcpBrowserClientId
+        }
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: BridgeOutcome = .failure("timed out")
 

@@ -18,9 +18,17 @@ const LEGACY_HOST = "com.t3tools.t3code.desktop";
 const GROUP_TITLE = "MT Code";
 const OWNED_STATE_KEY = "ownedState";
 
-/** Tabs this extension owns, and the group holding them. */
-let ownedTabs = new Set();
-let groupId = null;
+/**
+ * Per-MCP-client ownership. Cursor and MT Code (and extra MCP children) share
+ * one extension via the desktop bridge; each process has its own clientId so
+ * one client's cleanup cannot close another client's tabs.
+ *
+ * @typedef {{ tabs: Set<number>, groupId: number|null }} ClientOwned
+ * @type {Map<string, ClientOwned>}
+ */
+const clients = new Map();
+/** tabId → clientId, for assertOwned / favicon listeners / onRemoved. */
+const tabOwner = new Map();
 /** Tabs we have attached the debugger to, so we detach exactly once. */
 const attached = new Set();
 let port = null;
@@ -36,14 +44,38 @@ let connectedAt = 0;
 const LIVE_SESSION_DWELL_MS = 2000;
 let stateReady = null;
 
+function requireClientId(params) {
+  const clientId = params && typeof params.clientId === "string" ? params.clientId.trim() : "";
+  if (!clientId) throw new Error("clientId is required");
+  return clientId;
+}
+
+/** @returns {ClientOwned} */
+function clientState(clientId) {
+  let state = clients.get(clientId);
+  if (!state) {
+    state = { tabs: new Set(), groupId: null };
+    clients.set(clientId, state);
+  }
+  return state;
+}
+
+function groupTitleFor(clientId) {
+  // Keep the strip readable: short suffix so two agents are distinguishable.
+  const short = clientId.length <= 8 ? clientId : clientId.slice(0, 8);
+  return `${GROUP_TITLE} · ${short}`;
+}
+
 async function persistOwnedState() {
   try {
-    await chrome.storage.session.set({
-      [OWNED_STATE_KEY]: {
-        tabs: Array.from(ownedTabs),
-        groupId,
-      },
-    });
+    const serialized = {};
+    for (const [clientId, state] of clients) {
+      serialized[clientId] = {
+        tabs: Array.from(state.tabs),
+        groupId: state.groupId,
+      };
+    }
+    await chrome.storage.session.set({ [OWNED_STATE_KEY]: { clients: serialized } });
   } catch {
     // Storage can fail in restricted contexts; ownership still works in-memory.
   }
@@ -55,24 +87,55 @@ async function restoreOwnedState() {
     const state = stored?.[OWNED_STATE_KEY];
     if (!state || typeof state !== "object") return;
 
-    const next = new Set();
-    for (const tabId of Array.isArray(state.tabs) ? state.tabs : []) {
-      if (typeof tabId !== "number") continue;
-      try {
-        await chrome.tabs.get(tabId);
-        next.add(tabId);
-      } catch {
-        // Tab closed while the service worker was asleep.
-      }
-    }
-    ownedTabs = next;
+    clients.clear();
+    tabOwner.clear();
 
-    groupId = typeof state.groupId === "number" ? state.groupId : null;
-    if (groupId !== null) {
-      try {
-        await chrome.tabGroups.get(groupId);
-      } catch {
-        groupId = null;
+    // Legacy single-owner shape: { tabs, groupId }.
+    if (Array.isArray(state.tabs)) {
+      const legacy = clientState("legacy");
+      for (const tabId of state.tabs) {
+        if (typeof tabId !== "number") continue;
+        try {
+          await chrome.tabs.get(tabId);
+          legacy.tabs.add(tabId);
+          tabOwner.set(tabId, "legacy");
+        } catch {
+          // Tab closed while the service worker was asleep.
+        }
+      }
+      legacy.groupId = typeof state.groupId === "number" ? state.groupId : null;
+      if (legacy.groupId !== null) {
+        try {
+          await chrome.tabGroups.get(legacy.groupId);
+        } catch {
+          legacy.groupId = null;
+        }
+      }
+      await persistOwnedState();
+      return;
+    }
+
+    const serialized = state.clients && typeof state.clients === "object" ? state.clients : {};
+    for (const [clientId, entry] of Object.entries(serialized)) {
+      if (!entry || typeof entry !== "object") continue;
+      const next = clientState(clientId);
+      for (const tabId of Array.isArray(entry.tabs) ? entry.tabs : []) {
+        if (typeof tabId !== "number") continue;
+        try {
+          await chrome.tabs.get(tabId);
+          next.tabs.add(tabId);
+          tabOwner.set(tabId, clientId);
+        } catch {
+          // Tab closed while the service worker was asleep.
+        }
+      }
+      next.groupId = typeof entry.groupId === "number" ? entry.groupId : null;
+      if (next.groupId !== null) {
+        try {
+          await chrome.tabGroups.get(next.groupId);
+        } catch {
+          next.groupId = null;
+        }
       }
     }
     await persistOwnedState();
@@ -118,19 +181,23 @@ function connect() {
     // Tear down tabs when a real session ends: either we saw traffic, or the
     // host stayed up long enough that this was not a connectNative race.
     // Immediate disconnects (MCP pipe not bound yet) keep restored tabs.
+    // Native-host drop means every MCP client lost the bridge — close all.
     const wasLive = hadLiveSession || livedMs >= LIVE_SESSION_DWELL_MS;
-    const tabsToClose = wasLive ? Array.from(ownedTabs) : [];
-    const groupToClear = wasLive ? groupId : null;
+    const snapshot = wasLive
+      ? Array.from(clients.entries()).map(([clientId, state]) => ({
+          clientId,
+          tabs: Array.from(state.tabs),
+          groupId: state.groupId,
+        }))
+      : [];
     if (port === sessionPort) {
       port = null;
       hadLiveSession = false;
       connectedAt = 0;
     }
-    if (tabsToClose.length) {
-      for (const tabId of tabsToClose) {
-        void hideCursor(tabId);
-      }
-      void closeOwnedTabs(tabsToClose, groupToClear);
+    for (const entry of snapshot) {
+      for (const tabId of entry.tabs) void hideCursor(tabId);
+      void closeOwnedTabs(entry.clientId, entry.tabs, entry.groupId);
     }
   });
 }
@@ -184,35 +251,41 @@ const groupQueue = (() => {
   };
 })();
 
-async function ensureGroup(tabId) {
+async function ensureGroup(clientId, tabId) {
   return groupQueue(async () => {
+    const state = clientState(clientId);
     // Re-create the group if the user dismissed it or Chrome dropped it.
-    if (groupId !== null) {
+    if (state.groupId !== null) {
       try {
-        await chrome.tabGroups.get(groupId);
+        await chrome.tabGroups.get(state.groupId);
       } catch {
-        groupId = null;
+        state.groupId = null;
       }
     }
-    if (groupId === null) {
-      groupId = await chrome.tabs.group({ tabIds: [tabId] });
-      await chrome.tabGroups.update(groupId, { title: GROUP_TITLE, color: "blue" });
+    if (state.groupId === null) {
+      state.groupId = await chrome.tabs.group({ tabIds: [tabId] });
+      await chrome.tabGroups.update(state.groupId, {
+        title: groupTitleFor(clientId),
+        color: "blue",
+      });
     } else {
-      await chrome.tabs.group({ groupId, tabIds: [tabId] });
+      await chrome.tabs.group({ groupId: state.groupId, tabIds: [tabId] });
     }
     // Agent tabs get the pointer favicon (not the T3 toolbar logo) as soon as
     // they join the group, so the strip reads as "agent-owned" before the first click.
     await markTab(tabId);
     await persistOwnedState();
-    return groupId;
+    return state.groupId;
   });
 }
 
-async function openTab(url) {
+async function openTab(clientId, url) {
   // active:false is the whole point — the user stays on whatever they were doing.
   const tab = await chrome.tabs.create({ url: url || "about:blank", active: false });
-  ownedTabs.add(tab.id);
-  await ensureGroup(tab.id);
+  const state = clientState(clientId);
+  state.tabs.add(tab.id);
+  tabOwner.set(tab.id, clientId);
+  await ensureGroup(clientId, tab.id);
   await persistOwnedState();
   // Pages replace their favicon on load (Spotify, YouTube, …). Re-apply the
   // pointer whenever the document finishes, and also when the tab's own icon
@@ -220,31 +293,35 @@ async function openTab(url) {
   chrome.tabs.onUpdated.addListener(function badge(id, info) {
     if (id !== tab.id) return;
     if (info.status === "complete" || info.favIconUrl) markTab(tab.id);
-    if (!ownedTabs.has(tab.id)) chrome.tabs.onUpdated.removeListener(badge);
+    if (!tabOwner.has(tab.id)) chrome.tabs.onUpdated.removeListener(badge);
   });
-  return { tabId: tab.id, url: tab.url, title: tab.title };
+  return { tabId: tab.id, url: tab.url, title: tab.title, clientId };
 }
 
-async function listTabs() {
+async function listTabs(clientId) {
+  const state = clientState(clientId);
   const out = [];
   // Snapshot first: the loop drops ids for tabs the user closed behind us.
-  const known = Array.from(ownedTabs);
+  const known = Array.from(state.tabs);
   for (const tabId of known) {
     try {
       const tab = await chrome.tabs.get(tabId);
       out.push({ tabId, title: tab.title, url: tab.url, active: tab.active });
     } catch {
-      ownedTabs.delete(tabId); // closed behind our back
+      state.tabs.delete(tabId);
+      tabOwner.delete(tabId);
     }
   }
-  return { groupId, tabs: out };
+  return { groupId: state.groupId, tabs: out, clientId };
 }
 
-/// Close a captured set of agent tabs from a past session. Only mutates
-/// `ownedTabs` / `groupId` for those ids so a newer reconnect's tabs survive.
-async function closeOwnedTabs(ids, expectedGroupId) {
+/// Close a captured set of one client's agent tabs. Only mutates that client's
+/// ownership so a peer MCP client's tabs survive.
+async function closeOwnedTabs(clientId, ids, expectedGroupId) {
+  const state = clients.get(clientId);
   for (const id of ids) {
-    ownedTabs.delete(id);
+    if (state) state.tabs.delete(id);
+    tabOwner.delete(id);
     attached.delete(id);
     try {
       await chrome.tabs.remove(id);
@@ -252,33 +329,35 @@ async function closeOwnedTabs(ids, expectedGroupId) {
       // Already closed by the user; nothing to do.
     }
   }
-  if (expectedGroupId !== null && groupId === expectedGroupId) {
+  if (state && expectedGroupId !== null && state.groupId === expectedGroupId) {
     try {
       const remaining = await chrome.tabs.query({ groupId: expectedGroupId });
-      // Ungroup stragglers that are not part of the current owned set — a
+      // Ungroup stragglers that are not part of this client's owned set — a
       // reconnect may already have placed new agent tabs in this same group.
-      const leftover = remaining.filter((t) => !ownedTabs.has(t.id));
+      const leftover = remaining.filter((t) => !state.tabs.has(t.id));
       if (leftover.length) await chrome.tabs.ungroup(leftover.map((t) => t.id));
     } catch {
       // The group is already gone.
     }
-    // Keep groupId when a newer session still owns tabs in it; only drop the
-    // handle once nothing we track remains there.
-    if (groupId === expectedGroupId && ownedTabs.size === 0) {
-      groupId = null;
+    if (state.groupId === expectedGroupId && state.tabs.size === 0) {
+      state.groupId = null;
     }
   }
+  if (state && state.tabs.size === 0 && state.groupId === null) {
+    clients.delete(clientId);
+  }
   await persistOwnedState();
-  return { closed: ids.length };
+  return { closed: ids.length, clientId };
 }
 
-async function closeAllTabs() {
-  return closeOwnedTabs(Array.from(ownedTabs), groupId);
+async function closeAllTabs(clientId) {
+  const state = clientState(clientId);
+  return closeOwnedTabs(clientId, Array.from(state.tabs), state.groupId);
 }
 
-function assertOwned(tabId) {
-  if (!ownedTabs.has(tabId)) {
-    throw new Error(`tab ${tabId} is not one of the agent's tabs`);
+function assertOwned(clientId, tabId) {
+  if (tabOwner.get(tabId) !== clientId) {
+    throw new Error(`tab ${tabId} is not one of this agent's tabs`);
   }
 }
 
@@ -672,9 +751,9 @@ async function navigate(tabId, url) {
 
 // ── "the agent is using this tab" indicator ─────────────────────────────────
 //
-// Toolbar icon = T3 logo (manifest icons/). Tab favicon = Computer Use badge
-// (icons/pointer-*.png), matching Settings → Agent cursor overlay — so a tab
-// in the "MT Code" group is visually distinct from the extension itself.
+// Toolbar icon = T3 logo (manifest icons/). Tab favicon = the same Computer Use
+// cursor PNG the page overlay paints (icons/cursor-112.png) — one source of
+// truth with BubbleView / T3AgentCursor, scaled by Chrome in the tab strip.
 //
 // An extension cannot set a tab's favicon directly, but it can replace the
 // page's icon link, which is what Chrome renders in the tab strip. Pages
@@ -697,7 +776,7 @@ async function markTab(tabId) {
     await chrome.scripting.executeScript({
       target: { tabId },
       func: applyFavicon,
-      args: [chrome.runtime.getURL("icons/pointer-64.png")],
+      args: [chrome.runtime.getURL("icons/cursor-112.png")],
     });
   } catch {
     // Chrome's own pages (chrome://, the Web Store) refuse injection; the tab
@@ -709,10 +788,11 @@ async function markTab(tabId) {
 
 const handlers = {
   ping: async () => ({ pong: true }),
-  open_tab: async (p) => openTab(p.url),
-  list_tabs: async () => listTabs(),
+  open_tab: async (p) => openTab(requireClientId(p), p.url),
+  list_tabs: async (p) => listTabs(requireClientId(p)),
   select_tab: async (p) => {
-    assertOwned(p.tabId);
+    const clientId = requireClientId(p);
+    assertOwned(clientId, p.tabId);
     // The tool contract is "make one of the agent's tabs the visible one. Does
     // not affect the user's tabs" — but activating unconditionally yanked the
     // window away from whatever the user was doing, mid-typing, which is the
@@ -723,43 +803,46 @@ const handlers = {
     // the user keeps typing where they were.
     const target = await chrome.tabs.get(p.tabId);
     const [active] = await chrome.tabs.query({ active: true, windowId: target.windowId });
-    const userIsOnAgentTab = active?.id !== undefined && ownedTabs.has(active.id);
+    const userIsOnAgentTab = active?.id !== undefined && tabOwner.get(active.id) === clientId;
     if (userIsOnAgentTab) {
       await chrome.tabs.update(p.tabId, { active: true });
     }
     return { tabId: p.tabId, activated: userIsOnAgentTab };
   },
-  close_all_tabs: async () => closeAllTabs(),
+  close_all_tabs: async (p) => closeAllTabs(requireClientId(p)),
   close_tab: async (p) => {
-    assertOwned(p.tabId);
+    const clientId = requireClientId(p);
+    assertOwned(clientId, p.tabId);
     await chrome.tabs.remove(p.tabId);
-    ownedTabs.delete(p.tabId);
+    const state = clientState(clientId);
+    state.tabs.delete(p.tabId);
+    tabOwner.delete(p.tabId);
     attached.delete(p.tabId);
     await persistOwnedState();
     return { closed: p.tabId };
   },
   navigate: async (p) => {
-    assertOwned(p.tabId);
+    assertOwned(requireClientId(p), p.tabId);
     return navigate(p.tabId, p.url);
   },
   snapshot: async (p) => {
-    assertOwned(p.tabId);
+    assertOwned(requireClientId(p), p.tabId);
     return snapshot(p.tabId);
   },
   click: async (p) => {
-    assertOwned(p.tabId);
+    assertOwned(requireClientId(p), p.tabId);
     return p.index !== undefined ? clickElement(p.tabId, p.index) : clickAt(p.tabId, p.x, p.y);
   },
   type: async (p) => {
-    assertOwned(p.tabId);
+    assertOwned(requireClientId(p), p.tabId);
     return typeText(p.tabId, p.text);
   },
   press: async (p) => {
-    assertOwned(p.tabId);
+    assertOwned(requireClientId(p), p.tabId);
     return pressKey(p.tabId, p.key);
   },
   screenshot: async (p) => {
-    assertOwned(p.tabId);
+    assertOwned(requireClientId(p), p.tabId);
     return screenshot(p.tabId);
   },
 };
@@ -777,8 +860,10 @@ async function handleCommand(msg, replyPort = port) {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (!ownedTabs.has(tabId) && !attached.has(tabId)) return;
-  ownedTabs.delete(tabId);
+  if (!tabOwner.has(tabId) && !attached.has(tabId)) return;
+  const clientId = tabOwner.get(tabId);
+  if (clientId) clients.get(clientId)?.tabs.delete(tabId);
+  tabOwner.delete(tabId);
   attached.delete(tabId);
   void persistOwnedState();
 });

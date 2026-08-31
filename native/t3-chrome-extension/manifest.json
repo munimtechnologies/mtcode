@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MT Code Desktop Control",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Lets MT Code agents work in their own tab group, in your signed-in browser, without touching your tabs.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlKKDWohdbduAaQO52AeI5OdBddEOMr4t2bu/jMeefnDjKLvmPNfjiOUUAKO10LkZNAyQL/IYJRizD2Ps1DqMIHADTdl/ihLQe5GPxOsswNo75oqpVcvpcfKsVRk0g5c3bAnedTaHe8zu37cyLIovKjdlrlcvtavKngJmG9JJfKKPmjZUqriGNA6mRqcUYo75+xppeKg7UJGyVSDvJOyx7SQHebbSN5bxWtT7cdvaNHq1MyqcIML/5LlQxh9vznZlKie7tQQAeDQENPrWzJ51X0YvoJUZWjhog967Wbasi7zVgsrFfcVe0VZBi6Ccsxg2K6DUCa6ZcAI5S/lAZ7uC8QIDAQAB",
   "minimum_chrome_version": "116",
@@ -14,20 +14,14 @@
     "alarms",
     "storage"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "wake.js"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["wake.js"],
       "run_at": "document_start",
       "all_frames": false
     }
@@ -40,16 +34,8 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "icons/cursor-112.png",
-        "icons/pointer-16.png",
-        "icons/pointer-32.png",
-        "icons/pointer-48.png",
-        "icons/pointer-64.png"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "resources": ["icons/cursor-112.png"],
+      "matches": ["<all_urls>"]
     }
   ]
 }
