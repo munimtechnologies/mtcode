@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { autoAnimate } from "@formkit/auto-animate";
+import { autoAnimate, type AnimationController } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -2481,6 +2481,9 @@ export default function Sidebar() {
     [orderedThreads],
   );
   const listContainerRef = useRef<HTMLUListElement | null>(null);
+  // auto-animate and dnd-kit both rewrite child transforms; leaving both
+  // active during a drag produces overlapping rows and stray ghost fragments.
+  const listAutoAnimateControllerRef = useRef<AnimationController | null>(null);
   const threadByKeyRef = useRef(threadByKey);
   threadByKeyRef.current = threadByKey;
   // handleNewThread is inherently unstable (depends on the projects list);
@@ -3972,8 +3975,22 @@ export default function Sidebar() {
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
   const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
+    if (!node) {
+      listAutoAnimateControllerRef.current = null;
+      return;
+    }
+    if (listAutoAnimateControllerRef.current?.parent === node) return;
+    listAutoAnimateControllerRef.current = autoAnimate(node, {
+      duration: 150,
+      easing: "ease-out",
+    });
+  }, []);
+
+  const setListAutoAnimateEnabled = useCallback((enabled: boolean) => {
+    const controller = listAutoAnimateControllerRef.current;
+    if (!controller) return;
+    if (enabled) controller.enable();
+    else controller.disable();
   }, []);
 
   // New thread starts on the current computer. Shift+click (and chat.newLocal)
@@ -4433,14 +4450,21 @@ export default function Sidebar() {
                 sensors={pinnedDndSensors}
                 collisionDetection={collisionDetectionStrategy}
                 onDragStart={(event: DragStartEvent) => {
+                  // Disable before the drag-key render inserts drop zones so
+                  // auto-animate never fights sortable transforms mid-drag.
+                  setListAutoAnimateEnabled(false);
                   setActiveDragKey(String(event.active.id));
                 }}
                 onDragEnd={(event: DragEndEvent) => {
                   setActiveDragKey(null);
                   handleThreadDragEnd(event);
+                  // Wait a frame so drop-zone teardown commits without animation;
+                  // the next list mutation (reorder settle) can animate again.
+                  requestAnimationFrame(() => setListAutoAnimateEnabled(true));
                 }}
                 onDragCancel={() => {
                   setActiveDragKey(null);
+                  requestAnimationFrame(() => setListAutoAnimateEnabled(true));
                 }}
               >
                 <ul
@@ -4449,7 +4473,12 @@ export default function Sidebar() {
                     attachListAutoAnimateRef(el);
                   }}
                   role="list"
-                  className="flex flex-col gap-px"
+                  className={cn(
+                    "flex flex-col gap-px",
+                    // content-visibility placeholders fight variable-height
+                    // sortable transforms and leave clipped ghosts mid-drag.
+                    activeDragKey !== null && "[&_[data-thread-item]]:[content-visibility:visible]",
+                  )}
                 >
                   {(() => {
                     const items: ReactNode[] = [
