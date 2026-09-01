@@ -13,7 +13,6 @@ import {
   type ThemePreviewColors,
 } from "@t3tools/shared/themePreview";
 import { getProductName } from "./branding";
-import { DEFAULT_MOBILE_THEME_VARIABLES } from "./mobileDefaultTheme";
 
 export const DEFAULT_MOBILE_THEME_ID = MOBILE_DEFAULT_THEME_ID;
 export const MOBILE_THEME_IDS = SHARED_MOBILE_THEME_IDS;

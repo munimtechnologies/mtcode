@@ -1,4 +1,7 @@
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from "react-native-svg";
+import { withUniwind } from "uniwind";
+
+const ThemedSvg = withUniwind(Svg);
 
 export type SourceControlIconKind = "github" | "gitlab" | "bitbucket" | "azure-devops" | "forgejo";
 

@@ -1108,17 +1108,27 @@ export function deriveEffectiveComposerModelState(input: {
    * collapsing to the default Codex bucket.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;
+  /** Keep a persisted thread's routing key even when live discovery temporarily omits it. */
+  preserveExistingThreadModel?: boolean | undefined;
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
   const baseModelCandidate =
     input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null;
+  const preservedThreadModel =
+    input.preserveExistingThreadModel === true &&
+    input.threadModelSelection &&
+    input.threadModelSelection.instanceId === input.selectedInstanceId
+      ? input.threadModelSelection.model
+      : null;
   const preserveThreadModel =
+    input.preserveExistingThreadModel !== false &&
     input.selectedInstanceId !== null &&
     input.selectedInstanceId !== undefined &&
     input.threadModelSelection?.instanceId === input.selectedInstanceId;
   const baseModel =
+    preservedThreadModel ??
     (input.selectedInstanceId
       ? resolveAppModelSelectionForInstance(
           input.selectedInstanceId,
@@ -1149,13 +1159,20 @@ export function deriveEffectiveComposerModelState(input: {
   const activeSelectionInstanceId = instanceSelection
     ? (input.selectedInstanceId ?? ProviderInstanceId.make(input.selectedProvider))
     : ProviderInstanceId.make(input.selectedProvider);
+  const preservedActiveModel =
+    input.preserveExistingThreadModel === true &&
+    activeSelection &&
+    activeSelection.instanceId === input.selectedInstanceId
+      ? activeSelection.model
+      : null;
   const selectedModel = activeSelection?.model
-    ? (resolveAppModelSelectionForInstance(
+    ? (preservedActiveModel ??
+      resolveAppModelSelectionForInstance(
         activeSelectionInstanceId,
         input.settings,
         input.providers,
         activeSelection.model,
-        { preserveUnavailableSelection: true },
+        { preserveUnavailableSelection: input.preserveExistingThreadModel !== false },
       ) ??
       resolveAppModelSelection(
         input.selectedProvider,
@@ -4081,6 +4098,8 @@ export function useEffectiveComposerModelState(input: {
    * instance reads its own model, not the default Codex's.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;
+  /** Keep a persisted thread's routing key even when live discovery temporarily omits it. */
+  preserveExistingThreadModel?: boolean | undefined;
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
@@ -4094,6 +4113,7 @@ export function useEffectiveComposerModelState(input: {
         providers: input.providers,
         selectedProvider: input.selectedProvider,
         selectedInstanceId: input.selectedInstanceId,
+        preserveExistingThreadModel: input.preserveExistingThreadModel,
         threadModelSelection: input.threadModelSelection,
         projectModelSelection: input.projectModelSelection,
         settings: input.settings,
@@ -4103,6 +4123,7 @@ export function useEffectiveComposerModelState(input: {
       input.providers,
       input.settings,
       input.projectModelSelection,
+      input.preserveExistingThreadModel,
       input.selectedInstanceId,
       input.selectedProvider,
       input.threadModelSelection,

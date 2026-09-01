@@ -2902,7 +2902,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           type: "error",
           title: "Attach dropped files again or remove them before stashing",
         });
-        return;
+        return false;
       }
       const upload = readAttachmentUpload(file.id);
       if (upload?.status !== "ready" || upload.environmentId !== environmentId) {
@@ -2910,7 +2910,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           type: "error",
           title: "Wait for file uploads before stashing this prompt",
         });
-        return;
+        return false;
       }
       stashedFiles.push({
         id: file.id,
@@ -4522,8 +4522,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         </Tooltip>
                       </>
                     ) : null}
-                    {showMobilePendingAnswerActions ? null : inlineTasksBadge}
-                    {showMobilePendingAnswerActions ? null : inlineStashBadge}
                     {voiceTranscriptionReady &&
                     !isComposerApprovalState &&
                     pendingUserInputs.length === 0 ? (

@@ -105,6 +105,7 @@ describe("deriveProviderModelsForDisplay", () => {
       instanceId,
       instance: { driver },
       driverOption: undefined,
+      environmentId: EnvironmentId.make("environment-test"),
       liveProvider,
       onUpdate: () => undefined,
       hiddenModels: [],

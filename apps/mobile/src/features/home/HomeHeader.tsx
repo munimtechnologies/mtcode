@@ -68,6 +68,7 @@ function checkedMenuState(checked: boolean) {
 
 function AndroidHomeHeader(props: HomeHeaderProps) {
   const insets = useSafeAreaInsets();
+  const iconColor = useUniwindTheme()["--color-icon"];
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   // Thread List v2 lays the list out in fixed creation order, so the
   // sort/group filter controls would be silently ignored — hide them and

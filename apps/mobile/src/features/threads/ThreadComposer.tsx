@@ -20,7 +20,7 @@ import {
   type RefObject,
 } from "react";
 import { ActivityIndicator, Platform, Pressable, View, type ViewStyle } from "react-native";
-import ImageViewing from "react-native-image-viewing";
+import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -107,7 +107,7 @@ export interface ThreadComposerProps {
    * "loading" = first fetch, nothing to show yet; "syncing" = cached messages
    * are on screen while they reconcile with the server.
    */
-  readonly threadSyncPhase?: "loading" | "syncing" | null;
+  readonly threadSyncPhase?: "loading" | "syncing" | "reconnecting" | null;
   readonly selectedThread: OrchestrationThreadShell;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
@@ -220,7 +220,7 @@ function composerConnectionStatus(input: {
   readonly connectionError: string | null;
   readonly connectionState: RemoteClientConnectionState;
   readonly environmentLabel: string | null;
-  readonly threadSyncPhase?: "loading" | "syncing" | null;
+  readonly threadSyncPhase?: "loading" | "syncing" | "reconnecting" | null;
 }): ComposerStatusPillState | null {
   const environmentLabel = input.environmentLabel ?? "Environment";
 
@@ -257,6 +257,8 @@ function composerConnectionStatus(input: {
       return { kind: "syncing", label: "Loading messages..." };
     case "syncing":
       return { kind: "syncing", label: "Syncing messages..." };
+    case "reconnecting":
+      return { kind: "syncing", label: "Reconnecting..." };
     default:
       return null;
   }
@@ -312,7 +314,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const inFlightThreadIdsRef = useRef(new Set<string>());
   const { onExpandedChange } = props;
 
-  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
   const showStopAction =
@@ -373,17 +375,17 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
 
-  const onPressImage = useCallback(
-    (uri: string) => {
+  const onPressPreview = useCallback(
+    (source: FilePreviewSource) => {
       wasExpandedBeforePreviewRef.current = isFocused;
       setPreviewVideo(null);
-      setPreviewImageUri(uri);
+      setPreviewFile((current) => current ?? source);
     },
     [isFocused],
   );
 
   const closePreview = useCallback(() => {
-    setPreviewImageUri(null);
+    setPreviewFile(null);
     setPreviewVideo(null);
     if (wasExpandedBeforePreviewRef.current) {
       setTimeout(() => {
@@ -395,7 +397,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const onPressVideo = useCallback(
     (attachment: DraftComposerFileAttachment, sourceIdentifier: string) => {
       wasExpandedBeforePreviewRef.current = isFocused;
-      setPreviewImageUri(null);
+      setPreviewFile(null);
       setPreviewVideo((current) => current ?? { type: "local", attachment, sourceIdentifier });
     },
     [isFocused],
@@ -620,7 +622,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 <ComposerAttachmentStrip
                   attachments={props.draftAttachments}
                   onRemove={voiceInput.isBusy ? () => undefined : props.onRemoveDraftImage}
-                  onPressImage={voiceInput.isBusy ? undefined : onPressImage}
+                  onPressPreview={voiceInput.isBusy ? undefined : onPressPreview}
                   onPressVideo={voiceInput.isBusy ? undefined : onPressVideo}
                 />
               </Animated.View>
@@ -674,7 +676,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     size={30}
                     borderRadius={8}
                     compact
-                    onPressImage={onPressImage}
+                    onPressPreview={onPressPreview}
                     onPressVideo={onPressVideo}
                   />
                 ))}
@@ -820,14 +822,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       </Animated.View>
 
       <VideoPreviewModal source={previewVideo} onRequestClose={closePreview} />
-      <ImageViewing
-        images={previewImageUri ? [{ uri: previewImageUri }] : []}
-        imageIndex={0}
-        visible={previewImageUri !== null}
-        onRequestClose={closePreview}
-        swipeToCloseEnabled
-        doubleTapToZoomEnabled
-      />
+      <FilePreviewModal source={previewFile} onRequestClose={closePreview} />
     </Animated.View>
   );
 });

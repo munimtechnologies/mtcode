@@ -46,6 +46,7 @@ import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls
 import {
   applyWslEnableSelection,
   isQrShareableEndpoint,
+  isWslSettingsRowVisible,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
 import {
@@ -3103,10 +3104,13 @@ export function ConnectionsSettings() {
       // retry so the row doesn't flicker away, and the button reflects the
       // loading state. With no error we simply haven't loaded yet (or WSL
       // management isn't available), so render nothing.
-      if (desktopWslError && canManageLocalBackend) {
+      if (
+        isWslSettingsRowVisible({ state: null, error: desktopWslError }) &&
+        canManageLocalBackend
+      ) {
         return (
           <SettingsRow
-            title="WSL backend"
+            {...searchableSetting("wsl-backend")}
             description="Couldn't load the WSL backend state."
             status={<span className="block text-destructive">{desktopWslError}</span>}
             control={
@@ -3131,11 +3135,13 @@ export function ConnectionsSettings() {
     // be stranded on a WSL preference they can't clear, so render a recovery
     // row that switches back to Windows. When WSL is unavailable AND unused,
     // there's nothing to recover — keep the section hidden as before.
+    if (!isWslSettingsRowVisible({ state: desktopWslState, error: desktopWslError })) {
+      return null;
+    }
     if (!desktopWslState.available) {
-      if (!desktopWslState.enabled && !desktopWslState.wslOnly) return null;
       return (
         <SettingsRow
-          title="WSL backend"
+          {...searchableSetting("wsl-backend")}
           description="WSL is no longer available, so the Windows backend is running instead. Switch off the WSL backend to clear this preference."
           status={
             desktopWslError ? (
@@ -3172,7 +3178,7 @@ export function ConnectionsSettings() {
     return (
       <>
         <SettingsRow
-          title="WSL backend"
+          {...searchableSetting("wsl-backend")}
           description="Run a second backend inside a WSL distro alongside the Windows one. Pick a distro to start it; pick Off to stop it. Projects opened against the WSL backend live on the Linux side; Windows projects stay where they are."
           status={
             desktopWslError ? (
@@ -3659,8 +3665,8 @@ export function ConnectionsSettings() {
               <DialogHeader>
                 <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
                 <DialogDescription>
-                  {APP_BASE_NAME} will restart the local backend with Tailscale Serve enabled and ask
-                  Tailscale to proxy HTTPS traffic to this backend.
+                  {APP_BASE_NAME} will restart the local backend with Tailscale Serve enabled and
+                  ask Tailscale to proxy HTTPS traffic to this backend.
                 </DialogDescription>
               </DialogHeader>
               <DialogPanel className="space-y-4">

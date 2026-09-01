@@ -273,7 +273,6 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps) {
                     return (
                       <Pressable
                         key={action.id ?? `${index}-${action.title}`}
-                        android_ripple={{ color: rippleColor }}
                         accessibilityRole="menuitem"
                         accessibilityState={{
                           disabled,

@@ -128,13 +128,18 @@ export function ConnectionEnvironmentRow(props: {
                 props.onRename(props.environment.environmentId);
               }}
             >
-              <SymbolView name="pencil" size={13} tintColor={mutedColor} type="monochrome" />
+              <SymbolView
+                name="pencil"
+                size={13}
+                tintColorClassName={"accent-icon-subtle"}
+                type="monochrome"
+              />
             </Pressable>
           ) : null}
           <SymbolView
             name="chevron.down"
             size={12}
-            tintColor={mutedColor}
+            tintColorClassName={"accent-icon-subtle"}
             type="monochrome"
             style={{
               transform: [{ rotate: props.expanded ? "180deg" : "0deg" }],
