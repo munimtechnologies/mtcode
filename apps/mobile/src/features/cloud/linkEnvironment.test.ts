@@ -7,6 +7,7 @@ import { RelayMobileClientId } from "@t3tools/contracts/relay";
 import { DPOP_UNKNOWN_HINT, ManagedRelay } from "@t3tools/client-runtime/relay";
 import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { HttpClient } from "effect/unstable/http";
+import { getMobileClientLabel } from "../../lib/branding";
 import { MobilePreferencesStore } from "../../persistence/mobile-preferences";
 import { MobileStorage } from "../../persistence/mobile-storage";
 
@@ -499,7 +500,7 @@ describe("mobile cloud link environment client", () => {
       const environmentTokenBody = new URLSearchParams(
         requestBodyText(environmentTokenRequest?.body),
       );
-      expect(environmentTokenBody.get("client_label")).toBe("T3 Code Mobile");
+      expect(environmentTokenBody.get("client_label")).toBe(getMobileClientLabel());
       expect(environmentTokenBody.get("client_device_type")).toBe("mobile");
       expect(environmentTokenBody.get("client_os")).toBe("iOS");
     }),
