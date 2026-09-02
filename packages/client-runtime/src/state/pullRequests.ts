@@ -60,6 +60,8 @@ export function createPullRequestStackEnvironmentAtoms<R, E>(
   };
 }
 
+export const LINKED_PULL_REQUEST_DETAIL_IDLE_TTL_MS = 5_000;
+
 /** Refresh a linked PR while its thread is visible so merges update the sidebar. */
 export function createLinkedPullRequestDetailAtomFamily<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
@@ -69,6 +71,7 @@ export function createLinkedPullRequestDetailAtomFamily<R, E>(
     tag: WS_METHODS.pullRequestsDetail,
     staleTimeMs: 15_000,
     refreshIntervalMs: 30_000,
+    idleTtlMs: LINKED_PULL_REQUEST_DETAIL_IDLE_TTL_MS,
   });
 }
 

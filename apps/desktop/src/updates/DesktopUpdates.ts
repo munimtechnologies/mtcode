@@ -596,14 +596,24 @@ export const make = Effect.gen(function* () {
           }
 
           const checkedAt = yield* currentIsoTimestamp;
-          const releaseNotes = normalizeDesktopUpdateReleaseNotes(info.releaseNotes, info.version);
+          const { releaseNotes, omittedReleaseCount } = normalizeDesktopUpdateReleaseNotes(
+            info.releaseNotes,
+            info.version,
+          );
           yield* setState(
-            reduceDesktopUpdateStateOnUpdateAvailable(state, info.version, checkedAt, releaseNotes),
+            reduceDesktopUpdateStateOnUpdateAvailable(
+              state,
+              info.version,
+              checkedAt,
+              releaseNotes,
+              omittedReleaseCount,
+            ),
           );
           yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
           yield* logUpdaterInfo("update available", {
             version: info.version,
             releaseNoteGroups: releaseNotes.length,
+            omittedReleaseCount,
           });
           // Personal fork: download as soon as an update is available (no rocket click).
           const downloadResult = yield* downloadAvailableUpdate;

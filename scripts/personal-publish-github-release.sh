@@ -176,11 +176,14 @@ if [[ "$PREV_TAG" == "$TAG" ]]; then
 fi
 # -25 instead of `| head`: head's early exit SIGPIPEs git log under
 # pipefail and set -e kills the whole publish with no error output.
+# --reverse: oldest first. The desktop updater (upstream #9138) keeps the LAST
+# items of a note and reverses them for display, so the note must be
+# chronological or the hover shows the oldest commits and drops the newest.
 CHANGELOG=$(
   if [[ -n "$PREV_TAG" ]] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
-    git log --pretty=format:'- %s' -25 "${PREV_TAG}..HEAD"
+    git log --reverse --pretty=format:'- %s' -25 "${PREV_TAG}..HEAD"
   else
-    git log --pretty=format:'- %s' -15
+    git log --reverse --pretty=format:'- %s' -15
   fi
 )
 NOTES=$(cat <<EOF

@@ -139,6 +139,12 @@ require apps/web/src/components/chat/MessagesTimeline.tsx "filter(isImageAttachm
 # telemetry never reached the RPC layer.
 require apps/server/src/ws.ts "clientAnalyticsProps," "client analytics props passed into the ws rpc layer"
 
+# --- Update changelog on every channel (5e8467899) ---
+# Upstream gates the release-notes popover/tooltip to nightly; MT Code ships a
+# single latest track with fullChangelog on, so the gate must stay removed.
+require apps/web/src/components/sidebar/SidebarUpdatePill.tsx 'state !== null && state.releaseNotes.length > 0' "release-notes popover not gated to nightly"
+require apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.tsx 'if (state.releaseNotes.length === 0) {' "release-notes body not gated to nightly"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2
