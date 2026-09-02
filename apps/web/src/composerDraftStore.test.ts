@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
   EnvironmentId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -19,6 +20,10 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
+import {
+  collectAssistantCitations,
+  serializeAssistantCitation,
+} from "@t3tools/shared/assistantCitations";
 
 // The composer draft's `modelSelectionByProvider` and
 // `stickyModelSelectionByProvider` maps are keyed by `ProviderInstanceId`
@@ -272,6 +277,44 @@ describe("deriveEffectiveComposerModelState", () => {
     });
 
     expect(result.selectedModel).toBe(availableFallback);
+  });
+});
+
+describe("composerDraftStore assistant citations", () => {
+  beforeEach(resetComposerDraftStore);
+  afterEach(resetComposerDraftStore);
+
+  it("keeps quotes, comments, and remote source IDs through persistence and removes them on clear", () => {
+    const threadId = ThreadId.make("citation-draft");
+    const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+    const citation = {
+      version: 1 as const,
+      environmentId: EnvironmentId.make("remote-source"),
+      threadId: ThreadId.make("source-thread"),
+      messageId: MessageId.make("source-message"),
+      text: "Preserve the selected text after reload.",
+      comment: "Why is this important?\nPlease show an example.",
+      start: 12,
+      end: 52,
+      prefix: "Before. ",
+      suffix: " After.",
+    };
+    const prompt = `Explain ${serializeAssistantCitation(citation)} further.`;
+    useComposerDraftStore.getState().setPrompt(threadRef, prompt);
+    const options = useComposerDraftStore.persist.getOptions();
+    const saved = JSON.parse(
+      JSON.stringify(options.partialize!(useComposerDraftStore.getState())),
+    ) as unknown;
+    resetComposerDraftStore();
+    const hydrated = options.merge!(saved, useComposerDraftStore.getState());
+    useComposerDraftStore.setState(hydrated);
+    const restored = draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt ?? "";
+    expect(restored).toBe(prompt);
+    expect(collectAssistantCitations(restored).map((entry) => entry.citation)).toEqual([citation]);
+    useComposerDraftStore.getState().clearComposerContent(threadRef);
+    expect(
+      collectAssistantCitations(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt ?? ""),
+    ).toEqual([]);
   });
 });
 

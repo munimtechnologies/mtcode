@@ -16,6 +16,7 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
+import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import { buildGoalContinuationPrompt } from "@t3tools/shared/goalContinuation";
 import * as Cache from "effect/Cache";
@@ -132,7 +133,7 @@ function formatThreadTitleSection(message: ThreadTitleMessage): string | undefin
   if (message.role === "system" || isCorrectionMessage(message)) {
     return undefined;
   }
-  const text = message.text.trim();
+  const text = assistantCitationsToPlainText(message.text).trim();
   const attachmentSummary = (message.attachments ?? [])
     .map((attachment) => attachment.name)
     .join(", ");
@@ -1323,7 +1324,9 @@ const make = Effect.gen(function* () {
           projects: project ? [project] : [],
         }) ?? process.cwd();
       const generationInput = {
-        messageText,
+        // Title generation reads only plain text: citations are stripped like
+        // upstream, but from the fork's messageText (continuation/correction aware).
+        messageText: assistantCitationsToPlainText(messageText),
         ...(attachments !== undefined ? { attachments } : {}),
         ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
       };

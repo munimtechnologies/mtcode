@@ -55,6 +55,7 @@ const RawBranchSchema = Schema.Struct({
   commit: Schema.optional(
     Schema.NullOr(Schema.Struct({ hash: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)) })),
   ),
+  repository: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: TrimmedNonEmptyString }))),
 });
 
 const RawLinkSchema = Schema.Struct({ href: Schema.optional(Schema.String) });
@@ -180,6 +181,7 @@ export interface BitbucketPullRequest {
   readonly url: string;
   readonly author: PullRequestActor | null;
   readonly headBranch: string;
+  readonly headRepositoryNameWithOwner: string | null;
   readonly baseBranch: string;
   readonly diffRevision?: { readonly baseOid: string; readonly headOid: string };
   readonly state: PullRequestState;
@@ -297,6 +299,7 @@ function toPullRequest(raw: Schema.Schema.Type<typeof RawPullRequestSchema>): Bi
     url: raw.links.html.href,
     author: toActor(raw.author),
     headBranch: raw.source.branch.name,
+    headRepositoryNameWithOwner: raw.source.repository?.full_name ?? null,
     baseBranch: raw.destination.branch.name,
     ...(baseOid === null || headOid === null ? {} : { diffRevision: { baseOid, headOid } }),
     state: toState(raw),
