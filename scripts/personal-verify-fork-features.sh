@@ -153,6 +153,7 @@ require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* downloadAvailableUpd
 require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* installDownloadedUpdate(info.version);' "auto-install pinned to the downloaded version"
 # Remote-update flow must treat the fork's in-flight auto-install as prepared.
 require apps/desktop/src/updates/DesktopRemoteUpdates.ts 'ready-to-install' "remote update publishes ready-to-install"
+require scripts/build-desktop-artifact.ts "VC.Runtimes.x86.x64.Spectre" "Windows build preflight probes the real VS 2022 Spectre component id (upstream's VC.Tools.*.Spectre does not exist)"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2

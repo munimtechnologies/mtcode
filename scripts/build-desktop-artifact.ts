@@ -1836,16 +1836,20 @@ export const preflightMacDesktopBuild = Effect.fn("preflightMacDesktopBuild")(fu
   }
 });
 
-function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
+// MT fork: upstream (#8975) asks vswhere for `VC.Tools.<arch>.Spectre`, an id
+// that does not exist in the Visual Studio 2022 catalog (the installer reports
+// "Cannot find package ... in product graph"), so the probe could never pass.
+// The Spectre-mitigated libraries ship as `VC.Runtimes.<arch>.Spectre`.
+export function windowsVswherePrerequisiteScript(arch: typeof BuildArch.Type): string {
   const components =
     arch === "arm64"
       ? [
           "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
-          "Microsoft.VisualStudio.Component.VC.Tools.ARM64.Spectre",
+          "Microsoft.VisualStudio.Component.VC.Runtimes.ARM64.Spectre",
         ]
       : [
           "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-          "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre",
+          "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre",
         ];
   return [
     "$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'",
