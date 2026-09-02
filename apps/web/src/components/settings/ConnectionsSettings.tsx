@@ -1916,7 +1916,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
         />
       ) : null}
       <SettingsRow
-        title="Publish agent activity"
+        title={searchableSetting("publish-agent-activity").title}
         description="Send activity from this environment to your mobile clients for push notifications and Live Activities. Works without a managed Connect tunnel."
         control={
           <CloudLinkSwitch
@@ -3245,7 +3245,7 @@ export function ConnectionsSettings() {
 
   const renderTailscaleRow = () => (
     <SettingsRow
-      title="Tailscale HTTPS"
+      title={searchableSetting("tailscale-https").title}
       description={
         tailscaleHttpsEndpoint
           ? tailscaleHttpsEndpoint.status === "available"
@@ -3295,7 +3295,7 @@ export function ConnectionsSettings() {
   );
   const renderNetworkAccessRow = () => (
     <SettingsRow
-      title="Network access"
+      title={searchableSetting("network-access").title}
       description={
         isLocalBackendNetworkAccessible ? (
           <NetworkAccessDescription
@@ -3327,7 +3327,7 @@ export function ConnectionsSettings() {
   );
   const renderDisabledNetworkAccessRow = () => (
     <SettingsRow
-      title="Network access"
+      title={searchableSetting("network-access").title}
       description={
         currentAuthPolicy === "remote-reachable"
           ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
@@ -3360,7 +3360,7 @@ export function ConnectionsSettings() {
       <ConnectAccountsSection />
       {canManageLocalBackend ? (
         <>
-          <SettingsSection title="This environment">
+          <SettingsSection {...searchableSetting("connections-environment")}>
             {primaryEnvironment && primaryEnvironmentId ? (
               <SettingsRow
                 title="Environment name"
@@ -3730,7 +3730,7 @@ export function ConnectionsSettings() {
           </Dialog>
         </>
       ) : (
-        <SettingsSection title="This environment">
+        <SettingsSection {...searchableSetting("connections-environment")}>
           {primaryEnvironment && primaryEnvironmentId ? (
             <SettingsRow
               title="Environment name"

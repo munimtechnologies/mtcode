@@ -16,6 +16,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
+import * as Struct from "effect/Struct";
 import type * as Option from "effect/Option";
 import type * as Effect from "effect/Effect";
 
@@ -37,6 +38,21 @@ export const ProjectionThreadMessage = Schema.Struct({
   deliveryState: Schema.optional(Schema.Literal("queued")),
 });
 export type ProjectionThreadMessage = typeof ProjectionThreadMessage.Type;
+
+// A streaming row is always a fresh assistant message: it never carries a
+// correction or a queued delivery state, so those fork columns stay at their
+// NULL defaults and are not part of the append input.
+export const AppendStreamingProjectionThreadMessage = Schema.Struct(
+  Struct.omit(ProjectionThreadMessage.fields, [
+    "isStreaming",
+    "originalText",
+    "correctionTargetMessageId",
+    "correctionReplacementText",
+    "deliveryState",
+  ]),
+);
+export type AppendStreamingProjectionThreadMessage =
+  typeof AppendStreamingProjectionThreadMessage.Type;
 
 export const ListProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
@@ -68,6 +84,11 @@ export interface ProjectionThreadMessageRepositoryShape {
    */
   readonly upsert: (
     message: ProjectionThreadMessage,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Insert a streaming message or append text to its existing row. */
+  readonly appendStreaming: (
+    message: AppendStreamingProjectionThreadMessage,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**

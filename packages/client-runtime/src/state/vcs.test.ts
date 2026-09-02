@@ -99,6 +99,7 @@ function session(client: WsRpcProtocolClient, sourceControlSshPasswordPrompts = 
         },
       },
     } as ServerConfig),
+    subscribeServerConfig: (input) => client.subscribeServerConfig(input),
     ready: Effect.void,
     probe: Effect.void,
     closed: Effect.never,

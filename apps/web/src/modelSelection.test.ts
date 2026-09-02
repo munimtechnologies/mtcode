@@ -621,9 +621,11 @@ describe("instance-scoped model selection", () => {
       planModeEnabled: false,
     });
 
+    // MT Auto routes per turn, so a draft model this instance does not list
+    // keeps the caller's selections instead of being rebuilt from descriptors.
     expect(
       createModelSelection(instanceId, state.selectedModel, dispatch.modelOptionsForDispatch),
-    ).toEqual(createModelSelection(instanceId, "openai/gpt-5.5"));
+    ).toEqual(createModelSelection(instanceId, "openai/gpt-5.5", [{ id: "effort", value: "max" }]));
   });
 
   it("preserves custom provider instances in settings model selection", () => {

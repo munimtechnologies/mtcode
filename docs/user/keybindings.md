@@ -52,6 +52,10 @@ successful pick; its hover glow and badge preview the element and color family t
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
 
+`thread.copyReference` copies the active thread's pull request link, or its thread ID when no pull
+request is available. Its default shortcut is `mod+shift+c`, and it does not replace terminal copy
+while the terminal has focus.
+
 `thread.settle` settles the active thread or restores it when it is already settled. Its default
 shortcut is `mod+shift+s`, and it does not run while the terminal has focus.
 
@@ -73,10 +77,11 @@ to the draft, and selecting another level removes that prefix while preserving t
 draft. If `ultrathink` appears elsewhere in the draft text, remove it before changing levels so T3
 Code does not rewrite text it does not own.
 
-The command palette searches active thread titles, projects, branches, user messages, and final
-agent responses across connected environments. Message matches show one labeled excerpt while
-keeping the thread's project, branch, and machine context visible. Message search begins after two
-characters and uses SQLite's ASCII case-insensitive matching.
+The command palette searches settings, active thread titles, projects, branches, user messages, and
+final agent responses across connected environments. A setting result opens its exact control or
+section. Message matches show one labeled excerpt while keeping the thread's project, branch, and
+machine context visible. Message search begins after two characters and uses SQLite's ASCII
+case-insensitive matching.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.

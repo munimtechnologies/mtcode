@@ -73,6 +73,9 @@ steps. This helps the agent keep a change in the correct pull request.
 
 - See if your current branch already has an open PR/MR
 - Open several reviews from the **Pull requests** page as tabs in the right panel
+- Filter the list by author or labels, rank authors by merges in the loaded results, see label and
+  change-size context on each row, and sort the results currently shown by update time, creation
+  time, or change size
 - While working in a thread, open linked reviews in the same compact right-panel tabs without
   leaving the conversation
 - Merging a linked review updates the thread immediately so it can move to the settled list

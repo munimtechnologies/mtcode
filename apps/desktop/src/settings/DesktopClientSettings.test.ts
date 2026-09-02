@@ -21,7 +21,7 @@ const clientSettings: ClientSettings = {
   browserAutoShowFloatingPreview: false,
   browserProfiles: [{ id: "work", name: "Work", kind: "persistent" }],
   browserDefaultProfileId: "work",
-  confirmQuit: true,
+  confirmQuit: "double-click",
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   confirmThreadUnpin: false,
@@ -48,8 +48,6 @@ const clientSettings: ClientSettings = {
   planModeEnabled: false,
   showSkillsInSlashMenu: false,
   providerModelPreferences: {},
-  sidebarAutoSettleAfterDays: 3,
-  sidebarAutoSettleOnMerge: true,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",

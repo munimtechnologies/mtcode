@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   CommonActions,
@@ -35,6 +36,10 @@ import {
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
+import {
+  composerAttachmentUploadBlockReason,
+  composerAttachmentUploadsAtom,
+} from "../../state/composer-attachment-uploads";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { ProviderIcon } from "../../components/ProviderIcon";
@@ -168,6 +173,16 @@ export function NewTaskDraftScreen(props: {
     connectedEnvironments.find(
       (environment) => environment.environmentId === selectedProject.environmentId,
     )?.connectionState === "connected";
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  const attachmentBlockReason = selectedProject
+    ? composerAttachmentUploadBlockReason({
+        environmentId: selectedProject.environmentId,
+        attachments: flow.attachments,
+        connected: environmentConnected,
+        serverConfig: selectedEnvironmentServerConfig,
+        states: uploadStates,
+      })
+    : null;
   const promptInputRef = useRef<ComposerEditorHandle>(null);
   const loadedBranchesProjectKeyRef = useRef<string | null>(null);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
@@ -879,6 +894,7 @@ export function NewTaskDraftScreen(props: {
     const initialMessageText = attachGoal ?? draftedMessageText;
 
     if (
+      attachmentBlockReason !== null ||
       !modelSelection ||
       initialMessageText.length === 0 ||
       flow.submitting ||
@@ -1061,6 +1077,7 @@ export function NewTaskDraftScreen(props: {
 
   const isAndroid = Platform.OS === "android";
   const canStart =
+    attachmentBlockReason === null &&
     Boolean(flow.selectedProject) &&
     Boolean(flow.selectedModel) &&
     flow.prompt.trim().length > 0 &&
@@ -1260,6 +1277,7 @@ export function NewTaskDraftScreen(props: {
         {flow.attachments.length > 0 ? (
           <View className="px-[14px] pb-2.5">
             <ComposerAttachmentStrip
+              environmentId={selectedProject.environmentId}
               attachments={flow.attachments}
               imageBorderRadius={16}
               imageSize={72}
@@ -1361,11 +1379,12 @@ export function NewTaskDraftScreen(props: {
               {voicePresentation.showsSend ? (
                 <ComposerActionButton
                   accessibilityLabel={
-                    flow.submitting
+                    attachmentBlockReason ??
+                    (flow.submitting
                       ? "Starting task"
                       : environmentConnected
                         ? "Start task"
-                        : "Queue task"
+                        : "Queue task")
                   }
                   disabled={!canStart}
                   icon={environmentConnected ? "arrow.up" : "tray.and.arrow.up"}

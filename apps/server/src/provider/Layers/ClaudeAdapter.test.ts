@@ -36,6 +36,13 @@ import * as TestClock from "effect/testing/TestClock";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+  SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
+  SYNTHETIC_CLAUDE_MODEL_CATALOG,
+  SYNTHETIC_CLAUDE_STANDARD_MODEL,
+  SYNTHETIC_CLAUDE_THINKING_MODEL,
+} from "../ClaudeModelCatalog.testFixtures.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import {
@@ -281,6 +288,7 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
+    modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
     createQuery: (input) => {
       createInput = input;
       const previous = query;
@@ -454,6 +462,7 @@ function highTaskProgressMessage(): SDKMessage {
 function tokenUsageEvents(events: ReadonlyArray<ProviderRuntimeEvent>) {
   return events.filter((event) => event.type === "thread.token-usage.updated");
 }
+const SYNTHETIC_SUBAGENT_MODEL = "claude-synthetic-subagent[expanded]";
 
 describe("ClaudeAdapterLive", () => {
   it.effect("returns validation error for non-claude provider on startSession", () => {
@@ -1203,7 +1212,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           [{ id: "effort", value: "max" }],
         ),
         runtimeMode: "full-access",
@@ -1226,7 +1235,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
         ),
         runtimeMode: "full-access",
       });
@@ -1242,29 +1251,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("maps the Claude Opus 4.7 default effort to the SDK-supported max value", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-opus-4-7",
-        },
-        runtimeMode: "full-access",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "max");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("maps xhigh effort for Claude Opus 4.7 to the SDK-supported max value", () => {
+  it.effect("forwards Claude thinking toggle for models that support it", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -1273,122 +1260,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-7",
-          [{ id: "effort", value: "xhigh" }],
-        ),
-        runtimeMode: "full-access",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "max");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("preserves xhigh effort for Claude Fable 5", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-fable-5",
-          [{ id: "effort", value: "xhigh" }],
-        ),
-        runtimeMode: "full-access",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "xhigh");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("preserves xhigh effort for Claude Opus 5", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-5",
-          [{ id: "effort", value: "xhigh" }],
-        ),
-        runtimeMode: "full-access",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "xhigh");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("falls back to default effort when unsupported max is requested for Sonnet 4.6", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
-          [{ id: "effort", value: "max" }],
-        ),
-        runtimeMode: "full-access",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "high");
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("ignores adaptive effort for Haiku 4.5", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-haiku-4-5",
-          [{ id: "effort", value: "high" }],
-        ),
-        runtimeMode: "full-access",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("forwards Claude thinking toggle into SDK settings for Haiku 4.5", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-haiku-4-5",
+          SYNTHETIC_CLAUDE_THINKING_MODEL,
           [{ id: "thinking", value: false }],
         ),
         runtimeMode: "full-access",
@@ -1404,7 +1276,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("ignores Claude thinking toggle for non-Haiku models", () => {
+  it.effect("ignores Claude thinking toggle for models without it", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -1413,7 +1285,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
+          SYNTHETIC_CLAUDE_STANDARD_MODEL,
           [{ id: "thinking", value: false }],
         ),
         runtimeMode: "full-access",
@@ -1436,7 +1308,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           [{ id: "fastMode", value: true }],
         ),
         runtimeMode: "full-access",
@@ -1452,7 +1324,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("ignores claude fast mode for non-opus models", () => {
+  it.effect("ignores claude fast mode for models without it", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -1461,7 +1333,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
+          SYNTHETIC_CLAUDE_STANDARD_MODEL,
           [{ id: "fastMode", value: true }],
         ),
         runtimeMode: "full-access",
@@ -1475,6 +1347,97 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "keeps a configured custom alias opaque without disabling the canonical built-in",
+    () => {
+      const claudeConfig = { customModels: [SYNTHETIC_CLAUDE_COLLIDING_ALIAS] };
+      const customHarness = makeHarness({ claudeConfig });
+      const builtInHarness = makeHarness({ claudeConfig });
+      const start = (harness: ReturnType<typeof makeHarness>, model: string) =>
+        Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            provider: ProviderDriverKind.make("claudeAgent"),
+            modelSelection: createModelSelection(ProviderInstanceId.make("claudeAgent"), model, [
+              { id: "effort", value: "max" },
+              { id: "fastMode", value: true },
+              { id: "contextWindow", value: "expanded" },
+            ]),
+            runtimeMode: "full-access",
+          });
+          return harness.getLastCreateQueryInput()!.options;
+        }).pipe(
+          Effect.provideService(Random.Random, makeDeterministicRandomService()),
+          Effect.provide(harness.layer),
+        );
+      const runCustomFlow = Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
+            [
+              { id: "effort", value: "max" },
+              { id: "fastMode", value: true },
+              { id: "contextWindow", value: "expanded" },
+            ],
+          ),
+          runtimeMode: "full-access",
+        });
+        const options = customHarness.getLastCreateQueryInput()!.options;
+
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "use the built-in model",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+            [{ id: "contextWindow", value: "expanded" }],
+          ),
+          attachments: [],
+        });
+        yield* Effect.promise(() => readFirstPromptText(customHarness.getLastCreateQueryInput()));
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "keep this prompt literal",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
+            [{ id: "effort", value: "ultrathink" }],
+          ),
+          attachments: [],
+        });
+        const prompt = yield* Effect.promise(() =>
+          readFirstPromptText(customHarness.getLastCreateQueryInput()),
+        );
+        return { options, prompt };
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(customHarness.layer),
+      );
+
+      return Effect.gen(function* () {
+        const { options: customOptions, prompt: customPrompt } = yield* runCustomFlow;
+        assert.equal(customOptions.model, SYNTHETIC_CLAUDE_COLLIDING_ALIAS);
+        assert.equal(customOptions.effort, undefined);
+        assert.equal(customOptions.settings, undefined);
+        assert.deepEqual(customHarness.query.setModelCalls, [
+          `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
+          SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
+        ]);
+        assert.equal(customPrompt, "keep this prompt literal");
+
+        const builtInOptions = yield* start(builtInHarness, SYNTHETIC_CLAUDE_CAPABLE_MODEL);
+        assert.equal(builtInOptions.model, `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`);
+        assert.equal(builtInOptions.effort, "max");
+        assert.deepEqual(builtInOptions.settings, { fastMode: true });
+      });
+    },
+  );
+
   it.effect("treats ultrathink as a prompt keyword instead of a session effort", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -1484,7 +1447,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
+          SYNTHETIC_CLAUDE_STANDARD_MODEL,
           [{ id: "effort", value: "ultrathink" }],
         ),
         runtimeMode: "full-access",
@@ -1496,7 +1459,7 @@ describe("ClaudeAdapterLive", () => {
         attachments: [],
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
+          SYNTHETIC_CLAUDE_STANDARD_MODEL,
           [{ id: "effort", value: "ultrathink" }],
         ),
       });
@@ -1517,7 +1480,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       const modelSelection = createModelSelection(
         ProviderInstanceId.make("claudeAgent"),
-        "claude-sonnet-4-6",
+        SYNTHETIC_CLAUDE_STANDARD_MODEL,
         [{ id: "effort", value: "ultrathink" }],
       );
       const session = yield* adapter.startSession({
@@ -1646,7 +1609,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-sonnet-4-5",
+          model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
         },
         runtimeMode: "full-access",
       });
@@ -3226,7 +3189,7 @@ describe("ClaudeAdapterLive", () => {
           output_tokens: 50,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -3316,7 +3279,7 @@ describe("ClaudeAdapterLive", () => {
           output_tokens: 50,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -3451,7 +3414,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           [{ id: "effort", value: "max" }],
         ),
         runtimeMode: "full-access",
@@ -3480,7 +3443,7 @@ describe("ClaudeAdapterLive", () => {
         type: "assistant",
         parent_tool_use_id: "toolu_agent_m",
         message: {
-          model: "claude-sonnet-5[1m]",
+          model: SYNTHETIC_SUBAGENT_MODEL,
           content: [],
         },
         uuid: "subagent-snapshot-uuid",
@@ -3500,13 +3463,13 @@ describe("ClaudeAdapterLive", () => {
       const started = taskEvents[0];
       assert.equal(started?.type, "task.started");
       if (started?.type === "task.started") {
-        assert.equal(started.payload.model, "claude-opus-4-6");
+        assert.equal(started.payload.model, SYNTHETIC_CLAUDE_CAPABLE_MODEL);
         assert.equal(started.payload.effort, "max");
       }
       const progress = taskEvents[1];
       assert.equal(progress?.type, "task.progress");
       if (progress?.type === "task.progress") {
-        assert.equal(progress.payload.model, "claude-sonnet-5[1m]");
+        assert.equal(progress.payload.model, SYNTHETIC_SUBAGENT_MODEL);
         assert.equal(progress.payload.effort, "max");
       }
     }).pipe(
@@ -3532,7 +3495,7 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           [{ id: "effort", value: "max" }],
         ),
         runtimeMode: "full-access",
@@ -3549,7 +3512,7 @@ describe("ClaudeAdapterLive", () => {
         type: "assistant",
         parent_tool_use_id: "toolu_agent_early",
         message: {
-          model: "claude-sonnet-5[1m]",
+          model: SYNTHETIC_SUBAGENT_MODEL,
           content: [],
         },
         uuid: "early-snapshot-uuid",
@@ -3579,13 +3542,13 @@ describe("ClaudeAdapterLive", () => {
       const started = taskEvents[0];
       assert.equal(started?.type, "task.started");
       if (started?.type === "task.started") {
-        assert.equal(started.payload.model, "claude-sonnet-5[1m]");
+        assert.equal(started.payload.model, SYNTHETIC_SUBAGENT_MODEL);
         assert.equal(started.payload.effort, "max");
       }
       const progress = taskEvents[1];
       assert.equal(progress?.type, "task.progress");
       if (progress?.type === "task.progress") {
-        assert.equal(progress.payload.model, "claude-sonnet-5[1m]");
+        assert.equal(progress.payload.model, SYNTHETIC_SUBAGENT_MODEL);
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -4563,7 +4526,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("keeps turn-completion usage after a successful compact boundary", () => {
+  it.effect("keeps post-compact usage when turn completion follows a compact boundary", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -4608,7 +4571,7 @@ describe("ClaudeAdapterLive", () => {
           output_tokens: 679,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -4623,17 +4586,13 @@ describe("ClaudeAdapterLive", () => {
       if (usageEvents[0]?.type === "thread.token-usage.updated") {
         assert.equal(usageEvents[0].payload.usage.usedTokens, 18_000);
       }
+      // The result's cumulative totals describe the pre-compact context; the
+      // meter keeps the post-compact figure and only the processed total grows.
       assert.equal(usageEvents[1]?.type, "thread.token-usage.updated");
       if (usageEvents[1]?.type === "thread.token-usage.updated") {
-        assert.deepEqual(usageEvents[1].payload, {
-          usage: {
-            usedTokens: 24_542,
-            lastUsedTokens: 24_542,
-            inputTokens: 23_863,
-            outputTokens: 679,
-            maxTokens: 200000,
-          },
-        });
+        assert.equal(usageEvents[1].payload.usage.usedTokens, 18_000);
+        assert.equal(usageEvents[1].payload.usage.totalProcessedTokens, 24_542);
+        assert.equal(usageEvents[1].payload.usage.maxTokens, 200000);
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -4680,7 +4639,7 @@ describe("ClaudeAdapterLive", () => {
           output_tokens: 679,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -4744,7 +4703,7 @@ describe("ClaudeAdapterLive", () => {
           total_tokens: 535000,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -4814,7 +4773,7 @@ describe("ClaudeAdapterLive", () => {
           total_tokens: 535000,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -5857,7 +5816,7 @@ describe("ClaudeAdapterLive", () => {
         cwd: "/tmp/claude-adapter-test",
         tools: [],
         mcp_servers: [],
-        model: "claude-sonnet-4-5",
+        model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
         permissionMode: "bypassPermissions",
         slash_commands: [],
         output_style: "default",
@@ -6230,7 +6189,7 @@ describe("ClaudeAdapterLive", () => {
         input: "first",
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
         },
         interactionMode: "plan",
         attachments: [],
@@ -6245,7 +6204,9 @@ describe("ClaudeAdapterLive", () => {
         resultUuid: "result-keep-options",
       });
       yield* Fiber.join(firstCompletedFiber);
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]"]);
+      assert.deepEqual(harness.query.setModelCalls, [
+        `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
+      ]);
       assert.deepEqual(harness.query.setPermissionModeCalls, ["plan"]);
 
       yield* adapter.sendTurn({
@@ -6273,7 +6234,7 @@ describe("ClaudeAdapterLive", () => {
 
       const restarted = harness.getLastCreateQueryInput();
       assert.equal(restarted?.options.resumeSessionAt, "assistant-keep-options");
-      assert.equal(restarted?.options.model, "claude-opus-4-6[1m]");
+      assert.equal(restarted?.options.model, `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`);
       assert.equal(restarted?.options.permissionMode, "plan");
       assert.equal(restarted?.options.allowDangerouslySkipPermissions, true);
       // Recreated query already has the mid-session options; sendTurn must
@@ -6387,12 +6348,14 @@ describe("ClaudeAdapterLive", () => {
         input: "hello",
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
         },
         attachments: [],
       });
 
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]"]);
+      assert.deepEqual(harness.query.setModelCalls, [
+        `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
+      ]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -6435,7 +6398,7 @@ describe("ClaudeAdapterLive", () => {
         const adapter = yield* ClaudeAdapter;
         const modelSelection = {
           instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
         };
 
         const session = yield* adapter.startSession({
@@ -6482,8 +6445,8 @@ describe("ClaudeAdapterLive", () => {
         input: "hello",
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
-          [{ id: "contextWindow", value: "1m" }],
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+          [{ id: "contextWindow", value: "expanded" }],
         ),
         attachments: [],
       });
@@ -6492,13 +6455,16 @@ describe("ClaudeAdapterLive", () => {
         input: "hello again",
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
-          [{ id: "contextWindow", value: "200k" }],
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+          [{ id: "contextWindow", value: "standard" }],
         ),
         attachments: [],
       });
 
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]", "claude-opus-4-6"]);
+      assert.deepEqual(harness.query.setModelCalls, [
+        `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
+        SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+      ]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -6513,13 +6479,13 @@ describe("ClaudeAdapterLive", () => {
         const adapter = yield* ClaudeAdapter;
         const startedModel = createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
-          [{ id: "contextWindow", value: "200k" }],
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+          [{ id: "contextWindow", value: "standard" }],
         );
         const requestedModel = createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
-          [{ id: "contextWindow", value: "1m" }],
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+          [{ id: "contextWindow", value: "expanded" }],
         );
 
         yield* adapter.startSession({
@@ -6550,11 +6516,13 @@ describe("ClaudeAdapterLive", () => {
 
         assert.equal(turnStarted._tag, "Some");
         if (turnStarted._tag === "Some" && turnStarted.value.type === "turn.started") {
-          assert.deepEqual(turnStarted.value.payload, { model: "claude-opus-4-6" });
+          assert.deepEqual(turnStarted.value.payload, { model: SYNTHETIC_CLAUDE_CAPABLE_MODEL });
         }
         const sessions = yield* adapter.listSessions();
-        assert.equal(sessions[0]?.model, "claude-opus-4-6");
-        assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]"]);
+        assert.equal(sessions[0]?.model, SYNTHETIC_CLAUDE_CAPABLE_MODEL);
+        assert.deepEqual(harness.query.setModelCalls, [
+          `${SYNTHETIC_CLAUDE_CAPABLE_MODEL}[expanded]`,
+        ]);
       }).pipe(
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),
@@ -6583,8 +6551,8 @@ describe("ClaudeAdapterLive", () => {
           input: "hello",
           modelSelection: createModelSelection(
             ProviderInstanceId.make("claudeAgent"),
-            "claude-opus-4-6",
-            [{ id: "contextWindow", value: "1m" }],
+            SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+            [{ id: "contextWindow", value: "expanded" }],
           ),
           attachments: [],
         })
@@ -7047,7 +7015,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-exit-plan",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           id: "msg-exit-plan",
           type: "message",
           role: "assistant",
@@ -7119,7 +7087,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-plan-text",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           id: "msg-plan-text",
           type: "message",
           role: "assistant",
@@ -7215,7 +7183,7 @@ describe("ClaudeAdapterLive", () => {
           uuid: "assistant-plan-text-skip",
           parent_tool_use_id: null,
           message: {
-            model: "claude-opus-4-6",
+            model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
             id: "msg-plan-text-skip",
             type: "message",
             role: "assistant",
@@ -7281,7 +7249,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-exit-then-result",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           id: "msg-exit-then-result",
           type: "message",
           role: "assistant",
@@ -7360,7 +7328,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-plan-then-synthetic",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           id: "msg-plan-then-synthetic",
           type: "message",
           role: "assistant",
@@ -7399,7 +7367,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-synthetic-followup",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           id: "msg-synthetic-followup",
           type: "message",
           role: "assistant",
@@ -7494,7 +7462,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-pending-input",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: SYNTHETIC_CLAUDE_CAPABLE_MODEL,
           id: "msg-pending-input",
           type: "message",
           role: "assistant",

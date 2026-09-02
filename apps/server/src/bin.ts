@@ -11,6 +11,7 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { authCommand } from "./cli/auth.ts";
+import { appCommand } from "./cli/app.ts";
 import { connectCommand } from "./cli/connect.ts";
 import { tryLaunchDesktopApp } from "./cli/desktopLaunch.ts";
 import { pairCommand } from "./cli/pair.ts";
@@ -108,6 +109,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
     Command.withSubcommands([
       startCommand,
       serveCommand,
+      appCommand,
       pairCommand,
       authCommand,
       projectCommand,

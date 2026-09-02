@@ -11,6 +11,7 @@ import {
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
+  resolveSelectableModel,
 } from "@t3tools/shared/model";
 import type { ReactNode } from "react";
 
@@ -83,9 +84,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   // MT Auto routes per turn, so the thread's model can name a backend this
   // instance does not list. Keep the caller's selections in that case instead
   // of rebuilding them from descriptors that do not apply.
-  const modelIsAvailable = models.some(
-    (candidate) => candidate.slug === normalizeModelSlug(model, provider),
-  );
+  const modelIsAvailable = resolveSelectableModel(provider, model, models) !== null;
   const descriptors = getProviderOptionDescriptors({ caps, selections: modelOptions });
   const primarySelectDescriptor = descriptors.find(
     (descriptor): descriptor is Extract<(typeof descriptors)[number], { type: "select" }> =>

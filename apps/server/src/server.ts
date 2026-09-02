@@ -73,6 +73,7 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.
 import { TurnWatchdogReactorLive } from "./orchestration/Layers/TurnWatchdogReactor.ts";
 import * as GoalReactor from "./orchestration/GoalReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
+import * as ThreadSettlementReactor from "./orchestration/ThreadSettlementReactor.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
@@ -286,6 +287,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GoalReactor.layer),
   Layer.provideMerge(TurnWatchdogReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(ThreadSettlementReactor.layer),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(MtTeamsBridge.MtTeamsBridgeLive.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
@@ -324,6 +326,13 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
   ),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
+);
+
+const PullRequestServiceLive = PullRequestService.layer.pipe(
+  Layer.provide(PullRequestProviderRegistry.layer),
+  Layer.provide(SourceControlProviderRegistryLayerLive),
+  Layer.provide(SourceControlRateLimit.layer),
+  Layer.provide(VcsProcess.layer),
 );
 
 const GitManagerLayerLive = GitManager.layer.pipe(
@@ -416,8 +425,13 @@ const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(
   Layer.provide(T3ProjectFileLoader.layer),
 );
 
+const ServerEnvironmentLayerLive = ServerEnvironment.layer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+);
+
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provide(ServerEnvironmentLayerLive),
   Layer.provide(ServerSecretStore.layer),
 );
 
@@ -438,7 +452,9 @@ const RuntimeDomainDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
-  Layer.provideMerge(SourceControlProviderRegistryLayerLive),
+  Layer.provideMerge(
+    Layer.mergeAll(SourceControlProviderRegistryLayerLive, PullRequestServiceLive),
+  ),
   // Merged with Git rather than added beside it: both want text generation, and this pipe is at
   // the composition limit.
   Layer.provideMerge(
@@ -485,7 +501,7 @@ const RuntimeDomainDependenciesLive = ReactorLayerLive.pipe(
 );
 
 const RuntimeCoreDependenciesLive = RuntimeDomainDependenciesLive.pipe(
-  Layer.provideMerge(ServerEnvironment.layer),
+  Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(VoiceSessionService.layer.pipe(Layer.provide(ServerSecretStore.layer))),
@@ -521,14 +537,6 @@ const commandReadinessLayer = HttpRouter.middleware(
       startup.awaitCommandReady.pipe(Effect.orDie, Effect.andThen(httpEffect)),
     ),
   { global: true },
-);
-
-const PullRequestServiceLive = PullRequestService.layer.pipe(
-  // One registry entry per supported host; the service only knows the registry.
-  Layer.provide(PullRequestProviderRegistry.layer),
-  Layer.provide(SourceControlProviderRegistryLayerLive),
-  Layer.provide(SourceControlRateLimit.layer),
-  Layer.provide(VcsProcess.layer),
 );
 
 const PullRequestStackServiceLive = GitHubPullRequestStackService.layer.pipe(

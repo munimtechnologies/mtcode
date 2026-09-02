@@ -35,6 +35,9 @@ import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { getConnectName, getProductName, getBrandMark } from "../../lib/branding";
 import { runtime } from "../../lib/runtime";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import {
   type AppUpdateCheckState,
@@ -535,13 +538,14 @@ function ConfiguredSettingsRouteScreen() {
 function GeneralSettingsSection() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
-  const autoSettleOnMerge =
-    !AsyncResult.isSuccess(preferencesResult) ||
-    preferencesResult.value.autoSettleOnMerge !== false;
   const steerActiveTurns =
     !AsyncResult.isSuccess(preferencesResult) || preferencesResult.value.steerActiveTurns !== false;
   const voiceTranscription = useMobileVoiceTranscriptionSettings();
   const voiceTranscriptionConfig = activeMobileVoiceTranscriptionConfig(voiceTranscription);
+  const { savedConnectionsById } = useSavedRemoteConnections();
+  const connections = Object.values(savedConnectionsById).sort((left, right) =>
+    left.environmentLabel.localeCompare(right.environmentLabel),
+  );
 
   return (
     <SettingsSection title="General">
@@ -557,12 +561,13 @@ function GeneralSettingsSection() {
         target="SettingsVoiceDictation"
       />
       <MtTeamsSettingsRow />
-      <SettingsSwitchRow
-        icon="arrow.triangle.branch"
-        label="Auto-settle merged threads"
-        value={autoSettleOnMerge}
-        onValueChange={(value) => savePreferences({ autoSettleOnMerge: value })}
-      />
+      {connections.map((connection) => (
+        <EnvironmentAutoSettleSwitch
+          key={connection.environmentId}
+          environmentId={connection.environmentId}
+          environmentLabel={connection.environmentLabel}
+        />
+      ))}
       <SettingsSwitchRow
         icon="arrow.up.right.circle"
         label="Steer active turns"
@@ -572,6 +577,34 @@ function GeneralSettingsSection() {
       />
       <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
     </SettingsSection>
+  );
+}
+
+function EnvironmentAutoSettleSwitch(props: {
+  readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string;
+}) {
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.environmentId));
+  const config = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "auto-settle settings update",
+    reportFailure: true,
+  });
+  if (config?.environment.capabilities.threadAutoSettlement !== true || settings === null) {
+    return null;
+  }
+  return (
+    <SettingsSwitchRow
+      icon="arrow.triangle.branch"
+      label={`Auto-settle merged threads · ${props.environmentLabel}`}
+      value={settings?.sidebarAutoSettleOnMerge ?? true}
+      onValueChange={(value) => {
+        void updateSettings({
+          environmentId: props.environmentId,
+          input: { patch: { sidebarAutoSettleOnMerge: value } },
+        });
+      }}
+    />
   );
 }
 

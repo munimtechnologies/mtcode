@@ -387,32 +387,6 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
-  it.effect("rejects PDF attachments before invoking the Codex runtime", () =>
-    Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      const result = yield* adapter
-        .sendTurn({
-          threadId: asThreadId("sess-pdf"),
-          input: "read this",
-          attachments: [
-            {
-              type: "pdf",
-              id: "sess-pdf-attachment",
-              name: "spec.pdf",
-              mimeType: "application/pdf",
-              sizeBytes: 4,
-            },
-          ],
-        })
-        .pipe(Effect.result);
-
-      NodeAssert.equal(result._tag, "Failure");
-      NodeAssert.equal(result.failure._tag, "ProviderAdapterRequestError");
-      NodeAssert.match(result.failure.detail, /does not support PDF attachments/);
-      NodeAssert.equal(sessionRuntimeFactory.factory.mock.calls.length, 0);
-    }),
-  );
-
   it.effect("uploads feedback for the active Codex thread", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;

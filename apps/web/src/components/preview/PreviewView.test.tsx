@@ -151,6 +151,7 @@ vi.mock("~/state/use-atom-command", () => ({
 
 vi.mock("~/browser/browserRecording", () => ({
   findActiveBrowserRecordingRuntimeTabId: vi.fn(() => null),
+  isBrowserRecordingStartCancelledError: vi.fn(() => false),
   startBrowserRecording: vi.fn(),
   stopBrowserRecording: vi.fn(),
   useActiveBrowserRecordingTabIds: () => new Set(),

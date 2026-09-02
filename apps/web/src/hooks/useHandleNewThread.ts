@@ -24,9 +24,10 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
-import { readThreadShell, useProjects, useThread } from "../state/entities";
+import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
+  hasExplicitComposerModelSelection,
   resolveAvailableNewThreadProjectRef,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
@@ -38,7 +39,6 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
-import { toastManager } from "../components/ui/toast";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -60,7 +60,6 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 }
 
 export function useNewThreadHandler() {
-  const projects = useProjects();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   // New-thread defaults are a user preference, and the settings UI only ever
@@ -85,26 +84,18 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
-        /**
-         * Move the viewed draft's typed content and transferable attachments into the
-         * draft this request lands on. Set by the draft repo picker: the
-         * user started writing in the wrong project and the text should
-         * follow them. Explicit new-thread surfaces leave this unset and
-         * keep mint-fresh semantics.
-         */
-        carryComposerContent?: boolean;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
+      const projects = readProjects();
       const {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
         getDraftThread,
         applyStickyState,
-        moveComposerPromptAndImages,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
         setModelSelection,
@@ -145,39 +136,6 @@ export function useNewThreadHandler() {
         carrySourceShell?.interactionMode ??
         carrySourceDraft?.interactionMode ??
         null;
-      // Content only moves when the caller opted in and the user is looking
-      // at a draft. The content check happens at move time, not here: the
-      // paths below await, and text typed during those awaits must still
-      // come along.
-      const carryContentSourceDraftId =
-        options?.carryComposerContent === true && currentRouteTarget?.kind === "draft"
-          ? currentRouteTarget.draftId
-          : null;
-      const carryComposerContentTo = (destinationDraftId: DraftId) => {
-        if (
-          carryContentSourceDraftId &&
-          carryContentSourceDraftId !== destinationDraftId &&
-          // Never clobber a destination the user already invested in — the
-          // move overwrites the destination prompt, so a concurrent repo
-          // change that carried content first must win.
-          !composerDraftHasUserContent(getComposerDraft(destinationDraftId)) &&
-          composerDraftHasUserContent(getComposerDraft(carryContentSourceDraftId))
-        ) {
-          moveComposerPromptAndImages(carryContentSourceDraftId, destinationDraftId);
-          // The move caps at the destination's free slots and skips
-          // duplicates, so images and files can both stay behind.
-          const remainingDraft = getComposerDraft(carryContentSourceDraftId);
-          const remainingCount =
-            (remainingDraft?.files.length ?? 0) + (remainingDraft?.images.length ?? 0);
-          if (remainingCount > 0) {
-            toastManager.add({
-              type: "warning",
-              title: `${remainingCount} attachment${remainingCount === 1 ? " stayed" : "s stayed"} in the original draft`,
-              description: "Return to the original draft or attach the files again.",
-            });
-          }
-        }
-      };
       const requestedProject = projects.find(
         (candidate) =>
           candidate.id === requestedProjectRef.projectId &&
@@ -357,11 +315,7 @@ export function useNewThreadHandler() {
           // is looking at, because explicit picks are the only thing the
           // flag protects.
           const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
-          const storedActiveSelection = storedDraft?.activeProvider
-            ? storedDraft.modelSelectionByProvider[storedDraft.activeProvider]
-            : undefined;
-          const storedDraftHasExplicitModelPick =
-            Boolean(storedActiveSelection) && storedDraft?.modelSelectionExplicit === true;
+          const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
           if (!storedDraftHasExplicitModelPick) {
             applyStickyState(emptyStoredDraftThread.draftId);
             const modelSelectionOverride = resolveModelSelectionOverride(
@@ -390,7 +344,6 @@ export function useNewThreadHandler() {
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
-          carryComposerContentTo(emptyStoredDraftThread.draftId);
           const opened = {
             draftId: emptyStoredDraftThread.draftId,
             threadId: emptyStoredDraftThread.threadId,
@@ -481,7 +434,6 @@ export function useNewThreadHandler() {
             interactionMode: racedDraft.interactionMode,
             ...pickExplicitWorkspaceOptions(workspaceOptions),
           });
-          carryComposerContentTo(racedDraft.draftId);
           await router.navigate({
             to: "/draft/$draftId",
             params: { draftId: racedDraft.draftId },
@@ -511,8 +463,6 @@ export function useNewThreadHandler() {
           // state. The project default wins when both are present.
           setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
         }
-        carryComposerContentTo(draftId);
-
         await router.navigate({
           to: "/draft/$draftId",
           params: { draftId },
@@ -527,7 +477,6 @@ export function useNewThreadHandler() {
       primaryEnvironmentId,
       primaryServerSettings,
       projectGroupingSettings,
-      projects,
       router,
     ],
   );
