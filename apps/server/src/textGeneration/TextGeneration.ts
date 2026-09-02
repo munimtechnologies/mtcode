@@ -99,16 +99,6 @@ export interface PullRequestRankingResult {
   }>;
 }
 
-export interface TextGenerationService {
-  generateCommitMessage(
-    input: CommitMessageGenerationInput,
-  ): Promise<CommitMessageGenerationResult>;
-  generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
-  generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
-  generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
-  rankPullRequests(input: PullRequestRankingInput): Promise<PullRequestRankingResult>;
-}
-
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -147,9 +137,6 @@ export class TextGeneration extends Context.Service<
     ) => Effect.Effect<PullRequestRankingResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
-
-/** @deprecated Use `TextGeneration["Service"]`. */
-export type TextGenerationShape = TextGeneration["Service"];
 
 type TextGenerationOp =
   | "generateCommitMessage"

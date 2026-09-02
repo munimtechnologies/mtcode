@@ -13,6 +13,7 @@ import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { APP_BASE_NAME } from "../../branding";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageFocusRingOffsetClass,
@@ -123,7 +124,7 @@ function BrandWordmark() {
       </span>
     );
   }
-  return <T3Wordmark />;
+  return <T3Wordmark aria-label="T3" className="h-2.5 w-auto shrink-0" />;
 }
 
 function MTWordmark() {
@@ -136,22 +137,6 @@ function MTWordmark() {
     >
       <path
         d="M52.55 87.88L52.71 88.31L51.91 88.23L-0.00 603.93L105.52 614.54L135.85 313.36L180.70 434.81L181.21 439.26L182.29 439.14L184.07 443.91L265.79 413.73L273.57 383.74L293.72 313.04L312.99 481.66L219.10 524.02L180.96 657.00L668.78 436.99L668.19 435.67L631.01 110.43L725.00 105.25L719.20 0.00L419.05 16.55L424.86 121.80L525.04 116.27L554.38 372.82L413.31 436.42L366.62 27.95L262.49 39.87L262.94 43.85L212.90 219.50L150.87 51.56Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-function T3Wordmark() {
-  return (
-    <svg
-      aria-label="T3"
-      className="h-2.5 w-auto shrink-0"
-      viewBox="15.5309 37 94.3941 56.96"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z"
         fill="currentColor"
       />
     </svg>

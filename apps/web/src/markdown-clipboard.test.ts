@@ -41,6 +41,10 @@ class FakeElement {
     return this.childNodes.map((child) => child.textContent).join("");
   }
 
+  get children(): ReadonlyArray<FakeElement> {
+    return this.childNodes.filter((child): child is FakeElement => child instanceof FakeElement);
+  }
+
   append(...children: Array<FakeElement | FakeText>): this {
     this.childNodes.push(...children);
     return this;
@@ -54,21 +58,38 @@ class FakeElement {
     return Object.hasOwn(this.attributes, name);
   }
 
-  querySelector(selector: string): FakeElement | null {
-    if (
-      selector === 'annotation[encoding="application/x-tex"]' &&
-      this.tagName === "ANNOTATION" &&
-      this.getAttribute("encoding") === "application/x-tex"
-    ) {
-      return this;
-    }
-    for (const child of this.childNodes) {
-      if (child instanceof FakeElement) {
-        const match = child.querySelector(selector);
-        if (match) return match;
-      }
-    }
+  closest(): FakeElement | null {
     return null;
+  }
+
+  /** Supports only the selectors markdown-clipboard actually asks for. */
+  querySelector(selector: string): FakeElement | null {
+    const childOnly = selector.startsWith(":scope > ");
+    const target = childOnly ? selector.slice(":scope > ".length) : selector;
+    const matches = (element: FakeElement): boolean => {
+      if (target === 'input[type="checkbox"]') {
+        return element.tagName === "INPUT" && element.getAttribute("type") === "checkbox";
+      }
+      if (target === 'annotation[encoding="application/x-tex"]') {
+        return (
+          element.tagName === "ANNOTATION" &&
+          element.getAttribute("encoding") === "application/x-tex"
+        );
+      }
+      return element.tagName === target.toUpperCase();
+    };
+    const search = (parent: FakeElement): FakeElement | null => {
+      for (const child of parent.childNodes) {
+        if (!(child instanceof FakeElement)) continue;
+        if (matches(child)) return child;
+        if (!childOnly) {
+          const nested = search(child);
+          if (nested) return nested;
+        }
+      }
+      return null;
+    };
+    return search(this);
   }
 }
 
@@ -79,6 +100,21 @@ function asNode(element: FakeElement): Node {
 function shikiCodeLine(text: string): FakeElement {
   const token = new FakeElement("SPAN").append(new FakeText(text));
   return new FakeElement("SPAN", ["line"]).append(token);
+}
+
+/** Mirrors a rendered code block: select-none header chrome plus a shiki pre. */
+function renderedCodeBlock(lines: ReadonlyArray<string>): FakeElement {
+  const code = new FakeElement("CODE");
+  lines.forEach((line, index) => {
+    if (index > 0) code.append(new FakeText("\n"));
+    code.append(shikiCodeLine(line));
+  });
+  return new FakeElement("DIV", ["chat-markdown-codeblock"]).append(
+    new FakeElement("DIV", ["chat-markdown-codeblock-header", "select-none"]).append(
+      new FakeText("sh"),
+    ),
+    new FakeElement("DIV", ["chat-markdown-shiki"]).append(new FakeElement("PRE").append(code)),
+  );
 }
 
 describe("serializeRenderedMarkdownFragment", () => {
@@ -167,6 +203,82 @@ describe("serializeRenderedMarkdownFragment", () => {
 
     expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
       "\\[\nA_t = \\lambda_t A_t^{\\text{local}}\n\\]",
+    );
+  });
+
+  it("keeps fences when a bare list item sits alongside the code block", () => {
+    // serializeListItem emits "- " for an item with no text, so the item is
+    // content the plain-code path would drop.
+    const container = new FakeElement("DIV").append(
+      new FakeElement("UL").append(new FakeElement("LI")),
+      renderedCodeBlock(["pnpm test"]),
+    );
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe("-\n\n```\npnpm test\n```");
+  });
+
+  it("keeps fences when a checkbox-only task item sits alongside the code block", () => {
+    // The checkbox is a skipped tag, so the item renders no text of its own, but
+    // it still carries the task state.
+    const container = new FakeElement("DIV").append(
+      new FakeElement("UL").append(
+        new FakeElement("LI").append(new FakeElement("INPUT", [], { type: "checkbox" })),
+      ),
+      renderedCodeBlock(["pnpm test"]),
+    );
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
+      "- [ ]\n\n```\npnpm test\n```",
+    );
+  });
+
+  it("still drops fences for a code block that is the whole list item", () => {
+    // The item only wraps the block, so a selection that never left the pre
+    // would drop the marker too.
+    const container = new FakeElement("DIV").append(
+      new FakeElement("UL").append(new FakeElement("LI").append(renderedCodeBlock(["pnpm test"]))),
+      new FakeText("\n"),
+    );
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe("pnpm test");
+  });
+
+  it("keeps fences when a file chip sits alongside the code block", () => {
+    // The chip renders as a button, a skipped tag, but its data-markdown-copy
+    // still contributes markdown, so the block is not the only visible content.
+    const container = new FakeElement("DIV").append(
+      renderedCodeBlock(["pnpm test"]),
+      new FakeText("\n"),
+      new FakeElement("BUTTON", [], { "data-markdown-copy": "`src/foo.ts`" }),
+    );
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
+      "```\npnpm test\n```\n\n`src/foo.ts`",
+    );
+  });
+
+  it("omits fences when a selection past the last line drags in the whole code block", () => {
+    // Dragging over the final newline ends the range after the pre, so the
+    // fragment carries the block plus the empty head of the next paragraph.
+    const container = new FakeElement("DIV").append(
+      renderedCodeBlock(["printf '%s' 'TOKEN' | gh secret set CLOUDFLARE_API_TOKEN"]),
+      new FakeText("\n"),
+      new FakeElement("P").append(new FakeText("")),
+    );
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
+      "printf '%s' 'TOKEN' | gh secret set CLOUDFLARE_API_TOKEN",
+    );
+  });
+
+  it("still fences a code block copied alongside prose", () => {
+    const container = new FakeElement("DIV").append(
+      new FakeElement("P").append(new FakeText("Run this:")),
+      renderedCodeBlock(["gh workflow run Deploy --ref main"]),
+    );
+
+    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
+      "Run this:\n\n```\ngh workflow run Deploy --ref main\n```",
     );
   });
 

@@ -186,6 +186,13 @@ export const ServerProviderClaudeStatus = Schema.Struct({
   ),
 });
 export type ServerProviderClaudeStatus = typeof ServerProviderClaudeStatus.Type;
+export const ServerProviderWorkspaceSnapshot = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  checkedAt: IsoDateTime,
+  slashCommands: Schema.Array(ServerProviderSlashCommand),
+  skills: Schema.Array(ServerProviderSkill),
+});
+export type ServerProviderWorkspaceSnapshot = typeof ServerProviderWorkspaceSnapshot.Type;
 
 /**
  * Availability of a configured provider instance from the runtime's POV.
@@ -289,6 +296,7 @@ export const ServerProvider = Schema.Struct({
   codexStatus: Schema.optionalKey(ServerProviderCodexStatus),
   /** Live plan rate-limit data returned by Claude Code's Agent SDK. */
   claudeStatus: Schema.optionalKey(ServerProviderClaudeStatus),
+  workspaceSnapshots: Schema.optionalKey(Schema.Array(ServerProviderWorkspaceSnapshot)),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
 });

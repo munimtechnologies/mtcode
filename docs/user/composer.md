@@ -66,6 +66,16 @@ sends a corrective follow-up.
 On web and desktop, Revert remains available on completed turns that have a checkpoint. It returns
 both the conversation and workspace to the state before that message.
 
+## Model defaults
+
+T3 Code remembers the last provider, model, and model options you selected and reuses that
+selection for new threads. A model configured in a project's settings overrides the remembered
+selection for that project; resetting the project setting returns it to the remembered selection.
+
+Model options shown as provider defaults remain display values until you choose them in T3 Code.
+T3 Code only sends options you selected explicitly, so an unset reasoning level or service tier can
+still come from the provider's own configuration.
+
 ## Quote an assistant response
 
 On web and desktop, select text in an assistant response, then choose **Cite in composer** from the

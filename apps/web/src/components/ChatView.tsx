@@ -288,6 +288,7 @@ import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
+import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
@@ -394,6 +395,7 @@ import {
   startNewThreadForProject,
   threadHasStarted,
   codexArtifactTemplatePromptToAppend,
+  toolGroupConsumesUpwardNavigation,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
@@ -4553,7 +4555,11 @@ function ChatViewContent(props: ChatViewProps) {
         // Only an upward wheel is a navigation intent; wheeling down while
         // following either does nothing (at the end) or moves toward it.
         const handleWheel = (event: WheelEvent) => {
-          if (event.deltaY < 0 && contentScrollsUp()) {
+          if (
+            event.deltaY < 0 &&
+            contentScrollsUp() &&
+            !toolGroupConsumesUpwardNavigation(event.target)
+          ) {
             handleManualNavigation();
           }
         };
@@ -4590,7 +4596,7 @@ function ChatViewContent(props: ChatViewProps) {
             case "PageUp":
             case "Home":
             case "ArrowUp":
-              if (contentScrollsUp()) {
+              if (contentScrollsUp() && !toolGroupConsumesUpwardNavigation(event.target)) {
                 handleManualNavigation();
               }
               break;
@@ -8083,7 +8089,11 @@ function ChatViewContent(props: ChatViewProps) {
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
-                skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+                skills={
+                  activeProviderStatus
+                    ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
+                    : EMPTY_PROVIDER_SKILLS
+                }
                 anchorMessageId={timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
                 contentInsetEndAdjustment={composerOverlayHeight}
