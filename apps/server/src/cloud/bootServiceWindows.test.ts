@@ -276,7 +276,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("installs, reports current state, and uninstalls", () =>
     Effect.gen(function* () {
       const { service, fs, statePath, shortcutPath } = yield* makeHarness();
-      const installed = yield* service.install;
+      const installed = yield* service.install();
 
       expect(parseServiceState(yield* fs.readFileString(statePath))).toEqual({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
@@ -295,7 +295,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("creates the shortcut only after the Startup folder passes its probe", () =>
     Effect.gen(function* () {
       const { service, commands } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
 
       const actions = commands
         .filter((command) => command.includes("service-shortcut.ps1"))
@@ -307,7 +307,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("goes stale when the startup script drifts from what it should be", () =>
     Effect.gen(function* () {
       const { service, fs, startupScriptPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       expect((yield* service.status).current).toBe(true);
 
       yield* fs.writeFileString(startupScriptPath, "# edited by hand\n");
@@ -320,7 +320,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
       const { service, control } = yield* makeHarness();
       control.disabled = "True";
 
-      const error = yield* service.install.pipe(Effect.flip);
+      const error = yield* service.install().pipe(Effect.flip);
       // A dedicated tag, because the generic install error hides its cause and
       // the CLI prints only `message`. The guidance has to reach the user.
       expect(error._tag).toBe("BootServiceStartupEntryDisabledError");
@@ -331,11 +331,11 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("reinstalls over a running launcher only after it has actually gone", () =>
     Effect.gen(function* () {
       const { service, fs, pidPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // The stand-in launcher claimed the pid file when the startup script ran.
       expect(yield* fs.exists(pidPath)).toBe(true);
 
-      yield* service.install;
+      yield* service.install();
       expect((yield* service.status).current).toBe(true);
     }).pipe(TestClock.withLive),
   );
@@ -343,12 +343,12 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("refuses to reinstall when the running launcher will not stop", () =>
     Effect.gen(function* () {
       const { service, control } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // Writing over a launcher we cannot confirm dead would leave two servers
       // on one database, so this must fail rather than carry on.
       control.launcherStopsOnRequest = false;
 
-      const error = yield* service.install.pipe(Effect.flip);
+      const error = yield* service.install().pipe(Effect.flip);
       expect(error._tag).toBe("BootServiceCommandError");
       expect(error.message).toContain("did not exit within");
     }).pipe(TestClock.withLive),
@@ -357,7 +357,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("removes the shortcut without needing the generated script", () =>
     Effect.gen(function* () {
       const { service, fs, shortcutPath, startupScriptPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // A user who cleared the runtime directory still needs uninstall to work,
       // because the shortcut is the thing they asked to be rid of.
       yield* fs.remove(startupScriptPath, { force: true });
@@ -370,7 +370,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("goes stale when the shortcut itself is edited, not just the script", () =>
     Effect.gen(function* () {
       const { service, control } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       expect((yield* service.status).current).toBe(true);
 
       // The generated scripts still match. Only the .lnk was tampered with, and
@@ -383,7 +383,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("stops a running launcher even when the shortcut was deleted by hand", () =>
     Effect.gen(function* () {
       const { service, fs, shortcutPath, pidPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // A launcher outlives its shortcut, so keying the stop on the shortcut
       // would leave a server running with nothing left to manage it.
       yield* fs.remove(shortcutPath, { force: true });
@@ -397,7 +397,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
     Effect.gen(function* () {
       const { service } = yield* makeHarness("win32", "C:\\pct %TEMP% dir\\node.exe");
 
-      const error = yield* service.install.pipe(Effect.flip);
+      const error = yield* service.install().pipe(Effect.flip);
       // The generic install error prints fixed text, so a dedicated tag is what
       // gets the user told which path to move.
       expect(error._tag).toBe("BootServicePathHasPercentError");
@@ -408,7 +408,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("ignores a pid record left behind by an earlier boot", () =>
     Effect.gen(function* () {
       const { service, fs, pidPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // Process ids are recycled across reboots, so a record from a previous
       // boot can name a live stranger. Trusting it would block every install.
       yield* fs.writeFileString(
@@ -416,7 +416,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
         encodeServiceLauncherPresence({ pid: process.pid, bootTimeMs: 0 }),
       );
 
-      yield* service.install;
+      yield* service.install();
       expect((yield* service.status).current).toBe(true);
     }).pipe(TestClock.withLive),
   );
@@ -424,13 +424,13 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("clears a leftover stop request when no launcher is listening", () =>
     Effect.gen(function* () {
       const { service, fs, pidPath, stopRequestPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // A dead launcher leaves both files. Removing only the pid record would
       // let the request stop the very launcher the next install starts.
       yield* fs.remove(pidPath, { force: true });
       yield* fs.writeFileString(stopRequestPath, "");
 
-      yield* service.install;
+      yield* service.install();
       expect(yield* fs.exists(stopRequestPath)).toBe(false);
     }).pipe(TestClock.withLive),
   );
@@ -438,7 +438,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("refuses to reinstall while a remote update is still pending", () =>
     Effect.gen(function* () {
       const { service, fs, statePath, pidPath } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned test document.
       const pendingState = JSON.stringify({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
@@ -453,7 +453,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
       });
       yield* fs.writeFileString(statePath, pendingState);
 
-      const error = yield* service.install.pipe(Effect.flip);
+      const error = yield* service.install().pipe(Effect.flip);
       expect(error._tag).toBe("BootServiceUpdatePendingError");
       // The guard protects the in-flight update, so it must refuse before
       // anything is terminated. A surviving pid record proves nothing stopped.
@@ -464,7 +464,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("ignores a pid record nobody has refreshed", () =>
     Effect.gen(function* () {
       const { service, fs, pidPath, control } = yield* makeHarness();
-      yield* service.install;
+      yield* service.install();
       // Nothing answers a stop request now, and nothing refreshes the record
       // either. That pair is what a recycled process id looks like, and it is
       // what makes the assertion below mean something.
@@ -476,7 +476,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
       const longAgoSeconds = 1_577_836_800; // 2020-01-01
       yield* fs.utimes(pidPath, longAgoSeconds, longAgoSeconds);
 
-      yield* service.install;
+      yield* service.install();
       expect((yield* service.status).current).toBe(true);
     }).pipe(TestClock.withLive),
   );
@@ -485,7 +485,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
     Effect.gen(function* () {
       const { service } = yield* makeHarness("linux");
       expect((yield* service.status).supported).toBe(false);
-      expect((yield* service.install.pipe(Effect.flip))._tag).toBe("BootServiceUnsupportedError");
+      expect((yield* service.install().pipe(Effect.flip))._tag).toBe("BootServiceUnsupportedError");
     }).pipe(TestClock.withLive),
   );
 });

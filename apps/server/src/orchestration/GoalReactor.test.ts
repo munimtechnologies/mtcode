@@ -196,6 +196,7 @@ const createHarness = (threads: ReadonlyArray<OrchestrationThread>) =>
       readEvents: () => Stream.empty,
       dispatch,
       streamDomainEvents: Stream.fromQueue(events),
+      subscribeDomainEvents: Effect.succeed(Stream.fromQueue(events)),
       latestSequence: Effect.succeed(0),
     } satisfies OrchestrationEngineShape;
 

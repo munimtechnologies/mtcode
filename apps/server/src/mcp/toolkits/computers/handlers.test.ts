@@ -121,6 +121,7 @@ function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
       return Effect.succeed({ sequence: 11 });
     },
     streamDomainEvents: Stream.empty,
+    subscribeDomainEvents: Effect.succeed(Stream.empty),
     latestSequence: Effect.succeed(10),
   } satisfies OrchestrationEngineService["Service"];
 

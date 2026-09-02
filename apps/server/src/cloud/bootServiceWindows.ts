@@ -43,7 +43,9 @@ import {
   decodeServiceLauncherPresence,
   serviceLauncherPresenceIsFromThisBoot,
   SERVICE_STOP_REQUEST_FILE,
+  compareExactServiceVersions,
   parseServiceState,
+  serviceStateActiveVersion,
   serviceStateHasPendingUpdate,
   type ServiceState,
 } from "./serviceProtocol.ts";
@@ -559,95 +561,114 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     ),
   );
 
-  const install: BootService.BootService["Service"]["install"] = Effect.gen(function* () {
-    yield* requireWindows;
-    yield* fs
-      .makeDirectory(input.logsDir, { recursive: true })
-      .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
+  const install: BootService.BootService["Service"]["install"] = (options) =>
+    Effect.gen(function* () {
+      yield* requireWindows;
+      yield* fs
+        .makeDirectory(input.logsDir, { recursive: true })
+        .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
 
-    const percentIn = findPercentInPaths([
-      ["the Node executable", plan.nodePath],
-      // Named with the variable that moves it, because the shared message
-      // deliberately gives no relocation advice of its own.
-      ["the T3 Code data directory (T3CODE_HOME)", plan.launcherPath],
-      ["the T3 Code log directory", plan.logPath],
-    ]);
-    if (percentIn !== undefined) {
-      return yield* new BootService.BootServicePathHasPercentError({ pathLabel: percentIn });
-    }
+      const percentIn = findPercentInPaths([
+        ["the Node executable", plan.nodePath],
+        // Named with the variable that moves it, because the shared message
+        // deliberately gives no relocation advice of its own.
+        ["the T3 Code data directory (T3CODE_HOME)", plan.launcherPath],
+        ["the T3 Code log directory", plan.logPath],
+      ]);
+      if (percentIn !== undefined) {
+        return yield* new BootService.BootServicePathHasPercentError({ pathLabel: percentIn });
+      }
 
-    // Write the shortcut script first so the preflight has something to run.
-    // It lives under the data directory, so nothing user-visible changes yet.
-    yield* writeDurably(shortcutScriptPath, renderShortcutScript(plan));
-    const checks = yield* preflight;
-    if (!checks.shellRunning) {
-      // Not fatal. Running a different shell is a deliberate choice, and it is
-      // the user's to make. Saying nothing would leave them with a service that
-      // silently never starts.
-      yield* Console.warn(
-        "Windows Explorer is not running, and it is what starts Startup folder entries.\n" +
-          "If you use a different shell, T3 Code may never start when you sign in.",
+      // Write the shortcut script first so the preflight has something to run.
+      // It lives under the data directory, so nothing user-visible changes yet.
+      yield* writeDurably(shortcutScriptPath, renderShortcutScript(plan));
+      const checks = yield* preflight;
+      if (!checks.shellRunning) {
+        // Not fatal. Running a different shell is a deliberate choice, and it is
+        // the user's to make. Saying nothing would leave them with a service that
+        // silently never starts.
+        yield* Console.warn(
+          "Windows Explorer is not running, and it is what starts Startup folder entries.\n" +
+            "If you use a different shell, T3 Code may never start when you sign in.",
+        );
+      }
+      if (checks.entryDisabled) {
+        return yield* new BootService.BootServiceStartupEntryDisabledError({
+          shortcutName: SHORTCUT_NAME,
+        });
+      }
+
+      // Prepare every immutable artifact before stopping a running launcher.
+      yield* installPinnedRuntime;
+      const launcherSource = yield* fs
+        .readFileString(launcherSourcePath)
+        .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
+
+      const installed = yield* fs
+        .exists(unitPath)
+        .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
+      // Before anything is stopped. This guard exists to protect an in-flight
+      // remote update, and terminating the launcher first would interrupt the
+      // very thing it is guarding.
+      const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
+      if (
+        Option.isSome(previousStateText) &&
+        serviceStateHasPendingUpdate(previousStateText.value)
+      ) {
+        return yield* new BootService.BootServiceUpdatePendingError();
+      }
+      // Same downgrade guard as the systemd/launchd path (upstream #5302): an
+      // older CLI must not silently replace a newer service.
+      if (installed && Option.isSome(previousStateText)) {
+        const installedVersion = serviceStateActiveVersion(previousStateText.value);
+        if (
+          installedVersion !== undefined &&
+          options?.allowDowngrade !== true &&
+          compareExactServiceVersions(input.cliVersion, installedVersion) < 0
+        ) {
+          return yield* new BootService.BootServiceDowngradeRefusedError({
+            installedVersion,
+            targetVersion: input.cliVersion,
+          });
+        }
+      }
+
+      // Keyed on the pid file, never on the shortcut. A launcher outlives a
+      // manually deleted shortcut, and starting a second one alongside it would
+      // put two servers on the same database.
+      const stopped = yield* requestStop;
+
+      yield* Effect.gen(function* () {
+        yield* writeDurably(launcherPath, launcherSource);
+        yield* writeDurably(
+          statePath,
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned document.
+          `${JSON.stringify(
+            {
+              protocol: SERVICE_LAUNCHER_PROTOCOL,
+              activeVersion: input.cliVersion,
+            } satisfies ServiceState,
+            null,
+            2,
+          )}\n`,
+        );
+        yield* writeDurably(startupScriptPath, renderStartupScript(plan));
+
+        yield* runShortcutScript("creating the Windows Startup shortcut", "Install");
+        // Start last. No administrative state write occurs after this succeeds.
+        yield* runPowerShellScript("starting the service", startupScriptPath);
+      }).pipe(
+        Effect.tapError(() =>
+          installed || stopped
+            ? runPowerShellScript(
+                "restarting the service after a failed update",
+                startupScriptPath,
+              ).pipe(Effect.ignore)
+            : Effect.void,
+        ),
       );
-    }
-    if (checks.entryDisabled) {
-      return yield* new BootService.BootServiceStartupEntryDisabledError({
-        shortcutName: SHORTCUT_NAME,
-      });
-    }
-
-    // Prepare every immutable artifact before stopping a running launcher.
-    yield* installPinnedRuntime;
-    const launcherSource = yield* fs
-      .readFileString(launcherSourcePath)
-      .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
-
-    const installed = yield* fs
-      .exists(unitPath)
-      .pipe(Effect.mapError((cause) => new BootService.BootServiceInstallError({ cause })));
-    // Before anything is stopped. This guard exists to protect an in-flight
-    // remote update, and terminating the launcher first would interrupt the
-    // very thing it is guarding.
-    const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
-    if (Option.isSome(previousStateText) && serviceStateHasPendingUpdate(previousStateText.value)) {
-      return yield* new BootService.BootServiceUpdatePendingError();
-    }
-
-    // Keyed on the pid file, never on the shortcut. A launcher outlives a
-    // manually deleted shortcut, and starting a second one alongside it would
-    // put two servers on the same database.
-    const stopped = yield* requestStop;
-
-    yield* Effect.gen(function* () {
-      yield* writeDurably(launcherPath, launcherSource);
-      yield* writeDurably(
-        statePath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned document.
-        `${JSON.stringify(
-          {
-            protocol: SERVICE_LAUNCHER_PROTOCOL,
-            activeVersion: input.cliVersion,
-          } satisfies ServiceState,
-          null,
-          2,
-        )}\n`,
-      );
-      yield* writeDurably(startupScriptPath, renderStartupScript(plan));
-
-      yield* runShortcutScript("creating the Windows Startup shortcut", "Install");
-      // Start last. No administrative state write occurs after this succeeds.
-      yield* runPowerShellScript("starting the service", startupScriptPath);
-    }).pipe(
-      Effect.tapError(() =>
-        installed || stopped
-          ? runPowerShellScript(
-              "restarting the service after a failed update",
-              startupScriptPath,
-            ).pipe(Effect.ignore)
-          : Effect.void,
-      ),
-    );
-    return plan satisfies BootService.BootServicePlan;
-  }).pipe(Effect.withSpan("cloud.boot_service_windows.install"));
+      return plan satisfies BootService.BootServicePlan;
+    }).pipe(Effect.withSpan("cloud.boot_service_windows.install"));
 
   const uninstall: BootService.BootService["Service"]["uninstall"] = Effect.gen(function* () {
     yield* requireWindows;
@@ -695,6 +716,9 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
       fs.readFileString(statePath).pipe(Effect.option),
     ]);
     const state = Option.isSome(stateText) ? parseServiceState(stateText.value) : undefined;
+    const installedVersion = Option.isSome(stateText)
+      ? serviceStateActiveVersion(stateText.value)
+      : undefined;
     // Read the shortcut itself back, because the script that wrote it matching
     // proves nothing about the .lnk someone may have edited or replaced since.
     const shortcut = yield* runShortcutScript(
@@ -713,6 +737,7 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     return {
       supported: true,
       installed: true,
+      ...(installedVersion === undefined ? {} : { installedVersion }),
       current:
         shortcutMatches &&
         Option.isSome(startupScript) &&

@@ -3,10 +3,11 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Terminal from "effect/Terminal";
-import { Command, GlobalFlag, Prompt } from "effect/unstable/cli";
+import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
+import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
 import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
@@ -42,13 +43,25 @@ export type ServiceReconcileResult =
     };
 
 /** Install, update, or repair the service using the CLI version running this command. */
-export const reconcileService = Effect.fn("cli.service.reconcile")(function* () {
+export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
+  readonly allowDowngrade?: boolean;
+}) {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
   if (status.installed && status.current) {
     return { changed: false, status } satisfies ServiceReconcileResult;
   }
-  const plan = yield* service.install;
+  if (
+    status.installedVersion !== undefined &&
+    options?.allowDowngrade !== true &&
+    compareExactServiceVersions(packageJson.version, status.installedVersion) < 0
+  ) {
+    return yield* new BootService.BootServiceDowngradeRefusedError({
+      installedVersion: status.installedVersion,
+      targetVersion: packageJson.version,
+    });
+  }
+  const plan = yield* service.install(options);
   return {
     changed: true,
     previouslyInstalled: status.installed,
@@ -68,9 +81,23 @@ export function formatServiceStatus(
   }
   const locationLabel =
     status.kind === "systemd" ? "Unit" : status.kind === "launchd" ? "LaunchAgent" : "Shortcut";
+  const installedVersion = status.installedVersion ?? cliVersion;
+  if (
+    !status.current &&
+    status.installedVersion !== undefined &&
+    compareExactServiceVersions(status.installedVersion, cliVersion) > 0
+  ) {
+    return [
+      `${resolveAppDisplayName()} service`,
+      `  Status: installed · t3@${installedVersion} (newer than this t3@${cliVersion} CLI)`,
+      `  ${locationLabel}: ${status.unitPath}`,
+      `  Logs: ${status.logPath}`,
+      `  Next: Use \`npx t3@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
+    ].join("\n");
+  }
   return [
     `${resolveAppDisplayName()} service`,
-    `  Status: ${status.current ? `installed · t3@${cliVersion}` : "needs an update or repair"}`,
+    `  Status: ${status.current ? `installed · t3@${installedVersion}` : "needs an update or repair"}`,
     `  ${locationLabel}: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...(status.current ? [] : ["  Next: Run `npx t3@latest service update`."]),
@@ -88,7 +115,7 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
 
 /** Windows only. The blink at sign-in looks alarming until you know what it is. */
 const WINDOWS_SERVICE_NOTICE = [
-  'A small window named `${resolveAppDisplayName()} Server` blinks once when you sign in. That is expected.',
+  `A small window named \`${resolveAppDisplayName()} Server\` blinks once when you sign in. That is expected.`,
   "It appears under Startup apps in Windows Settings, where you can switch it off.",
   "It starts at sign-in, not at boot, and it stops when you sign out.",
 ].join("\n");
@@ -110,13 +137,23 @@ const reportReconcileResult = Effect.fn("cli.service.report")(function* (
   }
 });
 
-const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe(
-  Command.withDescription(`Install ${resolveAppDisplayName()} as a background service for this user.`),
+const serviceReconcileFlags = {
+  ...projectLocationFlags,
+  allowDowngrade: Flag.boolean("allow-downgrade").pipe(
+    Flag.withDescription("Allow replacing a newer installed service with this older CLI version."),
+    Flag.withDefault(false),
+  ),
+};
+
+const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
+  Command.withDescription(
+    `Install ${resolveAppDisplayName()} as a background service for this user.`,
+  ),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService();
+        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         yield* reportReconcileResult(
           result,
           `${resolveAppDisplayName()} service is already installed with t3@${packageJson.version}.`,
@@ -126,7 +163,7 @@ const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe
   ),
 );
 
-const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
+const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription(
     "Update or repair the background service using this CLI version. Use `npx t3@latest service update` for the latest release.",
   ),
@@ -134,7 +171,7 @@ const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService();
+        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         yield* reportReconcileResult(
           result,
           `${resolveAppDisplayName()} service is already using t3@${packageJson.version}.`,
@@ -153,7 +190,9 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
         const service = yield* BootService.BootService;
         const removed = yield* service.uninstall;
         yield* Console.log(
-          removed ? `Removed the ${resolveAppDisplayName()} service.` : `${resolveAppDisplayName()} service is not installed.`,
+          removed
+            ? `Removed the ${resolveAppDisplayName()} service.`
+            : `${resolveAppDisplayName()} service is not installed.`,
         );
       }),
     ),
@@ -161,7 +200,9 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 );
 
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
-  Command.withDescription(`Show whether the ${resolveAppDisplayName()} background service is installed.`),
+  Command.withDescription(
+    `Show whether the ${resolveAppDisplayName()} background service is installed.`,
+  ),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -175,13 +216,27 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
 
 export const offerServiceDuringOnboarding = Effect.gen(function* () {
   const service = yield* BootService.BootService;
-  const { supported, installed, current } = yield* service.status;
+  const status = yield* service.status;
+  const { supported, installed, current } = status;
   if (!supported) {
     return false;
   }
   if (installed && current) {
-    yield* Console.log(`${resolveAppDisplayName()} is already set up to run in the background on this machine.`);
+    yield* Console.log(
+      `${resolveAppDisplayName()} is already set up to run in the background on this machine.`,
+    );
     return true;
+  }
+  if (
+    installed &&
+    status.installedVersion !== undefined &&
+    compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
+  ) {
+    yield* Console.log(
+      `A newer t3@${status.installedVersion} background service is installed. Leaving it unchanged.`,
+    );
+    // This CLI cannot verify the newer service. Keep the manual fallback available.
+    return false;
   }
   // A LaunchAgent (macOS) and a Startup shortcut (Windows) both start at
   // login and die at logout; neither has an enable-linger equivalent the way
@@ -235,6 +290,8 @@ export const recoverServiceOnboardingOffer = <R>(
         Console.warn(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
       BootServiceStartupEntryDisabledError: (error) =>
         Console.warn(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
+      BootServiceDowngradeRefusedError: (error) =>
+        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
     }),
   );
 

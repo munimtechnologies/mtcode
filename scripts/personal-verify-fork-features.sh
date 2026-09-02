@@ -145,6 +145,15 @@ require apps/server/src/ws.ts "clientAnalyticsProps," "client analytics props pa
 require apps/web/src/components/sidebar/SidebarUpdatePill.tsx 'state !== null && state.releaseNotes.length > 0' "release-notes popover not gated to nightly"
 require apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.tsx 'if (state.releaseNotes.length === 0) {' "release-notes body not gated to nightly"
 
+# --- Desktop auto-download / auto-install (personal fork) ---
+# The 2026-09-01 sync silently broke auto-install when upstream turned
+# installDownloadedUpdate into a function (the fork line yielded the function).
+require apps/desktop/src/updates/DesktopUpdates.ts 'const fullChangelog = true;' "release notes fetched on every update channel"
+require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* downloadAvailableUpdate;' "auto-download when an update becomes available"
+require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* installDownloadedUpdate(info.version);' "auto-install pinned to the downloaded version"
+# Remote-update flow must treat the fork's in-flight auto-install as prepared.
+require apps/desktop/src/updates/DesktopRemoteUpdates.ts 'ready-to-install' "remote update publishes ready-to-install"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2
