@@ -6,6 +6,7 @@ import type {
   PreviewSessionSnapshot,
   ScopedThreadRef,
 } from "@t3tools/contracts";
+import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import {
   type AtomCommandResult,
   mapAtomCommandResult,
@@ -62,9 +63,14 @@ export async function openUrlInPreview<E>(input: {
   });
 }
 
+/**
+ * Opens a browser document in the integrated browser. Inside the workspace the
+ * page may load sibling assets; a file outside it is served on its own.
+ */
 export async function openFileInPreview<AssetError, PreviewError>(input: {
   readonly threadRef: ScopedThreadRef;
   readonly filePath: string;
+  readonly workspaceRoot: string | undefined;
   readonly httpBaseUrl: string;
   readonly createAssetUrl: (input: {
     readonly environmentId: EnvironmentId;
@@ -81,11 +87,13 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
       ),
     );
   }
+  const insideWorkspace =
+    mediaFileReference(input.filePath, input.workspaceRoot).relativePath !== undefined;
   const assetResult = await input.createAssetUrl({
     environmentId: input.threadRef.environmentId,
     input: {
       resource: {
-        _tag: "workspace-file",
+        _tag: insideWorkspace ? "workspace-file" : "media-file",
         threadId: input.threadRef.threadId,
         path: input.filePath,
       },
