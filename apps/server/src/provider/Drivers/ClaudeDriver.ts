@@ -44,6 +44,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
+import { withInstanceIdentity } from "./instanceIdentity.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -108,23 +109,6 @@ const CLAUDE_ACCOUNT_LOGIN_ADVERTISEMENT = {
   supportsLogout: true,
 } as const;
 
-const withInstanceIdentity =
-  (input: {
-    readonly instanceId: ProviderInstance["instanceId"];
-    readonly displayName: string | undefined;
-    readonly accentColor: string | undefined;
-    readonly continuationGroupKey: string;
-  }) =>
-  (snapshot: ServerProviderDraft): ServerProvider => ({
-    ...snapshot,
-    accountLogin: CLAUDE_ACCOUNT_LOGIN_ADVERTISEMENT,
-    instanceId: input.instanceId,
-    driver: DRIVER_KIND,
-    ...(input.displayName ? { displayName: input.displayName } : {}),
-    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-    continuation: { groupKey: input.continuationGroupKey },
-  });
-
 export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
@@ -156,11 +140,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         env: processEnv,
       });
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
-      const stampIdentity = withInstanceIdentity({
+      const stampInstanceIdentity = withInstanceIdentity({
         instanceId,
+        driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey,
+      });
+      // MT Code advertises the account login modes this driver supports so the
+      // client can offer sign-in/sign-out per provider instance.
+      const stampIdentity = (snapshot: ServerProviderDraft): ServerProvider => ({
+        ...stampInstanceIdentity(snapshot),
+        accountLogin: CLAUDE_ACCOUNT_LOGIN_ADVERTISEMENT,
       });
 
       const adapterOptions = {

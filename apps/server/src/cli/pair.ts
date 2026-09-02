@@ -43,6 +43,7 @@ import * as ServerConfig from "../config.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import {
   type PersistedServerRuntimeState,
+  isProcessAlive,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
 import {
@@ -242,17 +243,6 @@ const probeEnvironmentDescriptor = (
     return { _tag: "descriptor", descriptor } as const;
   }).pipe(Effect.catch((outcome) => Effect.succeed(outcome)));
 
-// signal 0 delivers nothing; it only reports whether the pid exists. EPERM
-// means it exists but belongs to another user, which still counts as alive.
-const isProcessAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error instanceof Error && "code" in error && error.code === "EPERM";
-  }
-};
-
 /**
  * Walk the same homes `t3 pair` uses (explicit `--base-dir`, else worktree
  * `.t3` then `T3CODE_HOME`/`~/.t3`) and both state variants (`userdata`,
@@ -274,6 +264,12 @@ export const findAliveServerRuntimeCandidates = Effect.fn("pair.findAliveServerR
       }
       const envHome = yield* Config.string("T3CODE_HOME").pipe(Config.option);
       bases.push(yield* resolveBaseDir(Option.getOrUndefined(envHome)));
+    }
+    interface DiscoveredPairTarget {
+      readonly baseDir: string;
+      readonly variant: PairStateVariant;
+      readonly state: PersistedServerRuntimeState;
+      readonly descriptor: ExecutionEnvironmentDescriptor;
     }
 
     const candidates: Array<AliveServerRuntimeCandidate> = [];
