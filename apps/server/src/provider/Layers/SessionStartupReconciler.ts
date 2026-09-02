@@ -8,6 +8,7 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
+import { hasServerUpdateContinuationMarker } from "../serverUpdateContinuation.ts";
 import {
   SessionStartupReconciler,
   type SessionStartupReconcilerShape,
@@ -62,19 +63,28 @@ const makeSessionStartupReconciler = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const sessionDirectory = yield* ProviderSessionDirectory;
 
-  const hasResumeCursor = (thread: OrchestrationThreadShell) =>
+  // What the session directory remembers about an orphan: whether the
+  // provider session can be restored from a persisted cursor, and whether the
+  // server marked the thread to continue after a self-update. A marked thread
+  // belongs to the server-update continuation pass in serverRuntimeStartup,
+  // which runs after this sweep; settling or resuming it here would either
+  // continue it twice or take it away from that pass.
+  const readResumeState = (thread: OrchestrationThreadShell) =>
     sessionDirectory.getBinding(thread.id).pipe(
       Effect.map(
         Option.match({
-          onNone: () => false,
-          onSome: (binding) => binding.resumeCursor != null,
+          onNone: () => ({ hasResumeCursor: false, continuationMarked: false }),
+          onSome: (binding) => ({
+            hasResumeCursor: binding.resumeCursor != null,
+            continuationMarked: hasServerUpdateContinuationMarker(binding.runtimePayload),
+          }),
         }),
       ),
       Effect.catchCause((cause) =>
         Effect.logWarning("session.startup-reconciler.resume-state-read-failed", {
           threadId: thread.id,
           cause,
-        }).pipe(Effect.as(false)),
+        }).pipe(Effect.as({ hasResumeCursor: false, continuationMarked: false })),
       ),
     );
 
@@ -174,10 +184,19 @@ const makeSessionStartupReconciler = Effect.gen(function* () {
     const nowMillis = DateTime.toEpochMillis(nowUtc);
     let settledCount = 0;
     let resumedCount = 0;
+    let deferredCount = 0;
     for (const orphan of orphans) {
+      const resumeState = yield* readResumeState(orphan.thread);
+      if (resumeState.continuationMarked) {
+        deferredCount += 1;
+        yield* Effect.logInfo("session.startup-reconciler.deferred-to-server-update-continuation", {
+          threadId: orphan.thread.id,
+        });
+        continue;
+      }
       const plan = planForOrphan({
         ...orphan,
-        hasResumeCursor: yield* hasResumeCursor(orphan.thread),
+        hasResumeCursor: resumeState.hasResumeCursor,
       });
       const settled = yield* settleOrphan(
         orphan.thread,
@@ -198,6 +217,7 @@ const makeSessionStartupReconciler = Effect.gen(function* () {
       orphanCount: orphans.length,
       settledCount,
       resumedCount,
+      deferredCount,
     });
   });
 

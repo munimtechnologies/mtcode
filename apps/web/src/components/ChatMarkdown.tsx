@@ -342,10 +342,10 @@ function findTaskListMarkerOffset(markdown: string, listItemStart: number): numb
 }
 
 /**
- * The default `1.25rem` marker gutter (`.chat-markdown ol`) fits single-digit
- * decimal markers. Wider markers can extend past it and get clipped by a
- * collapsed message's overflow, so multi-digit lists get a gutter sized to
- * their widest marker. The width includes a negative marker's minus sign.
+ * The default `1.25rem` marker gutter (`.chat-markdown ol`) fits one-character
+ * markers. Wider markers can extend past it and get clipped by a collapsed
+ * message's overflow. Widen the gutter to fit the widest marker, including a
+ * negative marker's minus sign.
  */
 export function orderedListGutterStyle(
   itemCount: number,
@@ -354,12 +354,8 @@ export function orderedListGutterStyle(
   const parsedStart = Number.parseInt(String(start ?? 1), 10);
   const firstNumber = Number.isNaN(parsedStart) ? 1 : parsedStart;
   const lastNumber = firstNumber + Math.max(itemCount - 1, 0);
-  const digitWidth = Math.max(
-    String(Math.abs(firstNumber)).length,
-    String(Math.abs(lastNumber)).length,
-  );
   const markerWidth = Math.max(String(firstNumber).length, String(lastNumber).length);
-  if (digitWidth <= 1) return undefined;
+  if (markerWidth <= 1) return undefined;
   return { "--list-gutter": `${markerWidth + 1}ch` };
 }
 

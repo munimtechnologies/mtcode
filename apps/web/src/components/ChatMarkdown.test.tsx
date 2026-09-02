@@ -387,7 +387,7 @@ describe("orderedListGutterStyle", () => {
   it("uses the widest marker and includes a negative start's minus sign", () => {
     expect(orderedListGutterStyle(1001, -1000)).toEqual({ "--list-gutter": "6ch" });
     expect(orderedListGutterStyle(3, -15)).toEqual({ "--list-gutter": "4ch" });
-    expect(orderedListGutterStyle(3, -5)).toBeUndefined();
+    expect(orderedListGutterStyle(3, -5)).toEqual({ "--list-gutter": "3ch" });
   });
 
   it("treats a missing/zero item count as a single item", () => {

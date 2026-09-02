@@ -65,6 +65,8 @@ describe("SessionStartupReconciler", () => {
     readonly archivedThreads?: ReadonlyArray<ReturnType<typeof makeThreadShell>>;
     readonly liveSessionThreadIds?: ReadonlyArray<ThreadId>;
     readonly resumableThreadIds?: ReadonlyArray<ThreadId>;
+    /** Threads the server marked to continue after a self-update. */
+    readonly continuationMarkedThreadIds?: ReadonlyArray<ThreadId>;
     readonly dispatchImplementation?: () => ReturnType<
       OrchestrationEngineService["Service"]["dispatch"]
     >;
@@ -97,14 +99,20 @@ describe("SessionStartupReconciler", () => {
     };
 
     const resumable = new Set(input.resumableThreadIds ?? []);
+    const continuationMarked = new Set(input.continuationMarkedThreadIds ?? []);
     const sessionDirectory: Partial<ProviderSessionDirectoryShape> = {
       getBinding: (threadId) =>
         Effect.succeed(
-          resumable.has(threadId)
+          resumable.has(threadId) || continuationMarked.has(threadId)
             ? Option.some({
                 threadId,
                 provider: "codex",
-                resumeCursor: { threadId: `provider-${threadId}` },
+                ...(resumable.has(threadId)
+                  ? { resumeCursor: { threadId: `provider-${threadId}` } }
+                  : {}),
+                ...(continuationMarked.has(threadId)
+                  ? { runtimePayload: { continueAfterServerUpdate: `turn-${threadId}` } }
+                  : {}),
               } as ProviderRuntimeBinding)
             : Option.none(),
         ),
@@ -208,6 +216,32 @@ describe("SessionStartupReconciler", () => {
       expect(resume.message.role).toBe("user");
       expect(resume.message.text).toContain("Continue exactly where you left off");
     }
+  });
+
+  it("leaves a thread marked for server-update continuation to the startup continuation pass", async () => {
+    const markedThreadId = ThreadId.make("thread-orphan-marked");
+    const plainThreadId = ThreadId.make("thread-orphan-plain");
+    const harness = createHarness({
+      threads: [
+        makeThreadShell(markedThreadId, runningSession(markedThreadId)),
+        makeThreadShell(plainThreadId, runningSession(plainThreadId)),
+      ],
+      resumableThreadIds: [markedThreadId, plainThreadId],
+      continuationMarkedThreadIds: [markedThreadId],
+    });
+
+    await runReconcile();
+
+    // The marked thread is neither settled nor resumed here: serverRuntimeStartup's
+    // continuation pass owns it, and a second resume would run the turn twice.
+    expect(harness.dispatched.map((command) => command.threadId)).toEqual([
+      plainThreadId,
+      plainThreadId,
+    ]);
+    expect(harness.dispatched.map((command) => command.type)).toEqual([
+      "thread.session.set",
+      "thread.turn.start",
+    ]);
   });
 
   it("settles as interrupted without a resume turn when a queued message will restart the thread", async () => {
