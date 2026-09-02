@@ -15,8 +15,6 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
-  isMtModelInstanceId,
-  isMtModelSelection,
   PROVIDER_DISPLAY_NAMES,
   resolveProviderInstanceEnabled,
   type ModelSelection,
@@ -325,16 +323,6 @@ export function getDefaultProviderInstanceModel(
 const isSelectableProviderInstanceEntry = (entry: ProviderInstanceEntry): boolean =>
   entry.enabled && entry.isAvailable;
 
-function hasReadyMtModelBackend(providers: ReadonlyArray<ServerProvider>): boolean {
-  return providers.some(
-    (provider) =>
-      !isMtModelInstanceId(provider.instanceId) &&
-      provider.enabled &&
-      provider.availability !== "unavailable" &&
-      (provider.status === "ready" || provider.status === "warning"),
-  );
-}
-
 /**
  * Resolve an exact stored instance when it remains enabled and available.
  * Otherwise choose a deterministic fallback that can plausibly start now:
@@ -368,9 +356,6 @@ export function resolveSelectableProviderInstance(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId | undefined,
 ): ProviderInstanceId | undefined {
-  if (isMtModelInstanceId(instanceId) && hasReadyMtModelBackend(providers)) {
-    return instanceId;
-  }
   const entries = deriveProviderInstanceEntries(providers);
   return resolveSelectableProviderInstanceEntry(entries, instanceId)?.instanceId;
 }
@@ -385,9 +370,6 @@ export function resolveDefaultProviderModelSelection(
   providers: ReadonlyArray<ServerProvider>,
   selection: ModelSelection | null | undefined,
 ): ModelSelection | null {
-  if (selection != null && isMtModelSelection(selection) && hasReadyMtModelBackend(providers)) {
-    return selection;
-  }
   const instanceId = resolveSelectableProviderInstance(providers, selection?.instanceId);
   if (instanceId === undefined) return null;
   if (selection?.instanceId === instanceId) return selection ?? null;

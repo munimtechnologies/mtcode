@@ -12,8 +12,7 @@ modules, types, and tests, but resolves the few lines that _call_ them in
 upstream's favor. Typecheck stays clean, unit tests stay green, and the
 feature is simply gone from the app. This has really happened to: Goals
 wiring, the usage "All" window button, the composer `/goal` menu, the `#`
-thread-reference chip, the web dictation mic, MT Auto in the model picker,
-and the upstream-PR cards UI.
+thread-reference chip, the web dictation mic, and the upstream-PR cards UI.
 
 `apps/web/src/components/chat/ChatComposer.tsx` and
 `apps/web/src/components/ChatView.tsx` are the highest-risk files — upstream

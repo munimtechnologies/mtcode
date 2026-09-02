@@ -40,7 +40,6 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
-import { isMtModelInstanceId, MT_MODEL_SLUG } from "@t3tools/contracts";
 
 type ModelPickerItem = {
   slug: string;
@@ -389,12 +388,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     } else if (selectedInstanceId === "favorites") {
       result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
-      const mtModel = flatModels.find(
-        (model) => isMtModelInstanceId(model.instanceId) && model.slug === MT_MODEL_SLUG,
-      );
-      if (mtModel && !result.some((model) => isMtModelInstanceId(model.instanceId))) {
-        result = [mtModel, ...result];
-      }
     } else {
       result = result.filter((m) => m.instanceId === selectedInstanceId);
     }

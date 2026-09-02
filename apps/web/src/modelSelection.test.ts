@@ -125,40 +125,6 @@ describe("instance-scoped model selection", () => {
     ).toBe("openai/gpt-5.5");
   });
 
-  it("resolves the virtual MT Model picker entry", () => {
-    const providers = [
-      {
-        instanceId: ProviderInstanceId.make("mt"),
-        driver: ProviderDriverKind.make("mt"),
-        enabled: true,
-        installed: true,
-        version: null,
-        status: "ready" as const,
-        auth: { status: "unknown" as const },
-        checkedAt: "2026-08-18T00:00:00.000Z",
-        models: [
-          {
-            slug: "mt-auto",
-            name: "MT Model",
-            isCustom: false,
-            isDefault: true,
-            capabilities: {},
-          },
-        ],
-        slashCommands: [],
-        skills: [],
-      },
-    ];
-    expect(
-      resolveAppModelSelectionForInstance(
-        ProviderInstanceId.make("mt"),
-        DEFAULT_UNIFIED_SETTINGS,
-        providers,
-        "mt-auto",
-      ),
-    ).toBe("mt-auto");
-  });
-
   it("preserves a custom slug that collides with a provider alias", () => {
     const providers = [
       provider({
@@ -644,8 +610,8 @@ describe("instance-scoped model selection", () => {
       planModeEnabled: false,
     });
 
-    // MT Auto routes per turn, so a draft model this instance does not list
-    // keeps the caller's selections instead of being rebuilt from descriptors.
+    // Cross-provider handoff can leave a draft model this instance does not
+    // list; keep the caller's selections instead of rebuilding from descriptors.
     expect(
       createModelSelection(instanceId, state.selectedModel, dispatch.modelOptionsForDispatch),
     ).toEqual(createModelSelection(instanceId, "openai/gpt-5.5", [{ id: "effort", value: "max" }]));

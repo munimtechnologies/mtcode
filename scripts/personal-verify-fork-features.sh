@@ -5,8 +5,8 @@
 # feature's modules, types, and tests while dropping the few lines that CALL
 # them. Typecheck stays clean, unit tests stay green, and the feature is
 # silently gone from the app (this happened to Goals, the usage "All" window,
-# the composer /goal menu, the # thread-reference chip, the web dictation mic,
-# and MT Auto in the model picker). Each check below pins a feature's
+# the composer /goal menu, the # thread-reference chip, and the web dictation
+# mic). Each check below pins a feature's
 # call-site — the line a merge is most likely to lose — not its module.
 #
 # Run it:
@@ -62,10 +62,6 @@ require apps/web/src/components/chat/ChatComposer.tsx "searchThreadReferences" "
 
 # --- Voice dictation, web composer (5fe86fbb6, c239c12e0) ---
 require apps/web/src/components/chat/ChatComposer.tsx "VoiceTranscriptionPanel" "dictation panel rendered by web composer"
-
-# --- MT Auto model routing (70dd0b424, 0d1b9c8bd) ---
-require apps/web/src/components/chat/ChatComposer.tsx "prependMtModelPickerEntry" "MT Auto entry in composer model picker"
-require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "mtModel" "MT Auto routing in provider reactor"
 
 # --- Computer-use permission/tool approvals (b671c08ef lineage) ---
 require apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts 'case "permissions_approval"' "permissions approval request kind mapping"

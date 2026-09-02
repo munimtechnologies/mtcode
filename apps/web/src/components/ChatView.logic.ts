@@ -3,7 +3,6 @@ import {
   type AssetCreateUrlResult,
   type ChatFileAttachment,
   type EnvironmentId,
-  isMtModelSelection,
   isProviderDriverKind,
   ProjectId,
   type MessageId,
@@ -613,11 +612,6 @@ export function deriveLockedProvider(input: {
   if (!threadHasStarted(input.thread)) {
     return null;
   }
-  // MT Auto is a harness router. The live session sits on whatever backend
-  // it picked; locking to that backend would steal the picker away from MT.
-  if (isMtModelSelection(input.thread?.modelSelection)) {
-    return null;
-  }
   const sessionProvider = input.thread?.session?.providerName ?? null;
   if (sessionProvider && isProviderDriverKind(sessionProvider)) {
     return sessionProvider;
@@ -641,9 +635,6 @@ export function getStartedThreadModelChangeBlockReason(input: {
   nextModelSelection: ModelSelection;
 }): { title: string; description: string } | null {
   if (!input.hasStartedSession) {
-    return null;
-  }
-  if (isMtModelSelection(input.nextModelSelection)) {
     return null;
   }
   const currentModelSelection = {

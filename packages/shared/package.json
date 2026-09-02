@@ -267,10 +267,6 @@
       "types": "./src/limitsFormat.ts",
       "import": "./src/limitsFormat.ts"
     },
-    "./mtModelRouter": {
-      "types": "./src/mtModelRouter.ts",
-      "import": "./src/mtModelRouter.ts"
-    },
     "./nodeSqliteClient": {
       "types": "./src/nodeSqliteClient.ts",
       "import": "./src/nodeSqliteClient.ts"

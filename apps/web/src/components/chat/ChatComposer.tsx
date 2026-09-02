@@ -14,7 +14,6 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
-  isMtModelSelection,
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -335,7 +334,6 @@ import {
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { prependMtModelPickerEntry, withMtModelProvider } from "../../mtModel";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { type SessionPhase, type Thread, videoMimeType } from "../../types";
@@ -351,7 +349,6 @@ import {
 } from "@t3tools/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { searchThreadReferences } from "../../threadReferenceSearch";
-import { useEnvironmentPresentation } from "~/state/presentation";
 import { useThreadShells } from "../../state/entities";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceTranscription } from "../../hooks/useVoiceTranscription";
@@ -1043,36 +1040,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Instance-aware projection of the wire provider list. One entry per
   // configured instance (default built-in + any custom `providerInstances.*`),
   // sorted default-first per driver kind for a stable picker order.
-  // The turn runs on the thread's machine, and only a machine that understands
-  // the `mt` instance can route it. An older server answers with "unknown
-  // provider instance 'mt'", so the entry is withheld for those environments.
-  const { presentation: composerEnvironmentPresentation } = useEnvironmentPresentation(
-    _activeThreadEnvironmentId ?? environmentId,
-  );
-  // Absent (not just `false`) means an older server that rejects the `mt`
-  // instance outright, so MT Auto is only offered once an environment has
-  // answered that it can route. While the config is still loading nothing is
-  // known yet, and withholding the entry there would yank a sticky MT
-  // selection out of the picker on every reconnect.
-  const composerServerConfig = composerEnvironmentPresentation?.serverConfig ?? null;
-  const serverCanRoute =
-    composerServerConfig === null
-      ? true
-      : composerServerConfig.environment.capabilities.modelRouting === true;
   const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
     () =>
-      prependMtModelPickerEntry(
-        sortProviderInstanceEntries(
-          applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
-        ),
-        { serverCanRoute },
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
       ),
-    [providerStatuses, serverCanRoute, settings],
+    [providerStatuses, settings],
   );
-  const pickerProviders = useMemo(
-    () => withMtModelProvider(providerStatuses, { serverCanRoute }),
-    [providerStatuses, serverCanRoute],
-  );
+  const pickerProviders = providerStatuses;
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
     activeThread?.session?.providerInstanceId ??
@@ -1117,21 +1092,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   //   5. First enabled entry overall / default instance for the kind.
   //
   const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
-    // Session instance is the *routed* backend after MT Auto picks one.
-    // Keep the sticky MT selection in the picker unless the draft explicitly
-    // moved to another provider.
-    if (
-      !lockedProvider &&
-      activeThreadModelSelection != null &&
-      isMtModelSelection(activeThreadModelSelection) &&
-      // An untouched draft carries `null`, not `undefined` — treating only
-      // `undefined` as "no explicit pick" let the routed backend take the
-      // picker over as soon as any draft existed for the thread.
-      (composerDraft.activeProvider == null ||
-        composerDraft.activeProvider === activeThreadModelSelection.instanceId)
-    ) {
-      return activeThreadModelSelection.instanceId;
-    }
     const candidates: Array<string | null | undefined> = [
       composerDraft.activeProvider,
       activeThread?.session?.providerInstanceId,

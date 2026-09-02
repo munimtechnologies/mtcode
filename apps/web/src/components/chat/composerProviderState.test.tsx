@@ -285,8 +285,8 @@ describe("getComposerProviderState", () => {
         planModeEnabled: true,
       });
 
-      // MT Auto / cross-provider routing can name a backend this instance
-      // does not list — keep the caller's selections instead of dropping them.
+      // Cross-provider handoff can name a backend this instance does not
+      // list — keep the caller's selections instead of dropping them.
       expect(state.modelOptionsForDispatch).toEqual(selections(["unknown", "value"]));
     },
   );

@@ -81,7 +81,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
     }
   }
   const caps = getProviderModelCapabilities(models, model, provider, planModeEnabled);
-  // MT Auto routes per turn, so the thread's model can name a backend this
+  // Cross-provider handoff can leave the thread's model naming a backend this
   // instance does not list. Keep the caller's selections in that case instead
   // of rebuilding them from descriptors that do not apply.
   const modelIsAvailable = resolveSelectableModel(provider, model, models) !== null;

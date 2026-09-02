@@ -20,7 +20,6 @@ import {
   type KeybindingCommand,
   getLastVisibleMessage,
   getThreadMessageCorrectionEligibility,
-  isMtModelInstanceId,
   OrchestrationThreadActivity,
   providerTurnDisabledReason,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -229,7 +228,6 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useComputerUsePermissions } from "../hooks/useComputerUsePermissions";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
-import { withMtModelProvider } from "../mtModel";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import {
@@ -2453,14 +2451,7 @@ function ChatViewContent(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
-  // Only the machine that will run the turn can route it; an older server
-  // rejects the `mt` instance instead of picking a backend.
-  const environmentCanRouteModels =
-    activeEnvironment?.serverConfig?.environment.capabilities.modelRouting !== false;
-  const pickerProviders = useMemo(
-    () => withMtModelProvider(providerStatuses, { serverCanRoute: environmentCanRouteModels }),
-    [environmentCanRouteModels, providerStatuses],
-  );
+  const pickerProviders = providerStatuses;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider,
@@ -7608,12 +7599,10 @@ function ChatViewContent(props: ChatViewProps) {
         (snapshot) => snapshot.instanceId === sessionInstanceId,
       );
       const sessionDriver = sessionEntry?.driver ?? lockedProvider;
-      const selectingMt = isMtModelInstanceId(instanceId);
       const isCrossProvider =
         isServerThread &&
         activeServerThread !== null &&
         threadHasStarted(activeServerThread) &&
-        !selectingMt &&
         ((lockedProvider !== null &&
           resolvedDriverKind !== null &&
           resolvedDriverKind !== lockedProvider) ||

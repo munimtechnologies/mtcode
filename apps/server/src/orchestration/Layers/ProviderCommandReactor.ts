@@ -3,8 +3,6 @@ import {
   CommandId,
   EventId,
   isCorrectionMessage,
-  isMtModelInstanceId,
-  isMtModelSelection,
   type ModelSelection,
   type OrchestrationEvent,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -41,8 +39,6 @@ import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
-import { resolveMtModelForTurnEffect } from "../../provider/mtModelRouting.ts";
-import { AccountLimitsService } from "../../usage/AccountLimitsService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -440,11 +436,7 @@ const make = Effect.gen(function* () {
         ...(session ?? {
           threadId: input.threadId,
           providerName: null,
-          // `mt` is a router, not a runnable instance. Stamping it here makes
-          // every later turn fail with "unknown provider instance 'mt'".
-          ...(isMtModelInstanceId(thread.modelSelection.instanceId)
-            ? {}
-            : { providerInstanceId: thread.modelSelection.instanceId }),
+          providerInstanceId: thread.modelSelection.instanceId,
           runtimeMode: thread.runtimeMode,
         }),
         status: session?.status === "stopped" ? "stopped" : "error",
@@ -552,9 +544,6 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
-      readonly prompt?: string;
-      readonly attachmentCount?: number;
-      readonly interactionMode?: "default" | "plan";
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -564,37 +553,6 @@ const make = Effect.gen(function* () {
 
     const desiredRuntimeMode = thread.runtimeMode;
     const requestedModelSelection = options?.modelSelection;
-    const stickyModelSelection = requestedModelSelection ?? thread.modelSelection;
-    const providers = yield* providerRegistry.getProviders;
-    const accountLimits = yield* Effect.serviceOption(AccountLimitsService);
-    const usageSnapshots = Option.isSome(accountLimits)
-      ? (yield* accountLimits.value.readSummary()).snapshots
-      : [];
-    const preferredInstanceId =
-      thread.session?.providerInstanceId && !isMtModelInstanceId(thread.session.providerInstanceId)
-        ? thread.session.providerInstanceId
-        : undefined;
-    const mtDecision = isMtModelSelection(stickyModelSelection)
-      ? yield* resolveMtModelForTurnEffect({
-          stickySelection: stickyModelSelection,
-          prompt: options?.prompt ?? "",
-          providers,
-          snapshots: usageSnapshots,
-          interactionMode: options?.interactionMode ?? thread.interactionMode,
-          attachmentCount: options?.attachmentCount,
-          conversationTurnCount: thread.messages.filter((message) => message.role === "user")
-            .length,
-          preferredInstanceId,
-        })
-      : null;
-    if (isMtModelSelection(stickyModelSelection) && mtDecision === null) {
-      return yield* new ProviderAdapterRequestError({
-        provider: "mt",
-        method: "thread.turn.start",
-        detail:
-          "MT Auto has no ready providers to route to. Enable Codex, Claude, Cursor, or another provider in Settings.",
-      });
-    }
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
         .listSessions()
@@ -617,27 +575,13 @@ const make = Effect.gen(function* () {
         detail: `Thread '${threadId}' has an active provider session without a provider instance id.`,
       });
     }
-    const rawCurrentInstanceId =
+    const currentInstanceId =
       activeThreadSession !== null &&
       activeSession !== undefined &&
       activeSession.providerInstanceId !== undefined
         ? activeSession.providerInstanceId
-        : (thread.session?.providerInstanceId ??
-          mtDecision?.instanceId ??
-          thread.modelSelection.instanceId);
-    // A thread can carry the router id from an earlier MT Auto turn. It never
-    // names a runnable instance, so resolve it to this turn's routed backend,
-    // or - when the user has since picked a real model - to that pick.
-    const currentInstanceId = !isMtModelInstanceId(rawCurrentInstanceId)
-      ? rawCurrentInstanceId
-      : (mtDecision?.instanceId ??
-        (requestedModelSelection !== undefined &&
-        !isMtModelInstanceId(requestedModelSelection.instanceId)
-          ? requestedModelSelection.instanceId
-          : rawCurrentInstanceId));
-    const desiredModelSelection = mtDecision
-      ? { instanceId: mtDecision.instanceId, model: mtDecision.model }
-      : (requestedModelSelection ?? thread.modelSelection);
+        : (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId);
+    const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
     const desiredInstanceId = desiredModelSelection.instanceId;
     const currentInfo = yield* providerService.getInstanceInfo(currentInstanceId).pipe(
       Effect.mapError(
@@ -696,11 +640,7 @@ const make = Effect.gen(function* () {
         createdAt,
       });
     }
-    if (
-      thread.session !== null &&
-      !isProviderHandoff &&
-      !isMtModelSelection(stickyModelSelection)
-    ) {
+    if (thread.session !== null && !isProviderHandoff) {
       yield* rejectStartedThreadModelChangeIfRequired({
         threadId,
         currentModelSelection:
@@ -715,7 +655,7 @@ const make = Effect.gen(function* () {
       });
     }
     const persistHandoffModelSelection = Effect.gen(function* () {
-      if (!isProviderHandoff || isMtModelSelection(stickyModelSelection)) {
+      if (!isProviderHandoff) {
         return;
       }
       yield* orchestrationEngine.dispatch({
@@ -730,13 +670,8 @@ const make = Effect.gen(function* () {
       thread.session !== null &&
       requestedModelSelection !== undefined &&
       (desiredInstanceId !== currentInstanceId || desiredModelSelection.model !== currentModel);
-    const announceMtRoute =
-      mtDecision !== null &&
-      (modelSelectionChangedForStartedThread ||
-        thread.session === null ||
-        thread.session.status === "stopped");
     const appendModelChangedNotice = Effect.gen(function* () {
-      if (!modelSelectionChangedForStartedThread && !announceMtRoute) {
+      if (!modelSelectionChangedForStartedThread) {
         return;
       }
       yield* orchestrationEngine.dispatch({
@@ -747,9 +682,7 @@ const make = Effect.gen(function* () {
           id: yield* serverEventId(),
           tone: "info",
           kind: "thread.model-changed",
-          summary: isMtModelSelection(stickyModelSelection)
-            ? (mtDecision?.reason ?? `MT Auto → ${desiredModelSelection.model}`)
-            : `Switched model to ${desiredModelSelection.model}`,
+          summary: `Switched model to ${desiredModelSelection.model}`,
           payload: {
             fromInstanceId: String(currentInstanceId),
             fromModel: currentModel,
@@ -829,17 +762,16 @@ const make = Effect.gen(function* () {
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
-      const comparableSelection = mtDecision ?? requestedModelSelection;
       const modelChanged =
-        comparableSelection !== undefined && comparableSelection.model !== activeSession?.model;
+        requestedModelSelection !== undefined &&
+        requestedModelSelection.model !== activeSession?.model;
       const instanceChanged =
-        comparableSelection !== undefined &&
-        activeSession?.providerInstanceId !== comparableSelection.instanceId;
+        requestedModelSelection !== undefined &&
+        activeSession?.providerInstanceId !== requestedModelSelection.instanceId;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
       const previousModelSelection = threadModelSelections.get(threadId);
       const shouldRestartForModelSelectionChange =
         preferredProvider === "claudeAgent" &&
-        !isMtModelSelection(stickyModelSelection) &&
         requestedModelSelection !== undefined &&
         !Equal.equals(previousModelSelection, requestedModelSelection);
 
@@ -921,9 +853,6 @@ const make = Effect.gen(function* () {
     const ensuredSession = yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
-      prompt: input.messageText,
-      ...(input.attachments === undefined ? {} : { attachmentCount: input.attachments.length }),
-      ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
@@ -962,16 +891,8 @@ const make = Effect.gen(function* () {
               .sessionModelSwitch;
     const requestedModelSelection =
       input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
-    const routedFromSession =
-      activeSession?.providerInstanceId !== undefined && activeSession.model !== undefined
-        ? {
-            instanceId: activeSession.providerInstanceId,
-            model: activeSession.model,
-          }
-        : undefined;
-    const modelForTurn = isMtModelSelection(requestedModelSelection)
-      ? routedFromSession
-      : sessionModelSwitch === "unsupported" && input.modelSelection === undefined
+    const modelForTurn =
+      sessionModelSwitch === "unsupported" && input.modelSelection === undefined
         ? activeSession?.model !== undefined
           ? {
               ...requestedModelSelection,
@@ -1430,9 +1351,7 @@ const make = Effect.gen(function* () {
           ...(thread.session ?? {
             threadId: thread.id,
             providerName: null,
-            ...(isMtModelInstanceId(thread.modelSelection.instanceId)
-              ? {}
-              : { providerInstanceId: thread.modelSelection.instanceId }),
+            providerInstanceId: thread.modelSelection.instanceId,
             runtimeMode: thread.runtimeMode,
           }),
           status: "error",

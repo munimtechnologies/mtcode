@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderDriverKind } from "./providerInstance.ts";
 
 export const ProviderOptionDescriptorType = Schema.Literals(["select", "boolean"]);
 export type ProviderOptionDescriptorType = typeof ProviderOptionDescriptorType.Type;
@@ -133,36 +133,6 @@ const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const ANTIGRAVITY_DRIVER_KIND = ProviderDriverKind.make("antigravity");
-export const MT_MODEL_DRIVER_KIND = ProviderDriverKind.make("mt");
-export const MT_MODEL_INSTANCE_ID = ProviderInstanceId.make("mt");
-export const MT_MODEL_SLUG = "mt-auto";
-export const MT_MODEL_DISPLAY_NAME = "MT Auto";
-export const MT_MODEL_PROVIDER_LABEL = "Munim";
-export const MT_MODEL_ROUTE_MODE_OPTION_ID = "routeMode";
-export const MT_MODEL_ROUTE_MODES = ["cost", "balance", "intelligence"] as const;
-export type MtModelRouteMode = (typeof MT_MODEL_ROUTE_MODES)[number];
-export const DEFAULT_MT_MODEL_ROUTE_MODE: MtModelRouteMode = "balance";
-
-export function isMtModelSlug(model: string | null | undefined): boolean {
-  return model?.trim() === MT_MODEL_SLUG;
-}
-
-export function isMtModelInstanceId(instanceId: string | null | undefined): boolean {
-  return instanceId === MT_MODEL_INSTANCE_ID;
-}
-
-export function isMtModelSelection(
-  selection:
-    | {
-        readonly instanceId?: string | null | undefined;
-        readonly model?: string | null | undefined;
-      }
-    | null
-    | undefined,
-): boolean {
-  return isMtModelInstanceId(selection?.instanceId) && isMtModelSlug(selection?.model);
-}
-
 export const DEFAULT_MODEL = "gpt-5.6-sol";
 
 /**
@@ -185,7 +155,6 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [GROK_DRIVER_KIND]: "grok-build",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
   [ANTIGRAVITY_DRIVER_KIND]: "gemini-3.7-flash",
-  [MT_MODEL_DRIVER_KIND]: MT_MODEL_SLUG,
 };
 
 /** Per-provider text generation model defaults. */
@@ -252,5 +221,4 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [GROK_DRIVER_KIND]: "Grok",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
   [ANTIGRAVITY_DRIVER_KIND]: "Antigravity",
-  [MT_MODEL_DRIVER_KIND]: MT_MODEL_PROVIDER_LABEL,
 };

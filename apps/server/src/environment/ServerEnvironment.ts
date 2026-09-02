@@ -244,7 +244,6 @@ export const make = Effect.gen(function* () {
       sourceControlSshPasswordPrompts: true,
       providerHandoff: true,
       threadMessageCorrection: true,
-      modelRouting: true,
       threadPullRequestLinking: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
