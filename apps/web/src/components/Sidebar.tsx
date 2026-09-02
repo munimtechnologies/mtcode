@@ -166,11 +166,17 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   ThreadWorktreeIndicator,
+  nextThreadChangeRequestSnapshot,
   prStatusIndicator,
-  resolveThreadPr,
+  resolveDisplayedThreadPr,
+  resolveDisplayedThreadPrProvider,
+  setThreadChangeRequestSnapshot,
   settledPrHoverColorClass,
   terminalStatusFromRunningIds,
+  threadChangeRequestSnapshotsAtom,
+  useLinkedThreadPullRequest,
   type TerminalStatusIndicator,
+  type ThreadChangeRequestSnapshot,
 } from "./ThreadStatusIndicators";
 import {
   resolveSnoozePresets,
@@ -831,10 +837,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
+  // Parent-held PR snapshot: rows remount when settlement partitions move
+  // them, so a merged/closed badge would vanish if the row kept it itself.
+  changeRequestSnapshot: ThreadChangeRequestSnapshot | null;
+  onChangeRequestSnapshot: (
+    threadKey: string,
+    snapshot: ThreadChangeRequestSnapshot | null,
+  ) => void;
   isOverlay?: boolean | undefined;
 }) {
   const {
     isRenaming,
+    changeRequestSnapshot,
+    onChangeRequestSnapshot,
     onCancelRename,
     onCommitRename,
     onContextMenu,
@@ -872,6 +887,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const terminalProcessCount = runningTerminalIds.length;
 
   const gitCwd = thread.worktreePath ?? props.projectCwd;
+  // A linked PR is read from the host directly, so the badge follows the
+  // link even when the local checkout has moved to another branch.
+  const linkedPullRequestStatus = useLinkedThreadPullRequest(
+    leaseLiveStatus ? thread.environmentId : null,
+    leaseLiveStatus ? thread.linkedPullRequest : null,
+  );
   const gitStatus = useEnvironmentQuery(
     leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({
@@ -884,9 +905,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
-  const pr = resolveThreadPr({
+  const retainTerminalOnBranchMismatch = thread.worktreePath === null;
+  const pr = resolveDisplayedThreadPr({
     threadBranch: thread.branch,
     gitStatus: visibleGitStatus,
+    snapshot: changeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
+    linkedPullRequest: thread.linkedPullRequest,
+    linkedPullRequestStatus,
   });
 
   // Same semantics as the legacy sidebar (never-visited counts as read):
@@ -979,8 +1005,37 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     activeThreadBranch: thread.branch,
     currentGitBranch: visibleGitStatus?.refName ?? null,
   });
-  const prStatus = prStatusIndicator(pr, visibleGitStatus?.sourceControlProvider);
+  const prProvider = resolveDisplayedThreadPrProvider({
+    threadBranch: thread.branch,
+    gitStatus: visibleGitStatus,
+    snapshot: changeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
+    linkedPullRequest: thread.linkedPullRequest,
+    linkedPullRequestStatus,
+  });
+  const prStatus = prStatusIndicator(pr, prProvider);
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
+  useEffect(() => {
+    const nextSnapshot = nextThreadChangeRequestSnapshot({
+      threadBranch: thread.branch,
+      gitStatus: visibleGitStatus,
+      snapshot: changeRequestSnapshot,
+      retainTerminalOnBranchMismatch,
+      linkedPullRequest: thread.linkedPullRequest,
+      linkedPullRequestStatus,
+    });
+    if (nextSnapshot === undefined) return;
+    onChangeRequestSnapshot(threadKey, nextSnapshot);
+  }, [
+    changeRequestSnapshot,
+    visibleGitStatus,
+    linkedPullRequestStatus,
+    onChangeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
+    thread.branch,
+    thread.linkedPullRequest,
+    threadKey,
+  ]);
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
@@ -2013,6 +2068,8 @@ export default function Sidebar() {
   // below, after the partition knows the boundary); the partition reads a
   // fresh clock whenever it recomputes.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
+
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
 
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
@@ -4045,6 +4102,8 @@ export default function Sidebar() {
         onUnsnooze={attemptUnsnooze}
         onUnpin={attemptUnpin}
         onAcknowledgeWoke={acknowledgeWoke}
+        changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
+        onChangeRequestSnapshot={setThreadChangeRequestSnapshot}
         isOverlay={isOverlay}
       />
     );

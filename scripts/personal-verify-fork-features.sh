@@ -88,6 +88,12 @@ require apps/server/src/provider/Layers/GrokAdapter.ts "resolveDesktopMcp" "desk
 require apps/server/src/ws.ts "computerViewStream" "computer view RPCs registered"
 require apps/web/src/components/chat/ChatHeader.tsx "ComputerViewDialog" "computer view mounted in chat header"
 
+# --- Sidebar linked-PR badge (upstream #4755/#8160 wiring, restored 2026-09-02) ---
+# Rows read the linked PR from the host and hold merged/closed state in the
+# parent atom; a merge dropped this once and left the sidebar blind to links.
+require apps/web/src/components/Sidebar.tsx "useLinkedThreadPullRequest(" "sidebar rows read linked PR status"
+require apps/web/src/components/Sidebar.tsx "onChangeRequestSnapshot={setThreadChangeRequestSnapshot}" "sidebar rows publish PR snapshots to the shared atom"
+
 # --- Artwork + app icon pickers (44cf90dc0, 0efc0e293) ---
 require apps/web/src/components/settings/SettingsPanels.tsx "SidebarArtworkRow" "artwork picker in settings"
 require apps/web/src/components/settings/SettingsPanels.tsx "AppIconRow" "app icon picker in settings"
