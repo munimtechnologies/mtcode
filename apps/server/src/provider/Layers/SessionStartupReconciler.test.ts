@@ -234,10 +234,9 @@ describe("SessionStartupReconciler", () => {
 
     // The marked thread is neither settled nor resumed here: serverRuntimeStartup's
     // continuation pass owns it, and a second resume would run the turn twice.
-    expect(harness.dispatched.map((command) => command.threadId)).toEqual([
-      plainThreadId,
-      plainThreadId,
-    ]);
+    expect(
+      harness.dispatched.map((command) => ("threadId" in command ? command.threadId : null)),
+    ).toEqual([plainThreadId, plainThreadId]);
     expect(harness.dispatched.map((command) => command.type)).toEqual([
       "thread.session.set",
       "thread.turn.start",

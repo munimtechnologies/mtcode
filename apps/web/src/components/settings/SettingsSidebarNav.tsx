@@ -37,6 +37,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
 } from "../ui/sidebar";
 import { useMtTeamsSelector, useMtTeamsSync } from "../../mtTeams/state";
@@ -94,6 +97,32 @@ function MtTeamsInviteCountBadge() {
   if (count === 0) return null;
   return <SidebarMenuBadge>{count}</SidebarMenuBadge>;
 }
+const SETTINGS_PAGE_SECTIONS: Partial<
+  Readonly<Record<SettingsPath, ReadonlyArray<{ label: string; targetId: string }>>>
+> = {
+  "/settings/general": [
+    { label: "Organization", targetId: "organization" },
+    { label: "Behavior", targetId: "behavior" },
+    { label: "Projects & threads", targetId: "projects-and-threads" },
+    { label: "Confirmations", targetId: "confirmations" },
+    { label: "Text generation", targetId: "text-generation" },
+    { label: "About", targetId: "about" },
+    { label: "Legacy features", targetId: "legacy-features" },
+  ],
+  "/settings/appearance": [
+    { label: "Colors & themes", targetId: "appearance" },
+    { label: "Interface", targetId: "appearance-interface" },
+    { label: "Typography", targetId: "typography" },
+  ],
+  "/settings/source-control": [
+    { label: "Version control", targetId: "source-control" },
+    { label: "Text generation", targetId: "source-control-text-generation" },
+  ],
+  "/settings/connections": [
+    { label: "This environment", targetId: "connections-environment" },
+    { label: "Remote environments", targetId: "remote-environments" },
+  ],
+};
 
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
@@ -161,9 +190,32 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       if (isMobile) {
         setOpenMobile(false);
       }
-      void navigate({ to, hash: "", replace: true, hashScrollIntoView: false });
+      void navigate({
+        to,
+        hash: "",
+        replace: true,
+        hashScrollIntoView: false,
+      });
     },
     [isMobile, navigate, setOpenMobile],
+  );
+  const handlePageSectionClick = useCallback(
+    (to: SettingsPath, targetId: string) => {
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      if (pathname === to && scrollToSettingsTarget(targetId, { highlight: false })) {
+        return;
+      }
+      void navigate({
+        to,
+        hash: targetId,
+        replace: true,
+        hashScrollIntoView: false,
+        state: { settingsTargetHighlight: false },
+      });
+    },
+    [isMobile, navigate, pathname, setOpenMobile],
   );
   const clearSearch = useCallback(() => {
     setQuery("");
@@ -181,7 +233,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         // page when mounted; otherwise preserve the hash so deferred targets can handle it later.
         return;
       }
-      void navigate({ to: item.to, hash: targetId, replace: true, hashScrollIntoView: false });
+      void navigate({
+        to: item.to,
+        hash: targetId,
+        replace: true,
+        hashScrollIntoView: false,
+        state: { settingsTargetHighlight: true },
+      });
     },
     [clearSearch, isMobile, navigate, pathname, setOpenMobile],
   );
@@ -268,55 +326,76 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               No settings found
             </p>
           ) : null}
-          <SidebarMenu
-            className="ps-px"
-            id={isSearching && hasResults ? "settings-search-results" : undefined}
-            role={isSearching && hasResults ? "listbox" : undefined}
-            aria-label={isSearching && hasResults ? "Settings search results" : undefined}
-          >
-            {isSearching
-              ? results.map((item, index) => (
-                  <SidebarMenuItem key={item.id} role="presentation">
-                    <SidebarMenuButton
-                      id={`settings-search-result-${item.id}`}
-                      role="option"
-                      aria-selected={index === activeResultIndex}
-                      tabIndex={-1}
-                      size="sm"
-                      isActive={index === activeResultIndex}
-                      className="h-auto min-h-10 items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                      onMouseMove={() => setActiveResultIndex(index)}
-                      onClick={() => handleSearchResultClick(item)}
-                    >
-                      <SettingsSectionIcon to={item.to} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-sidebar-foreground">
-                          {item.title}
-                        </span>
-                        <span className="block truncate text-[11px] text-sidebar-muted-foreground/75">
-                          {SETTINGS_SECTION_LABELS[item.to]}
-                        </span>
+          {isSearching ? (
+            <SidebarMenu
+              className="ps-px"
+              id={hasResults ? "settings-search-results" : undefined}
+              role={hasResults ? "listbox" : undefined}
+              aria-label={hasResults ? "Settings search results" : undefined}
+            >
+              {results.map((item, index) => (
+                <SidebarMenuItem key={item.id} role="presentation">
+                  <SidebarMenuButton
+                    id={`settings-search-result-${item.id}`}
+                    role="option"
+                    aria-selected={index === activeResultIndex}
+                    tabIndex={-1}
+                    size="sm"
+                    isActive={index === activeResultIndex}
+                    className="h-auto min-h-10 items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                    onMouseMove={() => setActiveResultIndex(index)}
+                    onClick={() => handleSearchResultClick(item)}
+                  >
+                    <SettingsSectionIcon to={item.to} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-sidebar-foreground">
+                        {item.title}
                       </span>
+                      <span className="block truncate text-[11px] text-sidebar-muted-foreground/75">
+                        {SETTINGS_SECTION_LABELS[item.to]}
+                      </span>
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          ) : (
+            <SidebarMenu className="ps-px">
+              {SETTINGS_NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
+                const pageSections = SETTINGS_PAGE_SECTIONS[item.to];
+                return (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      onClick={() => handleSectionClick(item.to)}
+                    >
+                      <Icon />
+                      <span className="truncate">{item.label}</span>
                     </SidebarMenuButton>
+                    {isActive && pageSections ? (
+                      <SidebarMenuSub className="border-l-0">
+                        {pageSections.map((section) => (
+                          <SidebarMenuSubItem key={section.targetId}>
+                            <SidebarMenuSubButton
+                              render={<button type="button" />}
+                              size="sm"
+                              className="text-sidebar-muted-foreground/65"
+                              onClick={() => handlePageSectionClick(item.to, section.targetId)}
+                            >
+                              <span className="ms-0.5">{section.label}</span>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    ) : null}
+                    {item.to === "/settings/mt-teams" ? <MtTeamsInviteCountBadge /> : null}
                   </SidebarMenuItem>
-                ))
-              : SETTINGS_NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                      {item.to === "/settings/mt-teams" ? <MtTeamsInviteCountBadge /> : null}
-                    </SidebarMenuItem>
-                  );
-                })}
-          </SidebarMenu>
+                );
+              })}
+            </SidebarMenu>
+          )}
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-[var(--sidebar-content-inset)]">

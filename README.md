@@ -1,6 +1,6 @@
 # MT Code
 
-MT Code is a free, open-source desktop app for running and controlling coding agents — Claude Code, Codex, Cursor, Grok Build, and OpenCode — from one place. It is [Munim Technologies](https://munimtech.com)' fork of [T3 Code](https://github.com/pingdotgg/t3code) with extra features and fixes, and anyone can download and use it.
+MT Code is a free, open-source desktop app for running and controlling coding agents — Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity — from one place. It is [Munim Technologies](https://munimtech.com)' fork of [T3 Code](https://github.com/pingdotgg/t3code) with extra features and fixes, and anyone can download and use it.
 
 ## Download
 
@@ -29,6 +29,7 @@ MT Code drives agents you already have. Install and sign in to at least one prov
 - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
 - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
 - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+- Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
 
 Your existing subscriptions are used directly — MT Code sells nothing and adds no accounts of its own.
 

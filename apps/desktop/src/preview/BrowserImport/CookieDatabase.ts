@@ -7,6 +7,9 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 /** A cookie in the shape Electron's `session.cookies.set` accepts. */
 export interface ImportedCookie {
@@ -26,7 +29,19 @@ export interface ImportedCookie {
   readonly httpOnly: boolean;
   /** Seconds since the UNIX epoch, or undefined for a session cookie. */
   readonly expirationDate: number | undefined;
-  readonly sameSite: "no_restriction" | "lax" | "strict";
+  readonly sameSite: "unspecified" | "no_restriction" | "lax" | "strict";
+}
+
+/**
+ * Cookies recovered from one database and rows that could not be decrypted.
+ * The skipped count reaches the user instead of disappearing from a partial
+ * import result.
+ */
+export interface CookieReadResult {
+  readonly cookies: ReadonlyArray<ImportedCookie>;
+  readonly undecryptable: number;
+  /** Distinct hosts of the rows that could not be decrypted. */
+  readonly undecryptableHosts: ReadonlyArray<string>;
 }
 
 /**
@@ -45,8 +60,13 @@ export const cookieScope = (
   secure: boolean,
 ): { readonly url: string; readonly domain: string | undefined } => {
   const isDomainCookie = host.startsWith(".");
+  const unwrappedHost = bareHost(host);
+  const authority =
+    unwrappedHost.includes(":") && !(unwrappedHost.startsWith("[") && unwrappedHost.endsWith("]"))
+      ? `[${unwrappedHost}]`
+      : unwrappedHost;
   return {
-    url: `${secure ? "https" : "http"}://${bareHost(host)}${path}`,
+    url: `${secure ? "https" : "http"}://${authority}${path}`,
     domain: isDomainCookie ? host : undefined,
   };
 };
@@ -55,8 +75,8 @@ export const cookieScope = (
 export const bareHost = (host: string): string => (host.startsWith(".") ? host.slice(1) : host);
 
 /**
- * Copies a cookie database, and its write-ahead sidecars, to a temporary
- * directory before reading, and returns the copy's path.
+ * Creates a transactionally consistent snapshot of a cookie database in a
+ * temporary directory and returns the snapshot's path.
  *
  * Both engines keep the file open with WAL while the browser runs, so reading
  * in place can observe a torn write. Copying also guarantees we never open the
@@ -66,26 +86,15 @@ export const bareHost = (host: string): string => (host.startsWith(".") ? host.s
  */
 export const snapshotCookieDatabase = Effect.fn("CookieDatabase.snapshotCookieDatabase")(function* (
   cookiePath: string,
+  tempPrefix = "t3code-cookie-import-",
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-
-  const directory = yield* fileSystem.makeTempDirectoryScoped({
-    prefix: "t3code-cookie-import-",
-  });
+  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: tempPrefix });
   const target = path.join(directory, path.basename(cookiePath));
-  yield* fileSystem.copyFile(cookiePath, target);
-  // A sidecar only exists while the browser holds the database open, so an
-  // absent one is normal. Anything else — a permission error, a partial read
-  // — is not: SQLite would then open the snapshot without the write-ahead
-  // log and quietly return a cookie set missing its newest transactions.
-  yield* Effect.forEach(["-wal", "-shm"], (suffix) =>
-    fileSystem.copyFile(`${cookiePath}${suffix}`, `${target}${suffix}`).pipe(
-      Effect.catchIf(
-        (error) => error.reason._tag === "NotFound",
-        () => Effect.void,
-      ),
-    ),
-  );
+  yield* Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`VACUUM INTO ${target}`;
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: cookiePath, readonly: true })));
   return target;
 });

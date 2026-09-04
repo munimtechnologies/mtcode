@@ -85,7 +85,7 @@ const clerkGateModule =
 // managed-auth runtime and the initial route's split chunks, before
 // rendering, so the splash holds until real UI paints instead of dropping to
 // a blank window while chunks download.
-void Promise.all([clerkGateModule, router.load()])
+export const startup = Promise.all([clerkGateModule, router.load()])
   .then(() => {
     // A route chunk failure still resolves router.load(): the error is parked in
     // the lazy component and surfaces through the route error boundary. Skip the
@@ -102,8 +102,7 @@ void Promise.all([clerkGateModule, router.load()])
     );
   })
   .catch((error: unknown) => {
-    // The auth shell chunk failed and the guarded reload is spent. Say so
-    // instead of leaving the splash up forever.
+    // Let the bootstrap entry show the error unless a reload is already scheduled.
     if (reloadScheduled) return;
     console.error("MT Code failed to load its startup chunks.", error);
     const bootShell = document.getElementById("boot-shell");

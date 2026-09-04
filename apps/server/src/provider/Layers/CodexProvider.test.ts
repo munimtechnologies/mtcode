@@ -26,8 +26,8 @@ it("projects Codex account and rate-limit snapshots into provider status", () =>
       requiresOpenaiAuth: false,
     },
     rateLimits: {
-      rateLimits: {
-        limitName: "codex",
+      snapshot: {
+        planType: "codex",
         primary: {
           usedPercent: 24,
           resetsAt: 1_781_654_400,
@@ -39,6 +39,7 @@ it("projects Codex account and rate-limit snapshots into provider status", () =>
           windowDurationMins: null,
         },
       },
+      resetCredits: null,
     },
     version: "1.0.0",
     models: [],

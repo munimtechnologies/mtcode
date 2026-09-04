@@ -2,6 +2,15 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  ProviderAuthCancelInput,
+  ProviderAuthCompleteInput,
+  ProviderAuthState,
+  ProviderInstallCancelInput,
+  ProviderInstallState,
+  ProviderSetupError,
+  ProviderSetupInput,
+} from "./providerSetup.ts";
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
@@ -239,7 +248,11 @@ import {
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
 import { AccountLimitsSummary } from "./accountLimits.ts";
-import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  ProviderConsumeResetCreditInput,
+  ProviderConsumeResetCreditResult,
+} from "./providerUsageLimits.ts";
+import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -289,6 +302,16 @@ export const WS_METHODS = {
 
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
+  providerAuthStart: "provider.auth.start",
+  providerConsumeResetCredit: "provider.consumeResetCredit",
+  providerAuthComplete: "provider.auth.complete",
+  providerAuthCancel: "provider.auth.cancel",
+  providerAuthLogout: "provider.auth.logout",
+  providerAuthSubscribe: "provider.auth.subscribe",
+  providerInstallStart: "provider.install.start",
+  providerInstallCancel: "provider.install.cancel",
+  providerInstallSubscribe: "provider.install.subscribe",
+  providerInstallRemove: "provider.install.remove",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -365,6 +388,7 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverGetAccountLimits: "server.getAccountLimits",
+  serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Voice methods
   voiceGetCredentialStatus: "voice.getCredentialStatus",
@@ -472,9 +496,11 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
      */
     instanceId: Schema.optional(ProviderInstanceId),
     cwd: Schema.optional(TrimmedNonEmptyString),
+    /** Explicit user request. Background status refreshes must not open agent sessions. */
+    refreshModels: Schema.optional(Schema.Boolean),
   }),
   success: ServerProviderUpdatedPayload,
-  error: EnvironmentAuthorizationError,
+  error: Schema.Union([EnvironmentAuthorizationError, ProviderSetupError]),
 });
 
 export const WsServerLoginProviderAccountRpc = Rpc.make(WS_METHODS.serverLoginProviderAccount, {
@@ -512,6 +538,70 @@ export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvide
   payload: ServerProviderUpdateInput,
   success: ServerProviderUpdatedPayload,
   error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
+});
+
+const ProviderSetupRpcError = Schema.Union([ProviderSetupError, EnvironmentAuthorizationError]);
+
+export const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeResetCredit, {
+  payload: ProviderConsumeResetCreditInput,
+  success: ProviderConsumeResetCreditResult,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthStartRpc = Rpc.make(WS_METHODS.providerAuthStart, {
+  payload: ProviderSetupInput,
+  success: ProviderAuthState,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthCompleteRpc = Rpc.make(WS_METHODS.providerAuthComplete, {
+  payload: ProviderAuthCompleteInput,
+  success: ProviderAuthState,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthCancelRpc = Rpc.make(WS_METHODS.providerAuthCancel, {
+  payload: ProviderAuthCancelInput,
+  success: ProviderAuthState,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthLogoutRpc = Rpc.make(WS_METHODS.providerAuthLogout, {
+  payload: ProviderSetupInput,
+  success: ProviderAuthState,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderAuthSubscribeRpc = Rpc.make(WS_METHODS.providerAuthSubscribe, {
+  payload: ProviderSetupInput,
+  success: ProviderAuthState,
+  error: ProviderSetupRpcError,
+  stream: true,
+});
+
+export const WsProviderInstallStartRpc = Rpc.make(WS_METHODS.providerInstallStart, {
+  payload: ProviderSetupInput,
+  success: ProviderInstallState,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderInstallCancelRpc = Rpc.make(WS_METHODS.providerInstallCancel, {
+  payload: ProviderInstallCancelInput,
+  success: ProviderInstallState,
+  error: ProviderSetupRpcError,
+});
+
+export const WsProviderInstallSubscribeRpc = Rpc.make(WS_METHODS.providerInstallSubscribe, {
+  payload: ProviderSetupInput,
+  success: ProviderInstallState,
+  error: ProviderSetupRpcError,
+  stream: true,
+});
+
+export const WsProviderInstallRemoveRpc = Rpc.make(WS_METHODS.providerInstallRemove, {
+  payload: ProviderSetupInput,
+  success: ProviderInstallState,
+  error: ProviderSetupRpcError,
 });
 
 export const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -599,6 +689,16 @@ export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSumm
 export const WsServerGetAccountLimitsRpc = Rpc.make(WS_METHODS.serverGetAccountLimits, {
   payload: Schema.Struct({}),
   success: AccountLimitsSummary,
+  error: EnvironmentAuthorizationError,
+});
+
+/**
+ * Refetches the model rate table ahead of its daily TTL, so a model released
+ * since the last fetch gets priced. The next usage summary uses the new table.
+ */
+export const WsServerRefreshUsageRatesRpc = Rpc.make(WS_METHODS.serverRefreshUsageRates, {
+  payload: Schema.Struct({}),
+  success: UsagePricing,
   error: EnvironmentAuthorizationError,
 });
 
@@ -1405,6 +1505,8 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
      * dropped by old servers.
      */
     environmentThemes: Schema.optional(Schema.Boolean),
+    /** Whether this client understands `usageLimitSourcesUpdated` events. */
+    usageLimitSources: Schema.optional(Schema.Boolean),
   }),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
@@ -1448,6 +1550,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerLogoutProviderAccountRpc,
   WsServerListProviderWorkspaceCapabilitiesRpc,
   WsServerUpdateProviderRpc,
+  WsProviderConsumeResetCreditRpc,
+  WsProviderAuthStartRpc,
+  WsProviderAuthCompleteRpc,
+  WsProviderAuthCancelRpc,
+  WsProviderAuthLogoutRpc,
+  WsProviderAuthSubscribeRpc,
+  WsProviderInstallStartRpc,
+  WsProviderInstallCancelRpc,
+  WsProviderInstallSubscribeRpc,
+  WsProviderInstallRemoveRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerCommitDesktopUpdateRpc,
@@ -1463,6 +1575,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsServerGetAccountLimitsRpc,
+  WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,

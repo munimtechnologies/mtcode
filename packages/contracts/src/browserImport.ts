@@ -59,12 +59,24 @@ export type BrowserImportUnavailableReason = typeof BrowserImportUnavailableReas
  */
 export const BrowserImportFailureReason = Schema.Literals([
   ...BrowserImportUnavailableReason.literals,
+  /** The operating system's keyring or its bundled reader is unavailable. */
+  "keychainUnavailable",
   /** No source registered under the requested id. */
   "unknownSource",
   /** The requested profile directory is not one the source reported. */
   "unknownSourceProfile",
   /** The target profile's Electron session could not be opened. */
   "sessionUnavailable",
+  /**
+   * The cookies were written, but the new profile could not be saved to
+   * settings, so its partition was cleared again rather than left orphaned.
+   */
+  "profileNotSaved",
+  /**
+   * The cookies were written, but the profile count reached its cap while the
+   * import ran, so the new profile was not saved and its partition was cleared.
+   */
+  "profileLimitReached",
   /** Anything else: a corrupt database, a failed decrypt, a vanished file. */
   "readFailed",
 ]);
@@ -145,8 +157,13 @@ export const BROWSER_IMPORT_UNAVAILABLE_COPY: Readonly<
 /** What to tell the user when an attempted import fails. */
 export const BROWSER_IMPORT_FAILURE_COPY: Readonly<Record<BrowserImportFailureReason, string>> = {
   ...BROWSER_IMPORT_UNAVAILABLE_COPY,
+  keychainUnavailable:
+    "The system keyring could not be accessed. Make sure your desktop keyring is running and unlocked, then retry.",
   unknownSource: "That browser is no longer available to import from.",
   unknownSourceProfile: "That browser profile no longer exists.",
   sessionUnavailable: "The target profile could not be opened.",
+  profileNotSaved: "The cookies were imported, but the new profile couldn't be saved. Try again.",
+  profileLimitReached:
+    "You've reached the profile limit. Delete a profile or import into an existing one.",
   readFailed: "The browser's cookie database could not be read.",
 };

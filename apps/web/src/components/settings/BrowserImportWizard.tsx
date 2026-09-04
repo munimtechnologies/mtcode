@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 
 import { cn, randomUUID } from "~/lib/utils";
 
+import { APP_BASE_NAME, APP_DISPLAY_NAME } from "~/branding";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -19,31 +20,27 @@ import {
 import { Spinner } from "../ui/spinner";
 import {
   initialWizardStep,
+  initialTargetSelection,
+  canCloseWizard,
   isRetryableReason,
   formatSkippedDomains,
   outcomeToStep,
+  refreshedSourceProfileDirectory,
   refreshedSourceStep,
+  resolveWizardTarget,
   type ImportOutcome,
+  type WizardTarget,
+  type WizardTargetProfile,
+  type WizardTargetSelection,
   type WizardStep,
 } from "./browserImportWizard.logic";
-import { APP_DISPLAY_NAME } from "~/branding";
-import { APP_BASE_NAME } from "../../branding";
 
-/** A profile the import can land in. */
-export interface WizardTargetProfile {
-  readonly id: string;
-  readonly name: string;
-}
-
-/** The target the user picked: a brand-new profile, or an existing one. */
-export type WizardTarget =
-  | { readonly kind: "new"; readonly profileId: string }
-  | { readonly kind: "existing"; readonly profileId: string; readonly name: string };
-
-const NEW_TARGET_VALUE = "new";
+export type { WizardTarget } from "./browserImportWizard.logic";
 
 interface BrowserImportWizardProps {
   readonly source: BrowserImportSource;
+  /** Captured when the wizard opens so destination copy and writes stay stable. */
+  readonly destinationEnvironmentName: string;
   /** Existing profiles the import can go into. Incognito is excluded upstream. */
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
   /** Whether a new profile can still be created (profile cap). */
@@ -59,7 +56,7 @@ interface BrowserImportWizardProps {
   }) => Promise<ImportOutcome>;
   /** Re-checks the source's availability after the user quits the browser. */
   readonly onRefreshSource: () => Promise<BrowserImportSource | undefined>;
-  /** Opens the OS setting that grants access to a protected cookie store. */
+  /** Opens System Settings at Full Disk Access (Safari imports). */
   readonly onOpenFullDiskAccessSettings: () => void;
   readonly onClose: () => void;
 }
@@ -73,6 +70,7 @@ interface BrowserImportWizardProps {
  */
 export function BrowserImportWizard({
   source: initialSource,
+  destinationEnvironmentName,
   targetProfiles,
   canCreateProfile,
   onImport,
@@ -85,36 +83,47 @@ export function BrowserImportWizard({
   const [sourceProfileDirectory, setSourceProfileDirectory] = useState(
     () => initialSource.profiles[0]?.directory ?? "",
   );
-  const [target, setTarget] = useState<string>(
-    canCreateProfile ? NEW_TARGET_VALUE : (targetProfiles[0]?.id ?? NEW_TARGET_VALUE),
+  const [target, setTarget] = useState<WizardTargetSelection>(() =>
+    initialTargetSelection(canCreateProfile, targetProfiles),
   );
-  // Stable across retries so a Full Disk Access round-trip (added on the Safari
-  // branch) or a keychain re-approval lands in one profile, not a new one each
-  // time.
+  const [targetError, setTargetError] = useState<string>();
+  // Stable across retries so a keychain re-approval lands in one profile, not
+  // a new one each time.
   const newProfileId = useRef(`profile-${randomUUID()}`);
+  // A second Import click before React has left the configure screen would
+  // start a second run; the parent refuses it, and applying that refusal here
+  // would drop the wizard out of the importing step while the first write is
+  // still going. The ref settles synchronously where state does not.
+  const importInFlight = useRef(false);
 
   const runImport = () => {
+    if (importInFlight.current) return;
+    const chosen = resolveWizardTarget(target, newProfileId.current, targetProfiles);
+    if (chosen === undefined) {
+      setTargetError("That profile is no longer available. Choose where to import these cookies.");
+      setStep({ step: "configure" });
+      return;
+    }
+    setTargetError(undefined);
+    importInFlight.current = true;
     setStep({ step: "importing" });
-    const chosen: WizardTarget =
-      target === NEW_TARGET_VALUE
-        ? { kind: "new", profileId: newProfileId.current }
-        : {
-            kind: "existing",
-            profileId: target,
-            name: targetProfiles.find((profile) => profile.id === target)?.name ?? "",
-          };
     void onImport({ sourceProfileDirectory, target: chosen })
       .then((outcome) => setStep(outcomeToStep(outcome)))
-      .catch(() => setStep({ step: "blocked", reason: "readFailed" }));
+      .catch(() => setStep({ step: "blocked", reason: "readFailed" }))
+      .finally(() => {
+        importInFlight.current = false;
+      });
   };
 
   const recheckAfterQuit = () => {
-    setStep({ step: "importing" });
+    setStep({ step: "checking" });
     void onRefreshSource()
       .then((refreshed) => {
         if (refreshed) {
           setSource(refreshed);
-          setSourceProfileDirectory(refreshed.profiles[0]?.directory ?? sourceProfileDirectory);
+          setSourceProfileDirectory((current) =>
+            refreshedSourceProfileDirectory(current, refreshed),
+          );
         }
         setStep(refreshedSourceStep(refreshed));
       })
@@ -122,8 +131,8 @@ export function BrowserImportWizard({
   };
 
   return (
-    <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogPopup className="max-w-lg">
+    <Dialog open onOpenChange={(open) => (open || !canCloseWizard(step) ? undefined : onClose())}>
+      <DialogPopup className="max-w-lg" showCloseButton={canCloseWizard(step)}>
         {step.step === "quit" ? (
           <QuitStep source={source} onCancel={onClose} onRechecked={recheckAfterQuit} />
         ) : step.step === "fullDiskAccess" ? (
@@ -135,8 +144,14 @@ export function BrowserImportWizard({
           />
         ) : step.step === "importing" ? (
           <ImportingStep />
+        ) : step.step === "checking" ? (
+          <CheckingStep sourceName={source.name} />
         ) : step.step === "done" ? (
-          <DoneStep {...step} onClose={onClose} />
+          <DoneStep
+            {...step}
+            destinationEnvironmentName={destinationEnvironmentName}
+            onClose={onClose}
+          />
         ) : step.step === "blocked" ? (
           <BlockedStep
             source={source}
@@ -147,12 +162,17 @@ export function BrowserImportWizard({
         ) : (
           <ConfigureStep
             source={source}
+            destinationEnvironmentName={destinationEnvironmentName}
             targetProfiles={targetProfiles}
             canCreateProfile={canCreateProfile}
             sourceProfileDirectory={sourceProfileDirectory}
             onSourceProfileChange={setSourceProfileDirectory}
             target={target}
-            onTargetChange={setTarget}
+            onTargetChange={(selection) => {
+              setTarget(selection);
+              setTargetError(undefined);
+            }}
+            targetError={targetError}
             onCancel={onClose}
             onImport={runImport}
           />
@@ -189,25 +209,6 @@ function QuitStep({
   );
 }
 
-/** "5,065 cookies", or "no cookies", or nothing when the store is unreadable. */
-function cookieCountLabel(count: number | undefined): string | undefined {
-  if (count === undefined) return undefined;
-  if (count === 0) return "no cookies";
-  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
-}
-
-type ConfigureStepProps = {
-  readonly source: BrowserImportSource;
-  readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
-  readonly canCreateProfile: boolean;
-  readonly sourceProfileDirectory: string;
-  readonly onSourceProfileChange: (directory: string) => void;
-  readonly target: string;
-  readonly onTargetChange: (target: string) => void;
-  readonly onCancel: () => void;
-  readonly onImport: () => void;
-};
-
 function FullDiskAccessStep({
   source,
   onCancel,
@@ -222,7 +223,9 @@ function FullDiskAccessStep({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Let ${APP_DISPLAY_NAME} read {source.name}&rsquo;s cookies</DialogTitle>
+        <DialogTitle>
+          Let {APP_DISPLAY_NAME} read {source.name}&rsquo;s cookies
+        </DialogTitle>
         <DialogDescription>
           {source.name} keeps its cookies somewhere only apps with Full Disk Access can reach. Turn
           that on for {APP_BASE_NAME} in System Settings, then come back and finish the import.
@@ -241,22 +244,65 @@ function FullDiskAccessStep({
   );
 }
 
+/** "5,065 cookies", or "no cookies", or nothing when the store is unreadable. */
+function cookieCountLabel(count: number | undefined): string | undefined {
+  if (count === undefined) return undefined;
+  if (count === 0) return "no cookies";
+  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
+}
+
+function cookieResultCount(count: number): string {
+  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
+}
+
+type ConfigureStepProps = {
+  readonly source: BrowserImportSource;
+  readonly destinationEnvironmentName: string;
+  readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly canCreateProfile: boolean;
+  readonly sourceProfileDirectory: string;
+  readonly onSourceProfileChange: (directory: string) => void;
+  readonly target: WizardTargetSelection;
+  readonly targetError: string | undefined;
+  readonly onTargetChange: (target: WizardTargetSelection) => void;
+  readonly onCancel: () => void;
+  readonly onImport: () => void;
+};
+
 function ConfigureStep({
   source,
+  destinationEnvironmentName,
   targetProfiles,
   canCreateProfile,
   sourceProfileDirectory,
   onSourceProfileChange,
   target,
+  targetError,
   onTargetChange,
   onCancel,
   onImport,
 }: ConfigureStepProps) {
+  const targetMissing =
+    target.kind === "existing" &&
+    !targetProfiles.some((profile) => profile.id === target.profileId);
+  // The "New profile" tile is unrendered once the cap is reached, so a target
+  // chosen before that leaves nothing selected in "Into" — say so, the same
+  // way a vanished existing target is explained.
+  const targetUncreatable = target.kind === "new" && !canCreateProfile;
+  const targetFeedback =
+    targetError ??
+    (targetMissing
+      ? "That profile is no longer available. Choose where to import these cookies."
+      : targetUncreatable
+        ? "You've reached the profile limit. Choose an existing profile to import into."
+        : undefined);
   return (
     <>
       <DialogHeader>
         <DialogTitle>Import from {source.name}</DialogTitle>
-        <DialogDescription>Cookies flow from the browser into a profile here.</DialogDescription>
+        <DialogDescription>
+          Choose which cookies to import for {destinationEnvironmentName}.
+        </DialogDescription>
       </DialogHeader>
       <DialogPanel>
         {/* Side by side when the dialog has room, stacked when it doesn't. */}
@@ -285,44 +331,41 @@ function ConfigureStep({
             </p>
             {canCreateProfile ? (
               <SelectableTile
-                selected={target === NEW_TARGET_VALUE}
+                selected={target.kind === "new"}
                 title="New profile"
                 subtitle="Created for these cookies"
-                onSelect={() => onTargetChange(NEW_TARGET_VALUE)}
+                onSelect={() => onTargetChange({ kind: "new" })}
               />
             ) : null}
             {targetProfiles.map((profile) => (
               <SelectableTile
                 key={profile.id}
-                selected={target === profile.id}
+                selected={target.kind === "existing" && target.profileId === profile.id}
                 title={profile.name}
                 subtitle="Existing profile"
-                onSelect={() => onTargetChange(profile.id)}
+                onSelect={() => onTargetChange({ kind: "existing", profileId: profile.id })}
               />
             ))}
           </section>
         </div>
+        {targetFeedback ? (
+          <p role="alert" className="mt-3 text-sm text-destructive">
+            {targetFeedback}
+          </p>
+        ) : null}
       </DialogPanel>
-      <ConfigureFooter onCancel={onCancel} onImport={onImport} />
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          disabled={sourceProfileDirectory === "" || targetMissing || targetUncreatable}
+          onClick={onImport}
+        >
+          Import
+        </Button>
+      </DialogFooter>
     </>
-  );
-}
-
-/** Shared footer so the step keeps one set of actions. */
-function ConfigureFooter({
-  onCancel,
-  onImport,
-}: {
-  readonly onCancel: () => void;
-  readonly onImport: () => void;
-}) {
-  return (
-    <DialogFooter>
-      <Button variant="outline" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button onClick={onImport}>Import</Button>
-    </DialogFooter>
   );
 }
 
@@ -341,9 +384,10 @@ function SelectableTile({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
+        "flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
         selected
           ? "border-primary bg-primary/8"
           : "border-border/60 hover:border-border hover:bg-muted/40",
@@ -371,10 +415,31 @@ function SelectableTile({
 
 function ImportingStep() {
   return (
-    <DialogPanel className="flex items-center gap-3 py-6">
-      <Spinner className="size-4 text-muted-foreground" />
-      <span className="text-sm text-muted-foreground">Importing cookies…</span>
-    </DialogPanel>
+    <>
+      <DialogHeader>
+        <DialogTitle>Importing cookies</DialogTitle>
+        <DialogDescription>This may take a moment.</DialogDescription>
+      </DialogHeader>
+      <DialogPanel className="flex items-center gap-3 py-6">
+        <Spinner className="size-4 text-muted-foreground" />
+        <span className="text-sm text-muted-foreground">Importing…</span>
+      </DialogPanel>
+    </>
+  );
+}
+
+function CheckingStep({ sourceName }: { readonly sourceName: string }) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Checking {sourceName}</DialogTitle>
+        <DialogDescription>Checking whether the browser has closed.</DialogDescription>
+      </DialogHeader>
+      <DialogPanel className="flex items-center gap-3 py-6">
+        <Spinner className="size-4 text-muted-foreground" />
+        <span className="text-sm text-muted-foreground">Checking…</span>
+      </DialogPanel>
+    </>
   );
 }
 
@@ -383,24 +448,32 @@ function DoneStep({
   skipped,
   skippedDomains,
   targetName,
+  destinationEnvironmentName,
   onClose,
 }: {
   readonly imported: number;
   readonly skipped: number;
   readonly skippedDomains: ReadonlyArray<string>;
   readonly targetName: string;
+  readonly destinationEnvironmentName: string;
   readonly onClose: () => void;
 }) {
   return (
     <>
       <DialogHeader>
         <DialogTitle>
-          {imported > 0 ? `Imported ${imported} cookies` : "Nothing to import"}
+          {imported > 0
+            ? `Imported ${cookieResultCount(imported)}`
+            : skipped > 0
+              ? `Skipped ${cookieResultCount(skipped)}`
+              : "No cookies found"}
         </DialogTitle>
         <DialogDescription>
           {imported > 0
-            ? `Into ${targetName}.${skipped > 0 ? ` ${skipped} couldn't be brought over.` : ""}`
-            : "There were no cookies to bring over."}
+            ? `Added to ${targetName} for ${destinationEnvironmentName}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}`
+            : skipped > 0
+              ? `No cookies were imported for ${destinationEnvironmentName}.`
+              : `There were no cookies to import for ${destinationEnvironmentName}.`}
         </DialogDescription>
       </DialogHeader>
       {skippedDomains.length > 0 ? (

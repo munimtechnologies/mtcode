@@ -2,12 +2,38 @@ import { describe, expect, it } from "vite-plus/test";
 import type { BrowserImportSource } from "@t3tools/contracts";
 
 import {
+  canCloseWizard,
   initialWizardStep,
+  initialTargetSelection,
   isRetryableReason,
   formatSkippedDomains,
   outcomeToStep,
+  refreshedSourceProfileDirectory,
   refreshedSourceStep,
+  resolveWizardTarget,
 } from "./browserImportWizard.logic";
+
+describe("wizard target selection", () => {
+  it("treats an existing profile whose id is new as an existing target", () => {
+    const profiles = [{ id: "new", name: "Existing new" }];
+    const selection = initialTargetSelection(false, profiles);
+
+    expect(selection).toEqual({ kind: "existing", profileId: "new" });
+    expect(resolveWizardTarget(selection, "generated", profiles)).toEqual({
+      kind: "existing",
+      profileId: "new",
+      name: "Existing new",
+    });
+  });
+
+  it("rejects an existing target that is no longer listed", () => {
+    expect(
+      resolveWizardTarget({ kind: "existing", profileId: "removed" }, "generated", [
+        { id: "default", name: "Default" },
+      ]),
+    ).toBeUndefined();
+  });
+});
 
 const source = (over: Partial<BrowserImportSource> = {}): BrowserImportSource => ({
   id: "helium",
@@ -30,6 +56,27 @@ describe("initialWizardStep", () => {
       step: "blocked",
       reason: "unsupportedPlatform",
     });
+  });
+
+  it("blocks a ready source that reports no importable profiles", () => {
+    expect(initialWizardStep(source({ profiles: [] }))).toEqual({
+      step: "blocked",
+      reason: "unknownSourceProfile",
+    });
+  });
+
+  it("handles source availability before checking its profiles", () => {
+    expect(
+      initialWizardStep(source({ profiles: [], unavailable: "needsKeychainApproval" })),
+    ).toEqual({ step: "blocked", reason: "needsKeychainApproval" });
+  });
+});
+
+describe("canCloseWizard", () => {
+  it("keeps the wizard open while an import writes its target profile", () => {
+    expect(canCloseWizard({ step: "importing" })).toBe(false);
+    expect(canCloseWizard({ step: "configure" })).toBe(true);
+    expect(canCloseWizard({ step: "blocked", reason: "readFailed" })).toBe(true);
   });
 });
 
@@ -84,17 +131,55 @@ describe("refreshedSourceStep", () => {
   it("blocks when the source vanished from the list", () => {
     expect(refreshedSourceStep(undefined)).toEqual({ step: "blocked", reason: "unknownSource" });
   });
+
+  it("blocks when the refreshed source has no profiles", () => {
+    expect(refreshedSourceStep(source({ profiles: [] }))).toEqual({
+      step: "blocked",
+      reason: "unknownSourceProfile",
+    });
+  });
+});
+
+describe("refreshedSourceProfileDirectory", () => {
+  const refreshed = source({
+    profiles: [
+      { directory: "Default", name: "Personal" },
+      { directory: "Profile 2", name: "Work" },
+    ],
+  });
+
+  it("preserves a selected non-first profile after the browser quits", () => {
+    expect(refreshedSourceProfileDirectory("Profile 2", refreshed)).toBe("Profile 2");
+  });
+
+  it("falls back only when the old profile vanished and clears an empty result", () => {
+    expect(refreshedSourceProfileDirectory("Removed", refreshed)).toBe("Default");
+    expect(refreshedSourceProfileDirectory("Removed", source({ profiles: [] }))).toBe("");
+  });
 });
 
 describe("isRetryableReason", () => {
   it("offers a retry for failures a second attempt can clear", () => {
     expect(isRetryableReason("needsKeychainApproval")).toBe(true);
+    expect(isRetryableReason("keychainUnavailable")).toBe(true);
     expect(isRetryableReason("readFailed")).toBe(true);
   });
 
   it("does not offer a retry for a permanent failure", () => {
     expect(isRetryableReason("unsupportedPlatform")).toBe(false);
-    expect(isRetryableReason("keychainItemMissing")).toBe(false);
+    expect(isRetryableReason("unknownSourceProfile")).toBe(false);
+    // Retrying the same new-profile import cannot lower the profile count.
+    expect(isRetryableReason("profileLimitReached")).toBe(false);
+  });
+
+  it("offers a retry once the user has signed in to create the missing key", () => {
+    // The blocked copy tells the user to sign in and retry, so the screen
+    // has to offer the retry it asks for.
+    expect(isRetryableReason("keychainItemMissing")).toBe(true);
+  });
+
+  it("offers a retry when the cookies landed but the new profile was not saved", () => {
+    expect(isRetryableReason("profileNotSaved")).toBe(true);
   });
 });
 

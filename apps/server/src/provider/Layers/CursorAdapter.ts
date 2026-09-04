@@ -604,7 +604,6 @@ export function makeCursorAdapter(
             ...(cursorModelSelection?.model ? { model: cursorModelSelection.model } : {}),
             childProcessSpawner,
             cwd,
-            runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "t3-code", version: "0.0.0" },
             ...(mcpServers.length > 0 ? { mcpServers } : {}),

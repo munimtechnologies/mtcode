@@ -120,7 +120,9 @@ describe("parseBinaryCookies", () => {
         url: "http://example.test/app",
         name: "plain",
         value: "v",
-        domain: "example.test",
+        // Host-only (no leading dot): left undefined so Electron does not
+        // widen it into a domain cookie.
+        domain: undefined,
         path: "/app",
         secure: false,
         httpOnly: false,

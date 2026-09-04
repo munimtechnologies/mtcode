@@ -1,5 +1,42 @@
 import type { BrowserImportFailureReason, BrowserImportSource } from "@t3tools/contracts";
 
+export interface WizardTargetProfile {
+  readonly id: string;
+  readonly name: string;
+}
+
+export type WizardTarget =
+  | { readonly kind: "new"; readonly profileId: string }
+  | { readonly kind: "existing"; readonly profileId: string; readonly name: string };
+
+export type WizardTargetSelection =
+  | { readonly kind: "new" }
+  | { readonly kind: "existing"; readonly profileId: string };
+
+export function initialTargetSelection(
+  canCreateProfile: boolean,
+  targetProfiles: ReadonlyArray<WizardTargetProfile>,
+): WizardTargetSelection {
+  if (canCreateProfile) return { kind: "new" };
+  const first = targetProfiles[0];
+  return first ? { kind: "existing", profileId: first.id } : { kind: "new" };
+}
+
+export function resolveWizardTarget(
+  selection: WizardTargetSelection,
+  newProfileId: string,
+  targetProfiles: ReadonlyArray<WizardTargetProfile>,
+): WizardTarget | undefined {
+  if (selection.kind === "new") return { kind: "new", profileId: newProfileId };
+  const profile = targetProfiles.find((candidate) => candidate.id === selection.profileId);
+  if (profile === undefined) return undefined;
+  return {
+    kind: "existing",
+    profileId: selection.profileId,
+    name: profile.name,
+  };
+}
+
 /**
  * What the import wizard produces once it has actually tried to import. The
  * parent runs the import and classifies the result; the wizard only reacts to
@@ -23,6 +60,7 @@ export type WizardStep =
   | { readonly step: "quit" }
   | { readonly step: "fullDiskAccess" }
   | { readonly step: "configure" }
+  | { readonly step: "checking" }
   | { readonly step: "importing" }
   | {
       readonly step: "done";
@@ -33,6 +71,11 @@ export type WizardStep =
     }
   | { readonly step: "blocked"; readonly reason: BrowserImportFailureReason };
 
+/** The import owns its target partition until the write finishes. */
+export function canCloseWizard(step: WizardStep): boolean {
+  return step.step !== "importing";
+}
+
 /**
  * Where the wizard opens for a source. A running browser is the one thing we
  * know up front, from the source listing; everything else is discovered by
@@ -41,6 +84,7 @@ export type WizardStep =
 export function initialWizardStep(source: BrowserImportSource): WizardStep {
   if (source.unavailable === "browserRunning") return { step: "quit" };
   if (source.unavailable !== undefined) return { step: "blocked", reason: source.unavailable };
+  if (source.profiles.length === 0) return { step: "blocked", reason: "unknownSourceProfile" };
   return { step: "configure" };
 }
 
@@ -69,16 +113,33 @@ export function refreshedSourceStep(source: BrowserImportSource | undefined): Wi
   return initialWizardStep(source);
 }
 
+/** Preserve the chosen source profile when a post-quit refresh still lists it. */
+export function refreshedSourceProfileDirectory(
+  currentDirectory: string,
+  source: BrowserImportSource,
+): string {
+  if (source.profiles.some((profile) => profile.directory === currentDirectory)) {
+    return currentDirectory;
+  }
+  return source.profiles[0]?.directory ?? "";
+}
+
 /**
  * Whether retrying could clear a failure. The keychain prompt can be approved
- * on a second try, and a read or session error may be transient; a missing key
- * or an unsupported browser will not change, so those get no retry button.
+ * on a second try, a missing key appears once the user signs in to the
+ * browser (which is what its copy asks for), and a read or session error may
+ * be transient; an unsupported browser will not change, so it gets no retry
+ * button.
  */
 export function isRetryableReason(reason: BrowserImportFailureReason): boolean {
   switch (reason) {
     case "needsKeychainApproval":
+    case "keychainItemMissing":
+    case "keychainUnavailable":
+    case "needsFullDiskAccess":
     case "readFailed":
     case "sessionUnavailable":
+    case "profileNotSaved":
       return true;
     default:
       return false;

@@ -114,8 +114,13 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   const clipboardText = formatThreadErrorClipboardText({ error, ...copyContext });
 
   return (
-    <div className="mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
-      <Alert variant="error" controlAlignment="first-line">
+    <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
+      <Alert
+        variant="error"
+        controlAlignment="first-line"
+        className="alert-glass"
+        data-variant="error"
+      >
         <CircleAlertIcon />
         <AlertDescription>
           <Tooltip>

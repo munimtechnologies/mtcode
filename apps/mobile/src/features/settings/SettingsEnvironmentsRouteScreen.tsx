@@ -140,6 +140,12 @@ export function SettingsEnvironmentsRouteScreen() {
                   onRename={(environmentId) =>
                     navigation.navigate("EnvironmentRename", { environmentId })
                   }
+                  onSetupProvider={(params) =>
+                    navigation.navigate("SettingsSheet", {
+                      screen: "SettingsContent",
+                      params: { screen: "SettingsProviderSetup", params },
+                    })
+                  }
                 />
               </View>
             ))}
@@ -167,6 +173,12 @@ export function SettingsEnvironmentsRouteScreen() {
         <CloudEnvironmentRows
           connectedCloudEnvironments={connectedCloudEnvironments}
           onReconnectEnvironment={onReconnectEnvironment}
+          onSetupProvider={(params) =>
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsContent",
+              params: { screen: "SettingsProviderSetup", params },
+            })
+          }
           {...(SHOWCASE_ENABLED
             ? {
                 showcaseAvailableEnvironments: SHOWCASE_AVAILABLE_CLOUD_ENVIRONMENTS,

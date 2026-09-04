@@ -26,6 +26,11 @@ import {
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import {
+  type ClaudeScopedLimitNames,
+  claudeRateLimitEventToUpdate,
+  claudeUsageResponseToLimits,
+} from "./claudeUsageLimits.ts";
+import {
   ApprovalRequestId,
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -237,12 +242,10 @@ function toSessionPermissionUpdates(
   toolName: string,
   suggestions: ReadonlyArray<PermissionUpdate> | undefined,
 ): Array<PermissionUpdate> {
-  const sessionScoped = (suggestions ?? []).map(
-    (suggestion): PermissionUpdate => ({
-      ...suggestion,
-      destination: "session",
-    }),
-  );
+  const sessionScoped = (suggestions ?? []).map((suggestion): PermissionUpdate => ({
+    ...suggestion,
+    destination: "session",
+  }));
   if (sessionScoped.length > 0) {
     return sessionScoped;
   }
@@ -465,6 +468,8 @@ export interface ClaudeAdapterLiveOptions {
     readonly settingSources: ReadonlyArray<SettingSource>;
   }) => Promise<ClaudeResolvedSettingsSnapshot>;
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
+  /** Scoped-bucket names the driver's status probe last saw; see `claudeUsageLimits`. */
+  readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
 }
 
 function isUuid(value: string): boolean {
@@ -787,12 +792,17 @@ function compactBoundaryTokenUsageSnapshot(
   }
 
   const preTokens = finiteNonNegativeInteger(compactMetadata.pre_tokens);
-  return makeClaudeTokenUsageSnapshot({
+  const snapshot = makeClaudeTokenUsageSnapshot({
     activeTokens: postTokens,
     ...(preTokens !== undefined ? { lastUsedTokens: preTokens } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
   });
+  if (snapshot === undefined || preTokens !== undefined) {
+    return snapshot;
+  }
+  const { lastUsedTokens: _lastUsedTokens, ...snapshotWithoutBeforeTokens } = snapshot;
+  return snapshotWithoutBeforeTokens;
 }
 
 function normalizeClaudeTaskProgressTokenUsage(
@@ -1569,12 +1579,8 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
   // therefore split into [leading text, "/name trailing text"] so the CLI
   // runs it natively and the prose around it survives. See ClaudeSkillDispatch.
   const dispatch = planClaudeSkillDispatch(text, dependencies.skillNames);
-  if (dispatch) {
-    if (dispatch.leadingText !== undefined) {
-      sdkContent.push({ type: "text", text: dispatch.leadingText });
-    }
-  } else if (text.length > 0) {
-    sdkContent.push({ type: "text", text });
+  if (dispatch?.leadingText !== undefined) {
+    sdkContent.push({ type: "text", text: dispatch.leadingText });
   }
 
   for (const attachment of input.attachments ?? []) {
@@ -1620,10 +1626,15 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
     );
   }
 
-  // Images go before the command block: a text block after them still
-  // expands, a command block followed by an image does not.
+  // The final text block goes last on purpose. The Claude CLI only reads a
+  // streamed user message as a slash-command invocation when the last content
+  // block is text; image blocks ahead of it ride along as preceding input.
+  // Leading with the text made every image-carrying turn fall back to a plain
+  // prompt, so a hand-typed `/skill args` reached the agent unexpanded.
   if (dispatch) {
     sdkContent.push({ type: "text", text: dispatch.commandText });
+  } else if (text.length > 0) {
+    sdkContent.push({ type: "text", text });
   }
 
   return buildUserMessage({ sdkContent });
@@ -3612,11 +3623,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           context.turnState.latestAssistantUsage = undefined;
           context.turnState.compactedSinceLatestAssistantUsage = true;
         }
-        const snapshot = yield* resolveCompactBoundaryTokenUsage(
+        const compactedUsage = yield* resolveCompactBoundaryTokenUsage(
           context,
           message as unknown as Record<string, unknown>,
         );
-        yield* emitThreadTokenUsage(context, snapshot, {
+        yield* emitThreadTokenUsage(context, compactedUsage, {
           rawMethod: "claude/system/compact_boundary",
           rawPayload: message,
         });
@@ -3625,6 +3636,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "thread.state.changed",
           payload: {
             state: "compacted",
+            ...(compactedUsage?.lastUsedTokens !== undefined
+              ? { beforeTokens: compactedUsage.lastUsedTokens }
+              : {}),
+            ...(compactedUsage?.usedTokens !== undefined
+              ? { afterTokens: compactedUsage.usedTokens }
+              : {}),
             detail: message,
           },
         });
@@ -3964,6 +3981,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (!usage || usage.rate_limits === null || usage.rate_limits === undefined) return;
 
     const stamp = yield* makeEventStamp();
+    // Only the limit windows travel: the full response also carries session
+    // cost and a local behaviors scan that have no consumer here.
+    const { limits, names } = claudeUsageResponseToLimits({
+      response: usage,
+      checkedAt: stamp.createdAt,
+    });
+    // The probe is the only source that names the scoped buckets, so hand the
+    // names to the streamed-event mapper before the next `rate_limit_event`.
+    if (options?.scopedLimitNames) {
+      yield* Ref.set(options.scopedLimitNames, names);
+    }
     yield* offerRuntimeEvent({
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -3971,14 +3999,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       threadId: context.session.threadId,
       providerRefs: nativeProviderRefs(context),
       type: "account.rate-limits.updated",
-      // Only the limit fields travel: the full response also carries session
-      // cost and a local behaviors scan that have no consumer here.
-      payload: {
-        rateLimits: {
-          subscription_type: usage.subscription_type,
-          rate_limits: usage.rate_limits,
-        },
-      },
+      payload: { limits: { windows: limits.windows } },
     });
   });
 
@@ -4057,12 +4078,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (message.type === "rate_limit_event") {
+      const names = options?.scopedLimitNames
+        ? yield* Ref.get(options.scopedLimitNames)
+        : { overageIncluded: undefined };
+      const limits = claudeRateLimitEventToUpdate(message.rate_limit_info, names);
+      if (!limits) return;
       yield* offerRuntimeEvent({
         ...base,
         type: "account.rate-limits.updated",
-        payload: {
-          rateLimits: message,
-        },
+        payload: { limits },
       });
       // A rejected window parks the turn inside the SDK: no further messages
       // arrive and no result lands, so without a row the thread just spins.
@@ -4269,7 +4293,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     // Same reason as the approvals above: a request nobody can answer any more
     // must not stay open, or the thread can never be settled.
-    for (const pending of [...context.pendingUserInputs.values()]) {
+    for (const pending of context.pendingUserInputs.values()) {
       yield* pending.cancel;
     }
 

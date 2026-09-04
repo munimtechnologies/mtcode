@@ -63,6 +63,12 @@ export const PROVIDER_OPTIONS: Array<{
     available: true,
     pickerSidebarBadge: "new",
   },
+  {
+    value: ProviderDriverKind.make("antigravity"),
+    label: "Antigravity",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
 ];
 
 export type WorkLogToolLifecycleStatus =
@@ -548,10 +554,11 @@ function parseUserInputQuestions(
           return {
             label: optionRecord.label,
             description: optionRecord.description,
+            ...(typeof optionRecord.value === "string" ? { value: optionRecord.value } : {}),
           };
         })
         .filter((option): option is UserInputQuestion["options"][number] => option !== null);
-      if (options.length === 0) {
+      if (options.length === 0 && question.allowCustomAnswer === false) {
         return null;
       }
       return {
@@ -560,6 +567,9 @@ function parseUserInputQuestions(
         question: question.question,
         options,
         multiSelect: question.multiSelect === true,
+        ...(typeof question.allowCustomAnswer === "boolean"
+          ? { allowCustomAnswer: question.allowCustomAnswer }
+          : {}),
       };
     })
     .filter((question): question is UserInputQuestion => question !== null);

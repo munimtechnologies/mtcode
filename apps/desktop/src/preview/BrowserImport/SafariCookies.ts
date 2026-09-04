@@ -144,7 +144,10 @@ export function parseBinaryCookies(buffer: Buffer): ReadonlyArray<ImportedCookie
         url: `${secure ? "https" : "http"}://${host}${path || "/"}`,
         name,
         value,
-        domain,
+        // Only domain cookies (leading dot) carry `domain`: Electron reads any
+        // `domain` it is given as marking a domain cookie and would widen a
+        // host-only cookie to every subdomain.
+        domain: domain.startsWith(".") ? domain : undefined,
         path: path || "/",
         secure,
         httpOnly: (flags & FLAG_HTTP_ONLY) !== 0,

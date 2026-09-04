@@ -30,6 +30,7 @@ import { environmentSession } from "./session";
 export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRuntime, {
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
   environmentThemes: true,
+  usageLimitSources: true,
 });
 export const environmentBackgroundPolicy = createEnvironmentRpcSubscriptionAtomFamily(
   connectionAtomRuntime,

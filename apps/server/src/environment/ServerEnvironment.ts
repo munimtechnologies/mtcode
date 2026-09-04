@@ -240,6 +240,7 @@ export const make = Effect.gen(function* () {
       threadSnooze: true,
       threadGoal: true,
       environmentThemes: true,
+      usageLimitSources: true,
       threadPinning: true,
       threadPinReorder: true,
       threadActiveReorder: true,
