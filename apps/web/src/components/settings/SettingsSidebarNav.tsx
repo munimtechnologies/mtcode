@@ -45,7 +45,6 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { useMtTeamsSelector, useMtTeamsSync } from "../../mtTeams/state";
-import { T3ConnectSidebarAvatar, T3ConnectSidebarSignIn } from "../clerk/T3ConnectSidebarSignIn";
 import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
