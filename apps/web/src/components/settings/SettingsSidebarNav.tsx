@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -53,6 +55,17 @@ import {
   type SettingsSearchItem,
 } from "./settingsSearch";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
+
+const T3ConnectSidebarSignIn = lazy(() =>
+  import("../clerk/T3ConnectSidebarSignIn").then((module) => ({
+    default: module.T3ConnectSidebarSignIn,
+  })),
+);
+const T3ConnectSidebarAvatar = lazy(() =>
+  import("../clerk/T3ConnectSidebarSignIn").then((module) => ({
+    default: module.T3ConnectSidebarAvatar,
+  })),
+);
 
 const SETTINGS_SECTION_ICONS: Readonly<
   Record<SettingsPath, ComponentType<{ className?: string }>>
@@ -381,7 +394,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                             <SidebarMenuSubButton
                               render={<button type="button" />}
                               size="sm"
-                              className="text-sidebar-muted-foreground/65"
+                              className="w-full text-sidebar-muted-foreground/65"
                               onClick={() => handlePageSectionClick(item.to, section.targetId)}
                             >
                               <span className="ms-0.5">{section.label}</span>
@@ -399,7 +412,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-[var(--sidebar-content-inset)]">
-        <T3ConnectSidebarSignIn />
+        <Suspense fallback={null}>
+          <T3ConnectSidebarSignIn />
+        </Suspense>
         {/* The avatar keeps its own box: without it a long utility label
             pushed it off the rail (see "a stray sidebar avatar"). */}
         <div className="flex min-w-0 items-center gap-1">
@@ -407,7 +422,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             <SidebarUtilityMenu />
           </div>
           <div className="shrink-0">
-            <T3ConnectSidebarAvatar />
+            <Suspense fallback={null}>
+              <T3ConnectSidebarAvatar />
+            </Suspense>
           </div>
         </div>
       </SidebarFooter>
