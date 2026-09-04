@@ -53,6 +53,25 @@ You can also send `/compact` in an existing conversation. Web and desktop offer
 a large older thread. See [commands and skills](./composer.md#commands-and-skills)
 for using composer commands.
 
+## Let Claude ask a second model for advice
+
+Claude can consult a stronger model during a turn. The second model sees the work
+so far and gives guidance before Claude continues.
+
+Set **Advisor model** in the Claude provider settings to `fable`, `opus`, or
+`sonnet`. Leave it empty to keep the advisor setting from your Claude Code
+configuration.
+
+The advisor must be at least as capable as the thread's model; for example,
+`sonnet` cannot advise an Opus thread. If the two do not match, Claude Code runs
+the turn without an advisor. `fable` bills to usage credits, which you enable by
+running `/model fable` in an interactive Claude Code session; until then the turn
+runs without an advisor and shows no message.
+
+Each consult shows in the timeline as **Advisor consult**. The advice itself is
+encrypted, so the item records that the consult happened without its text. The
+advisor's tokens are additional to the thread model's.
+
 ## Usage limits
 
 If your Claude subscription runs out of usage mid-turn, the thread shows which
