@@ -242,16 +242,24 @@ export const clearCache = DesktopIpc.makeIpcMethod({
  * existed, so upgrading does not strand anyone's existing logins in an
  * orphaned partition. Incognito derives a non-persistent partition.
  */
-function resolvePartitionScope(
+export function resolvePartitionScope(
   environmentId: string,
   profileId: string | undefined,
-): { readonly scope: string; readonly persistent: boolean } {
+): {
+  readonly scope: string;
+  readonly persistent: boolean;
+  readonly namespace?: "profile";
+} {
   if (profileId === undefined || profileId === DEFAULT_BROWSER_PROFILE_ID) {
     return { scope: environmentId, persistent: true };
   }
+  // JSON's tuple framing is injective for strings, including lone UTF-16
+  // surrogates (which it escapes). URI encoding throws on those supported ids,
+  // while replacing them with U+FFFD would collapse distinct identities.
   return {
-    scope: `${environmentId}::${profileId}`,
+    scope: JSON.stringify([environmentId, profileId]),
     persistent: profileId !== INCOGNITO_BROWSER_PROFILE_ID,
+    namespace: "profile" as const,
   };
 }
 
@@ -266,13 +274,13 @@ const resolveClearPartitions = Effect.fn("desktop.ipc.preview.resolveClearPartit
   profileId: string | undefined,
 ) {
   if (profileId === undefined) return undefined;
-  const { scope, persistent } = resolvePartitionScope(environmentId, profileId);
+  const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
   // Loading the session is what puts the partition in the map the clear walks.
   // Deriving the partition string alone leaves nothing to match, so clearing a
   // profile with no tab open this run — after a restart, or when deleting a
   // profile — would report success and delete nothing.
-  yield* manager.getBrowserSession(scope, persistent);
-  return [yield* manager.getBrowserPartition(scope, persistent)];
+  yield* manager.getBrowserSession(scope, persistent, namespace);
+  return [yield* manager.getBrowserPartition(scope, persistent, namespace)];
 });
 
 export const getPreviewConfig = DesktopIpc.makeIpcMethod({
@@ -281,13 +289,13 @@ export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   result: DesktopPreviewWebviewConfigSchema,
   handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId, profileId }) {
     const manager = yield* PreviewManager.PreviewManager;
-    const { scope, persistent } = resolvePartitionScope(environmentId, profileId);
+    const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
     // Creating the session first is what installs the UA rewrite and permission
     // handlers; a guest that attached to an untouched partition would run with
     // Electron's default UA and Chromium's default permission behaviour.
-    yield* manager.getBrowserSession(scope, persistent);
+    yield* manager.getBrowserSession(scope, persistent, namespace);
     return {
-      partition: yield* manager.getBrowserPartition(scope, persistent),
+      partition: yield* manager.getBrowserPartition(scope, persistent, namespace),
       webPreferences: PREVIEW_WEBVIEW_PREFERENCES,
       preloadUrl: NodeURL.pathToFileURL(`${__dirname}/preview-pick-preload.cjs`).href,
     };
@@ -320,8 +328,16 @@ export const importBrowserCookies = DesktopIpc.makeIpcMethod({
     const browserImport = yield* BrowserImport.BrowserImport;
     // Derived in main from the same helper the webview config uses, so cookies
     // land in exactly the partition the profile's tabs attach to.
-    const { scope, persistent } = resolvePartitionScope(environmentId, importInput.targetProfileId);
-    return yield* browserImport.importCookies({ input: importInput, scope, persistent });
+    const { scope, persistent, namespace } = resolvePartitionScope(
+      environmentId,
+      importInput.targetProfileId,
+    );
+    return yield* browserImport.importCookies({
+      input: importInput,
+      scope,
+      persistent,
+      ...(namespace === undefined ? {} : { namespace }),
+    });
   }),
 });
 

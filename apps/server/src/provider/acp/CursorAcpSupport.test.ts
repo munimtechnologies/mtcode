@@ -83,15 +83,24 @@ describe("buildCursorAcpSpawnInput", () => {
     });
   });
 
-  it("omits --force outside full-access runtime mode", () => {
-    for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto"] as const) {
+  it("uses Cursor auto-review in auto mode", () => {
+    expect(buildCursorAcpSpawnInput(undefined, "/tmp/project", undefined, "auto")).toEqual({
+      command: "cursor-agent",
+      args: ["--auto-review", "acp"],
+      cwd: "/tmp/project",
+    });
+  });
+
+  it.each(["approval-required", "auto-accept-edits"] as const)(
+    "does not relax approval in %s mode",
+    (runtimeMode) => {
       expect(buildCursorAcpSpawnInput(undefined, "/tmp/project", undefined, runtimeMode)).toEqual({
         command: "cursor-agent",
         args: ["acp"],
         cwd: "/tmp/project",
       });
-    }
-  });
+    },
+  );
 
   it("keeps --force among the root options, before the acp subcommand", () => {
     expect(

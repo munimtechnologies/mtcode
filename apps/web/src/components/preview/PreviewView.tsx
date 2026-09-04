@@ -63,6 +63,7 @@ import {
   useActiveBrowserRecordingTabIds,
 } from "~/browser/browserRecording";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 interface Props {
   threadRef: ScopedThreadRef;
@@ -73,6 +74,13 @@ interface Props {
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
   ) => void;
+}
+
+export function previewProfileName(
+  profiles: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+  profileId: string,
+): string {
+  return profiles.find((profile) => profile.id === profileId)?.name ?? "Removed profile";
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
@@ -154,6 +162,7 @@ export function PreviewView({
   // as "every profile".
   const activeProfileId = snapshot?.profileId ?? DEFAULT_BROWSER_PROFILE_ID;
   const activeProfile = browserDefaults.profiles.find((profile) => profile.id === activeProfileId);
+  const activeProfileName = previewProfileName(browserDefaults.profiles, activeProfileId);
   const panelRect = useBrowserSurfaceStore((state) =>
     runtimeTabId ? (state.byTabId[runtimeTabId]?.rect ?? null) : null,
   );
@@ -700,7 +709,7 @@ export function PreviewView({
           // Only when it differs from the default: labelling every tab
           // "Default" would be noise on the common case, while a tab in
           // another profile is exactly what needs calling out.
-          activeProfile && activeProfile.id !== browserDefaults.profileId ? (
+          activeProfileId !== browserDefaults.profileId ? (
             // Capped: profile names run to 48 characters, and an unbounded
             // badge in this row takes its width from the URL input, the only
             // flexible element in the compact chrome. The cap sits on the
@@ -708,9 +717,20 @@ export function PreviewView({
             // `inline-flex` with `whitespace-nowrap` — `text-overflow` never
             // reaches a bare text node inside it, so the name would be cut off
             // at both ends with no ellipsis.
-            <Badge variant="outline" className="max-w-28 shrink-0" title={activeProfile.name}>
-              <span className="truncate">{activeProfile.name}</span>
-            </Badge>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Badge
+                    variant="outline"
+                    className="max-w-28 shrink-0"
+                    title={activeProfileName}
+                  />
+                }
+              >
+                <span className="truncate">{activeProfileName}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{activeProfileName}</TooltipPopup>
+            </Tooltip>
           ) : null
         }
         trailingActions={
@@ -718,7 +738,7 @@ export function PreviewView({
             <PreviewMoreMenu
               environmentId={threadRef.environmentId}
               profileId={activeProfileId}
-              profileName={activeProfile?.name}
+              profileName={activeProfileName}
               tabId={runtimeTabId}
               hasWebContents={desktopOverlay?.hasWebContents ?? false}
               zoomFactor={desktopOverlay?.zoomFactor ?? 1}

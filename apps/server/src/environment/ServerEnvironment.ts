@@ -27,6 +27,7 @@ import * as ServerConfig from "../config.ts";
 import { resolveDesktopMcpPath } from "../desktopControl/desktopMcpBinary.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
+import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.ts";
 
 export class ServerEnvironmentIdPersistenceError extends Schema.TaggedErrorClass<ServerEnvironmentIdPersistenceError>()(
   "ServerEnvironmentIdPersistenceError",
@@ -200,6 +201,7 @@ export const make = Effect.gen(function* () {
   const environmentId = yield* identity.getEnvironmentId;
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
+  const machine = yield* detectServerEnvironmentMachineKind();
   const launcher = yield* resolveServiceLauncherMode();
   // Binary presence, not the Computer Use settings toggle: the capability says
   // the machine can serve a live view at all. The stream RPC still fails
@@ -222,6 +224,7 @@ export const make = Effect.gen(function* () {
     platform: {
       os: platformOs(hostPlatform),
       arch: platformArch(hostArchitecture),
+      ...(machine === null ? {} : { machine }),
     },
     serverVersion: packageJson.version,
     ...(homeDirectory.length > 0 ? { homeDirectory } : {}),
@@ -245,6 +248,7 @@ export const make = Effect.gen(function* () {
       providerHandoff: true,
       threadMessageCorrection: true,
       threadPullRequestLinking: true,
+      environmentIcon: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? {

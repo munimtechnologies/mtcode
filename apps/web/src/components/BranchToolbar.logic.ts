@@ -1,4 +1,4 @@
-import type { EnvironmentId, VcsRef, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, EnvironmentMachineKind, VcsRef, ProjectId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
@@ -11,6 +11,7 @@ export interface EnvironmentOption {
   projectId: ProjectId;
   label: string;
   isPrimary: boolean;
+  machine: EnvironmentMachineKind;
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
@@ -58,8 +59,13 @@ export function shouldShowComposerContextStrip(input: {
   hasActiveProject: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
+  /** A collapsed composer's controls currently fit in their measured strip host. */
+  hostsRestingComposerControls: boolean;
 }): boolean {
-  return input.hasActiveProject && (input.isGitRepo || input.showEnvironmentIndicator);
+  return (
+    input.hasActiveProject &&
+    (input.isGitRepo || input.showEnvironmentIndicator || input.hostsRestingComposerControls)
+  );
 }
 
 export function resolveEnvModeLabel(mode: EnvMode): string {

@@ -32,7 +32,13 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
-import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from "./ComposerControl";
+import {
+  ComposerControl,
+  ComposerControlChevron,
+  ComposerControlIcon,
+  type ComposerControlSize,
+} from "./ComposerControl";
+import { composerFloatingLayerProps } from "./composerEventScope";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -40,7 +46,7 @@ const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   agent: "Agent",
   effort: "Effort",
   reasoningEffort: "Reasoning effort",
-  variant: "Variant",
+  variant: "Reasoning",
 };
 
 function savedOptionLabel(id: string): string {
@@ -301,6 +307,7 @@ export interface TraitsMenuContentProps {
   planModeEnabled: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  isComposerOwned?: boolean;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -569,8 +576,13 @@ export const TraitsPicker = memo(function TraitsPicker({
   planModeEnabled,
   triggerVariant,
   triggerClassName,
+  isComposerOwned,
+  size = "sm",
   ...persistence
-}: TraitsMenuContentProps & TraitsPersistence) {
+}: TraitsMenuContentProps &
+  TraitsPersistence & {
+    size?: ComposerControlSize;
+  }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
     getTraitsSectionVisibility({
@@ -606,6 +618,7 @@ export const TraitsPicker = memo(function TraitsPicker({
     <>
       <ComposerControlIcon
         icon={ZapIcon}
+        size={size}
         className={cn(
           "fill-current opacity-80",
           provider === "claudeAgent" ? "text-[#d97757]" : "text-foreground",
@@ -628,6 +641,7 @@ export const TraitsPicker = memo(function TraitsPicker({
         render={
           <ComposerControl
             variant={triggerVariant ?? "ghost"}
+            size={size}
             className={cn(
               isCodexStyle
                 ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap sm:max-w-48"
@@ -638,20 +652,25 @@ export const TraitsPicker = memo(function TraitsPicker({
         }
       >
         {isCodexStyle ? (
-          <span className="flex min-w-0 w-full items-center gap-1.5 overflow-hidden">
+          <span
+            className={cn(
+              "flex min-w-0 w-full items-center overflow-hidden",
+              size === "xs" ? "gap-1" : "gap-1.5",
+            )}
+          >
             {fastModeIcon}
             <span className="min-w-0 truncate">{triggerLabel}</span>
-            <ComposerControlChevron />
+            <ComposerControlChevron size={size} />
           </span>
         ) : (
           <>
             {fastModeIcon}
             <span>{triggerLabel}</span>
-            <ComposerControlChevron />
+            <ComposerControlChevron size={size} />
           </>
         )}
       </MenuTrigger>
-      <MenuPopup align="start">
+      <MenuPopup align="start" {...(isComposerOwned ? composerFloatingLayerProps : {})}>
         <TraitsMenuContent
           provider={provider}
           {...(instanceId ? { instanceId } : {})}

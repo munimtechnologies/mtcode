@@ -1,7 +1,12 @@
 import { SymbolView } from "../../components/AppSymbol";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
-import { AuthOrchestrationOperateScope, type EnvironmentId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  resolveEnvironmentMachineKind,
+} from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useState } from "react";
@@ -9,10 +14,12 @@ import { Alert, Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { getConnectName } from "../../lib/branding";
 import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
+import { serverEnvironment } from "../../state/server";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
 import { useEnvironmentSessionState } from "../../state/session";
 
@@ -36,7 +43,11 @@ export function ConnectionEnvironmentRow(props: {
     updates: { readonly label?: string; readonly displayUrl: string },
   ) => Promise<AtomCommandResult<unknown, unknown>>;
 }) {
+  const [label, setLabel] = useState(props.environment.environmentLabel);
   const [url, setUrl] = useState(props.environment.displayUrl);
+  const serverConfig = useAtomValue(
+    serverEnvironment.configValueAtom(props.environment.environmentId),
+  );
   const statusLabel = connectionStatusLabel(props.environment);
   const statusTraceId = props.environment.connectionErrorTraceId;
   const hasConnectionFailure = props.environment.connectionError !== null;
@@ -52,6 +63,7 @@ export function ConnectionEnvironmentRow(props: {
     );
   const handleSave = useCallback(async () => {
     const result = await props.onUpdate(props.environment.environmentId, {
+      label: label.trim(),
       displayUrl: url.trim(),
     });
     if (AsyncResult.isSuccess(result)) {
@@ -63,7 +75,7 @@ export function ConnectionEnvironmentRow(props: {
       "Could not update environment",
       error instanceof Error ? error.message : "The environment could not be updated.",
     );
-  }, [url, props]);
+  }, [label, url, props]);
 
   return (
     <Animated.View layout={LinearTransition.duration(250)} className="bg-card">
@@ -78,9 +90,19 @@ export function ConnectionEnvironmentRow(props: {
         />
 
         <View className="flex-1 gap-0.5">
-          <Text className="text-base font-t3-bold leading-snug text-foreground" numberOfLines={1}>
-            {props.environment.environmentLabel}
-          </Text>
+          <View className="flex-row items-center gap-1.5">
+            <EnvironmentMachineSymbol
+              kind={resolveEnvironmentMachineKind(serverConfig)}
+              size={14}
+              tintColorClassName="accent-foreground-muted"
+            />
+            <Text
+              className="min-w-0 flex-shrink text-base font-t3-bold leading-snug text-foreground"
+              numberOfLines={1}
+            >
+              {props.environment.environmentLabel}
+            </Text>
+          </View>
           <Text className="text-xs text-foreground-muted" numberOfLines={1}>
             {props.environment.displayUrl}
           </Text>
@@ -160,6 +182,20 @@ export function ConnectionEnvironmentRow(props: {
             </Text>
           ) : (
             <>
+              <View className="gap-1.5">
+                <Text className="text-2xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
+                  Label
+                </Text>
+                <TextInput
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  placeholder="My MacBook"
+                  value={label}
+                  onChangeText={setLabel}
+                  className="rounded-[14px] border border-input-border bg-input px-4 py-3 text-base text-foreground"
+                />
+              </View>
+
               <View className="gap-1.5">
                 <Text className="text-2xs font-t3-bold tracking-[0.8px] uppercase text-foreground-muted">
                   URL

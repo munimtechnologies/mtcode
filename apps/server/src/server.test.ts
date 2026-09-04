@@ -58,7 +58,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
@@ -128,6 +127,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
+import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -406,7 +406,9 @@ const makeBrowserOtlpPayload = (spanName: string) =>
       ({ close }) => Effect.promise(close),
     );
 
-    const runtime = ManagedRuntime.make(
+    // The exporter's batch fiber is forked while the layer builds and ticks on
+    // a wall-clock interval, so the whole tracer runs on the live clock.
+    yield* Layer.build(
       OtlpTracer.layer({
         url: collector.url,
         exportInterval: "10 millis",
@@ -419,13 +421,12 @@ const makeBrowserOtlpPayload = (spanName: string) =>
           },
         },
       }).pipe(Layer.provide(browserOtlpTracingLayer)),
+    ).pipe(
+      Effect.flatMap((tracing) =>
+        Effect.void.pipe(Effect.withSpan(spanName), Effect.provideContext(tracing)),
+      ),
+      TestClock.withLive,
     );
-
-    try {
-      yield* Effect.promise(() => runtime.runPromise(Effect.void.pipe(Effect.withSpan(spanName))));
-    } finally {
-      yield* Effect.promise(() => runtime.dispose());
-    }
 
     const request = yield* Effect.raceFirst(
       Effect.promise(() => collector.firstRequest).pipe(Effect.orDie),
@@ -636,6 +637,7 @@ const buildAppUnderTest = (options?: {
         Layer.provide(WorkspacePaths.layer),
         Layer.provide(T3ProjectFileLoader.layer),
       ),
+      NativeAppIconResolver.layer,
     );
     const gitWorkflowLayer = options?.layers?.gitWorkflow
       ? Layer.mock(GitWorkflowService.GitWorkflowService)({

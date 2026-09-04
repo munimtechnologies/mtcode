@@ -260,7 +260,7 @@ function ProviderEnvironmentSection(props: {
       {rows.map((variable, index) => (
         <div key={variable.id} className="flex min-w-0 items-center gap-1.5">
           <DraftInput
-            size="compact"
+            size="sm"
             className="w-44 shrink-0 font-mono"
             value={variable.name}
             onCommit={(name) => updateVariable(variable.id, { name: name.trim() })}
@@ -272,7 +272,7 @@ function ProviderEnvironmentSection(props: {
             =
           </span>
           <DraftInput
-            size="compact"
+            size="sm"
             className="min-w-0 flex-1 font-mono"
             value={variable.valueRedacted ? "" : variable.value}
             onCommit={(value) => updateVariable(variable.id, { value })}
@@ -689,10 +689,10 @@ export function ProviderInstanceCard({
                     render={
                       <Button
                         type="button"
-                        size="icon-xs"
+                        size="icon-micro"
                         variant="ghost"
                         className={cn(
-                          "size-5 rounded-sm p-0 [--control-icon-color:currentColor]",
+                          "[--control-icon-color:currentColor]",
                           versionAdvisory.emphasis === "strong"
                             ? "text-warning hover:text-warning"
                             : "text-muted-foreground hover:text-foreground",
@@ -758,7 +758,7 @@ export function ProviderInstanceCard({
                                   type="button"
                                   size="icon-xs"
                                   variant="ghost"
-                                  className="size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                                  className="shrink-0 text-muted-foreground hover:text-foreground"
                                   onClick={() =>
                                     copyToClipboard(updateCommand, {
                                       providerName: displayName,
@@ -884,6 +884,7 @@ export function ProviderInstanceCard({
               <div className="flex min-w-0 flex-wrap items-center gap-3">
                 <DraftInput
                   id={`provider-instance-${instanceId}-display-name`}
+                  size="sm"
                   className="w-44"
                   value={instance.displayName ?? ""}
                   onCommit={updateDisplayName}

@@ -24,7 +24,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { MessageId, PROVIDER_SEND_TURN_MAX_ATTACHMENTS, ThreadId } from "@t3tools/contracts";
+import {
+  MessageId,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  ThreadId,
+  resolveEnvironmentMachineKind,
+} from "@t3tools/contracts";
 
 import { ComposerEditor, type ComposerEditorHandle } from "../../components/ComposerEditor";
 import {
@@ -36,6 +41,7 @@ import {
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
+import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import {
   composerAttachmentUploadBlockReason,
   composerAttachmentUploadsAtom,
@@ -1097,7 +1103,7 @@ export function NewTaskDraftScreen(props: {
       multiline
       scrollEnabled
       value={flow.prompt}
-      skills={flow.selectedProviderStatus?.skills ?? []}
+      skills={composerMenu.skills}
       selection={composerMenu.selection}
       onChangeText={flow.setPrompt}
       onSelectionChange={composerMenu.onSelectionChange}
@@ -1173,7 +1179,13 @@ export function NewTaskDraftScreen(props: {
         accessibilityLabel={`Environment: ${selectedEnvironmentLabel}`}
         chevronDirection="right"
         disabled={isComposerInteractionLocked || voiceInput.isBusy}
-        icon="desktopcomputer"
+        iconNode={
+          <EnvironmentMachineSymbol
+            kind={resolveEnvironmentMachineKind(selectedEnvironmentServerConfig)}
+            size={16}
+            tintColorClassName="accent-icon-muted"
+          />
+        }
         label={`on ${selectedEnvironmentLabel}`}
         maxWidth={260}
         onPress={

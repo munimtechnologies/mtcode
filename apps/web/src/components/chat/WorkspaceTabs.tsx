@@ -154,6 +154,7 @@ function ServerThreadTabItem({
           <ProjectFavicon
             environmentId={tab.environmentId}
             cwd={tab.projectCwd ?? ""}
+            projectName={tab.projectName ?? title}
             faviconPath={tab.faviconPath}
             className="size-3.5 shrink-0"
           />

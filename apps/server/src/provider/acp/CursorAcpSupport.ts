@@ -20,6 +20,17 @@ import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 
 type CursorAcpRuntimeCursorSettings = Pick<CursorSettings, "apiEndpoint" | "binaryPath">;
 
+function cursorAcpPermissionArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string> {
+  switch (runtimeMode) {
+    case "auto":
+      return ["--auto-review"];
+    case "full-access":
+      return ["--force"];
+    default:
+      return [];
+  }
+}
+
 export interface CursorAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
   "authMethodId" | "clientCapabilities" | "spawn"
@@ -69,8 +80,8 @@ export function buildCursorAcpSpawnInput(
       // in `~/.cursor/cli-config.json` and emits `session/request_permission`
       // for anything missing from it, which surfaces as approval cards even
       // in full access. Like the endpoint flag, it is a root option and has
-      // to precede the `acp` subcommand.
-      ...(runtimeMode === "full-access" ? (["--force"] as const) : []),
+      // to precede the `acp` subcommand. `--auto-review` covers auto mode.
+      ...cursorAcpPermissionArgs(runtimeMode),
       "acp",
     ],
     cwd,

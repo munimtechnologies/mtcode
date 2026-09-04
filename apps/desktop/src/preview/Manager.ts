@@ -4709,6 +4709,7 @@ export class PreviewManager extends Context.Service<
     readonly getBrowserSession: (
       scope?: string,
       persistent?: boolean,
+      namespace?: BrowserSession.BrowserSessionPartitionNamespace,
     ) => Effect.Effect<Session, PreviewManagerError>;
     readonly isBrowserPartition: (partition: string) => boolean;
     readonly createTab: (
@@ -4757,6 +4758,7 @@ export class PreviewManager extends Context.Service<
     readonly getBrowserPartition: (
       scope?: string,
       persistent?: boolean,
+      namespace?: BrowserSession.BrowserSessionPartitionNamespace,
     ) => Effect.Effect<string, PreviewManagerError>;
     readonly setAnnotationTheme: (
       theme: DesktopPreviewAnnotationTheme,
@@ -4830,15 +4832,18 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   return PreviewManager.of({
     setMainWindow: operations.setMainWindow,
-    getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(function* (scope, persistent) {
-      return yield* browserSession
-        .getSession(scope, persistent)
-        .pipe(
-          Effect.mapError(
-            (cause) => new PreviewOperationError({ operation: "getBrowserSession", cause }),
-          ),
-        );
-    }),
+    getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(
+      function* (scope, persistent, namespace) {
+        return yield* browserSession
+          .getSession(scope, persistent, namespace)
+          .pipe(
+            Effect.mapError(
+              (cause) => new PreviewOperationError({ operation: "getBrowserSession", cause }),
+            ),
+          );
+      },
+    ),
+
     isBrowserPartition: browserSession.isPartition,
     createTab: operations.createTab,
     closeTab: operations.closeTab,
@@ -4874,9 +4879,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         );
     }),
     getBrowserPartition: Effect.fn("PreviewManager.getBrowserPartition")(
-      function* (scope, persistent) {
+      function* (scope, persistent, namespace) {
         return yield* browserSession
-          .getPartition(scope, persistent)
+          .getPartition(scope, persistent, namespace)
           .pipe(
             Effect.mapError(
               (cause) => new PreviewOperationError({ operation: "getBrowserPartition", cause }),

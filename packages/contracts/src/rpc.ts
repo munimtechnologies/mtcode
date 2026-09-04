@@ -116,6 +116,8 @@ import {
   PullRequestSummary,
   PullRequestReviewerCandidateList,
   PullRequestReviewerRequestInput,
+  PullRequestLabelCandidateList,
+  PullRequestLabelChangeInput,
   PullRequestSubmitReviewInput,
   PullRequestThreadCommentsInput,
   PullRequestThreadCommentsResult,
@@ -406,6 +408,8 @@ export const WS_METHODS = {
   pullRequestsInvalidate: "pullRequests.invalidate",
   pullRequestsReviewerCandidates: "pullRequests.reviewerCandidates",
   pullRequestsRequestReviewers: "pullRequests.requestReviewers",
+  pullRequestsLabelCandidates: "pullRequests.labelCandidates",
+  pullRequestsSetLabels: "pullRequests.setLabels",
 
   // Pull request stack methods
   pullRequestStacksList: "pullRequestStacks.list",
@@ -931,6 +935,19 @@ export const WsPullRequestStacksMergeRpc = Rpc.make(WS_METHODS.pullRequestStacks
   payload: PullRequestStackMergeInput,
   success: PullRequestStackMergeResult,
   error: PullRequestStackRpcError,
+});
+
+/** Read when the label menu opens, for the same reason the reviewer candidates are. */
+export const WsPullRequestsLabelCandidatesRpc = Rpc.make(WS_METHODS.pullRequestsLabelCandidates, {
+  payload: PullRequestRef,
+  success: PullRequestLabelCandidateList,
+  error: PullRequestRpcError,
+});
+
+export const WsPullRequestsSetLabelsRpc = Rpc.make(WS_METHODS.pullRequestsSetLabels, {
+  payload: PullRequestLabelChangeInput,
+  success: Schema.Void,
+  error: PullRequestRpcError,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -1489,6 +1506,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestStacksCurrentRpc,
   WsPullRequestStacksRunActionRpc,
   WsPullRequestStacksMergeRpc,
+  WsPullRequestsLabelCandidatesRpc,
+  WsPullRequestsSetLabelsRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlCloneRepositoryWithPromptsRpc,

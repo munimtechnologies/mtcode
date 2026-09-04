@@ -9,11 +9,14 @@
 import {
   BrowserImportFailureReason,
   BROWSER_PROFILE_MAX_COUNT,
+  type BrowserLinkTarget,
   type BrowserProfile,
+  type EnvironmentId,
   BROWSER_PROFILE_NAME_MAX_LENGTH,
   BROWSER_RECORDING_FRAME_RATES,
   DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
   DEFAULT_BROWSER_PROFILE_ID,
+  DEFAULT_BROWSER_LINK_TARGET,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
   DEFAULT_BROWSER_VIEWPORT,
   DEFAULT_PREVIEW_APPEARANCE,
@@ -32,13 +35,13 @@ import {
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
-import { InfoIcon, MoreVertical, Plus as PlusIcon } from "lucide-react";
+import { InfoIcon, MoreVertical, Plus as PlusIcon, Trash2 as Trash2Icon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { cn, randomUUID } from "~/lib/utils";
-import { usePrimaryEnvironment } from "~/state/environments";
+import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { isElectron } from "../../env";
 
 import { Badge } from "../ui/badge";
@@ -78,7 +81,9 @@ import {
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  getClientSettings,
   useClientSettings,
+  useClientSettingsHydrated,
   usePrimarySettings,
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
@@ -89,12 +94,42 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { searchableSetting } from "./settingsSearch";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
+
+type BrowserProfileDataBridge = Pick<
+  NonNullable<typeof previewBridge>,
+  "clearCookies" | "clearCache"
+>;
+
+export async function clearBrowserProfileData(
+  bridge: BrowserProfileDataBridge | null,
+  environmentIds: ReadonlyArray<EnvironmentId>,
+  profileId: string,
+): Promise<void> {
+  if (bridge === null || environmentIds.length === 0) {
+    throw new Error("Browser profile data is not available to clear.");
+  }
+  await Promise.all(
+    environmentIds.flatMap((environmentId) => [
+      bridge.clearCookies(environmentId, profileId),
+      bridge.clearCache(environmentId, profileId),
+    ]),
+  );
+}
+
+export function browserProfileRemovalAvailable(
+  bridgeAvailable: boolean,
+  environmentsReady: boolean,
+  environmentCount: number,
+): boolean {
+  return bridgeAvailable && environmentsReady && environmentCount > 0;
+}
 
 /**
  * The size a "Responsive" default falls back to when the user switches away
@@ -349,7 +384,7 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
             if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
           }}
         >
-          <SelectTrigger className="w-full sm:w-40" aria-label="Default browser zoom">
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Default browser zoom">
             <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -391,7 +426,11 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
             }
           }}
         >
-          <SelectTrigger className="w-full sm:w-40" aria-label="Default browser appearance">
+          <SelectTrigger
+            size="sm"
+            className="w-full sm:w-40"
+            aria-label="Default browser appearance"
+          >
             <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -436,13 +475,64 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
             }
           }}
         >
-          <SelectTrigger className="w-full sm:w-40" aria-label="Browser recording frame rate">
+          <SelectTrigger
+            size="sm"
+            className="w-full sm:w-40"
+            aria-label="Browser recording frame rate"
+          >
             <SelectValue>{frameRate} fps</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {BROWSER_RECORDING_FRAME_RATES.map((rate) => (
               <SelectItem hideIndicator key={rate} value={String(rate)}>
                 {rate} fps
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
+  system: "Your default browser",
+  app: "T3 Code",
+};
+
+function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {
+  const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsRow
+      {...searchableSetting("browser-link-target")}
+      description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a chat link to open it in your default browser either way."
+      resetAction={
+        !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
+          <SettingResetButton
+            label="link target"
+            onClick={() => updateSettings({ browserLinkTarget: DEFAULT_BROWSER_LINK_TARGET })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          disabled={disabled}
+          value={linkTarget}
+          onValueChange={(value) => {
+            if (value === "system" || value === "app") {
+              updateSettings({ browserLinkTarget: value });
+            }
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
+            <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {(Object.keys(LINK_TARGET_LABELS) as ReadonlyArray<BrowserLinkTarget>).map((target) => (
+              <SelectItem hideIndicator key={target} value={target}>
+                {LINK_TARGET_LABELS[target]}
               </SelectItem>
             ))}
           </SelectPopup>
@@ -912,16 +1002,87 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
+function BrowserDefaultProfileSetting({ disabled }: { readonly disabled: boolean }) {
+  const userProfiles = useClientSettings((settings) => settings.browserProfiles);
+  const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
+  const settingsHydrated = useClientSettingsHydrated();
+  const updateSettings = useUpdatePrimarySettings();
+  const profileWritesDisabled = disabled || !settingsHydrated;
+  // Incognito is deliberately absent: as a default it would open every tab
+  // into storage that is discarded on close.
+  const profiles = resolveBrowserProfiles(userProfiles).filter(
+    (profile) => profile.kind !== "incognito",
+  );
+  const selected = findBrowserProfile(profiles, defaultProfileId) ?? profiles[0];
+
+  return (
+    <SettingsRow
+      {...searchableSetting("browser-default-profile")}
+      description="Profile new browser tabs open under, including tabs an agent opens."
+      resetAction={
+        !profileWritesDisabled && defaultProfileId !== DEFAULT_BROWSER_PROFILE_ID ? (
+          <SettingResetButton
+            label="default browser profile"
+            onClick={() => {
+              if (settingsHydrated) {
+                updateSettings({ browserDefaultProfileId: DEFAULT_BROWSER_PROFILE_ID });
+              }
+            }}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          disabled={profileWritesDisabled}
+          value={selected?.id ?? DEFAULT_BROWSER_PROFILE_ID}
+          onValueChange={(value) => {
+            if (settingsHydrated && value !== null) {
+              updateSettings({ browserDefaultProfileId: value });
+            }
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Default browser profile">
+            <SelectValue>{selected?.name ?? "Default"}</SelectValue>
+          </SelectTrigger>
+          {/*
+            Capped and truncated like the tab menu's profile list: names are
+            user-supplied and run to 48 characters, which would otherwise
+            widen the popup to fit the longest one. The cap goes on the glass
+            shell (`popupClassName`), and the list fills that shell so it is
+            never narrower than the trigger it opens from — the same floor
+            every other settings select keeps. `ItemText` renders a block, so
+            the label must be a block too for `truncate` to apply.
+          */}
+          <SelectPopup
+            align="end"
+            alignItemWithTrigger={false}
+            popupClassName="max-w-64"
+            className="w-full"
+          >
+            {profiles.map((profile) => (
+              <SelectItem hideIndicator key={profile.id} value={profile.id}>
+                <span className="block min-w-0 truncate">{profile.name}</span>
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
 export function IntegrationsSettingsPanel() {
   // Client-local preview defaults are editable only where the preview exists.
   const previewDefaultsDisabled = !isElectron;
   const previewDefaults = (
     <>
       <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
+      <BrowserDefaultProfileSetting disabled={previewDefaultsDisabled} />
       <BrowserViewportSetting disabled={previewDefaultsDisabled} />
       <BrowserZoomSetting disabled={previewDefaultsDisabled} />
       <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
       <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
+      <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />
       <BrowserAutoShowFloatingPreviewSetting disabled={previewDefaultsDisabled} />
     </>
   );

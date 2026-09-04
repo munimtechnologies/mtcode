@@ -17,6 +17,9 @@ const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
  * `will-attach-webview` gate rejects anything it does not recognise.
  */
 const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "t3code-preview-ephemeral-";
+const PROFILE_PARTITION_MARKER = "profile-";
+
+export type BrowserSessionPartitionNamespace = "profile";
 
 // Permissions granted to preview web content. `clipboard-sanitized-write` is the
 // Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
@@ -107,11 +110,13 @@ export class BrowserSession extends Context.Service<
     readonly getPartition: (
       scope?: string,
       persistent?: boolean,
+      namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<string, BrowserSessionPartitionDerivationError>;
     readonly isPartition: (partition: string) => boolean;
     readonly getSession: (
       scope?: string,
       persistent?: boolean,
+      namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<Session, BrowserSessionGetSessionError>;
     /** Omit `partitions` to clear every known partition. */
     readonly clearCookies: (
@@ -136,6 +141,26 @@ const selectSessions = (
     ([partition]) => partitions === undefined || partitions.includes(partition),
   );
 
+/**
+ * Scope bytes for the partition digest.
+ *
+ * `TextEncoder` replaces a lone UTF-16 surrogate with U+FFFD, so `"p\ud800"`
+ * and `"p\ufffd"` would hash to the same partition and share cookies. Those
+ * are distinct, supported ids, so lone surrogates are escaped to `\uXXXX`
+ * first — and a literal backslash is doubled so the escape cannot be forged.
+ * Every well-formed scope passes through byte-for-byte unchanged, which keeps
+ * existing partitions (and the logins in them) where they are.
+ */
+const encodeScopeForDigest = (scope: string): Uint8Array =>
+  new TextEncoder().encode(
+    scope
+      .replace(/\\/g, "\\\\")
+      .replace(
+        /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+        (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`,
+      ),
+  );
+
 export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
@@ -143,8 +168,9 @@ export const make = Effect.gen(function* BrowserSessionMake() {
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (
     scope = "shared",
     persistent = true,
+    namespace?: BrowserSessionPartitionNamespace,
   ) {
-    const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(scope)).pipe(
+    const digest = yield* crypto.digest("SHA-256", encodeScopeForDigest(scope)).pipe(
       Effect.mapError(
         (cause) =>
           new BrowserSessionPartitionDerivationError({
@@ -154,14 +180,18 @@ export const make = Effect.gen(function* BrowserSessionMake() {
       ),
     );
     const prefix = persistent ? PREVIEW_PARTITION_PREFIX : PREVIEW_EPHEMERAL_PARTITION_PREFIX;
-    return `${prefix}${Encoding.encodeHex(digest).slice(0, 20)}`;
+    // Legacy/default partitions are prefix + hex digest. The non-hex profile
+    // marker creates a disjoint namespace while leaving every legacy default
+    // partition byte-for-byte unchanged.
+    return `${prefix}${namespace === "profile" ? PROFILE_PARTITION_MARKER : ""}${Encoding.encodeHex(digest).slice(0, 20)}`;
   });
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (
     scope = "shared",
     persistent = true,
+    namespace?: BrowserSessionPartitionNamespace,
   ) {
-    const partition = yield* getPartition(scope, persistent);
+    const partition = yield* getPartition(scope, persistent, namespace);
     return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
       const existing = sessions.get(partition);
       if (existing) return Effect.succeed([existing, sessions] as const);

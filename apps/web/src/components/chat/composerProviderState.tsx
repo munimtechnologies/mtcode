@@ -13,10 +13,13 @@ import {
   normalizeModelSlug,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
+import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
+import type { buttonVariants } from "../ui/button";
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
+import type { ComposerControlSize } from "./ComposerControl";
 import { shouldRenderTraitsControls, TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
@@ -50,6 +53,10 @@ type TraitsRenderInput = {
   prompt: string;
   onPromptChange: (prompt: string) => void;
   planModeEnabled: boolean;
+  size?: ComposerControlSize;
+  triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
+  triggerClassName?: string;
+  isComposerOwned?: boolean;
 };
 
 export function getComposerPromptInjectionState(prompt: string): ComposerPromptInjectionState {
@@ -127,6 +134,10 @@ function renderTraitsControl(
     prompt,
     onPromptChange,
     planModeEnabled,
+    size,
+    triggerVariant,
+    triggerClassName,
+    isComposerOwned,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
@@ -154,6 +165,10 @@ function renderTraitsControl(
       prompt={prompt}
       onPromptChange={onPromptChange}
       planModeEnabled={planModeEnabled}
+      {...(size !== undefined ? { size } : {})}
+      {...(triggerVariant !== undefined ? { triggerVariant } : {})}
+      {...(triggerClassName !== undefined ? { triggerClassName } : {})}
+      {...(isComposerOwned ? { isComposerOwned } : {})}
     />
   );
 }
