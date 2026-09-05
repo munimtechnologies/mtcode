@@ -35,7 +35,8 @@ python3 "$REPO/scripts/lib/computer-use-rebrand.py" "$WORK/mirror"
 cp "$REPO/native/computer-use/README.md" README.md
 cp "$REPO/native/computer-use/LICENSE" LICENSE
 cp "$REPO/native/computer-use/server.json" server.json
-mkdir -p .github/workflows npm/bin
+mkdir -p .github/workflows .github/resources npm/bin
+cp "$REPO/native/computer-use/.github/resources/banner.png" .github/resources/banner.png
 cp "$REPO/native/computer-use/.github/workflows/publish-mcp.yml" .github/workflows/publish-mcp.yml
 cp "$REPO/native/computer-use/npm/package.json" "$REPO/native/computer-use/npm/README.md" npm/
 cp "$REPO/native/computer-use/npm/bin/computer-use.js" npm/bin/computer-use.js

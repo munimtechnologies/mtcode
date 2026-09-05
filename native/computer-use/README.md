@@ -1,5 +1,8 @@
+<!-- Banner Image -->
+
 <p align="center">
   <a href="https://github.com/munimtechnologies/computer-use">
+    <img alt="Munim Technologies Computer Use" height="128" src="./.github/resources/banner.png?v=1">
     <h1 align="center">Computer Use</h1>
   </a>
 </p>
