@@ -18,7 +18,6 @@ import {
   buildCursorCapabilitiesFromConfigOptions,
   checkCursorProviderStatus,
   discoverCursorModelsViaAcp,
-  getCursorFallbackModels,
   getCursorParameterizedModelPickerUnsupportedMessage,
   applyCursorApiKeyAuth,
   isCursorDesktopAgentForwarderScript,
@@ -516,16 +515,6 @@ describe("Cursor skills", () => {
       expect(hasCursorSkillMention(text)).toBe(false);
       expect(rewriteCursorSkillMentions(text, names)).toBe(text);
     }
-  });
-});
-
-describe("getCursorFallbackModels", () => {
-  it("does not publish any built-in cursor models before ACP discovery", () => {
-    expect(
-      getCursorFallbackModels({
-        customModels: ["internal/cursor-model"],
-      }).map((model) => model.slug),
-    ).toEqual(["internal/cursor-model"]);
   });
 });
 

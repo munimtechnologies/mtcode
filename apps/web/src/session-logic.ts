@@ -37,7 +37,7 @@ import {
   type TurnDiffSummary,
 } from "./types";
 
-export { formatDuration, formatElapsed } from "@t3tools/shared/orchestrationTiming";
+export { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 export type WorkLogToolLifecycleStatus =
   | "inProgress"
