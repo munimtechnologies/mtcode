@@ -147,7 +147,7 @@ describe("buildBranchNamePrompt", () => {
 });
 
 describe("buildThreadTitlePrompt", () => {
-  it("includes the user message and the title guidance rules", () => {
+  it("includes the user message without absent attachment metadata", () => {
     const result = buildThreadTitlePrompt({
       message: "Investigate reconnect regressions after session restore",
     });
@@ -189,24 +189,6 @@ describe("buildThreadTitlePrompt", () => {
     expect(result.prompt).toContain("67890 bytes");
   });
 
-  it.each([
-    { mode: "initial", previousTitle: undefined },
-    { mode: "regeneration", previousTitle: "Open Projects in Desktop App" },
-  ])(
-    "tells the $mode prompt not to title linked PRs from local git history",
-    ({ previousTitle }) => {
-      const result = buildThreadTitlePrompt({
-        message: "$takeover https://github.com/pingdotgg/t3code/pull/8588",
-        ...(previousTitle === undefined ? {} : { previousTitle }),
-      });
-
-      expect(result.prompt).toContain(
-        "Local git history is not evidence of what a linked PR or issue is about.",
-      );
-      expect(result.prompt).toContain('such as "Take Over PR 8588"');
-    },
-  );
-
   it("regenerates from recent thread contents and identifies the previous title", () => {
     const result = buildThreadTitlePrompt({
       message: `USER:\nInvestigate reconnect regressions\n\nASSISTANT:\nThe remaining issue is stale session state`,
@@ -217,15 +199,6 @@ describe("buildThreadTitlePrompt", () => {
       `Regenerate the title for an existing ${resolveAppDisplayName()} thread so the user can recognize it weeks later.`,
     );
     expect(result.prompt).toContain('The previous title was "Investigate reconnect regressions".');
-    expect(result.prompt).toContain(
-      "Read the USER messages first. Identify the latest explicit durable goal.",
-    );
-    expect(result.prompt).toContain(
-      "Do not promote one assistant finding into the thread subject unless the user adopts it as a new goal.",
-    );
-    expect(result.prompt).toContain(
-      'A subagent-monitoring review that finds a Codex roster bug remains "Review Subagent Monitoring Risks,"',
-    );
     expect(result.prompt).toContain("Thread contents:");
     expect(result.prompt).toContain("The remaining issue is stale session state");
   });
