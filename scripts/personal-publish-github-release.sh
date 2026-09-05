@@ -56,6 +56,31 @@ echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
 echo "UPDATE_REPO=$T3CODE_DESKTOP_UPDATE_REPOSITORY"
 
+# --- Windows x64 via the Windows build host, started first so it overlaps the Mac build ---
+# Host/user are overridable so a second Windows box can cover for Blade when it
+# is offline; the remote paths are derived from the user, not hardcoded.
+WIN_HOST="${T3_MUNIM_WIN_HOST:-blade}"
+WIN_USER="${T3_MUNIM_WIN_USER:-muhha}"
+WIN_HOME="C:/Users/$WIN_USER"
+WIN_RELEASE_DIR="$WIN_HOME/dev/t3code-personal/release"
+WIN_JOB_LOG="$LOG_DIR/publish-munim-win-$$.log"
+WIN_PID=""
+build_windows() {
+  munim_connect_sync_to_windows_host "$WIN_HOST"
+  scp -o BatchMode=yes "$REPO/scripts/personal-publish-munim-win.ps1" "$WIN_HOST:dev/personal-publish-munim-win.ps1"
+  ssh -o BatchMode=yes "$WIN_HOST" powershell.exe -NoProfile -ExecutionPolicy Bypass \
+    -File "$WIN_HOME/dev/personal-publish-munim-win.ps1" \
+    -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
+    -UpdateRepository "$RELEASE_REPO"
+}
+if [[ "${T3_MUNIM_SKIP_WIN:-}" == "1" ]]; then
+  echo "-- skipping Windows build (T3_MUNIM_SKIP_WIN=1) --"
+else
+  echo "-- building Munim Windows x64 on $WIN_HOST (in parallel with the Mac build; log $WIN_JOB_LOG) --"
+  build_windows >"$WIN_JOB_LOG" 2>&1 &
+  WIN_PID=$!
+fi
+
 # --- Mac arm64 ---
 EXPECTED_MAC="$REPO/release/MT-Code-${T3CODE_DESKTOP_VERSION}-arm64.dmg"
 if [[ "${T3_MUNIM_SKIP_MAC:-}" == "1" && -f "$EXPECTED_MAC" ]]; then
@@ -102,27 +127,20 @@ fi
 # Clear quarantine on the DMG we ship.
 xattr -cr "$MAC_DMG" 2>/dev/null || true
 
-# --- Windows x64 via the Windows build host (PS1 file avoids nested $env escaping bugs) ---
-# Host/user are overridable so a second Windows box can cover for Blade when it
-# is offline; the remote paths are derived from the user, not hardcoded.
-WIN_HOST="${T3_MUNIM_WIN_HOST:-blade}"
-WIN_USER="${T3_MUNIM_WIN_USER:-muhha}"
-WIN_HOME="C:/Users/$WIN_USER"
-WIN_RELEASE_DIR="$WIN_HOME/dev/t3code-personal/release"
-
+# --- Collect the Windows build ---
 # Skipping Windows publishes a Mac-only release; re-running later with
 # T3_MUNIM_SKIP_MAC=1 uploads the exe onto the same tag (upload --clobber).
 WIN_LOCAL=""
-if [[ "${T3_MUNIM_SKIP_WIN:-}" == "1" ]]; then
-  echo "-- skipping Windows build (T3_MUNIM_SKIP_WIN=1) --"
-else
-echo "-- building Munim Windows x64 on $WIN_HOST --"
-munim_connect_sync_to_windows_host "$WIN_HOST"
-scp -o BatchMode=yes "$REPO/scripts/personal-publish-munim-win.ps1" "$WIN_HOST:dev/personal-publish-munim-win.ps1"
-ssh -o BatchMode=yes "$WIN_HOST" powershell.exe -NoProfile -ExecutionPolicy Bypass \
-  -File "$WIN_HOME/dev/personal-publish-munim-win.ps1" \
-  -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
-  -UpdateRepository "$RELEASE_REPO"
+if [[ -n "$WIN_PID" ]]; then
+WIN_STATUS=0
+wait "$WIN_PID" || WIN_STATUS=$?
+echo "-- Windows build output ($WIN_HOST) --"
+cat "$WIN_JOB_LOG"
+rm -f "$WIN_JOB_LOG"
+if [[ "$WIN_STATUS" -ne 0 ]]; then
+  echo "Windows build on $WIN_HOST failed (exit $WIN_STATUS)" >&2
+  exit "$WIN_STATUS"
+fi
 
 WIN_REMOTE=$(ssh -o BatchMode=yes "$WIN_HOST" "powershell.exe -NoProfile -Command \"Get-ChildItem $WIN_RELEASE_DIR/MT-Code-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName\"")
 WIN_REMOTE=$(echo "$WIN_REMOTE" | tr -d '\r' | tail -1 | tr '\\' '/')

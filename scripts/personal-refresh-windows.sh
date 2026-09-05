@@ -7,6 +7,10 @@
 #   T3CODE_DESKTOP_VERSION  single MT Code version (resolved from upstream base if unset)
 #   T3_PERSONAL_REPO       default $HOME/dev/t3code
 #   T3_FORCE_REBUILD=1     force Blade rebuild even when SHA unchanged (default 1 here)
+#   T3_WIN_INSTALLER       path ON BLADE of an installer the publish already built
+#                          (e.g. C:/Users/muhha/dev/t3code-personal/release/MT-Code-0.0.53-x64.exe);
+#                          installs it and skips the rebuild
+#   T3_BUILT_SHA           commit recorded on Blade with T3_WIN_INSTALLER
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -37,11 +41,19 @@ ps_encoded_command() {
   printf '%s' "$1" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n'
 }
 
-blade_refresh_cmd="\$env:T3CODE_DESKTOP_VERSION='$T3CODE_DESKTOP_VERSION'; \
+if [[ -n "${T3_WIN_INSTALLER:-}" ]]; then
+  echo "-- installing prebuilt $T3_WIN_INSTALLER on Blade (no rebuild) --"
+  blade_refresh_cmd="& 'C:/Users/muhha/dev/personal-refresh-win.ps1' \
+-DesktopVersion '$T3CODE_DESKTOP_VERSION' \
+-InstallerPath '$T3_WIN_INSTALLER' \
+-BuiltSha '${T3_BUILT_SHA:-}'"
+else
+  blade_refresh_cmd="\$env:T3CODE_DESKTOP_VERSION='$T3CODE_DESKTOP_VERSION'; \
 \$env:T3_FORCE_REBUILD='${T3_FORCE_REBUILD:-1}'; \
 & 'C:/Users/muhha/dev/personal-refresh-win.ps1' \
 -DesktopVersion '$T3CODE_DESKTOP_VERSION' \
 -ForceRebuild '${T3_FORCE_REBUILD:-1}'"
+fi
 ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -EncodedCommand "$(ps_encoded_command "$blade_refresh_cmd")"
 
