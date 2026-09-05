@@ -10,7 +10,7 @@ set -euo pipefail
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
 MIRROR="${COMPUTER_USE_REPO:-munimtechnologies/computer-use}"
 WORK=$(mktemp -d /tmp/computer-use.XXXXXX)
-trap 'rm -rf "$WORK"' EXIT
+if [[ -z "${COMPUTER_USE_KEEP_WORK:-}" ]]; then trap 'rm -rf "$WORK"' EXIT; else echo "export kept at $WORK"; fi
 
 cd "$REPO"
 SHA=$(git rev-parse --short HEAD)
@@ -29,11 +29,14 @@ for dir in t3-desktop-mcp t3-desktop-mcp-rs t3-chrome-extension; do
   rsync -a --exclude '.build' --exclude 'target' --exclude 'node_modules' \
     "$REPO/native/$dir/" "$WORK/mirror/$dir/"
 done
+# The public tree carries no T3 names: directories, binary, env vars and bundle
+# ids are rebranded on the copy (see scripts/lib/computer-use-rebrand.py).
+python3 "$REPO/scripts/lib/computer-use-rebrand.py" "$WORK/mirror"
 cp "$REPO/native/computer-use/README.md" README.md
 cp "$REPO/native/computer-use/LICENSE" LICENSE
 cat > .gitignore <<'GI'
-t3-desktop-mcp/.build/
-t3-desktop-mcp-rs/target/
+macos/.build/
+windows-linux/target/
 GI
 
 git add -A
