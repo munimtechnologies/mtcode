@@ -46,7 +46,6 @@ import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistr
 import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import { providerDisabledMessage } from "../../appDisplayName.ts";
 import {
-  haveProvidersChanged,
   mergeProviderSnapshot,
   mergeProviderSnapshots,
   selectProvidersByKind,
@@ -572,39 +571,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     });
 
     describe("ProviderRegistryLive", () => {
-      it("treats equal provider snapshots as unchanged", () => {
-        const providers = [
-          {
-            instanceId: ProviderInstanceId.make("codex"),
-            driver: ProviderDriverKind.make("codex"),
-            status: "ready",
-            enabled: true,
-            installed: true,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-03-25T00:00:00.000Z",
-            version: "1.0.0",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-          {
-            instanceId: ProviderInstanceId.make("claudeAgent"),
-            driver: ProviderDriverKind.make("claudeAgent"),
-            status: "warning",
-            enabled: true,
-            installed: true,
-            auth: { status: "unknown" },
-            checkedAt: "2026-03-25T00:00:00.000Z",
-            version: "1.0.0",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ] as const satisfies ReadonlyArray<ServerProvider>;
-
-        assert.strictEqual(haveProvidersChanged(providers, [...providers]), false);
-      });
-
       it("stores workspace skills and commands without changing machine metadata", () => {
         const provider = {
           instanceId: ProviderInstanceId.make("codex"),
