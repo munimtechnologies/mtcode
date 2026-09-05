@@ -930,6 +930,17 @@ function toRequestTypeFromMethod(method: string): CanonicalRequestType {
   }
 }
 
+function resolveOpenedRequestType(
+  method: string,
+  kind: ProviderRequestKind | undefined,
+): CanonicalRequestType {
+  // MT desktop permissions / generic tool approvals ride MCP elicitations; their kind is
+  // the only thing that tells them apart from a plain elicitation.
+  if (kind === "permissions" || kind === "tool") return toRequestTypeFromKind(kind);
+  const byMethod = toRequestTypeFromMethod(method);
+  return byMethod === "unknown" && kind ? toRequestTypeFromKind(kind) : byMethod;
+}
+
 function toRequestTypeFromKind(kind: ProviderRequestKind | undefined): CanonicalRequestType {
   switch (kind) {
     case "command":
@@ -1586,9 +1597,10 @@ function mapToRuntimeEvents(
         ...runtimeEventBase(event, canonicalThreadId),
         type: "request.opened",
         payload: {
-          requestType: event.requestKind
-            ? toRequestTypeFromKind(event.requestKind)
-            : toRequestTypeFromMethod(event.method),
+          // Method first, as upstream does (legacy `applyPatchApproval` stays distinct);
+          // the request kind only names methods the table does not know (MT desktop
+          // permissions / tool approvals).
+          requestType: resolveOpenedRequestType(event.method, event.requestKind),
           ...(detail ? { detail } : {}),
           ...(elicitationApproval
             ? {

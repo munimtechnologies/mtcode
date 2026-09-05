@@ -8,7 +8,16 @@ import { useUsage, type EnvironmentUsageStatus, type UsageView } from "./usage";
 const testState = vi.hoisted(() => ({ environments: [] as EnvironmentUsageStatus[] }));
 vi.mock("@effect/atom-react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@effect/atom-react")>()),
-  useAtomValue: () => testState.environments,
+  // The fork's window atom carries the catalog alongside the coverage rows.
+  useAtomValue: () => ({
+    isCatalogReady: true,
+    options: testState.environments.map(({ environmentId, label, phase }) => ({
+      environmentId,
+      label,
+      phase,
+    })),
+    environments: testState.environments,
+  }),
 }));
 
 const input = {
@@ -21,6 +30,7 @@ function environment(id: string, cost: number | null, hostId = id): EnvironmentU
   return {
     environmentId: EnvironmentId.make(id),
     label: id,
+    phase: "connected",
     isPending: cost === null,
     error: null,
     summary:
@@ -160,7 +170,9 @@ describe("usage environment selection", () => {
     ];
     await select("a");
     expect(latest.merged.costUsd).toBe(10);
-    expect(latest.isPending).toBe(false);
+    // MT Code: a retained SWR summary is not an answer for the current request, so the
+    // selection reads as pending until the refresh reports (usageEnvironmentScope rule).
+    expect(latest.isPending).toBe(true);
     expect(latest.isPartial).toBe(false);
   });
 });

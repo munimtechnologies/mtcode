@@ -2553,7 +2553,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             Layer.updateService(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
               ChildProcessSpawner.make((command) => {
                 if (command._tag !== "StandardCommand") return spawner.spawn(command);
-                spawnedCommands.push(command.command);
+                // A Homebrew-installed codex on the host makes the maintenance probe run
+                // `brew --prefix`; that is host state, not what this test measures.
+                if (command.command !== "brew" && !command.command.endsWith("/brew")) {
+                  spawnedCommands.push(command.command);
+                }
                 const beforeSpawn =
                   command.command === secondMissing
                     ? Deferred.succeed(secondProbeStarted, undefined).pipe(

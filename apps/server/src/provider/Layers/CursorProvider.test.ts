@@ -361,10 +361,13 @@ describe("Cursor skills", () => {
           directory: NodeOS.tmpdir(),
           prefix: "cursor-skills-home-",
         });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        // Skills are reported by real path; macOS keeps its temp dir behind /private.
+        const workspace = yield* fileSystem.realPath(
+          yield* fileSystem.makeTempDirectory({
+            directory: NodeOS.tmpdir(),
+            prefix: "cursor-skills-workspace-",
+          }),
+        );
         const writeSkill = Effect.fn("writeCursorSkill")(function* (
           root: string,
           name: string,
@@ -440,14 +443,19 @@ describe("Cursor skills", () => {
           directory: NodeOS.tmpdir(),
           prefix: "cursor-skills-home-",
         });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
-        const library = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-library-",
-        });
+        // Skills are reported by real path; macOS keeps its temp dir behind /private.
+        const workspace = yield* fileSystem.realPath(
+          yield* fileSystem.makeTempDirectory({
+            directory: NodeOS.tmpdir(),
+            prefix: "cursor-skills-workspace-",
+          }),
+        );
+        const library = yield* fileSystem.realPath(
+          yield* fileSystem.makeTempDirectory({
+            directory: NodeOS.tmpdir(),
+            prefix: "cursor-skills-library-",
+          }),
+        );
         const writeSkill = Effect.fn("writeCursorSkill")(function* (
           directory: string,
           contents: string,

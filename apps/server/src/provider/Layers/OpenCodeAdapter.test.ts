@@ -1406,7 +1406,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
         threadId,
-        runtimeMode: "full-access",
+        runtimeMode: "approval-required",
       });
       const openedEvent = yield* Deferred.await(opened).pipe(Effect.timeout("1 second"));
       yield* adapter.stopSession(threadId);
@@ -1463,7 +1463,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
         threadId,
-        runtimeMode: "full-access",
+        runtimeMode: "approval-required",
       });
       yield* Deferred.await(opened).pipe(Effect.timeout("1 second"));
       yield* adapter.stopAll();
@@ -1530,7 +1530,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         yield* adapter.startSession({
           provider: ProviderDriverKind.make("opencode"),
           threadId,
-          runtimeMode: "full-access",
+          runtimeMode: "approval-required",
         });
         yield* Deferred.await(opened).pipe(Effect.timeout("1 second"));
         yield* Scope.close(scope, Exit.void);

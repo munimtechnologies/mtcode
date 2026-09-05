@@ -1834,7 +1834,9 @@ export function makeOpenCodeAdapter(
       context.promptAdmission = undefined;
       const turnId = context.activeTurnId;
       deleteContextIfCurrent(context);
-      yield* settleOpenCodePendingAsCancelled(context).pipe(Effect.ignore);
+      // Unresolved permissions are deliberately left alone here: upstream keeps them
+      // so a reconnect can still answer them (they are only cancelled on an explicit
+      // stop, see stopSession / stopAll / the layer finalizer).
       // Emit lifecycle events BEFORE tearing down the scope. Both call sites
       // run this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
       // closing that scope triggers the fiber-interrupt finalizer, so any

@@ -71,6 +71,9 @@ export function collectComposerThreadReferences(
   text: string,
 ): ReadonlyArray<ComposerThreadInlineToken> {
   const matches: ComposerThreadInlineToken[] = [];
+  // The bounded label scan still costs a rescan per whitespace; skip it entirely for the
+  // common prompt that carries no thread link at all.
+  if (!text.includes("t3-thread:///")) return matches;
 
   for (const match of text.matchAll(THREAD_LINK_TOKEN_REGEX)) {
     const fullMatch = match[0];
