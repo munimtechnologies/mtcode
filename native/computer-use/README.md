@@ -45,7 +45,7 @@
 
 ## Introduction
 
-**Computer Use** is an open-source [MCP](https://modelcontextprotocol.io) server that lets any coding agent use your computer the way a person does. It reads the screen through accessibility trees, clicks and types **in the background** so your mouse stays yours, shows an agent pointer where it is working, zooms in on small text, and drives tabs in your signed-in Chrome — on **macOS, Windows and Linux**.
+**Computer Use** is an open-source [MCP](https://modelcontextprotocol.io) server — a computer-use agent (CUA) backend — that lets any coding agent use your computer the way a person does. It reads the screen through accessibility trees, clicks and types **in the background** so your mouse stays yours, shows an agent pointer where it is working, zooms in on small text, and drives tabs in your signed-in Chrome — on **macOS, Windows and Linux**.
 
 **Works with Claude Code, Codex, Cursor and [MT Code](https://munimtech.com/mt-code)**, or any other MCP client, with any model — no vision model is required for interaction.
 

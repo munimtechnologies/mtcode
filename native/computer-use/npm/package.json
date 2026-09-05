@@ -8,8 +8,11 @@
     "claude-code",
     "codex",
     "computer-use",
+    "computer-use-agent",
+    "cua",
     "cursor",
     "desktop-automation",
+    "gui-agent",
     "mcp",
     "mcp-server",
     "model-context-protocol"
