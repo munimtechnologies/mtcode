@@ -175,6 +175,6 @@ This repository mirrors the `native/` tree of [munimtechnologies/mtcode](https:/
 
 ## Credits and license
 
-Designed and built by [Munim Technologies, Inc.](https://munimtech.com) for MT Code. Licensed under the Apache License 2.0; see `LICENSE`.
+Designed and built by [Munim Technologies](https://munimtech.com) (Munim, Inc.) for MT Code. Copyright 2026 Munim, Inc. Licensed under the Apache License 2.0; see `LICENSE`.
 
 Comparison sources: [Codex Computer Use](https://openai.com/index/codex-for-almost-everything/) · [Anthropic computer-use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) · [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) · [CursorTouch/MacOS-MCP](https://github.com/CursorTouch/MacOS-MCP) · [QwenLM/open-computer-use](https://github.com/QwenLM/open-computer-use) · [zavora-ai/computer-use-mcp](https://github.com/zavora-ai/computer-use-mcp) · [mediar-ai/mcp-server-macos-use](https://github.com/mediar-ai/mcp-server-macos-use) · [deploymenttheory/windows-mcp-server](https://github.com/deploymenttheory/windows-mcp-server) · [nuphus-mcp](https://github.com/mrpulor-gh/nuphus-mcp) · [computer-control-mcp](https://github.com/AB498/computer-control-mcp) · [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp)
