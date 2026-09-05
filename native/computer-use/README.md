@@ -1,4 +1,4 @@
-# MT Computer Use
+# Computer Use
 
 An open-source [MCP](https://modelcontextprotocol.io) server that lets any coding agent use your computer the way a person does — read what is on screen, click, type, scroll, hover, drag, zoom in on small text, and drive Chrome tabs in your signed-in browser — on **macOS, Windows and Linux**.
 
@@ -53,23 +53,23 @@ The server speaks MCP over stdio. Point your client at the binary:
 **Claude Code**
 
 ```sh
-claude mcp add mt-desktop -- /absolute/path/to/t3-desktop-mcp
+claude mcp add computer-use -- /absolute/path/to/t3-desktop-mcp
 ```
 
 **Codex** (`~/.codex/config.toml`)
 
 ```toml
-[mcp_servers.mt-desktop]
+[mcp_servers.computer-use]
 command = "/absolute/path/to/t3-desktop-mcp"
 ```
 
 **Cursor** (`.cursor/mcp.json`)
 
 ```json
-{ "mcpServers": { "mt-desktop": { "command": "/absolute/path/to/t3-desktop-mcp" } } }
+{ "mcpServers": { "computer-use": { "command": "/absolute/path/to/t3-desktop-mcp" } } }
 ```
 
-MT Code ships this server and attaches it to every thread automatically.
+MT Code ships this server built in (as `mt-desktop`) and attaches it to every thread automatically.
 
 ### Chrome extension (optional)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mirror the Computer Use MCP server to the public munimtechnologies/mt-computer-use repo.
+# Mirror the Computer Use MCP server to the public munimtechnologies/computer-use repo.
 #
 # A snapshot mirror, not a subtree split: `native/` also holds unrelated
 # packages, and a fresh copy per sync keeps the public tree exactly the three
@@ -8,8 +8,8 @@
 set -euo pipefail
 
 REPO="${T3_PERSONAL_REPO:-$HOME/dev/t3code}"
-MIRROR="${MT_COMPUTER_USE_REPO:-munimtechnologies/mt-computer-use}"
-WORK=$(mktemp -d /tmp/mt-computer-use.XXXXXX)
+MIRROR="${COMPUTER_USE_REPO:-munimtechnologies/computer-use}"
+WORK=$(mktemp -d /tmp/computer-use.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 
 cd "$REPO"
@@ -18,7 +18,7 @@ SHA=$(git rev-parse --short HEAD)
 if ! gh repo view "$MIRROR" >/dev/null 2>&1; then
   gh repo create "$MIRROR" --public \
     --description "Open-source Computer Use MCP server for any coding agent — macOS, Windows, Linux. From MT Code." \
-    --homepage "https://munimtech.com/mt-computer-use"
+    --homepage "https://munimtech.com/computer-use"
 fi
 git clone -q "https://github.com/$MIRROR.git" "$WORK/mirror"
 cd "$WORK/mirror"
@@ -29,8 +29,8 @@ for dir in t3-desktop-mcp t3-desktop-mcp-rs t3-chrome-extension; do
   rsync -a --exclude '.build' --exclude 'target' --exclude 'node_modules' \
     "$REPO/native/$dir/" "$WORK/mirror/$dir/"
 done
-cp "$REPO/native/mt-computer-use/README.md" README.md
-cp "$REPO/native/mt-computer-use/LICENSE" LICENSE
+cp "$REPO/native/computer-use/README.md" README.md
+cp "$REPO/native/computer-use/LICENSE" LICENSE
 cat > .gitignore <<'GI'
 t3-desktop-mcp/.build/
 t3-desktop-mcp-rs/target/
