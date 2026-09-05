@@ -1168,6 +1168,16 @@ impl Desktop for LinuxDesktop {
         Ok(format!("right-clicked at ({x:.0}, {y:.0})"))
     }
 
+    fn hover(&mut self, target: Point) -> Result<String> {
+        self.ensure_accessibility();
+        let (x, y) = self.point_coordinates(target)?;
+        AgentCursor::shared().show(x, y);
+        self.move_pointer(x, y)?;
+        Ok(format!(
+            "hovering at ({x:.0}, {y:.0}) — call get_app_state or screenshot to see what appeared"
+        ))
+    }
+
     fn drag(&mut self, from: Point, to: Point) -> Result<String> {
         self.ensure_accessibility();
         let (from_x, from_y) = self.point_coordinates(from)?;

@@ -166,6 +166,8 @@ pub trait Desktop {
     fn activate_app(&mut self, app: &str) -> Result<String>;
     fn click(&mut self, target: Point, click_count: u32) -> Result<String>;
     fn right_click(&mut self, target: Point) -> Result<String>;
+    /// Park the pointer on a target without pressing, for hover-revealed UI.
+    fn hover(&mut self, target: Point) -> Result<String>;
     fn drag(&mut self, from: Point, to: Point) -> Result<String>;
     fn type_text(&mut self, text: &str, element: Option<u32>) -> Result<String>;
     fn press_key(&mut self, key: &str, modifiers: &[String]) -> Result<String>;

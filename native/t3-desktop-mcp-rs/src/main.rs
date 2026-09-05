@@ -312,10 +312,27 @@ fn call_tool(
         };
         return match usize::try_from(display) {
             Ok(index) => match capture::capture_display(index, max_width, format) {
-                Ok(bytes) => image_result(bytes, format.mime_type(), format!("display {index}")),
+                Ok(capture) => {
+                    let text = capture::mapping_text(&capture, &format!("display {index}"));
+                    image_result(capture.bytes, format.mime_type(), text)
+                }
                 Err(error) => text_result(format!("error: {error}"), true),
             },
             Err(_) => text_result("error: display index must be zero or greater", true),
+        };
+    }
+    // Zoom and wait need neither accessibility nor a window: keep them usable
+    // when the backend failed to start, like display screenshots.
+    if name == "zoom" {
+        return match zoom_region(&args) {
+            Ok(value) => value,
+            Err(error) => text_result(format!("error: {error}"), true),
+        };
+    }
+    if name == "wait" {
+        return match wait_seconds(&args) {
+            Ok(text) => text_result(text, false),
+            Err(error) => text_result(format!("error: {error}"), true),
         };
     }
 
@@ -332,6 +349,81 @@ fn call_tool(
     }
 }
 
+fn zoom_region(args: &Value) -> Result<Value, DesktopError> {
+    let coordinate = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite())
+            .ok_or_else(|| {
+                DesktopError::new(
+                    "zoom needs x0, y0, x1, y1 in screen coordinates (the space click uses)",
+                )
+            })
+    };
+    let (x0, y0, x1, y1) = (coordinate("x0")?, coordinate("y0")?, coordinate("x1")?, coordinate("y1")?);
+    let max_width = arg_i64(args, "max_width")
+        .unwrap_or(capture::DEFAULT_MAX_WIDTH as i64)
+        .clamp(0, 8000) as u32;
+    let format = capture::CaptureFormat::parse(arg_str(args, "format"))?;
+    let capture = capture::capture_region(x0, y0, x1, y1, max_width, format)?;
+    let text = capture::mapping_text(&capture, "zoomed region");
+    Ok(image_result(capture.bytes, format.mime_type(), text))
+}
+
+/// Blocks the request loop on purpose: the client is waiting on this call, and
+/// a pause the model asked for is exactly the time nothing else should happen.
+fn wait_seconds(args: &Value) -> Result<String, DesktopError> {
+    let requested = args.get("seconds").and_then(Value::as_f64).unwrap_or(1.0);
+    if !requested.is_finite() || requested <= 0.0 {
+        return Err(DesktopError::new("seconds must be a positive number"));
+    }
+    let seconds = requested.min(30.0);
+    std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
+    Ok(format!(
+        "waited {seconds:.1}s{}",
+        if seconds < requested { " (capped at 30s)" } else { "" }
+    ))
+}
+
+/// Narrow an accessibility outline to the lines that mention `query`. Element ids
+/// stay valid — the backend registered every element while walking; only the
+/// printout is filtered. Window headers (`── window`) are kept for context.
+fn filter_app_state(outline: &str, query: &str) -> String {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return outline.to_string();
+    }
+    let mut lines = outline.lines();
+    let mut header: Vec<&str> = Vec::new();
+    // The header runs until the first blank line; keep it whole.
+    for line in lines.by_ref() {
+        if line.is_empty() {
+            break;
+        }
+        header.push(line);
+    }
+    let body: Vec<&str> = lines.collect();
+    let matching: Vec<&str> = body
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("── window") || line.to_lowercase().contains(&needle))
+        .collect();
+    let count = matching.iter().filter(|line| !line.starts_with("── window")).count();
+    let mut out = header.join("\n");
+    out.push_str(&format!(
+        "\nfilter: \"{}\" — {count} matching element{}",
+        query.trim(),
+        if count == 1 { "" } else { "s" }
+    ));
+    if count == 0 {
+        out.push_str("\n\n(no elements match; drop the query or scroll the content into view)");
+    } else {
+        out.push_str("\n\n");
+        out.push_str(&matching.join("\n"));
+    }
+    out
+}
+
 fn run_desktop_tool(
     name: &str,
     args: &Value,
@@ -344,8 +436,13 @@ fn run_desktop_tool(
                 .ok_or_else(|| DesktopError::new("missing required argument 'app'"))?;
             let max_depth = arg_i64(args, "max_depth").unwrap_or(18).clamp(1, 60) as usize;
             let max_elements = arg_i64(args, "max_elements").unwrap_or(800).clamp(1, 5000) as usize;
-            desktop.get_app_state(app, max_depth, max_elements)?
+            let outline = desktop.get_app_state(app, max_depth, max_elements)?;
+            match arg_str(args, "query") {
+                Some(query) if !query.trim().is_empty() => filter_app_state(&outline, query),
+                _ => outline,
+            }
         }
+        "hover" => desktop.hover(point_from(args, "element_id", "x", "y")?)?,
         "activate_app" => {
             let app = arg_str(args, "app")
                 .ok_or_else(|| DesktopError::new("missing required argument 'app'"))?;
@@ -421,15 +518,17 @@ fn run_desktop_tool(
                 let index = usize::try_from(display).map_err(|_| {
                     DesktopError::new("display index must be zero or greater")
                 })?;
-                let bytes = capture::capture_display(index, max_width, format)?;
-                return Ok(image_result(bytes, format.mime_type(), format!("display {index}")));
+                let capture = capture::capture_display(index, max_width, format)?;
+                let text = capture::mapping_text(&capture, &format!("display {index}"));
+                return Ok(image_result(capture.bytes, format.mime_type(), text));
             }
             let app = arg_str(args, "app").ok_or_else(|| {
                 DesktopError::new("provide 'app' to capture a window, or 'display' for a whole screen")
             })?;
             let pid = desktop.resolve_pid(app)?;
-            let (bytes, title) = capture::capture_app_window(pid, max_width, format)?;
-            return Ok(image_result(bytes, format.mime_type(), format!("{app} — \"{title}\"")));
+            let (capture, title) = capture::capture_app_window(pid, max_width, format)?;
+            let text = capture::mapping_text(&capture, &format!("window of {app} \"{title}\""));
+            return Ok(image_result(capture.bytes, format.mime_type(), text));
         }
         other => {
             return Err(DesktopError::new(format!("unknown tool '{other}'")));
@@ -482,6 +581,24 @@ mod tests {
         // Clicking at (x, 0) because y was forgotten would be worse than an error.
         let args = json!({ "x": 10.0 });
         assert!(point_from(&args, "element_id", "x", "y").is_err());
+    }
+
+    #[test]
+    fn app_state_filter_keeps_header_and_matching_rows() {
+        let outline = "Finder [com.apple.finder] pid=1 frontmost=true windows=1\n\n── window 0: \"Docs\"\n  [e1] Button \"Save\"\n  [e2] Button \"Cancel\"\n       StaticText \"hello\"";
+        let filtered = super::filter_app_state(outline, "save");
+        assert!(filtered.starts_with("Finder [com.apple.finder]"), "{filtered}");
+        assert!(filtered.contains("filter: \"save\" — 1 matching element"), "{filtered}");
+        assert!(filtered.contains("[e1] Button \"Save\""), "{filtered}");
+        assert!(!filtered.contains("[e2]"), "{filtered}");
+        assert!(filtered.contains("── window 0"), "{filtered}");
+    }
+
+    #[test]
+    fn app_state_filter_reports_no_matches() {
+        let filtered = super::filter_app_state("App\n\n  [e1] Button \"Go\"", "zzz");
+        assert!(filtered.contains("0 matching elements"), "{filtered}");
+        assert!(filtered.contains("no elements match"), "{filtered}");
     }
 
     #[test]

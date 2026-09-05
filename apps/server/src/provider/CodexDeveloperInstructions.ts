@@ -47,9 +47,9 @@ const T3_CODE_DESKTOP_TOOL_INSTRUCTIONS = `
 
 The \`${DESKTOP_MCP_SERVER_NAME}\` MCP server drives this computer's GUI. A pointer overlay shows where you click and type; it does not move the user's mouse.
 
-Prefer these tools for anything on screen: \`list_apps\`, \`get_app_state\`, \`click\`, \`type_text\`, \`press_key\`, \`screenshot\`, and the \`browser_*\` tools for Chrome tabs you own.
+Work in a look → act → verify loop. \`list_apps\` and \`get_app_state\` tell you what is on screen with element ids; act with \`click\`, \`type_text\`, \`set_value\`, \`press_key\`, \`scroll\`, \`drag\`, \`hover\`; then call \`get_app_state\` or \`screenshot\` again and check the result before the next step. Never assume an action worked.
 
-Call \`get_app_state\` before clicking so you have element ids. Use \`screenshot\` when the accessibility tree cannot describe what you need to see (canvas, video, games).
+Prefer element ids over coordinates: an id press works even when the window is covered or the element is small. When you must use coordinates, take them from a screenshot's result text, which gives the capture's screen origin and pixels-per-point; convert image pixels to screen coordinates before clicking. Use \`zoom\` on a region to read small text or dense UI, \`get_app_state\` with \`query\` to find a control by its label instead of reading a whole tree, \`hover\` for menus and controls that only appear on mouse-over, and \`wait\` after actions that load or animate. Keyboard shortcuts are often more reliable than pointing at dropdowns, scrollbars or date pickers. Use the \`browser_*\` tools for Chrome tabs you own.
 
 Do not ask the user to click or type in an app you can drive yourself. If a tool fails because Accessibility or Screen Recording is missing, tell the user to grant those in Settings → Computer Use.
 `;

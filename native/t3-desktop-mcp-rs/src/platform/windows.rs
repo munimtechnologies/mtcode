@@ -217,6 +217,25 @@ impl WindowsDesktop {
         down_ok && up_ok
     }
 
+    /// Hover counterpart of `background_click`: prime the window under the point
+    /// with a mouse-move so it paints hover state, without touching the cursor.
+    fn background_hover(x: f64, y: f64) -> bool {
+        let sx = x.round() as i32;
+        let sy = y.round() as i32;
+        let Some(hwnd) = Self::hwnd_at_screen(sx, sy) else {
+            return false;
+        };
+        if !Self::accepts_posted_mouse(hwnd) {
+            return false;
+        }
+        let mut client = POINT { x: sx, y: sy };
+        if !unsafe { ScreenToClient(hwnd, &mut client) }.as_bool() {
+            return false;
+        }
+        let lp = Self::pack_client_lparam(client.x, client.y);
+        unsafe { PostMessageW(Some(hwnd), WM_MOUSEMOVE, WPARAM(0), lp) }.is_ok()
+    }
+
     fn scroll_wheel(horizontal: bool, notches: i32) -> Result<()> {
         let input = INPUT {
             r#type: INPUT_MOUSE,
@@ -534,6 +553,24 @@ impl Desktop for WindowsDesktop {
             .right_click(&UIPoint::new(x as i32, y as i32))
             .map_err(|error| DesktopError::new(format!("right click failed: {error}")))?;
         Ok(format!("right-clicked at ({x:.0}, {y:.0}) via cursor"))
+    }
+
+    fn hover(&mut self, target: Point) -> Result<String> {
+        let (x, y) = self.point_coordinates(target)?;
+        AgentCursor::shared().show(x, y);
+        // A posted WM_MOUSEMOVE lets hover-revealed controls (menus, toolbars,
+        // tooltips) react without moving the user's cursor.
+        if Self::background_hover(x, y) {
+            return Ok(format!(
+                "hovering at ({x:.0}, {y:.0}) in background — call get_app_state or screenshot to see what appeared"
+            ));
+        }
+        Mouse::default()
+            .move_to(&UIPoint::new(x as i32, y as i32))
+            .map_err(|error| DesktopError::new(format!("hover failed: {error}")))?;
+        Ok(format!(
+            "hovering at ({x:.0}, {y:.0}) via cursor — call get_app_state or screenshot to see what appeared"
+        ))
     }
 
     fn drag(&mut self, from: Point, to: Point) -> Result<String> {

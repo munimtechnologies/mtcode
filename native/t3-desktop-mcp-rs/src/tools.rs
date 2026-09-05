@@ -57,7 +57,8 @@ fn all_tool_defs() -> Value {
                 "properties": {
                     "app": { "type": "string", "description": "App name, bundle id, or pid" },
                     "max_depth": { "type": "integer", "description": "Max tree depth (default 18)" },
-                    "max_elements": { "type": "integer", "description": "Max elements to emit (default 800)" }
+                    "max_elements": { "type": "integer", "description": "Max elements to emit (default 800)" },
+                    "query": { "type": "string", "description": "Only list elements whose role, label or value contains this text (case-insensitive). Ids stay valid. Use it instead of raising max_elements when you know what you are looking for." }
                 },
                 "required": ["app"]
             }
@@ -126,7 +127,7 @@ fn all_tool_defs() -> Value {
         },
         {
             "name": "screenshot",
-            "description": "Capture the app's largest window as an image. Prefer get_app_state for interaction, which is cheaper and gives clickable element ids; use a screenshot when you need to see rendered content the accessibility tree does not describe, such as canvas or video.",
+            "description": "Capture the app's largest window (or a whole display) as an image. The result text states the capture's screen origin and pixels-per-point so you can convert an image pixel into click/hover coordinates. Prefer get_app_state for interaction, which is cheaper and gives clickable element ids; use a screenshot to verify an outcome or to see content the accessibility tree does not describe (canvas, video, custom drawing). Use zoom to read small text.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -179,6 +180,43 @@ fn all_tool_defs() -> Value {
                     "value": { "type": "string" }
                 },
                 "required": ["element_id", "value"]
+            }
+        },
+        {
+            "name": "zoom",
+            "description": "Capture one region of the screen at full resolution, to read small text, dense tables, file names or tiny controls that a normal screenshot blurs. Give the region as two corners in screen coordinates (the same space click uses); the result text explains how to map pixels in the zoomed image back to screen coordinates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "x0": { "type": "number", "description": "Left edge, screen coordinates" },
+                    "y0": { "type": "number", "description": "Top edge, screen coordinates" },
+                    "x1": { "type": "number", "description": "Right edge, screen coordinates" },
+                    "y1": { "type": "number", "description": "Bottom edge, screen coordinates" },
+                    "max_width": { "type": "integer", "description": "Downscale the zoomed image to this width in pixels (default 1400)" }
+                },
+                "required": ["x0", "y0", "x1", "y1"]
+            }
+        },
+        {
+            "name": "hover",
+            "description": "Move the agent pointer over an element or screen position without clicking, to reveal hover menus, toolbars, tooltips or drag handles. Follow with get_app_state or screenshot to see what appeared.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "element_id": { "type": "string", "description": "Element id from get_app_state" },
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                }
+            }
+        },
+        {
+            "name": "wait",
+            "description": "Pause before the next action so the UI can catch up: page loads, animations, dialogs opening, apps launching. Follow with get_app_state or screenshot to confirm the new state instead of guessing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "seconds": { "type": "number", "description": "Seconds to wait (default 1, max 30)" }
+                }
             }
         },
         {
@@ -294,7 +332,7 @@ fn all_tool_defs() -> Value {
 mod tests {
     use super::{all_tool_defs, tool_defs};
 
-    /// The macOS server advertises exactly these 23 tools. Drifting apart would
+    /// The macOS server advertises exactly these 26 tools. Drifting apart would
     /// silently give a model different capabilities per platform.
     #[test]
     fn advertises_the_macos_tool_surface() {
@@ -306,7 +344,7 @@ mod tests {
             .map(|tool| tool["name"].as_str().expect("tool has a name"))
             .collect();
 
-        assert_eq!(names.len(), 23, "tool count drifted from the macOS server");
+        assert_eq!(names.len(), 26, "tool count drifted from the macOS server");
         for expected in [
             "list_apps",
             "get_app_state",
@@ -320,6 +358,9 @@ mod tests {
             "right_click",
             "drag",
             "set_value",
+            "zoom",
+            "hover",
+            "wait",
             "select_text",
             "browser_open_tab",
             "browser_list_tabs",

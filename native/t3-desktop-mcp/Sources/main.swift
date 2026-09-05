@@ -867,6 +867,20 @@ func toolGetAppState(_ args: [String: Any]) -> String {
     if budget <= 0 {
         lines.append("… element budget reached; raise max_elements for more")
     }
+    // A filtered outline keeps the same ids: every element was registered while
+    // walking, only the printout is narrowed. Window headers stay for context.
+    if let query = (args["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !query.isEmpty
+    {
+        let needle = query.lowercased()
+        let matching = lines.filter { $0.hasPrefix("── window") || $0.lowercased().contains(needle) }
+        let count = matching.filter { !$0.hasPrefix("── window") }.count
+        header += "\nfilter: \"\(query)\" — \(count) matching element\(count == 1 ? "" : "s")"
+        if count == 0 {
+            return header + "\n\n(no elements match; drop the query or scroll the content into view)"
+        }
+        return header + "\n\n" + matching.joined(separator: "\n")
+    }
     return header + "\n\n" + lines.joined(separator: "\n")
 }
 
@@ -1099,25 +1113,71 @@ func toolActivateApp(_ args: [String: Any]) -> String {
 // MARK: - Screen capture
 
 /// Synchronizes capture results so a timed-out waiter never races a late write.
+/// One capture plus the geometry a model needs to turn image pixels back into
+/// the screen coordinates that click/hover/zoom accept.
+struct CaptureShot {
+    let data: Data
+    /// Captured area in global screen points (the coordinate space of click x/y).
+    let frame: CGRect
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let title: String?
+}
+
 private final class CaptureBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: Data?
-    func set(_ data: Data?) {
+    private var value: CaptureShot?
+    func set(_ shot: CaptureShot?) {
         lock.lock()
-        value = data
+        value = shot
         lock.unlock()
     }
-    func get() -> Data? {
+    func get() -> CaptureShot? {
         lock.lock()
         defer { lock.unlock() }
         return value
     }
 }
 
+/// The text block that rides with every screenshot/zoom image. Models read the
+/// image in pixels but every pointer tool takes screen points; without this
+/// line a coordinate click from a downscaled or Retina capture lands off-target.
+func captureMappingText(_ shot: CaptureShot, label: String) -> String {
+    let sx = Double(shot.pixelWidth) / max(1.0, shot.frame.width)
+    let sy = Double(shot.pixelHeight) / max(1.0, shot.frame.height)
+    let ox = Int(shot.frame.origin.x.rounded())
+    let oy = Int(shot.frame.origin.y.rounded())
+    let title = shot.title.map { " \"\($0)\"" } ?? ""
+    return "\(label)\(title): screen origin (\(ox), \(oy)), size \(Int(shot.frame.width.rounded()))×\(Int(shot.frame.height.rounded())) pt; "
+        + "image \(shot.pixelWidth)×\(shot.pixelHeight) px (\(String(format: "%.3f", sx)) px per pt). "
+        + "To act on something seen at image pixel (px, py): x = \(ox) + px / \(String(format: "%.3f", sx)), "
+        + "y = \(oy) + py / \(String(format: "%.3f", sy)). Prefer element ids from get_app_state when the "
+        + "target is listed there; use zoom on a region to read small text."
+}
+
+func imageResult(_ shot: CaptureShot, label: String) -> [String: Any] {
+    return [
+        "content": [
+            ["type": "image", "data": shot.data.base64EncodedString(), "mimeType": "image/png"],
+            ["type": "text", "text": captureMappingText(shot, label: label)],
+        ],
+        "isError": false,
+    ]
+}
+
+/// Backing scale of the screen that owns an SCDisplay (2 on Retina). Needed so
+/// a zoom can ask ScreenCaptureKit for every physical pixel of a region.
+func backingScale(for display: SCDisplay) -> CGFloat {
+    let key = NSDeviceDescriptionKey("NSScreenNumber")
+    return NSScreen.screens.first {
+        ($0.deviceDescription[key] as? NSNumber)?.uint32Value == display.displayID
+    }?.backingScaleFactor ?? 2
+}
+
 /// Capture a window as PNG. Runs the async ScreenCaptureKit call on a background
 /// executor and blocks the JSON-RPC loop until it lands, with a timeout so a
 /// wedged capture can never hang the server.
-func captureWindowPNG(pid: pid_t, maxWidth: Int) -> Data? {
+func captureWindowPNG(pid: pid_t, maxWidth: Int) -> CaptureShot? {
     let semaphore = DispatchSemaphore(value: 0)
     let box = CaptureBox()
 
@@ -1147,8 +1207,11 @@ func captureWindowPNG(pid: pid_t, maxWidth: Int) -> Data? {
             let image = try await SCScreenshotManager.captureImage(
                 contentFilter: SCContentFilter(desktopIndependentWindow: window),
                 configuration: config)
-            let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-            box.set(png)
+            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+            else { return }
+            box.set(CaptureShot(
+                data: png, frame: window.frame, pixelWidth: image.width, pixelHeight: image.height,
+                title: window.title))
         } catch {
             box.set(nil)
         }
@@ -1165,10 +1228,10 @@ func captureWindowPNG(pid: pid_t, maxWidth: Int) -> Data? {
 
 /// Capture a whole display. Window capture covers one app; this is for seeing
 /// the desktop as a whole, including every monitor the user has attached.
-func captureDisplayPNG(index: Int, maxWidth: Int) -> (data: Data, width: Int, height: Int)? {
+func captureDisplayPNG(index: Int, maxWidth: Int) -> CaptureShot? {
     let semaphore = DispatchSemaphore(value: 0)
     let lock = NSLock()
-    var result: (Data, Int, Int)?
+    var result: CaptureShot?
     Task.detached {
         defer { semaphore.signal() }
         do {
@@ -1192,7 +1255,9 @@ func captureDisplayPNG(index: Int, maxWidth: Int) -> (data: Data, width: Int, he
                 configuration: config)
             if let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) {
                 lock.lock()
-                result = (png, display.width, display.height)
+                result = CaptureShot(
+                    data: png, frame: display.frame, pixelWidth: image.width, pixelHeight: image.height,
+                    title: nil)
                 lock.unlock()
             }
         } catch {
@@ -1208,6 +1273,58 @@ func captureDisplayPNG(index: Int, maxWidth: Int) -> (data: Data, width: Int, he
     lock.lock()
     defer { lock.unlock() }
     return result
+}
+
+/// Capture one region of the screen at full physical resolution. `rect` is in
+/// global screen points, the same space click/hover take, so a model can zoom
+/// straight from the coordinates it already knows.
+func captureRegionPNG(rect: CGRect, maxWidth: Int) -> CaptureShot? {
+    let semaphore = DispatchSemaphore(value: 0)
+    let box = CaptureBox()
+    let task = Task.detached {
+        defer { semaphore.signal() }
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            guard let display = content.displays.first(where: { $0.frame.contains(center) })
+                ?? content.displays.first
+            else { return }
+            let clipped = rect.intersection(display.frame)
+            guard clipped.width >= 4, clipped.height >= 4 else { return }
+            let scale = backingScale(for: display)
+            var width = clipped.width * scale
+            var height = clipped.height * scale
+            if maxWidth > 0, width > CGFloat(maxWidth) {
+                let ratio = CGFloat(maxWidth) / width
+                width *= ratio
+                height *= ratio
+            }
+            let config = SCStreamConfiguration()
+            config.sourceRect = CGRect(
+                x: clipped.origin.x - display.frame.origin.x,
+                y: clipped.origin.y - display.frame.origin.y,
+                width: clipped.width, height: clipped.height)
+            config.width = max(1, Int(width.rounded()))
+            config.height = max(1, Int(height.rounded()))
+            config.showsCursor = false
+            if #available(macOS 14.0, *) { config.captureResolution = .best }
+            let image = try await SCScreenshotManager.captureImage(
+                contentFilter: SCContentFilter(display: display, excludingWindows: []),
+                configuration: config)
+            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+            else { return }
+            box.set(CaptureShot(
+                data: png, frame: clipped, pixelWidth: image.width, pixelHeight: image.height, title: nil))
+        } catch {
+            box.set(nil)
+        }
+    }
+    if semaphore.wait(timeout: .now() + 15) == .timedOut {
+        task.cancel()
+        return nil
+    }
+    return box.get()
 }
 
 func toolListDisplays(_ args: [String: Any]) -> String {
@@ -1336,6 +1453,70 @@ func toolRightClick(_ args: [String: Any]) -> String {
     UserPresence.noteTakeover()
     postRightClick(at: point, pid: nil)
     return "right-clicked at (\(Int(point.x)), \(Int(point.y))) via cursor"
+}
+
+/// Move the pointer without pressing. Hover-revealed UI (menus, toolbars that
+/// appear on mouse-over, tooltips) has no accessibility action to invoke, so a
+/// model needs a way to park the pointer and then look again.
+func backgroundHover(_ target: WindowTarget, at point: CGPoint) -> Bool {
+    guard SkyLight.available else { return false }
+    CursorOverlay.shared.show(at: point)
+    guard SkyLight.activateWithoutRaise(pid: target.pid, wid: target.wid) else { return false }
+    usleep(60_000)
+    clickGroupCounter += 1
+    let src = CGEventSource(stateID: .combinedSessionState)
+    guard let move = CGEvent(mouseEventSource: src, mouseType: .mouseMoved,
+                             mouseCursorPosition: point, mouseButton: .left)
+    else { return false }
+    SkyLight.postMouse(move, pid: target.pid, wid: target.wid, windowOrigin: target.origin,
+                       screen: point, clickState: 0, button: 0, subtype: 3, groupID: clickGroupCounter)
+    return true
+}
+
+func toolHover(_ args: [String: Any]) -> String {
+    let point: CGPoint
+    switch resolvePoint(args, xKey: "x", yKey: "y", idKey: "element_id") {
+    case .failure(let message):
+        return message
+    case .success(let resolved):
+        point = resolved
+    }
+    let element = (args["element_id"] as? String).flatMap { Registry.get($0) }
+    let target: WindowTarget?
+    if let element {
+        target = windowTarget(for: element)
+    } else if let under = windowTarget(under: point) {
+        target = under
+    } else {
+        switch resolveTargetPid(args) {
+        case .failure(let message):
+            return message
+        case .success(let pid):
+            target = pid.flatMap { windowTarget(forPid: $0, containing: point) }
+        }
+    }
+    if let target, backgroundHover(target, at: point) {
+        return "hovering at (\(Int(point.x)), \(Int(point.y))) in background — call get_app_state or screenshot to see what appeared"
+    }
+    if let refusal = UserPresence.refuseTakeover("hover (\(Int(point.x)), \(Int(point.y)))") {
+        return refusal
+    }
+    UserPresence.noteTakeover()
+    CursorOverlay.shared.show(at: point)
+    CGWarpMouseCursorPosition(point)
+    post(CGEvent(mouseEventSource: CGEventSource(stateID: .combinedSessionState), mouseType: .mouseMoved,
+                 mouseCursorPosition: point, mouseButton: .left), to: nil)
+    return "hovering at (\(Int(point.x)), \(Int(point.y))) via cursor — call get_app_state or screenshot to see what appeared"
+}
+
+/// Blocks the request loop on purpose: the client is waiting on this call, and
+/// a pause the model asked for is exactly the time nothing else should happen.
+func toolWait(_ args: [String: Any]) -> String {
+    let requested = (args["seconds"] as? Double) ?? 1
+    guard requested.isFinite, requested > 0 else { return "error: seconds must be a positive number" }
+    let seconds = min(requested, 30)
+    usleep(useconds_t(seconds * 1_000_000))
+    return "waited \(String(format: "%.1f", seconds))s" + (seconds < requested ? " (capped at 30s)" : "")
 }
 
 func toolDrag(_ args: [String: Any]) -> String {
@@ -2191,6 +2372,7 @@ let toolDefs: [[String: Any]] = [
                 "max_depth": ["type": "integer", "description": "Max tree depth (default 18)"],
                 "max_elements": ["type": "integer", "description": "Max elements to emit (default 800)"],
                 "window": ["description": "Limit to one window: a 0-based index, or \"agent\" for the browser window this agent owns"],
+                "query": ["type": "string", "description": "Only list elements whose role, label or value contains this text (case-insensitive). Ids stay valid. Use it instead of raising max_elements when you know what you are looking for."],
             ],
             "required": ["app"],
         ],
@@ -2255,7 +2437,7 @@ let toolDefs: [[String: Any]] = [
     ],
     [
         "name": "screenshot",
-        "description": "Capture the app's largest window as a PNG image. Prefer get_app_state for interaction, which is cheaper and gives clickable element ids; use a screenshot when you need to see rendered content the accessibility tree does not describe, such as canvas or video.",
+        "description": "Capture the app's largest window (or a whole display) as a PNG image. The result text states the capture's screen origin and pixels-per-point so you can convert an image pixel into click/hover coordinates. Prefer get_app_state for interaction, which is cheaper and gives clickable element ids; use a screenshot to verify an outcome or to see content the accessibility tree does not describe (canvas, video, custom drawing). Use zoom to read small text.",
         "inputSchema": [
             "type": "object",
             "properties": [
@@ -2398,6 +2580,43 @@ let toolDefs: [[String: Any]] = [
         ],
     ],
     [
+        "name": "zoom",
+        "description": "Capture one region of the screen at full resolution, to read small text, dense tables, file names or tiny controls that a normal screenshot blurs. Give the region as two corners in screen coordinates (the same space click uses); the result text explains how to map pixels in the zoomed image back to screen coordinates.",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "x0": ["type": "number", "description": "Left edge, screen coordinates"],
+                "y0": ["type": "number", "description": "Top edge, screen coordinates"],
+                "x1": ["type": "number", "description": "Right edge, screen coordinates"],
+                "y1": ["type": "number", "description": "Bottom edge, screen coordinates"],
+                "max_width": ["type": "integer", "description": "Downscale the zoomed image to this width in pixels (default 1400)"],
+            ],
+            "required": ["x0", "y0", "x1", "y1"],
+        ],
+    ],
+    [
+        "name": "hover",
+        "description": "Move the agent pointer over an element or screen position without clicking, to reveal hover menus, toolbars, tooltips or drag handles. Follow with get_app_state or screenshot to see what appeared.",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "element_id": ["type": "string", "description": "Element id from get_app_state"],
+                "x": ["type": "number"],
+                "y": ["type": "number"],
+            ],
+        ],
+    ],
+    [
+        "name": "wait",
+        "description": "Pause before the next action so the UI can catch up: page loads, animations, dialogs opening, apps launching. Follow with get_app_state or screenshot to confirm the new state instead of guessing.",
+        "inputSchema": [
+            "type": "object",
+            "properties": [
+                "seconds": ["type": "number", "description": "Seconds to wait (default 1, max 30)"],
+            ],
+        ],
+    ],
+    [
         "name": "select_text",
         "description": "Select a character range inside a text element. Defaults to selecting from 'start' to the end of the value.",
         "inputSchema": [
@@ -2437,6 +2656,8 @@ func dispatch(_ name: String, _ args: [String: Any]) -> String {
     case "drag": return toolDrag(args)
     case "set_value": return toolSetValue(args)
     case "select_text": return toolSelectText(args)
+    case "hover": return toolHover(args)
+    case "wait": return toolWait(args)
     case "browser_open_tab": return toolBrowserOpenTab(args)
     case "browser_list_tabs": return toolBrowserListTabs(args)
     case "browser_select_tab": return toolBrowserSelectTab(args)
@@ -2621,6 +2842,37 @@ while let line = readLine(strippingNewline: true) {
             // Handled ahead of the Accessibility check: screen capture is gated by
             // Screen Recording, a separate permission, so screenshots should still
             // work if only that one is granted.
+            if name == "wait" {
+                let out = toolWait(args)
+                respond(id: id, result: textResult(out, isError: out.hasPrefix("error:")))
+                break
+            }
+            if name == "zoom" {
+                guard let x0 = args["x0"] as? Double, let y0 = args["y0"] as? Double,
+                      let x1 = args["x1"] as? Double, let y1 = args["y1"] as? Double,
+                      x0.isFinite, y0.isFinite, x1.isFinite, y1.isFinite
+                else {
+                    respond(id: id, result: textResult(
+                        "error: zoom needs x0, y0, x1, y1 in screen coordinates (the space click uses)",
+                        isError: true))
+                    break
+                }
+                let rect = CGRect(x: min(x0, x1), y: min(y0, y1), width: abs(x1 - x0), height: abs(y1 - y0))
+                guard rect.width >= 4, rect.height >= 4 else {
+                    respond(id: id, result: textResult(
+                        "error: zoom region must be at least 4×4 points", isError: true))
+                    break
+                }
+                let maxWidth = (args["max_width"] as? Int) ?? 1400
+                guard let shot = captureRegionPNG(rect: rect, maxWidth: maxWidth) else {
+                    respond(id: id, result: textResult(
+                        "error: could not capture that region — check Screen Recording permission and "
+                        + "that the region lies on an attached display (list_displays).", isError: true))
+                    break
+                }
+                respond(id: id, result: imageResult(shot, label: "zoomed region"))
+                break
+            }
             if name == "screenshot" {
                 if let display = args["display"] as? Int {
                     let maxWidth = (args["max_width"] as? Int) ?? 1400
@@ -2630,13 +2882,7 @@ while let line = readLine(strippingNewline: true) {
                             + "permission, or call list_displays for valid indices.", isError: true))
                         break
                     }
-                    respond(id: id, result: [
-                        "content": [[
-                            "type": "image", "data": shot.data.base64EncodedString(),
-                            "mimeType": "image/png",
-                        ]],
-                        "isError": false,
-                    ])
+                    respond(id: id, result: imageResult(shot, label: "display \(display)"))
                     break
                 }
                 guard let query = args["app"] as? String, let resolved = resolveApp(query) else {
@@ -2646,21 +2892,15 @@ while let line = readLine(strippingNewline: true) {
                     break
                 }
                 let maxWidth = (args["max_width"] as? Int) ?? 1400
-                guard let png = captureWindowPNG(pid: resolved.app.processIdentifier, maxWidth: maxWidth) else {
+                guard let shot = captureWindowPNG(pid: resolved.app.processIdentifier, maxWidth: maxWidth) else {
                     respond(id: id, result: textResult(
                         "error: screen capture failed. The host app may be missing Screen Recording "
                         + "permission, or this app may have no on-screen window.",
                         isError: true))
                     break
                 }
-                respond(id: id, result: [
-                    "content": [[
-                        "type": "image",
-                        "data": png.base64EncodedString(),
-                        "mimeType": "image/png",
-                    ]],
-                    "isError": false,
-                ])
+                respond(id: id, result: imageResult(
+                    shot, label: "window of \(resolved.app.localizedName ?? query)"))
                 break
             }
 
