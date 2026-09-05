@@ -80,6 +80,7 @@ if ($exe) {
     Start-Process $exe.FullName
   }
 }
+}
 
 Log "refresh start"
 Log ("args DesktopVersion=$DesktopVersion ForceRebuild=$ForceRebuild InstallerPath=$InstallerPath envVersion=$($env:T3CODE_DESKTOP_VERSION) envForce=$($env:T3_FORCE_REBUILD)")
@@ -222,5 +223,3 @@ Install-MtCode -InstallerPath $installerPath
 Set-Content -Path $stateFile -Value $new -Encoding ascii
 Log "refresh done"
 exit 0
-
-}

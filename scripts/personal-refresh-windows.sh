@@ -57,6 +57,26 @@ fi
 ssh -o BatchMode=yes blade powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -EncodedCommand "$(ps_encoded_command "$blade_refresh_cmd")"
 
+# A script that parses but exits early reports nothing and leaves the old build
+# in place (2026-09-05: a misplaced brace turned the whole script into a function
+# body). Read the version back rather than trusting the exit code.
+installed_version() {
+  local host="$1"
+  local cmd='Write-Output ("VER=" + (Get-Item "$env:LOCALAPPDATA\Programs\mtcode\MT Code.exe").VersionInfo.ProductVersion)'
+  ssh -o BatchMode=yes -o ConnectTimeout=30 "$host" powershell.exe -NoProfile \
+    -EncodedCommand "$(ps_encoded_command "$cmd")" 2>/dev/null | tr -d '\r' | sed -n 's/^VER=//p' | tail -1
+}
+verify_installed() {
+  local host="$1" got
+  got=$(installed_version "$host")
+  if [[ "${got%.0}" != "$T3CODE_DESKTOP_VERSION" ]]; then
+    echo "$host reports MT Code ${got:-<none>} after the install, expected $T3CODE_DESKTOP_VERSION" >&2
+    return 1
+  fi
+  echo "$host is on $T3CODE_DESKTOP_VERSION"
+}
+verify_installed blade
+
 # --- Dell (install only from Blade-staged installer via this Mac) ---
 # One machine being off, asleep, or behind a tunnel that is not up must not undo the refresh for
 # the others: reaching Dell used to be the last thing that could kill the run outright.
@@ -90,8 +110,10 @@ refresh_dell_via_blade() {
 echo "-- refreshing Dell --"
 if refresh_dell; then
   echo "Dell refreshed"
+  verify_installed dell || true
 elif refresh_dell_via_blade; then
   echo "Dell refreshed over the LAN from Blade"
+  verify_installed dell || true
 else
   echo "Dell could not be reached, directly or through Blade — skipped." >&2
 fi
