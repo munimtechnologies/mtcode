@@ -1012,9 +1012,9 @@ fn cursor_rgba() -> &'static [(u8, u8, u8, u8)] {
     use std::sync::OnceLock;
     static PIXELS: OnceLock<Vec<(u8, u8, u8, u8)>> = OnceLock::new();
     PIXELS.get_or_init(|| {
-        let bytes = include_bytes!("cursor_112.png");
+        let bytes = include_bytes!("cursor_arrow_112.png");
         let img = image::load_from_memory(bytes)
-            .expect("cursor_112.png")
+            .expect("cursor_arrow_112.png")
             .into_rgba8();
         assert_eq!(img.width(), SIDE as u32);
         assert_eq!(img.height(), SIDE as u32);

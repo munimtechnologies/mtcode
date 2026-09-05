@@ -451,12 +451,15 @@ async function clickAt(tabId, x, y) {
 /// same pointer as the desktop overlay. Fixed-position, pointer-events:none and
 /// max z-index, so it is purely decorative and cannot intercept anything.
 ///
-/// Uses the PNG exported from BubbleView in AgentCursor.swift (not a hand-traced
+/// Uses the PNG rendered from BubbleView in AgentCursor.swift (not a hand-traced
 /// SVG) so Chrome and desktop stay pixel-matched: same glow, fill, rim, shape.
+/// The overlay asset is the 2x render (224px shown at 112 CSS px) so it stays as
+/// crisp as the desktop panel on Retina/HiDPI displays; the 1x file is kept for
+/// the tab favicon.
 /// Motion mirrors the desktop overlay: slow fade-in, cubic flight with tip
 /// following path tangent, and fade-out after Computer Use tools stop (not a
 /// short idle after the last pixel move).
-const CURSOR_IMG_URL = chrome.runtime.getURL("icons/cursor-112.png");
+const CURSOR_IMG_URL = chrome.runtime.getURL("icons/cursor-224.png");
 const CURSOR_HOTSPOT = 56; // OverlayController.hotspot — tip at centre of 112×112
 const CURSOR_FADE_IN_MS = 500;
 const CURSOR_FADE_OUT_MS = 350;
@@ -483,7 +486,7 @@ const PAINT_CURSOR_JS = `
       el.style.cssText = 'position:fixed;left:0;top:0;width:112px;height:112px;' +
         'pointer-events:none;z-index:2147483647;opacity:0;will-change:transform,opacity;' +
         'transform-origin:' + hotspot + 'px ' + hotspot + 'px;';
-      // Same artwork as desktop BubbleView / T3AgentCursor (cursor-112.png).
+      // Same artwork as desktop BubbleView / T3AgentCursor (cursor-224.png, 2x).
       const img = document.createElement('img');
       img.src = src;
       img.width = 112;
@@ -632,8 +635,8 @@ async function paintCursor(tabId, x, y) {
         `  if (!el) return { ok: false, reason: 'paint produced no element' };` +
         `  const img = el.querySelector('img');` +
         `  return Object.assign({}, r, {` +
-        `    hasGlow: !!(img && /cursor-112\\.png/.test(img.src)),` +
-        `    darkFill: !!(img && /cursor-112\\.png/.test(img.src)),` +
+        `    hasGlow: !!(img && /cursor-(?:112|224)\\.png/.test(img.src)),` +
+        `    darkFill: !!(img && /cursor-(?:112|224)\\.png/.test(img.src)),` +
         `    transform: el.style.transform || ''` +
         `  });` +
         `})()`,
