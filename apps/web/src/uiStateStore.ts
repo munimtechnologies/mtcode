@@ -23,6 +23,7 @@ export interface PersistedUiState {
   projectExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
+  threadAttentionAcknowledgedById?: Record<string, string>;
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
@@ -44,6 +45,7 @@ export interface UiProjectState {
 
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
+  threadAttentionAcknowledgedById: Record<string, string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
 }
 
@@ -63,6 +65,7 @@ const initialState: UiState = {
   projectOrder: [],
   sidebarProjectScopeKey: null,
   threadLastVisitedAtById: {},
+  threadAttentionAcknowledgedById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
   pullRequestMergeMethod: "merge",
@@ -121,6 +124,18 @@ function isPullRequestMergeMethod(value: unknown): value is PullRequestMergeMeth
   return value === "merge" || value === "squash" || value === "rebase";
 }
 
+function sanitizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] =>
+        entry[0].length > 0 && typeof entry[1] === "string" && entry[1].length > 0,
+    ),
+  );
+}
+
 export function parsePersistedState(parsed: PersistedUiState): UiState {
   const projectExpandedById =
     parsed.projectExpandedById === undefined
@@ -149,6 +164,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     projectExpandedById,
     projectOrder,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
+    threadAttentionAcknowledgedById: sanitizeStringRecord(parsed.threadAttentionAcknowledgedById),
     threadChangedFilesExpandedById:
       parsed.threadChangedFilesExpansionVersion === THREAD_CHANGED_FILES_EXPANSION_VERSION
         ? sanitizePersistedThreadChangedFilesExpanded(parsed.threadChangedFilesExpandedById)
@@ -227,6 +243,7 @@ export function persistState(state: UiState): void {
         projectExpandedById,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
+        threadAttentionAcknowledgedById: state.threadAttentionAcknowledgedById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
@@ -266,6 +283,23 @@ export function markThreadVisited(state: UiState, threadId: string, visitedAt: s
     threadLastVisitedAtById: {
       ...state.threadLastVisitedAtById,
       [threadId]: visitedAt,
+    },
+  };
+}
+
+export function acknowledgeThreadAttention(
+  state: UiState,
+  threadId: string,
+  attentionKey: string,
+): UiState {
+  if (!attentionKey || state.threadAttentionAcknowledgedById[threadId] === attentionKey) {
+    return state;
+  }
+  return {
+    ...state,
+    threadAttentionAcknowledgedById: {
+      ...state.threadAttentionAcknowledgedById,
+      [threadId]: attentionKey,
     },
   };
 }
@@ -425,6 +459,7 @@ export function reorderProjects(
 
 interface UiStateStore extends UiState {
   markThreadVisited: (threadId: string, visitedAt: string) => void;
+  acknowledgeThreadAttention: (threadId: string, attentionKey: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
@@ -442,6 +477,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
+  acknowledgeThreadAttention: (threadId, attentionKey) =>
+    set((state) => acknowledgeThreadAttention(state, threadId, attentionKey)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
     set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
   setThreadChangedFilesExpanded: (threadId, turnId, expanded) =>
@@ -458,6 +495,17 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
     ),
 }));
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== PERSISTED_STATE_KEY || event.newValue === null) return;
+    try {
+      useUiStateStore.setState(parsePersistedState(JSON.parse(event.newValue) as PersistedUiState));
+    } catch {
+      // Ignore malformed cross-tab state to keep the active tab usable.
+    }
+  });
+}
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
 
