@@ -194,6 +194,8 @@ const createHarness = (threads: ReadonlyArray<OrchestrationThread>) =>
 
     const engine = {
       readEvents: () => Stream.empty,
+      readThreadEvents: () => Stream.empty,
+      getThreadReplayStats: () => Effect.die("unused thread replay stats"),
       dispatch,
       streamDomainEvents: Stream.fromQueue(events),
       subscribeDomainEvents: Effect.succeed(Stream.fromQueue(events)),

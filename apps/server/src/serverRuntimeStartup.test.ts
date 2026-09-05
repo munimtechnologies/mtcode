@@ -189,6 +189,7 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
           getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+          getThreadRuntimeContext: () => Effect.die("unused"),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
           hasAssistantVisualizationReference: () => Effect.succeed(false),
@@ -263,6 +264,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
         getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.some(bootstrapThreadId)),
         getThreadCheckpointContext: () => Effect.succeed(Option.none()),
         getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+        getThreadRuntimeContext: () => Effect.die("unused"),
         getThreadShellById: () => Effect.die("unused"),
         getThreadDetailById: () => Effect.die("unused"),
         hasAssistantVisualizationReference: () => Effect.die("unused"),
@@ -271,6 +273,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
       }),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
+        readThreadEvents: () => Stream.empty,
+        getThreadReplayStats: () => Effect.die("unused thread replay stats"),
         dispatch: (command) =>
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
@@ -318,6 +322,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
         getThreadCheckpointContext: () => Effect.succeed(Option.none()),
         getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+        getThreadRuntimeContext: () => Effect.die("unused"),
         getThreadShellById: () => Effect.die("unused"),
         getThreadDetailById: () => Effect.die("unused"),
         hasAssistantVisualizationReference: () => Effect.die("unused"),
@@ -326,6 +331,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
       }),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
+        readThreadEvents: () => Stream.empty,
+        getThreadReplayStats: () => Effect.die("unused thread replay stats"),
         dispatch: (command) =>
           Ref.update(dispatchCalls, (calls) => [...calls, command]).pipe(
             Effect.as({ sequence: 1 }),
@@ -382,6 +389,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
         getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
         getThreadCheckpointContext: () => Effect.succeed(Option.none()),
         getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+        getThreadRuntimeContext: () => Effect.die("unused"),
         getThreadShellById: () => Effect.die("unused"),
         getThreadDetailById: () => Effect.die("unused"),
         hasAssistantVisualizationReference: () => Effect.die("unused"),
@@ -390,6 +398,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
       }),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
+        readThreadEvents: () => Stream.empty,
+        getThreadReplayStats: () => Effect.die("unused thread replay stats"),
         dispatch: (command) =>
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),

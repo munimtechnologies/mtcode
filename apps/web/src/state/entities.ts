@@ -19,6 +19,7 @@ import {
   allEnvironmentShellsBootstrappedAtom,
   authoritativeShellEnvironmentIdsAtom,
   connectedShellEnvironmentIdsAtom,
+  allEnvironmentProjectSnapshotsReadyAtom,
 } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
 
@@ -92,6 +93,10 @@ export function useAuthoritativeShellEnvironmentIds(): ReadonlySet<EnvironmentId
 
 export function useConnectedShellEnvironmentIds(): ReadonlySet<EnvironmentId> {
   return useAtomValue(connectedShellEnvironmentIdsAtom);
+}
+
+export function useAllEnvironmentProjectSnapshotsReady(): boolean {
+  return useAtomValue(allEnvironmentProjectSnapshotsReadyAtom);
 }
 
 export function useThreadShellsForProjectRefs(

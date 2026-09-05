@@ -18,6 +18,8 @@ import {
   ClaudeSettings,
   CodexSettings,
   USAGE_CONTRACT_VERSION,
+  type ServerSettings as ServerSettingsValue,
+  type UsageProviderKind,
   type UsageSource,
   type UsagePricing,
   type UsageSummary,
@@ -50,7 +52,7 @@ import { listProviderHomeCandidates, scanHomePath } from "./usageHomes.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { projectUsageSummaryForClient } from "./usageClientCompat.ts";
 import { loadCursorUsageRecords, type CursorExportLoadResult } from "./usageCursorExport.ts";
-import { parseRateTable, type RateTable } from "./usagePricing.ts";
+import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
 import { readOpenCodeUsage, resolveOpenCodeDatabasePaths } from "./usageOpenCode.ts";
 import {
   listTranscriptFiles,
@@ -286,28 +288,26 @@ export const make = Effect.gen(function* () {
       return nestedExists ? nested : path.join(homePath, "projects");
     });
 
+  // A settings failure must not silently discard custom rates or transcript homes.
+  const readSettings = settingsService.getSettings.pipe(
+    Effect.catchCause(
+      (cause) =>
+        new UsageReadError({
+          reason: "scanFailed",
+          detail: "Server settings could not be read.",
+          cause: Cause.squash(cause),
+        }),
+    ),
+  );
+
   /**
    * Resolves the transcript directories for each provider, one per configured
    * provider instance. Instances that share a home (shadow homes symlink
    * `sessions` back into the shared home) collapse to a single directory.
    */
-  const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* () {
-    // A settings failure must surface as an error: swallowing it here would
-    // present "zero usage from every provider" as a valid answer.
-    const settings = yield* settingsService.getSettings.pipe(
-      Effect.catchCause(
-        (cause) =>
-          new UsageReadError({
-            reason: "scanFailed",
-            // Bounded description; the squashed failure travels as the cause.
-            // Squashed, not the Cause tree: a full tree in a Defect field is
-            // the unbounded wire payload the bounded detail exists to avoid.
-            detail: "Server settings could not be read.",
-            cause: Cause.squash(cause),
-          }),
-      ),
-    );
-
+  const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* (
+    settings: ServerSettingsValue,
+  ) {
     type JsonlSource = {
       readonly provider: TranscriptProviderKind;
       readonly dir: string;
@@ -531,10 +531,15 @@ export const make = Effect.gen(function* () {
         readonly databasePaths: readonly string[];
       };
 
-  const collectDirs = Effect.fn("UsageService.collectDirs")(function* (windowStartMs: number) {
+  const collectDirs = Effect.fn("UsageService.collectDirs")(function* (
+    windowStartMs: number,
+    settings: ServerSettingsValue,
+  ) {
     // The home resolvers ask for `Path` themselves; satisfy them from the
     // instance we already hold so the scan stays context-free.
-    const dirs = yield* resolveTranscriptDirs().pipe(Effect.provideService(Path.Path, path));
+    const dirs = yield* resolveTranscriptDirs(settings).pipe(
+      Effect.provideService(Path.Path, path),
+    );
     const scanned: ScannedSource[] = [];
     for (const source of dirs) {
       const { dir } = source;
@@ -590,7 +595,10 @@ export const make = Effect.gen(function* () {
     return scanned;
   });
 
-  const scanSummary = Effect.fn("UsageService.scanSummary")(function* (input: UsageSummaryInput) {
+  const scanSummary = Effect.fn("UsageService.scanSummary")(function* (
+    input: UsageSummaryInput,
+    settings: ServerSettingsValue,
+  ) {
     if (input.sinceDay > input.untilDay) {
       return yield* new UsageReadError({
         reason: "invalidWindow",
@@ -639,9 +647,10 @@ export const make = Effect.gen(function* () {
     // Pricing only matters once records are aggregated, so the rate table
     // loads while transcripts stream instead of gating them: a cold rates
     // fetch on a slow network no longer delays the scan by its own timeout.
-    const [, scannedDirs] = yield* Effect.all([ensureRates(false), collectDirs(windowStartMs)], {
-      concurrency: 2,
-    });
+    const [, scannedDirs] = yield* Effect.all(
+      [ensureRates(false), collectDirs(windowStartMs, settings)],
+      { concurrency: 2 },
+    );
 
     const aggregator = new UsageAggregator({
       timeZone: input.timeZone,
@@ -650,6 +659,7 @@ export const make = Effect.gen(function* () {
       resolution: input.resolution ?? "day",
       ...hourlyWindow,
       rates,
+      priceOverrides: createOverrideRateTable(settings.usagePriceOverrides),
     });
 
     const sources: UsageSource[] = [];
@@ -830,13 +840,16 @@ export const make = Effect.gen(function* () {
   });
 
   /**
-   * In-flight scans by window, so concurrent identical requests (the usage
+   * In-flight scans by window and custom prices, so concurrent identical requests (the usage
    * page open on two clients at once) share one scan instead of racing over
    * the same corpus twice.
    */
   const inflightScans = new Map<string, Deferred.Deferred<UsageSummary, UsageReadError>>();
 
-  const scanKey = (input: UsageSummaryInput): string =>
+  const scanKey = (
+    input: UsageSummaryInput,
+    priceOverrides: ServerSettingsValue["usagePriceOverrides"],
+  ): string =>
     JSON.stringify([
       input.timeZone,
       input.sinceDay,
@@ -844,10 +857,12 @@ export const make = Effect.gen(function* () {
       input.resolution ?? "day",
       input.sinceTime ?? null,
       input.untilTime ?? null,
+      priceOverrides,
     ]);
 
   const readSummary = Effect.fn("UsageService.readSummary")(function* (input: UsageSummaryInput) {
-    const key = scanKey(input);
+    const settings = yield* readSettings;
+    const key = scanKey(input, settings.usagePriceOverrides);
     const deferred = yield* Effect.uninterruptible(
       Effect.gen(function* () {
         const existing = inflightScans.get(key);
@@ -859,7 +874,7 @@ export const make = Effect.gen(function* () {
         inflightScans.set(key, created);
         // Detached so one departing client cannot tear the scan out from under
         // the fibers awaiting it; a finished scan warms the cache either way.
-        yield* scanSummary(input).pipe(
+        yield* scanSummary(input, settings).pipe(
           Effect.onExit((exit) =>
             Effect.sync(() => inflightScans.delete(key)).pipe(
               Effect.andThen(Deferred.done(created, exit)),

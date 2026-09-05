@@ -518,7 +518,7 @@ describe("AgentActivityPublisher", () => {
   });
 
   it.effect(
-    "does not build Live Activity aggregates for links with Live Activities disabled",
+    "delivers notifications without querying activity rows when Live Activities are disabled",
     () => {
       const notificationState: RelayAgentActivityState = {
         ...state,
@@ -550,13 +550,7 @@ describe("AgentActivityPublisher", () => {
                     AgentActivityRows.AgentActivityRows,
                     makeAgentActivityRows({
                       listForUser: () =>
-                        Effect.succeed([
-                          {
-                            ...state,
-                            environmentId: "other-env" as RelayAgentActivityState["environmentId"],
-                            threadId: "other-thread" as RelayAgentActivityState["threadId"],
-                          },
-                        ]),
+                        Effect.die("Notification-only delivery must not read rows"),
                     }),
                   ),
                   Layer.succeed(

@@ -43,6 +43,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as ComputerHistoryService from "../../computerHistory/service.ts";
 import { makeResolveEnabledDesktopMcp } from "../../desktopControl/desktopMcpLaunch.ts";
+import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import {
@@ -1619,6 +1620,11 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               const displayModel = currentModelId
                 ? resolveGrokAcpBaseModelId(currentModelId)
                 : undefined;
+              const runtimeInstructions = buildRuntimeInstructions({
+                harness: "Grok",
+                model: displayModel,
+                reasoningEffort: normalizeGrokReasoningEffort(requestedTurnReasoningEffort),
+              });
               for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
                 yield* Effect.yieldNow;
               }
@@ -1674,6 +1680,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 acpSessionId: ctx.acpSessionId,
                 displayModel,
                 promptParts,
+                runtimeInstructions,
                 turnId,
                 promptEpoch,
                 promptLifecycle: ctx.promptLifecycle,
@@ -1730,7 +1737,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               }
               const dispatched = yield* Deferred.make<void>();
               const fiber = yield* liveCtx.acp
-                .prompt({ prompt: prepared.promptParts }, { dispatched })
+                .prompt(
+                  {
+                    prompt: [
+                      ...prepared.promptParts,
+                      { type: "text", text: prepared.runtimeInstructions },
+                    ],
+                  },
+                  { dispatched },
+                )
                 .pipe(Effect.forkChild({ startImmediately: true }));
               // Hold the lifecycle permit until the runtime has registered this
               // prompt's RPC fiber, so a later steer's session/cancel targets

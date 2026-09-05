@@ -112,12 +112,6 @@ function ConfiguredConnectOnboardingRouteScreen() {
           <CloudEnvironmentRows
             connectedCloudEnvironments={connectedCloudEnvironments}
             onReconnectEnvironment={onReconnectEnvironment}
-            onSetupProvider={(params) =>
-              navigation.navigate("SettingsSheet", {
-                screen: "SettingsContent",
-                params: { screen: "SettingsProviderSetup", params },
-              })
-            }
             showHeader={false}
           />
         ) : (

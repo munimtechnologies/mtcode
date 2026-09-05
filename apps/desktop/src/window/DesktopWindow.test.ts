@@ -357,6 +357,7 @@ function makeTestLayer(input: {
               input.openedExternalUrls?.push(url);
               return true;
             }),
+          openSystemSettings: () => Effect.succeed(true),
           copyText: () => Effect.void,
         } satisfies ElectronShell.ElectronShell["Service"]),
         electronThemeLayer,
@@ -473,6 +474,7 @@ const makeSplashScenario = (
           electronMenuLayer,
           Layer.succeed(ElectronShell.ElectronShell, {
             openExternal: () => Effect.succeed(true),
+            openSystemSettings: () => Effect.succeed(true),
             copyText: () => Effect.void,
           } satisfies ElectronShell.ElectronShell["Service"]),
           electronThemeLayer,

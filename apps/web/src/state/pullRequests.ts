@@ -28,8 +28,10 @@ import {
 import { formatEnvironmentQueryError } from "./query";
 
 export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(connectionAtomRuntime);
-export const linkedPullRequestDetailAtom =
-  createLinkedPullRequestSummaryAtomFamily(connectionAtomRuntime);
+export const linkedPullRequestDetailAtom = createLinkedPullRequestSummaryAtomFamily(
+  connectionAtomRuntime,
+  pullRequestEnvironment.refreshes,
+);
 
 const observedPullRequestSummaryAtom = Atom.family((key: string) =>
   Atom.make<PullRequestSummary | null>(null).pipe(
@@ -132,8 +134,8 @@ function createMergedEnvironmentQuery<Input, A>(
       (override?: ReadonlyArray<EnvironmentQueryTarget<Input>>) => {
         const refreshTargets =
           override ?? (JSON.parse(key) as ReadonlyArray<EnvironmentQueryTarget<Input>>);
-        for (const target of refreshTargets) {
-          appAtomRegistry.refresh(atomFor(target));
+        for (const atom of new Set(refreshTargets.map(atomFor))) {
+          appAtomRegistry.refresh(atom);
         }
       },
       [key],
@@ -156,12 +158,30 @@ const usePullRequestStacksQuery = createMergedEnvironmentQuery(
   "web-pull-request-stacks:list",
   pullRequestEnvironment.stackList,
 );
+const usePullRequestTurnRefreshQuery = createMergedEnvironmentQuery(
+  "web-pull-requests:turn-refreshes",
+  ({ environmentId }: EnvironmentQueryTarget<Readonly<Record<string, never>>>) =>
+    pullRequestEnvironment.refreshes({ environmentId, input: {} }),
+);
+
+export function usePullRequestTurnRefreshes(
+  environmentIds: ReadonlyArray<EnvironmentId>,
+): ReadonlyArray<readonly [EnvironmentId, number]> {
+  return usePullRequestTurnRefreshQuery(
+    environmentIds.map((environmentId) => ({ environmentId, input: {} })),
+  ).values.map(([target, count]) => [target.environmentId, count] as const);
+}
+
+export function usePullRequestTurnRefresh(environmentId: EnvironmentId): number | null {
+  const result = useAtomValue(pullRequestEnvironment.refreshes({ environmentId, input: {} }));
+  return Option.getOrNull(AsyncResult.value(result));
+}
 
 export interface MergedPullRequestListView {
   readonly data: MergedPullRequestList | null;
   readonly error: string | null;
   readonly isPending: boolean;
-  readonly refresh: () => void;
+  readonly refresh: (targets?: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>>) => void;
 }
 
 /** One listing per environment, merged into the single list the page renders. */

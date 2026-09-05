@@ -78,12 +78,6 @@ export function ConnectionsRouteScreen() {
                   onRename={(environmentId) =>
                     navigation.navigate("EnvironmentRename", { environmentId })
                   }
-                  onSetupProvider={(params) =>
-                    navigation.navigate("SettingsSheet", {
-                      screen: "SettingsContent",
-                      params: { screen: "SettingsProviderSetup", params },
-                    })
-                  }
                 />
               </View>
             ))}

@@ -1,3 +1,4 @@
+import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -41,7 +42,11 @@ const makeEnvironmentLayer = (
   DesktopEnvironment.layer({
     ...defaultInput,
     ...overrides,
-  }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest(env))));
+  }).pipe(
+    Layer.provide(
+      Layer.mergeAll(NodeServices.layer, NodePath.layerPosix, DesktopConfig.layerTest(env)),
+    ),
+  );
 
 const makeEnvironment = (
   overrides: Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> = {},

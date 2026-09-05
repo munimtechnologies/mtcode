@@ -35,6 +35,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as BootService from "../cloud/bootService.ts";
 import * as CliState from "../cloud/CliState.ts";
 import * as CliTokenManager from "../cloud/CliTokenManager.ts";
+import { filterRelayResponse } from "../cloud/relayResponse.ts";
 import {
   CLOUD_LINKED_USER_ID,
   isAgentActivityPublishingEnabledValue,
@@ -209,6 +210,8 @@ function formatCloudStatus(status: CloudCliStatus, options?: { readonly json?: b
     `  Relay: ${status.relayUrl ?? "not provisioned"}`,
     `  Publish agent activity: ${status.publishAgentActivity ? "enabled" : "disabled"}`,
     ...formatRelayClientStatus(status.relayClient),
+    "",
+    "This is saved setup, not a live connection check. Check the background service with `t3 service status`.",
     ...(nextStep ? ["", `Next: ${nextStep}`] : []),
   ].join("\n");
 }
@@ -347,7 +350,7 @@ const unlinkRelayEnvironment = Effect.fn("cloud.cli.unlink_relay_environment")(f
   ).pipe(
     HttpClientRequest.bearerToken(token.value.accessToken),
     httpClient.execute,
-    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap(filterRelayResponse),
     Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayOkResponse)),
     withRelayClientTracing,
   );
@@ -690,20 +693,20 @@ export const connectCommand = Command.make("connect", {
         // Show which account was linked so an unexpected identity (an
         // authorization code for a different account) is visible before the
         // machine is brought online.
-        yield* Console.log(`✓ Connected${connectedAs(linked.identity)}`);
+        yield* Console.log(`✓ Authorized${connectedAs(linked.identity)}`);
 
-        // Connect itself already succeeded; a boot-service failure must not
-        // fail the command, just tell the user what happened and move on.
+        // Authorization is stored. If service setup fails, preserve it and
+        // show how to run the server manually.
         const background = yield* recoverServiceOnboardingOffer(offerServiceDuringOnboarding);
         if (background) {
           // macOS/Windows stop at sign-out; only Linux systemd typically survives logout.
           const platform = yield* HostProcessPlatform;
           const reach =
             platform === "darwin"
-              ? `${resolveAppDisplayName()} will stay reachable while you are logged in to this Mac.`
+              ? `${resolveAppDisplayName()} is set to run while you are logged in to this Mac. The server establishes the T3 Connect link on startup.`
               : platform === "win32"
                 ? `${resolveAppDisplayName()} will start again every time you sign in to Windows.`
-                : `${resolveAppDisplayName()} will stay reachable after you log out.`;
+                : `${resolveAppDisplayName()} is set to keep running after you log out. The server establishes the T3 Connect link on startup.`;
           yield* Console.log(`\n✓ Background service ready\n\n${reach}`);
           return;
         }

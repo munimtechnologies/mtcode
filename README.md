@@ -95,6 +95,7 @@ Full docs live in [docs/](./docs):
 - [Plugins](./docs/user/plugins.md)
 - [Voice dictation](./docs/user/voice-dictation.md)
 - [Attachments](./docs/user/attachments.md)
+- [Project settings](./docs/user/project-settings.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Thread messaging](./docs/user/thread-messaging.md)
 - [Continue a thread with another provider](./docs/user/provider-handoff.md)
@@ -102,6 +103,7 @@ Full docs live in [docs/](./docs):
 - [Keeping app and server in sync](./docs/user/updating.md)
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
+- [Run T3 Code as a background service](./docs/user/background-service.md)
 
 Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
 

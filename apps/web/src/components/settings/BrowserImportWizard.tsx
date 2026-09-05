@@ -24,6 +24,7 @@ import {
   canCloseWizard,
   isRetryableReason,
   formatSkippedDomains,
+  fullDiskAccessRecheckStep,
   outcomeToStep,
   refreshedSourceProfileDirectory,
   refreshedSourceStep,
@@ -56,7 +57,7 @@ interface BrowserImportWizardProps {
   }) => Promise<ImportOutcome>;
   /** Re-checks the source's availability after the user quits the browser. */
   readonly onRefreshSource: () => Promise<BrowserImportSource | undefined>;
-  /** Opens System Settings at Full Disk Access (Safari imports). */
+  /** Opens the OS setting that grants access to a protected cookie store. */
   readonly onOpenFullDiskAccessSettings: () => void;
   readonly onClose: () => void;
 }
@@ -115,8 +116,13 @@ export function BrowserImportWizard({
       });
   };
 
-  const recheckAfterQuit = () => {
-    setStep({ step: "checking" });
+  // Re-lists the source after the user did something outside the app (quit the
+  // browser, granted access) and routes to wherever the refreshed source says.
+  const recheckSource = (
+    check: "browser" | "fullDiskAccess",
+    nextStep: (refreshed: BrowserImportSource | undefined) => WizardStep,
+  ) => {
+    setStep({ step: "checking", check });
     void onRefreshSource()
       .then((refreshed) => {
         if (refreshed) {
@@ -125,10 +131,12 @@ export function BrowserImportWizard({
             refreshedSourceProfileDirectory(current, refreshed),
           );
         }
-        setStep(refreshedSourceStep(refreshed));
+        setStep(nextStep(refreshed));
       })
       .catch(() => setStep({ step: "blocked", reason: "readFailed" }));
   };
+  const recheckAfterQuit = () => recheckSource("browser", refreshedSourceStep);
+  const recheckFullDiskAccess = () => recheckSource("fullDiskAccess", fullDiskAccessRecheckStep);
 
   return (
     <Dialog open onOpenChange={(open) => (open || !canCloseWizard(step) ? undefined : onClose())}>
@@ -140,12 +148,13 @@ export function BrowserImportWizard({
             source={source}
             onCancel={onClose}
             onOpenSettings={onOpenFullDiskAccessSettings}
-            onGranted={runImport}
+            onGranted={step.resume === "import" ? runImport : recheckFullDiskAccess}
+            stillRequired={step.checked === true}
           />
         ) : step.step === "importing" ? (
           <ImportingStep />
         ) : step.step === "checking" ? (
-          <CheckingStep sourceName={source.name} />
+          <CheckingStep sourceName={source.name} check={step.check} />
         ) : step.step === "done" ? (
           <DoneStep
             {...step}
@@ -209,41 +218,6 @@ function QuitStep({
   );
 }
 
-function FullDiskAccessStep({
-  source,
-  onCancel,
-  onOpenSettings,
-  onGranted,
-}: {
-  readonly source: BrowserImportSource;
-  readonly onCancel: () => void;
-  readonly onOpenSettings: () => void;
-  readonly onGranted: () => void;
-}) {
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>
-          Let {APP_DISPLAY_NAME} read {source.name}&rsquo;s cookies
-        </DialogTitle>
-        <DialogDescription>
-          {source.name} keeps its cookies somewhere only apps with Full Disk Access can reach. Turn
-          that on for {APP_BASE_NAME} in System Settings, then come back and finish the import.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button variant="outline" onClick={onOpenSettings}>
-          Open System Settings
-        </Button>
-        <Button onClick={onGranted}>I&rsquo;ve turned it on</Button>
-      </DialogFooter>
-    </>
-  );
-}
-
 /** "5,065 cookies", or "no cookies", or nothing when the store is unreadable. */
 function cookieCountLabel(count: number | undefined): string | undefined {
   if (count === undefined) return undefined;
@@ -269,6 +243,51 @@ type ConfigureStepProps = {
   readonly onImport: () => void;
 };
 
+function FullDiskAccessStep({
+  source,
+  onCancel,
+  onOpenSettings,
+  onGranted,
+  stillRequired,
+}: {
+  readonly source: BrowserImportSource;
+  readonly onCancel: () => void;
+  readonly onOpenSettings: () => void;
+  readonly onGranted: () => void;
+  readonly stillRequired: boolean;
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          Let {APP_DISPLAY_NAME} read {source.name}&rsquo;s cookies
+        </DialogTitle>
+        <DialogDescription>
+          To import cookies from {source.name}, {APP_BASE_NAME} needs Full Disk Access. Turn it on
+          in System Settings, then come back to finish the import — you can revoke it again once the
+          import is done.
+        </DialogDescription>
+      </DialogHeader>
+      {stillRequired ? (
+        <DialogPanel>
+          <p role="status" className="text-sm text-muted-foreground">
+            Full Disk Access is still required. If you just turned it on, quit and reopen{" "}
+            {APP_DISPLAY_NAME}, then try again.
+          </p>
+        </DialogPanel>
+      ) : null}
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="outline" onClick={onOpenSettings}>
+          Open System Settings
+        </Button>
+        <Button onClick={onGranted}>I&rsquo;ve turned it on</Button>
+      </DialogFooter>
+    </>
+  );
+}
 function ConfigureStep({
   source,
   destinationEnvironmentName,
@@ -428,16 +447,28 @@ function ImportingStep() {
   );
 }
 
-function CheckingStep({ sourceName }: { readonly sourceName: string }) {
+function CheckingStep({
+  sourceName,
+  check,
+}: {
+  readonly sourceName: string;
+  readonly check: "browser" | "fullDiskAccess";
+}) {
   return (
     <>
       <DialogHeader>
         <DialogTitle>Checking {sourceName}</DialogTitle>
-        <DialogDescription>Checking whether the browser has closed.</DialogDescription>
+        <DialogDescription>
+          {check === "fullDiskAccess"
+            ? "Checking Full Disk Access."
+            : "Checking whether the browser has closed."}
+        </DialogDescription>
       </DialogHeader>
       <DialogPanel className="flex items-center gap-3 py-6">
         <Spinner className="size-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">Checking…</span>
+        <span className="text-sm text-muted-foreground">
+          {check === "fullDiskAccess" ? "Checking access…" : "Checking…"}
+        </span>
       </DialogPanel>
     </>
   );

@@ -27,12 +27,13 @@ import {
 import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
+  DEFAULT_TIMEOUT_MS,
   isCommandMissingCause,
   parseGenericCliVersion,
   providerModelsFromSettings,
+  ProviderProbeTimeoutError,
   spawnAndCollect,
   type ServerProviderDraft,
-  ProviderProbeTimeoutError,
 } from "../providerSnapshot.ts";
 import { providerVersionProbeTimeoutMs } from "../providerProbeTimeouts.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
@@ -437,71 +438,52 @@ const probeClaudeCapabilities = (
           cwd,
         }),
       });
-      const init = await Promise.race([
-        q.initializationResult(),
-        new Promise<undefined>((resolve) => {
-          // @effect-diagnostics-next-line globalTimers:off - Promise.race needs a native timer.
-          globalThis.setTimeout(resolve, CAPABILITIES_PROBE_TIMEOUT_MS);
-        }),
-      ]);
-      if (!init) return undefined;
-      const claudeStatus = await Promise.race([
-        q
-          .usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()
-          .then((usage) => mapClaudeUsageToStatus(usage, claudePromo))
-          .catch(() => undefined),
-        new Promise<undefined>((resolve) => {
-          // @effect-diagnostics-next-line globalTimers:off - Promise.race needs a native timer.
-          globalThis.setTimeout(resolve, CLAUDE_USAGE_LOOKUP_TIMEOUT_MS);
-        }),
-      ]);
-      // Usage is a second control round trip on the same process; a failure
-      // there must not cost the slash commands and account we already have.
-      // Raced like the status lookup above: a usage endpoint that never
-      // answers degrades to "no usage this probe" instead of hanging it.
-      const usage = await Promise.race([
-        q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET().then(
-          (response) => ({
-            rate_limits_available: response.rate_limits_available,
-            rate_limits: response.rate_limits,
-          }),
-          () => undefined,
-        ),
-        new Promise<undefined>((resolve) => {
-          // @effect-diagnostics-next-line globalTimers:off - Promise.race needs a native timer.
-          globalThis.setTimeout(resolve, CLAUDE_USAGE_LOOKUP_TIMEOUT_MS);
-        }),
-      ]);
-      const account = init.account as
-        | {
-            readonly email?: string;
-            readonly subscriptionType?: string;
-            readonly tokenSource?: string;
-            readonly apiProvider?: string;
-          }
-        | undefined;
-      return {
-        email: account?.email,
-        subscriptionType: account?.subscriptionType,
-        tokenSource: account?.tokenSource,
-        apiProvider: account?.apiProvider,
-        ...(claudeStatus ? { claudeStatus } : {}),
-        slashCommands: parseClaudeInitializationCommands(init.commands),
-        ...(usage ? { usage } : {}),
-      } satisfies ClaudeCapabilitiesProbe;
+      const init = await q.initializationResult();
+      return { q, init, claudePromo };
     });
   }).pipe(
+    Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
+    Effect.flatMap(({ q, init, claudePromo }) =>
+      Effect.gen(function* () {
+        // Usage has its own deadline so a slow optional request cannot discard initialization.
+        const usageResult = yield* Effect.tryPromise(() =>
+          q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
+        ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result);
+        const usage = Result.isSuccess(usageResult)
+          ? {
+              rate_limits_available: usageResult.success.rate_limits_available,
+              rate_limits: usageResult.success.rate_limits,
+            }
+          : undefined;
+        const claudeStatus = Result.isSuccess(usageResult)
+          ? mapClaudeUsageToStatus(usageResult.success, claudePromo)
+          : undefined;
+        const account = init.account as
+          | {
+              readonly email?: string;
+              readonly subscriptionType?: string;
+              readonly tokenSource?: string;
+              readonly apiProvider?: string;
+            }
+          | undefined;
+        return {
+          email: account?.email,
+          subscriptionType: account?.subscriptionType,
+          tokenSource: account?.tokenSource,
+          apiProvider: account?.apiProvider,
+          ...(claudeStatus ? { claudeStatus } : {}),
+          slashCommands: parseClaudeInitializationCommands(init.commands),
+          ...(usage ? { usage } : {}),
+        } satisfies ClaudeCapabilitiesProbe;
+      }),
+    ),
     Effect.ensuring(
       Effect.sync(() => {
         if (!abort.signal.aborted) abort.abort();
       }),
     ),
-    Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS + CLAUDE_USAGE_LOOKUP_TIMEOUT_MS + 2_000),
     Effect.result,
-    Effect.map((result) => {
-      if (Result.isFailure(result)) return undefined;
-      return Option.isSome(result.success) ? result.success.value : undefined;
-    }),
+    Effect.map((result) => (Result.isSuccess(result) ? result.success : undefined)),
   );
 };
 

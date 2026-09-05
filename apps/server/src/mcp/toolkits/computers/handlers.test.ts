@@ -120,6 +120,8 @@ function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
       dispatched.push(command);
       return Effect.succeed({ sequence: 11 });
     },
+    readThreadEvents: () => Stream.empty,
+    getThreadReplayStats: () => Effect.die("unused thread replay stats"),
     streamDomainEvents: Stream.empty,
     subscribeDomainEvents: Effect.succeed(Stream.empty),
     latestSequence: Effect.succeed(10),

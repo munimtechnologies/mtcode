@@ -1,99 +1,58 @@
-# Review usage
+# Usage and limits
 
-The Usage page combines Claude Code, Codex, Cursor, Grok, and OpenCode activity
-from your connected environments. It shows API-equivalent token cost, processed
-tokens, cache savings, provider shares, and model breakdowns. Subscription
-billing is separate from the raw token cost shown here. If the model rate table
-cannot be loaded, the page says cost is unavailable instead of $0.00. Token
-counts are still valid.
+## Understand your usage
 
-Grok Build totals come from persisted session updates. Interactive turns that never wrote a
-completed-turn record will not appear.
+**Usage** combines Codex, Claude Code, and Grok Build session history from your connected
+environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
+cost. These estimates are not your subscription bill.
 
-| Provider    | Source                                                                                |
-| ----------- | ------------------------------------------------------------------------------------- |
-| Claude Code | Local Claude session transcripts under the Claude home                                |
-| Codex       | Local Codex session transcripts under the Codex home                                  |
-| Grok        | Local Grok Build session transcripts under the Grok home                              |
-| Cursor      | Cursor dashboard usage export (requires Cursor desktop signed in on that environment) |
-| OpenCode    | Local OpenCode SQLite databases under the OpenCode data directory                     |
+Totals depend on the history available on each server. Grok turns without a saved completed-turn
+record are missing from the totals.
 
-Totals include work done outside T3 Code when the provider writes its own
-session history (Claude, Codex, Grok, and OpenCode) or when Cursor reports
-usage for the signed-in desktop account.
+On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
+environments are selected by default. The dropdown shows which environments are still scanning;
+results appear as each one responds.
 
-Prompt text, responses, and tool output are not sent to the client; environments
-return only aggregated usage totals. When a provider records a cost, T3 Code uses
-it. Otherwise, it estimates cost from the available model rate table and marks
-models it cannot price.
+If recent work is missing or a new model shows no cost, refresh to rescan session history and
+update model pricing.
 
-Results appear as each environment responds. An environment that cannot report within 30 seconds is marked unavailable without hiding results from other environments; use **Refresh** to retry.
+## Set custom model prices
 
-Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period.
-The **7 days**, **30 days**, and **90 days** ranges use daily resolution.
-**All** scans local provider history from 2020-01-01 onward. Cost and token
-toggles update both the headline and chart, and refreshing rescans every
-connected environment.
+On web or desktop, open the environment dropdown on **Usage**, then choose **Model prices** to add,
+edit, or reset a model's estimated price. **Apply to** starts with your current Usage filter;
+choose all environments or select individual destinations. Enter the exact model ID and USD
+rates per million input and output tokens. You can enter any model ID, including models
+without public pricing.
 
-The **Limits** strip (and the Usage button hover) shows remaining subscription
-windows when a provider reports them: Claude Code's 5-hour and weekly buckets,
-Codex's rolling windows, and Cursor's monthly Auto / API pools plus the
-included-spend cap. Cursor limits use the same signed-in desktop session as
-the usage export.
+Cache read and cache write rates are optional and use the input rate when blank. Enter `0` for
+tokens that are free. Saved prices replace automatic pricing for all of that environment's
+history and are shared with clients connected to it. When environments have different prices,
+cells show **Mixed**. Edit rates directly in the table, then choose **Save changes** to apply all
+edited rows. Untouched cells keep each environment's rate. Select one environment to inspect its
+prices. **Reset to automatic** marks a model's override for removal when you save; you can undo
+it before saving.
 
-Cost figures are API-equivalent estimates from provider-reported dollars when
-present, otherwise from a shared model rate table. They are not subscription
-charges. Cursor rows billed as included on the plan still contribute tokens and
-are priced at API-equivalent rates: Cursor's published Auto Cost / Composer /
-Grok rates for those product models, and the underlying model API rate for
-third-party Cursor export names (effort and thinking suffixes stripped). Auto
-Balance / Intelligence may differ from Auto Cost when Cursor routed to another
-model — the export does not say which Auto mode ran.
+Each destination reports whether the change saved. Offline or unavailable environments are
+marked **Not saved**. Reconnect them and choose **Retry failed saves** to finish the same change
+without writing again to environments that already saved. Changes are not queued after you close
+the dialog.
 
-When multiple connected environments point to the same provider data on one
-machine, T3 Code counts that source once to avoid duplicate totals.
+## Track subscription limits
 
-## Cursor coverage
+**Usage → Limits** shows quota use and reset times for Codex and Claude subscriptions. It also
+compares quota consumed with time elapsed in each window, so you can judge your pace before the
+next reset.
 
-Cursor agent transcripts on disk do not include token counts. T3 Code reads
-usage from Cursor's own export when the environment machine has Cursor desktop
-installed and signed in. That uses the desktop session on the machine running
-the T3 Code server — the same host-trust model as scanning Claude or Codex
-homes. Any client paired to that environment can see the resulting usage.
-Environments without that desktop login show Cursor as uncovered and still
-report Claude, Codex, Grok, and OpenCode normally. The Limits strip also stays
-empty for Cursor on those environments until a desktop session is available.
+If a window looks stale, refresh Limits to re-check every provider and hub.
 
-## OpenCode coverage
+API-key accounts may not report subscription limits. This also applies to Claude connections
+using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
-For OpenCode, T3 Code honors `OPENCODE_DB` and discovers databases created by
-channel installs in OpenCode's data directory. In-memory OpenCode databases
-cannot be inspected by another process.
+## Connect a CLIProxyAPI hub
 
-## Grok coverage
+To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the
+environment that will connect to the hub and enter its URL and management key.
 
-Grok Build writes session updates to `~/.grok/sessions/**/updates.jsonl`. Set
-`GROK_HOME` to scan a non-default Grok home directory.
-The **Limits** view shows how much of each subscription window you have used on Codex and Claude
-Code, per connected environment: the session and weekly windows, plus a per-model weekly window
-such as Fable when your plan has one. Each window is a bar from the moment it opened to its reset,
-filled by the share of quota spent; a thin line marks how far into the window you are, which is
-also where even spending would have put the fill, and the icon beside the label says whether you
-are ahead of, on, or under that pace. Hover a bar for the exact reset time. Limits refresh on the
-provider health-check interval and update live while a turn runs. API-key accounts have no
-subscription windows and say so; that includes a Claude Code that reaches Anthropic through a proxy
-via `ANTHROPIC_AUTH_TOKEN`, since the CLI then treats itself as an API-key client.
-
-If you pool accounts behind a CLIProxyAPI hub, **Add hub** on the Limits view shows the accounts
-the hub manages. Each row shows its provider and instance name, or a small _CLI Proxy_ label for
-hub accounts. When a connected provider reports limits for the same provider and email, its row
-replaces the hub copy, keeping details such as banked reset credits. The hub copy remains visible
-if the connected provider cannot report limits. Enter the hub's URL and management key; the key
-is stored on the server and never sent back to a client. Emails are blurred until clicked, as in
-provider settings.
-
-Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period. The **7 days**,
-**30 days**, and **90 days** ranges use daily resolution. Cost and token toggles update both the
-headline and chart. Refreshing rescans every connected environment and refetches model pricing on
-each of them, so a newly released model that showed $0.00 gets a price without waiting for the daily
-pricing update.
+The accounts appear under **Usage → Limits**. This connection supplies usage information; configure
+the provider separately to send agent requests through the hub. Remove the hub from the same
+settings section when you no longer need it.

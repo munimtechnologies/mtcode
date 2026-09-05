@@ -26,7 +26,6 @@ import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
 import {
   getEnvironmentUsageLoadingState,
-  resolveEnvironmentUsageScope,
   type EnvironmentUsageOption,
 } from "./usageEnvironmentScope";
 
@@ -96,8 +95,8 @@ export interface UsageView {
   readonly options: readonly EnvironmentUsageOption[];
   /** Coverage entries in the active filter. */
   readonly environments: readonly EnvironmentUsageStatus[];
-  readonly selectedEnvironmentId: EnvironmentId | null;
-  /** True until at least one connected environment has answered. */
+  readonly selectedEnvironments: readonly EnvironmentUsageStatus[];
+  /** True until at least one selected environment has answered. */
   readonly isPending: boolean;
   readonly isPartial: boolean;
   readonly refresh: () => void;
@@ -105,9 +104,9 @@ export interface UsageView {
 
 export function useUsage(
   input: UsageSummaryInput,
-  selectedEnvironmentId: EnvironmentId | null,
+  selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null = null,
 ): UsageView {
-  const key = useMemo(
+  const windowKey = useMemo(
     () =>
       JSON.stringify({
         input: {
@@ -130,15 +129,18 @@ export function useUsage(
       input.clientContractVersion,
     ],
   );
-  const atom = usageByWindowAtom(key);
+  const atom = usageByWindowAtom(windowKey);
   const value = useAtomValue(atom);
-  const scope = resolveEnvironmentUsageScope(value.options, selectedEnvironmentId);
-  const environments = useMemo(() => {
-    if (scope.selectedEnvironmentId === null) return value.environments;
-    return value.environments.filter(
-      (environment) => environment.environmentId === scope.selectedEnvironmentId,
-    );
-  }, [scope.selectedEnvironmentId, value.environments]);
+  const environments = value.environments;
+  const selectedEnvironments = useMemo(
+    () =>
+      selectedEnvironmentIds === null
+        ? environments
+        : environments.filter((environment) =>
+            selectedEnvironmentIds.has(environment.environmentId),
+          ),
+    [environments, selectedEnvironmentIds],
+  );
 
   // Refreshing only the derived atom would re-read the per-environment SWR
   // queries within their stale window and change nothing. Refresh each
@@ -148,8 +150,8 @@ export function useUsage(
   // its last daily fetch gets priced by the rescan. The rescan runs whether or
   // not the refetch succeeds: an offline environment still recounts tokens.
   const refresh = useCallback(() => {
-    const { input } = JSON.parse(key) as UsageAtomKey;
-    for (const environment of environments) {
+    const { input } = JSON.parse(windowKey) as UsageAtomKey;
+    for (const environment of selectedEnvironments) {
       if (environment.phase !== "connected") continue;
       const { environmentId } = environment;
       const query = serverEnvironment.usageSummary({ environmentId, input });
@@ -160,10 +162,10 @@ export function useUsage(
         { reportFailure: false },
       ).finally(() => appAtomRegistry.refresh(query));
     }
-  }, [environments, key]);
+  }, [selectedEnvironments, windowKey]);
 
   const merged = useMemo(() => {
-    const answered: EnvironmentUsage[] = environments.flatMap((environment) =>
+    const answered: EnvironmentUsage[] = selectedEnvironments.flatMap((environment) =>
       environment.summary === null
         ? []
         : [
@@ -175,15 +177,15 @@ export function useUsage(
           ],
     );
     return mergeUsage(answered, USAGE_CONTRACT_VERSION);
-  }, [environments]);
+  }, [selectedEnvironments]);
 
-  const loadingState = getEnvironmentUsageLoadingState(environments);
+  const loadingState = getEnvironmentUsageLoadingState(selectedEnvironments);
 
   return {
     merged,
     options: value.options,
     environments,
-    selectedEnvironmentId: scope.selectedEnvironmentId,
+    selectedEnvironments,
     isPending: !value.isCatalogReady || loadingState.isPending,
     isPartial: loadingState.isPartial,
     refresh,

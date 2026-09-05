@@ -30,6 +30,7 @@ import {
 import {
   type DesktopWslState,
   type EnvironmentId,
+  type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
   type SourceControlDiscoveryResult,
@@ -77,6 +78,7 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useStartComputerThread } from "../hooks/useStartComputerThread";
+import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
@@ -228,6 +230,7 @@ function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
 interface AddProjectEnvironmentOption {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  readonly machine: EnvironmentMachineKind;
   readonly isPrimary: boolean;
   readonly isConnected: boolean;
   readonly status: string;
@@ -537,7 +540,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(open);
         }}
       >
-        {children}
+        {/* Block background focus calls for the entire time the palette is open. */}
+        <div className="contents" inert={state.open}>
+          {children}
+        </div>
         <CommandPaletteDialog
           mode={state.mode}
           openIntent={state.openIntent}
@@ -664,11 +670,15 @@ function OpenCommandPaletteDialog(props: {
           ),
           retainTerminalOnBranchMismatch: activeThread.worktreePath === null,
         })?.url ?? null);
+  const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(
+    activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
+  );
   const activeThreadReferenceCopyTarget =
     activeThread == null
       ? null
       : resolveThreadReferenceCopyTarget({
           threadId: activeThread.id,
+          openPanelPullRequestUrl,
           linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
           detectedPullRequestUrl,
         });
@@ -875,6 +885,7 @@ function OpenCommandPaletteDialog(props: {
           runtimeLabel: environment.label,
         }),
         isPrimary,
+        machine: resolveEnvironmentMachineKind(environment.serverConfig),
         isConnected: canCreateProjectInEnvironment(environment.connection.phase),
         status: connectionStatusText(environment.connection),
       };
@@ -1562,7 +1573,7 @@ function OpenCommandPaletteDialog(props: {
           : option.environmentId
         : option.status,
       disabled: !option.isConnected,
-      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      icon: <EnvironmentMachineIcon kind={option.machine} className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
         startAddProjectSourceSelection(option.environmentId);
@@ -2485,19 +2496,20 @@ function OpenCommandPaletteDialog(props: {
       context: { modelPickerOpen: false },
     });
     if (threadJumpIndexFromCommand(command ?? "") !== null) {
+      event.preventDefault();
+      event.stopPropagation();
       const matchingItem = displayedGroups
         .flatMap((group) => group.items)
         .find((item) => item.shortcutCommand === command);
       if (matchingItem) {
-        event.preventDefault();
-        event.stopPropagation();
         executeItem(matchingItem);
-        return;
       }
+      return;
     }
-    if (command === "thread.copyReference" && activeThreadReferenceCopyTarget !== null) {
+    if (command === "thread.copyReference") {
       event.preventDefault();
       event.stopPropagation();
+      if (activeThreadReferenceCopyTarget === null) return;
       setOpen(false);
       void copyActiveThreadReference();
       return;

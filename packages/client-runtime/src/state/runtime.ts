@@ -53,6 +53,10 @@ interface EnvironmentQueryAtomOptions<Input, A, E, R> extends EnvironmentAtomOpt
   readonly idleTtlMs?: number;
   readonly refreshIntervalMs?: number;
   readonly timeout?: Duration.Input;
+  readonly refreshTrigger?: (target: {
+    readonly environmentId: EnvironmentIdType;
+    readonly input: Input;
+  }) => Atom.Atom<unknown> | undefined;
 }
 
 interface EnvironmentSubscriptionAtomOptions<Input, A, E, R> {
@@ -577,10 +581,15 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         }),
         Atom.setIdleTTL(idleTtlMs),
       );
-    return (
+    const intervalQuery =
       options.refreshIntervalMs === undefined
         ? queryAtom
-        : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
+        : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs));
+    const refreshTrigger = options.refreshTrigger?.(target);
+    return (
+      refreshTrigger === undefined
+        ? intervalQuery
+        : intervalQuery.pipe(Atom.makeRefreshOnSignal(refreshTrigger))
     ).pipe(Atom.setIdleTTL(idleTtlMs), Atom.withLabel(`${options.label}:${key}`));
   });
   return (target) => family(environmentRpcKey(target));
@@ -628,6 +637,10 @@ export function createEnvironmentRpcQueryAtomFamily<R, ER, TTag extends Environm
     readonly idleTtlMs?: number;
     readonly refreshIntervalMs?: number;
     readonly timeout?: Duration.Input;
+    readonly refreshTrigger?: (target: {
+      readonly environmentId: EnvironmentIdType;
+      readonly input: EnvironmentRpcInput<TTag>;
+    }) => Atom.Atom<unknown> | undefined;
   },
 ) {
   return createEnvironmentQueryAtomFamily(runtime, {
@@ -638,6 +651,7 @@ export function createEnvironmentRpcQueryAtomFamily<R, ER, TTag extends Environm
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),
     ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+    ...(options.refreshTrigger === undefined ? {} : { refreshTrigger: options.refreshTrigger }),
     execute: (input: EnvironmentRpcInput<TTag>) => request(options.tag, input),
   });
 }
