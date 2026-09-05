@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as StatusRouteImport } from './routes/status'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -39,6 +40,11 @@ import { Route as SettingsPluginsPluginIdRouteImport } from './routes/settings.p
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
   path: '/usage',
@@ -192,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
   '/usage': typeof UsageRoute
+  '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/connect/callback': typeof ConnectCallbackRoute
   '/dev/goal-chips': typeof DevGoalChipsRoute
@@ -221,6 +228,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
   '/usage': typeof UsageRoute
+  '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/connect/callback': typeof ConnectCallbackRoute
   '/dev/goal-chips': typeof DevGoalChipsRoute
@@ -253,6 +261,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/status': typeof StatusRoute
   '/usage': typeof UsageRoute
+  '/welcome': typeof WelcomeRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/connect_/callback': typeof ConnectCallbackRoute
   '/dev/goal-chips': typeof DevGoalChipsRoute
@@ -286,6 +295,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/status'
     | '/usage'
+    | '/welcome'
     | '/pull-requests'
     | '/connect/callback'
     | '/dev/goal-chips'
@@ -315,6 +325,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/status'
     | '/usage'
+    | '/welcome'
     | '/pull-requests'
     | '/connect/callback'
     | '/dev/goal-chips'
@@ -346,6 +357,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/status'
     | '/usage'
+    | '/welcome'
     | '/_chat/pull-requests'
     | '/connect_/callback'
     | '/dev/goal-chips'
@@ -378,6 +390,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRouteWithChildren
   StatusRoute: typeof StatusRoute
   UsageRoute: typeof UsageRoute
+  WelcomeRoute: typeof WelcomeRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
   DevGoalChipsRoute: typeof DevGoalChipsRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
@@ -385,6 +398,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/usage': {
       id: '/usage'
       path: '/usage'
@@ -656,6 +676,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRouteWithChildren,
   StatusRoute: StatusRoute,
   UsageRoute: UsageRoute,
+  WelcomeRoute: WelcomeRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
   DevGoalChipsRoute: DevGoalChipsRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,

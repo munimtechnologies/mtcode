@@ -17,10 +17,23 @@ const noCorrection = {
 } as const;
 
 layer("ProjectionThreadMessageRepository", (it) => {
-  it.effect("finds the latest user-message time within one thread", () =>
+  it.effect("finds the latest live user-message time within one thread", () =>
     Effect.gen(function* () {
       const repository = yield* ProjectionThreadMessageRepository;
       const threadId = ThreadId.make("thread-latest-user-message");
+      assert.isNull(yield* repository.getLatestUserMessageAt({ threadId }));
+
+      yield* repository.upsert({
+        messageId: MessageId.make("import:codex:latest-user-message:000000"),
+        threadId,
+        turnId: null,
+        role: "user",
+        ...noCorrection,
+        text: "Imported prompt",
+        isStreaming: false,
+        createdAt: "2026-02-28T19:05:06.000Z",
+        updatedAt: "2026-02-28T19:05:06.000Z",
+      });
       assert.isNull(yield* repository.getLatestUserMessageAt({ threadId }));
 
       const messages = [

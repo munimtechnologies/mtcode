@@ -17,6 +17,8 @@ import {
   isCorrectionMessage,
   reconcileThreadMessageCorrections,
 } from "@t3tools/contracts";
+import { isImportedAgentSessionMessageId } from "@t3tools/contracts";
+import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
 
 export type ThreadDetailReducerResult =
   | { readonly kind: "updated"; readonly thread: OrchestrationThread }
@@ -910,7 +912,7 @@ function retainMessagesAfterRevert(
     if (message.deliveryState === "queued") {
       continue;
     }
-    if (message.role === "system") {
+    if (message.role === "system" || isImportedAgentSessionMessageId(message.id)) {
       retainedMessageIds.add(message.id);
       continue;
     }
@@ -937,7 +939,8 @@ function retainMessagesAfterRevert(
         )
         .toSorted(
           (left, right) =>
-            left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            compareDateTimeStrings(left.createdAt, right.createdAt) ||
+            left.id.localeCompare(right.id),
         )
         .at(-1)
     : undefined;
@@ -957,6 +960,7 @@ function retainMessagesAfterRevert(
     (message) =>
       message.role === "user" &&
       !isCorrectionMessage(message) &&
+      !isImportedAgentSessionMessageId(message.id) &&
       retainedMessageIds.has(message.id),
   ).length;
   const missingUserCount = Math.max(0, turnCount - retainedUserCount);
@@ -971,14 +975,17 @@ function retainMessagesAfterRevert(
     )
     .toSorted(
       (left, right) =>
-        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+        compareDateTimeStrings(left.createdAt, right.createdAt) || left.id.localeCompare(right.id),
     )
     .slice(0, missingUserCount)) {
     retainedMessageIds.add(message.id);
   }
 
   const retainedAssistantCount = messages.filter(
-    (message) => message.role === "assistant" && retainedMessageIds.has(message.id),
+    (message) =>
+      message.role === "assistant" &&
+      !isImportedAgentSessionMessageId(message.id) &&
+      retainedMessageIds.has(message.id),
   ).length;
   const missingAssistantCount = Math.max(0, turnCount - retainedAssistantCount);
   for (const message of messages
@@ -990,7 +997,7 @@ function retainMessagesAfterRevert(
     )
     .toSorted(
       (left, right) =>
-        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+        compareDateTimeStrings(left.createdAt, right.createdAt) || left.id.localeCompare(right.id),
     )
     .slice(0, missingAssistantCount)) {
     retainedMessageIds.add(message.id);

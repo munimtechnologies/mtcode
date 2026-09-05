@@ -189,6 +189,7 @@ import {
   openFileInPreview,
   openUrlInPreview,
   BrowserPreviewUnavailableError,
+  BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
@@ -2391,6 +2392,18 @@ function useChatMarkdownState({
       }
       return openUrlInPreview({ threadRef, url, openPreview }).then((result) => {
         if (result._tag === "Success") recordVisitForThread(threadRef, url);
+        else if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          if (error instanceof BrowserSettingsReadError) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Unable to open link in browser",
+                description: error.message,
+              }),
+            );
+          }
+        }
         return result;
       });
     },
@@ -2889,14 +2902,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
             }
             event.preventDefault();
             event.stopPropagation();
-            // The click was taken from the shell, so an in-app open that fails
-            // hands the link to the system browser instead of dropping it.
+            // Keep the link here if saved settings could not be read.
             void openExternalLinkInPreview(href).then((result) => {
               if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
               reportMarkdownActionFailure(
                 { operation: "open-link-in-preview", target: href },
                 result.cause,
               );
+              if (squashAtomCommandFailure(result) instanceof BrowserSettingsReadError) return;
               void readLocalApi()?.shell.openExternal(href);
             });
           }}
