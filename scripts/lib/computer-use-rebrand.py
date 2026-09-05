@@ -40,6 +40,8 @@ REPLACEMENTS = [
     ("T3 toolbar logo", "MT toolbar logo"),
     ("T3 logo", "MT logo"),
     ("T3 Code", "MT Code"),
+    # the public tree is Apache-2.0 (the monorepo crate says MIT)
+    ('license = "MIT"', 'license = "Apache-2.0"'),
 ]
 TEXT_EXT = {".swift", ".rs", ".js", ".json", ".sh", ".ps1", ".toml", ".md", ".txt", ".yml", ".yaml", ".lock", ".cjs", ".mjs", ".html", ".css", ".plist", ".dockerfile", ""}
 

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.munimtechnologies/computer-use",
+  "title": "Computer Use",
+  "description": "Accessibility-first desktop control for any agent: background input, agent pointer, zoom, Chrome.",
+  "repository": {
+    "url": "https://github.com/munimtechnologies/computer-use",
+    "source": "github"
+  },
+  "websiteUrl": "https://munimtech.com/computer-use",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "munim-computer-use",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "COMPUTER_USE_BROWSER",
+          "description": "Set to 0 to hide the browser_* tools",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "COMPUTER_USE_AGENT_CURSOR",
+          "description": "Set to 0 to disable the agent pointer overlay",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "munim-computer-use",
+  "version": "0.1.0",
+  "description": "Computer Use MCP server for any coding agent — accessibility-first desktop control on macOS, Windows and Linux, background input, agent pointer, zoom, your signed-in Chrome. Downloads the signed native binary from GitHub Releases on first run.",
+  "keywords": [
+    "accessibility",
+    "agents",
+    "claude-code",
+    "codex",
+    "computer-use",
+    "cursor",
+    "desktop-automation",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol"
+  ],
+  "homepage": "https://munimtech.com/computer-use",
+  "bugs": "https://github.com/munimtechnologies/computer-use/issues",
+  "license": "Apache-2.0",
+  "author": "Munim Technologies, Inc.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/munimtechnologies/computer-use.git"
+  },
+  "bin": {
+    "computer-use": "bin/computer-use.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "mcpName": "io.github.munimtechnologies/computer-use"
+}

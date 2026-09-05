@@ -1,13 +1,64 @@
-# Computer Use
+<p align="center">
+  <a href="https://github.com/munimtechnologies/computer-use">
+    <h1 align="center">Computer Use</h1>
+  </a>
+</p>
 
-[![Release](https://img.shields.io/github/v/release/munimtechnologies/computer-use?label=release)](https://github.com/munimtechnologies/computer-use/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/MCP-stdio%20server-8A2BE2)](https://modelcontextprotocol.io)
-![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+<p align="center">
+  <a aria-label="Latest release" href="https://github.com/munimtechnologies/computer-use/releases/latest" target="_blank">
+    <img alt="Latest release" src="https://img.shields.io/github/v/release/munimtechnologies/computer-use?style=flat-square&label=Version&labelColor=000000&color=0066CC" />
+  </a>
+  <a aria-label="License" href="https://github.com/munimtechnologies/computer-use/blob/main/LICENSE" target="_blank">
+    <img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache%202.0-success.svg?style=flat-square&color=33CC12" />
+  </a>
+  <a aria-label="MCP" href="https://modelcontextprotocol.io" target="_blank">
+    <img alt="MCP stdio server" src="https://img.shields.io/badge/MCP-stdio%20server-8A2BE2?style=flat-square" />
+  </a>
+  <img alt="Platforms" src="https://img.shields.io/badge/Platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" />
+</p>
 
-**Let any coding agent use your computer.** An open-source [MCP](https://modelcontextprotocol.io) server that reads the screen through accessibility trees, clicks and types _in the background_ so your mouse stays yours, shows an agent pointer where it is working, zooms in on small text, and drives tabs in your signed-in Chrome — on **macOS, Windows and Linux**.
+<p align="center">
+  <a aria-label="download" href="https://github.com/munimtechnologies/computer-use/releases/latest"><b>Download</b></a>
+&ensp;•&ensp;
+  <a aria-label="documentation" href="https://github.com/munimtechnologies/computer-use#readme">Read the Documentation</a>
+&ensp;•&ensp;
+  <a aria-label="report issues" href="https://github.com/munimtechnologies/computer-use/issues">Report Issues</a>
+&ensp;•&ensp;
+  <a aria-label="website" href="https://munimtech.com/computer-use">munimtech.com/computer-use</a>
+</p>
 
-Works with **Claude Code, Codex, Cursor, [MT Code](https://munimtech.com/mt-code)** and any other MCP client. Made by [Munim Technologies](https://munimtech.com/computer-use).
+<h6 align="center">Follow Munim Technologies</h6>
+<p align="center">
+  <a aria-label="Follow Munim Technologies on GitHub" href="https://github.com/munimtechnologies" target="_blank">
+    <img alt="Munim Technologies on GitHub" src="https://img.shields.io/badge/GitHub-222222?style=for-the-badge&logo=github&logoColor=white" />
+  </a>&nbsp;
+  <a aria-label="Follow Munim Technologies on LinkedIn" href="https://linkedin.com/in/sheehanmunim" target="_blank">
+    <img alt="Munim Technologies on LinkedIn" src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" />
+  </a>&nbsp;
+  <a aria-label="Visit Munim Technologies Website" href="https://munimtech.com" target="_blank">
+    <img alt="Munim Technologies Website" src="https://img.shields.io/badge/Website-0066CC?style=for-the-badge&logo=globe&logoColor=white" />
+  </a>
+</p>
+
+## Introduction
+
+**Computer Use** is an open-source [MCP](https://modelcontextprotocol.io) server that lets any coding agent use your computer the way a person does. It reads the screen through accessibility trees, clicks and types **in the background** so your mouse stays yours, shows an agent pointer where it is working, zooms in on small text, and drives tabs in your signed-in Chrome — on **macOS, Windows and Linux**.
+
+**Works with Claude Code, Codex, Cursor and [MT Code](https://munimtech.com/mt-code)**, or any other MCP client, with any model — no vision model is required for interaction.
+
+**Built by [Munim Technologies](https://munimtech.com/computer-use)** as the Computer Use engine of MT Code, and published here on its own.
+
+## Table of contents
+
+- [Quick start](#quick-start)
+- [Capability matrix](#capability-matrix)
+- [Why it works well](#why-it-works-well)
+- [Tools](#tools-26)
+- [Repository layout](#repository-layout)
+- [Environment flags](#environment-flags)
+- [Prompting your agent](#prompting-your-agent)
+- [Contributing](#contributing)
+- [Credits and license](#credits-and-license)
 
 ## Quick start
 
@@ -17,43 +68,48 @@ Works with **Claude Code, Codex, Cursor, [MT Code](https://munimtech.com/mt-code
 4. Register it with your agent:
 
 ```sh
-# Claude Code
+# Claude Code — fastest: the npm launcher fetches the signed binary on first run
+claude mcp add computer-use -- npx -y munim-computer-use
+# or point at a downloaded binary
 claude mcp add computer-use -- /usr/local/bin/computer-use
 ```
 
 ```toml
 # Codex — ~/.codex/config.toml
 [mcp_servers.computer-use]
-command = "/usr/local/bin/computer-use"
+command = "npx"
+args = ["-y", "munim-computer-use"]
 ```
 
 ```json
 // Cursor — .cursor/mcp.json
-{ "mcpServers": { "computer-use": { "command": "/usr/local/bin/computer-use" } } }
+{ "mcpServers": { "computer-use": { "command": "npx", "args": ["-y", "munim-computer-use"] } } }
 ```
 
 Then ask: _"Open Safari, find the cheapest flight to Denver on Tuesday and put it in a note."_ The agent reads the UI with `get_app_state`, acts by element id, and verifies with `screenshot`.
 
-## How it compares
+## Capability matrix
 
-Every row below is taken from that project's own README in September 2026 (links at the bottom). "Background input" means the agent can act on a window while you keep using the mouse and keyboard elsewhere. "Coordinate mapping" means screenshots tell the model how image pixels map to screen coordinates, so clicks from a Retina or downscaled capture land where intended.
+Columns are the other computer-use servers people reach for; each cell comes from that project's own README in September 2026 (sources under [Credits and license](#credits-and-license)). ✅ present · ❌ absent or not documented · ⚠️ partial.
 
-|                                     | Platforms                       | Perceives UI via                                           | Background input                                          | Agent pointer         | Zoom + coordinate mapping | Your signed-in Chrome                       | Any MCP client  | Open source |
-| ----------------------------------- | ------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------- | --------------------- | ------------------------- | ------------------------------------------- | --------------- | ----------- |
-| **Computer Use (this)**             | macOS, Windows, Linux           | Accessibility tree with element ids, screenshots to verify | **Yes** — window-addressed events; your mouse never moves | **Yes**, soft overlay | **Yes**                   | **Yes** — own tab group in your real Chrome | Yes             | MIT         |
-| OpenAI Codex Computer Use           | macOS, Windows                  | Screenshots                                                | No — drives its own cursor on your screen                 | Yes                   | Model-side                | Codex in-app browser                        | No — Codex only | No          |
-| Anthropic computer-use reference    | Linux desktop in Docker         | Screenshots (xdotool)                                      | Sandbox only, not your desktop                            | No                    | `zoom` action             | No                                          | Claude only     | Yes         |
-| CursorTouch/Windows-MCP             | Windows                         | UIA snapshot + screenshots                                 | No                                                        | Capture border flash  | No                        | DOM mode for browsers                       | Yes             | MIT         |
-| CursorTouch/MacOS-MCP               | macOS                           | Accessibility tree                                         | No — moves the real mouse                                 | No                    | No                        | Scrape to Markdown only                     | Yes             | MIT         |
-| QwenLM/open-computer-use            | macOS, Windows, Linux           | Accessibility + screenshots                                | No — controls the real cursor                             | No                    | No                        | No                                          | Yes             | MIT         |
-| zavora-ai/computer-use-mcp          | macOS, Windows, Linux           | Screenshots + accessibility tree                           | No — SendInput / native input                             | No                    | No                        | No                                          | Yes             | MIT         |
-| mediar-ai/mcp-server-macos-use      | macOS                           | Accessibility tree                                         | No                                                        | No                    | No                        | No                                          | Yes             | Yes         |
-| deploymenttheory/windows-mcp-server | Windows                         | UIA tree, Invoke patterns                                  | Partly — Invoke needs no focus                            | No                    | No                        | Scrape only                                 | Yes             | Yes         |
-| nuphus-mcp                          | Windows, macOS, Linux (partial) | OCR + your own vision model                                | No                                                        | OSD bar               | No                        | Own or CDP-attached Chrome profile          | Yes             | MIT         |
-| computer-control-mcp                | macOS, Windows, Linux           | Screenshots + OCR (PyAutoGUI)                              | No — moves the real mouse                                 | No                    | No                        | No                                          | Yes             | MIT         |
-| microsoft/playwright-mcp            | Browser only                    | Accessibility snapshot                                     | n/a                                                       | n/a                   | n/a                       | Persistent Playwright profile               | Yes             | Apache-2.0  |
+| Capability                                  | Computer Use  | Codex Computer Use | Anthropic reference demo | Windows-MCP | MacOS-MCP | open-computer-use | computer-use-mcp (zavora) | Notes                                                                                                                                                                         |
+| ------------------------------------------- | ------------- | ------------------ | ------------------------ | ----------- | --------- | ----------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS                                       | ✅            | ✅                 | ❌                       | ❌          | ✅        | ✅                | ✅                        | The Anthropic demo drives a Linux desktop inside Docker, not your machine.                                                                                                    |
+| Windows                                     | ✅            | ✅                 | ❌                       | ✅          | ❌        | ✅                | ✅                        | Windows-MCP is Windows only; MacOS-MCP is macOS only.                                                                                                                         |
+| Linux                                       | ✅            | ❌                 | ✅ (sandbox)             | ❌          | ❌        | ✅                | ✅                        | Computer Use uses AT-SPI + X11; native Wayland apps get element actions but not coordinate clicks.                                                                            |
+| Accessibility tree with element ids         | ✅            | ❌                 | ❌                       | ✅          | ✅        | ✅                | ✅                        | Codex and the Anthropic demo are screenshot-driven. Ids let the agent press _the button_ instead of a pixel.                                                                  |
+| Background input (your mouse never moves)   | ✅            | ❌                 | n/a                      | ❌          | ❌        | ❌                | ❌                        | Computer Use addresses events to the target window (SkyLight on macOS, posted window messages on Windows, XTEST on Linux). Every other desktop server drives the real cursor. |
+| Agent pointer overlay                       | ✅            | ✅                 | ❌                       | ⚠️          | ❌        | ❌                | ❌                        | Windows-MCP flashes a border around captures; Codex draws its own cursor on your screen.                                                                                      |
+| Zoom into a region at full resolution       | ✅            | ❌                 | ✅                       | ❌          | ❌        | ❌                | ❌                        | Anthropic's toolset has `zoom`; here it is a tool on every platform.                                                                                                          |
+| Screenshots carry screen-coordinate mapping | ✅            | n/a                | n/a                      | ❌          | ❌        | ❌                | ❌                        | Origin and pixels-per-point in every capture, so clicks from Retina or downscaled images land.                                                                                |
+| Hover, wait, label query                    | ✅            | ⚠️                 | ⚠️                       | ✅          | ⚠️        | ❌                | ⚠️                        | Windows-MCP has Wait/WaitFor; MacOS-MCP has Wait; Anthropic has `wait`/`mouse_move`.                                                                                          |
+| Your signed-in Chrome, own tab group        | ✅            | ⚠️                 | ❌                       | ⚠️          | ❌        | ❌                | ❌                        | Codex uses its in-app browser; Windows-MCP reads the DOM of open browsers. Computer Use opens its own labelled tab group in your real Chrome and never touches your tabs.     |
+| Works with any MCP client                   | ✅            | ❌                 | ❌                       | ✅          | ✅        | ✅                | ✅                        | Codex Computer Use is Codex only; the Anthropic demo is Claude only.                                                                                                          |
+| Identical tool surface on every platform    | ✅            | n/a                | n/a                      | n/a         | n/a       | ⚠️                | ✅                        | 26 tools with byte-identical schemas across the Swift and Rust servers.                                                                                                       |
+| Prebuilt signed binaries + npm launcher     | ✅            | ✅                 | ❌                       | ❌          | ❌        | ✅ (npm)          | ✅ (npm)                  | macOS universal (Developer ID signed) and Windows x64 on Releases.                                                                                                            |
+| Open source                                 | ✅ Apache-2.0 | ❌                 | ✅                       | ✅ MIT      | ✅ MIT    | ✅ MIT            | ✅ MIT                    |                                                                                                                                                                               |
 
-Where this server is unique: it is the only open-source option that combines accessibility-first perception, background input that leaves your mouse alone, an agent pointer, correct coordinate mapping, and your real signed-in browser — across all three desktop platforms, with one identical tool surface. Corrections welcome: open an issue with a link.
+Also looked at: [mediar-ai/mcp-server-macos-use](https://github.com/mediar-ai/mcp-server-macos-use) (macOS, accessibility, real input), [deploymenttheory/windows-mcp-server](https://github.com/deploymenttheory/windows-mcp-server) (Windows, UIA Invoke patterns, WaitFor), [nuphus-mcp](https://github.com/mrpulor-gh/nuphus-mcp) (OCR + bring-your-own vision model, CDP Chrome), [computer-control-mcp](https://github.com/AB498/computer-control-mcp) (PyAutoGUI + OCR), and [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp) (browser only). Corrections welcome — open an issue with a link.
 
 ## Why it works well
 
@@ -119,6 +175,6 @@ This repository mirrors the `native/` tree of [munimtechnologies/mtcode](https:/
 
 ## Credits and license
 
-Designed and built by [Munim Technologies, Inc.](https://munimtech.com) for MT Code. MIT licensed; see `LICENSE`.
+Designed and built by [Munim Technologies, Inc.](https://munimtech.com) for MT Code. Licensed under the Apache License 2.0; see `LICENSE`.
 
 Comparison sources: [Codex Computer Use](https://openai.com/index/codex-for-almost-everything/) · [Anthropic computer-use demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo) · [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) · [CursorTouch/MacOS-MCP](https://github.com/CursorTouch/MacOS-MCP) · [QwenLM/open-computer-use](https://github.com/QwenLM/open-computer-use) · [zavora-ai/computer-use-mcp](https://github.com/zavora-ai/computer-use-mcp) · [mediar-ai/mcp-server-macos-use](https://github.com/mediar-ai/mcp-server-macos-use) · [deploymenttheory/windows-mcp-server](https://github.com/deploymenttheory/windows-mcp-server) · [nuphus-mcp](https://github.com/mrpulor-gh/nuphus-mcp) · [computer-control-mcp](https://github.com/AB498/computer-control-mcp) · [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp)
