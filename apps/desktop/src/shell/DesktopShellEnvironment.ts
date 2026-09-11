@@ -16,6 +16,7 @@ import {
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import {
+  environmentNameKey,
   isImportableEnvironmentName,
   type ShellEnvironmentHarvest,
   type ShellEnvironmentMode,
@@ -230,8 +231,7 @@ const logShellEnvironmentCommandError = (
   );
 
 const FULL_ENVIRONMENT_MARKER = "*";
-const POSIX_ENTRY_DELIMITER = "\0";
-const WINDOWS_ENTRY_DELIMITER = "\n";
+const ENTRY_DELIMITER = "\0";
 
 const capturePosixEnvironmentCommand = (
   names: ReadonlyArray<string>,
@@ -269,7 +269,7 @@ const captureWindowsEnvironmentCommand = (
     ...(mode === "all"
       ? [
           `Write-Output '${startMarker(FULL_ENVIRONMENT_MARKER)}'`,
-          "Get-ChildItem Env: | ForEach-Object { Write-Output ($_.Name + '=' + $_.Value) }",
+          "Get-ChildItem Env: | ForEach-Object { [Console]::Out.Write($_.Name + '=' + $_.Value + [char]0) }",
           `Write-Output '${endMarker(FULL_ENVIRONMENT_MARKER)}'`,
         ]
       : []),
@@ -289,19 +289,25 @@ const extractMarkedSection = (output: string, name: string): string | null => {
     .replace(/\r?\n$/, "");
 };
 
-const extractFullEnvironment = (output: string, delimiter: string): EnvironmentPatch => {
-  const section = extractMarkedSection(output, FULL_ENVIRONMENT_MARKER);
-  if (section === null) return {};
+const extractFullEnvironment = (output: string): EnvironmentPatch => {
+  const opening = startMarker(FULL_ENVIRONMENT_MARKER);
+  const start = output.indexOf(opening);
+  if (start === -1) return {};
+
+  const end = output.lastIndexOf(endMarker(FULL_ENVIRONMENT_MARKER));
+  if (end <= start) return {};
+
+  const section = output
+    .slice(start + opening.length, end)
+    .replace(/^\r?\n/, "")
+    .replace(/\r?\n$/, "");
 
   const environment: EnvironmentPatch = {};
-  for (const entry of section.split(delimiter)) {
+  for (const entry of section.split(ENTRY_DELIMITER)) {
     const separator = entry.indexOf("=");
     if (separator <= 0) continue;
 
-    const value = entry.slice(separator + 1).replace(/\r$/, "");
-    if (value.length > 0) {
-      environment[entry.slice(0, separator)] = value;
-    }
+    environment[entry.slice(0, separator)] = entry.slice(separator + 1);
   }
 
   return environment;
@@ -311,10 +317,8 @@ const extractEnvironment = (
   output: string,
   names: ReadonlyArray<string>,
   mode: ShellEnvironmentMode,
-  delimiter: string,
 ): EnvironmentPatch => {
-  const environment: EnvironmentPatch =
-    mode === "all" ? extractFullEnvironment(output, delimiter) : {};
+  const environment: EnvironmentPatch = mode === "all" ? extractFullEnvironment(output) : {};
 
   for (const name of names) {
     const value = extractMarkedSection(output, name);
@@ -393,9 +397,7 @@ const readLoginShellEnvironment = (
         ],
         timeout: platform === "darwin" ? MACOS_LOGIN_SHELL_TIMEOUT : LOGIN_SHELL_TIMEOUT,
         ...(platform === "darwin" ? { forceKillAfter: MACOS_LOGIN_SHELL_TERMINATE_GRACE } : {}),
-      }).pipe(
-        Effect.map((output) => extractEnvironment(output, names, mode, POSIX_ENTRY_DELIMITER)),
-      );
+      }).pipe(Effect.map((output) => extractEnvironment(output, names, mode)));
 
 const readLaunchctlPath = runCommandOutput({
   probe: "launchctl-path",
@@ -426,7 +428,7 @@ const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEn
         args,
         timeout: LOGIN_SHELL_TIMEOUT,
       });
-      const environment = extractEnvironment(output, names, options.mode, WINDOWS_ENTRY_DELIMITER);
+      const environment = extractEnvironment(output, names, options.mode);
       if (Object.keys(environment).length > 0) {
         return environment;
       }
@@ -440,10 +442,16 @@ const applyHarvestedEnvironment = (input: {
   readonly env: NodeJS.ProcessEnv;
   readonly shellEnvironment: EnvironmentPatch;
   readonly governed: ReadonlyArray<string>;
+  readonly platform: NodeJS.Platform;
 }): void => {
-  const governed = new Set(input.governed);
+  const governed = new Set(input.governed.map((name) => environmentNameKey(name, input.platform)));
   for (const [name, value] of Object.entries(input.shellEnvironment)) {
-    if (governed.has(name) || !isImportableEnvironmentName(name) || value.length === 0) continue;
+    if (
+      governed.has(environmentNameKey(name, input.platform)) ||
+      !isImportableEnvironmentName(name, input.platform)
+    ) {
+      continue;
+    }
     input.env[name] = value;
   }
 };
@@ -463,7 +471,7 @@ const installWindowsEnvironment = Effect.fn("desktop.shellEnvironment.installWin
         readWindowsEnvironment(
           [
             ...WINDOWS_PROFILE_ENV_NAMES,
-            ...config.harvest.names.map((name) => name.toUpperCase()),
+            ...config.harvest.names.map((name) => environmentNameKey(name, "win32")),
           ],
           {
             loadProfile: true,
@@ -496,6 +504,7 @@ const installWindowsEnvironment = Effect.fn("desktop.shellEnvironment.installWin
       env: config.env,
       shellEnvironment: profile,
       governed: WINDOWS_PROFILE_ENV_NAMES,
+      platform: "win32",
     });
   },
 );
@@ -606,6 +615,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       env: config.env,
       shellEnvironment,
       governed: LOGIN_SHELL_ENV_NAMES,
+      platform: config.platform,
     });
   },
 );

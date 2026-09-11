@@ -25,7 +25,6 @@ import {
   DEFAULT_SHELL_ENVIRONMENT_HARVEST,
   normalizeShellEnvironmentMode,
   normalizeShellEnvironmentNames,
-  ShellEnvironmentModeSchema,
   type ShellEnvironmentMode,
 } from "../shell/shellEnvironmentHarvest.ts";
 import { resolveDefaultDesktopUpdateChannel } from "../updates/updateChannels.ts";
@@ -112,8 +111,8 @@ const DesktopSettingsDocument = Schema.Struct({
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
   serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
-  shellEnvironmentMode: Schema.optionalKey(ShellEnvironmentModeSchema),
-  shellEnvironmentNames: Schema.optionalKey(Schema.Array(Schema.String)),
+  shellEnvironmentMode: Schema.optionalKey(Schema.Unknown),
+  shellEnvironmentNames: Schema.optionalKey(Schema.Unknown),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
@@ -229,6 +228,7 @@ export function normalizeMainWindowBounds(value: unknown): DesktopWindowBounds |
 function normalizeDesktopSettingsDocument(
   parsed: DesktopSettingsDocument,
   appVersion: string,
+  platform: NodeJS.Platform,
   options?: { readonly singleReleaseChannel?: boolean },
 ): DesktopSettings {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion, options);
@@ -255,7 +255,7 @@ function normalizeDesktopSettingsDocument(
     serverExposureMode:
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     shellEnvironmentMode: normalizeShellEnvironmentMode(parsed.shellEnvironmentMode),
-    shellEnvironmentNames: normalizeShellEnvironmentNames(parsed.shellEnvironmentNames),
+    shellEnvironmentNames: normalizeShellEnvironmentNames(parsed.shellEnvironmentNames, platform),
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
     tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
     updateChannel: options?.singleReleaseChannel
@@ -423,6 +423,7 @@ function readSettings(
   fileSystem: FileSystem.FileSystem,
   settingsPath: string,
   appVersion: string,
+  platform: NodeJS.Platform,
   options?: { readonly singleReleaseChannel?: boolean },
 ): Effect.Effect<DesktopSettings> {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion, options);
@@ -434,7 +435,9 @@ function readSettings(
         onNone: () => Effect.succeed(defaultSettings),
         onSome: (raw) =>
           decodeDesktopSettingsJson(raw).pipe(
-            Effect.map((parsed) => normalizeDesktopSettingsDocument(parsed, appVersion, options)),
+            Effect.map((parsed) =>
+              normalizeDesktopSettingsDocument(parsed, appVersion, platform, options),
+            ),
             Effect.orElseSucceed(() => defaultSettings),
           ),
       }),
@@ -551,6 +554,7 @@ export const make = Effect.gen(function* () {
         fileSystem,
         environment.desktopSettingsPath,
         environment.appVersion,
+        environment.platform,
         { singleReleaseChannel },
       );
       return yield* SynchronizedRef.setAndGet(settingsRef, settings);
