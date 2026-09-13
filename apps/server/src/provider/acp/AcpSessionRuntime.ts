@@ -556,6 +556,10 @@ export const make = (
             return;
           }
           yield* processSessionUpdate(notification);
+          // A provider can flush text after its prompt-completion notification.
+          if (Option.isNone(yield* Ref.get(activePromptRef))) {
+            yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
+          }
         }),
       ),
     );
@@ -1043,6 +1047,9 @@ export const make = (
                 }
                 yield* Fiber.interrupt(activePrompt.fiber).pipe(Effect.ignore);
                 yield* Ref.set(activePromptRef, Option.none());
+                // An extension completion can interrupt the RPC before its success tap.
+                // Close its item now so the next prompt cannot complete it under another turn.
+                yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
                 yield* Deferred.succeed(activePrompt.completed, undefined);
               }),
           ),
