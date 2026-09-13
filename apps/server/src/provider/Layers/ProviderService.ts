@@ -914,6 +914,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     const capabilities = new Set<McpInvocationContext.McpCapability>([
       "pull-requests",
       "thread-reference",
+      "worktree",
     ]);
     const access = yield* agentAccessSettings(threadId);
     if (access.browser) capabilities.add("preview");
