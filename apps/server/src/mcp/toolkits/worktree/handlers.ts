@@ -2,6 +2,7 @@ import { CommandId, type ThreadId, type VcsRepositoryIdentity } from "@t3tools/c
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
@@ -18,6 +19,7 @@ import {
 
 const make = Effect.gen(function* () {
   const path = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
@@ -29,12 +31,19 @@ const make = Effect.gen(function* () {
       Effect.map((uuid) => CommandId.make(`server:mcp-worktree-handoff:${threadId}:${uuid}`)),
     );
 
+  // Symlinked or 8.3 short paths must compare equal to their long form.
+  const canonical = (target: string) =>
+    fileSystem.realPath(target).pipe(
+      Effect.orElseSucceed(() => target),
+      Effect.map((resolved) => path.normalize(resolved)),
+    );
+
   // Git reports the common dir relative to the root for a main checkout and
   // absolute for a linked worktree.
-  const commonDirOf = (repository: VcsRepositoryIdentity): string | null =>
+  const commonDirOf = (repository: VcsRepositoryIdentity) =>
     repository.metadataPath === null
-      ? null
-      : path.normalize(path.resolve(repository.rootPath, repository.metadataPath));
+      ? Effect.succeed(null)
+      : canonical(path.resolve(repository.rootPath, repository.metadataPath));
 
   const detectGit = (cwd: string, detail: string) =>
     vcsRegistry.detect({ cwd, requestedKind: "git" }).pipe(
@@ -74,15 +83,15 @@ const make = Effect.gen(function* () {
           project.value.workspaceRoot,
           "This thread's project is not a git repository.",
         );
-        const worktreePath = path.normalize(target.repository.rootPath);
-        if (worktreePath === path.normalize(home.repository.rootPath)) {
+        const worktreePath = yield* canonical(target.repository.rootPath);
+        if (worktreePath === (yield* canonical(home.repository.rootPath))) {
           return yield* new WorktreeHandoffPathInvalidError({
             detail:
               "That is the project's own checkout, which this thread uses when it has no worktree.",
           });
         }
-        const targetCommonDir = commonDirOf(target.repository);
-        if (targetCommonDir === null || targetCommonDir !== commonDirOf(home.repository)) {
+        const targetCommonDir = yield* commonDirOf(target.repository);
+        if (targetCommonDir === null || targetCommonDir !== (yield* commonDirOf(home.repository))) {
           return yield* new WorktreeHandoffPathInvalidError({
             detail: `${input.path} is not a worktree of this thread's project repository.`,
           });

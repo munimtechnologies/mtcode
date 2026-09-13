@@ -1,4 +1,5 @@
 import { McpCapabilityUnavailableError, TrimmedNonEmptyString } from "@t3tools/contracts";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Tool from "effect/unstable/ai/Tool";
@@ -14,6 +15,7 @@ const dependencies = [
   OrchestrationEngine.OrchestrationEngineService,
   ProjectionSnapshotQuery.ProjectionSnapshotQuery,
   VcsDriverRegistry.VcsDriverRegistry,
+  FileSystem.FileSystem,
   Path.Path,
 ];
 
