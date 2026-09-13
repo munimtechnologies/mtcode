@@ -226,7 +226,7 @@ interface OpenCodePromptAdmission {
   readonly generation: number;
   readonly turnId: TurnId;
   readonly messageId: string;
-  readonly requiresMessageReceipt: boolean;
+  requiresMessageReceipt: boolean;
   readonly priorAwaitingBusy: boolean;
   readonly priorIdle: { readonly turnId: TurnId; readonly raw: unknown } | undefined;
   idleDuringAdmission: { readonly turnId: TurnId; readonly raw: unknown } | undefined;
@@ -1793,9 +1793,7 @@ export function makeOpenCodeAdapter(
           const delayMs = Math.min(250 * 2 ** retryCount, 2_000);
           yield* Effect.sleep(`${delayMs} millis`);
         }
-        if (promptAdmission.accepted) {
-          yield* failPromptAdmissionRecovery(context, promptAdmission);
-        }
+        yield* failPromptAdmissionRecovery(context, promptAdmission);
       }).pipe(
         Effect.catchCause(() => Effect.void),
         Effect.ensuring(
@@ -3632,11 +3630,12 @@ export function makeOpenCodeAdapter(
                 );
               },
             }),
-            Effect.tapError(() =>
-              nativeCommand && promptAdmission.recoveryFiber
+            Effect.tapError(() => {
+              promptAdmission.requiresMessageReceipt = false;
+              return nativeCommand && promptAdmission.recoveryFiber
                 ? Fiber.interrupt(promptAdmission.recoveryFiber)
-                : Effect.void,
-            ),
+                : Effect.void;
+            }),
             Effect.tapError((requestError) => {
               if (
                 nativeCommand &&

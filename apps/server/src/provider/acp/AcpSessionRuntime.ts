@@ -1029,7 +1029,7 @@ export const make = (
                   yield* Deferred.succeed(promptOptions.dispatched, undefined);
                 }
                 return active;
-              }),
+              }).pipe(notificationSemaphore.withPermit),
             ),
             (activePrompt) =>
               Fiber.join(activePrompt.fiber).pipe(
