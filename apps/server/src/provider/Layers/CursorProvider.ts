@@ -66,6 +66,35 @@ export const makeCursorCommandCatalog = Effect.fn("makeCursorCommandCatalog")(fu
       workspaceSnapshots.length > 0 ? { ...snapshot, workspaceSnapshots } : snapshot,
     ),
   );
+  const snapshotForCwd = Effect.fn("CursorCommandCatalog.snapshotForCwd")(function* (
+    cwd: string,
+    skills: ServerProvider["skills"],
+  ) {
+    const machineSnapshot = yield* provider.getSnapshot;
+    const checkedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* SubscriptionRef.update(workspaces, (entries) =>
+      [
+        ...entries.filter((entry) => entry.cwd !== cwd),
+        {
+          cwd,
+          checkedAt,
+          slashCommands:
+            entries.find((entry) => entry.cwd === cwd)?.slashCommands ??
+            machineSnapshot.slashCommands,
+          skills,
+        },
+      ].slice(-16),
+    );
+    const snapshot = yield* getSnapshot;
+    return {
+      ...snapshot,
+      checkedAt,
+      slashCommands:
+        snapshot.workspaceSnapshots?.find((entry) => entry.cwd === cwd)?.slashCommands ??
+        snapshot.slashCommands,
+      skills,
+    };
+  });
   const onAvailableCommands = Effect.fn("CursorCommandCatalog.onAvailableCommands")(function* (
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
     cwd: string,
@@ -99,6 +128,7 @@ export const makeCursorCommandCatalog = Effect.fn("makeCursorCommandCatalog")(fu
   });
   return {
     onAvailableCommands,
+    snapshotForCwd,
     snapshot: {
       ...provider,
       getSnapshot,
