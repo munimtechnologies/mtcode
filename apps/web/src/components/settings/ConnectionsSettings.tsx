@@ -55,6 +55,7 @@ import * as Option from "effect/Option";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
+import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import {
@@ -69,6 +70,7 @@ import {
   SettingsSection,
   useRelativeTimeTick,
 } from "./settingsLayout";
+import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import {
@@ -2260,7 +2262,9 @@ export function ConnectionsSettings() {
   const setDefaultAdvertisedEndpointKey = useUiStateStore(
     (state) => state.setDefaultAdvertisedEndpointKey,
   );
-  const canManageLocalBackend = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
+  const canManageLocalBackend =
+    !isLocalEnvironmentDisabled() &&
+    (currentSessionScopes?.includes(AuthAccessWriteScope) ?? false);
   const canManageRelay = currentSessionScopes?.includes(AuthRelayWriteScope) ?? false;
   const canRenamePrimary = currentSessionScopes?.includes(AuthOrchestrationOperateScope) ?? false;
   const environmentLabels = useMemo(
@@ -3519,15 +3523,21 @@ export function ConnectionsSettings() {
   const primarySettings = (
     <>
       <ConnectAccountsSection />
-      {canManageLocalBackend ? (
+      {desktopBridge || canManageLocalBackend ? (
         <>
           <SettingsSection
             {...searchableSetting("connections-environment")}
-            title={primaryEnvironment?.label ?? "Primary environment"}
+            title={
+              primaryEnvironment?.label ?? (desktopBridge ? "This machine" : "Primary environment")
+            }
             icon={
               <EnvironmentMachineIcon
                 aria-hidden
-                kind={resolveEnvironmentMachineKind(primaryServerConfig)}
+                kind={
+                  primaryServerConfig
+                    ? resolveEnvironmentMachineKind(primaryServerConfig)
+                    : "desktop"
+                }
                 className="size-4"
               />
             }
@@ -3572,46 +3582,51 @@ export function ConnectionsSettings() {
                 }
               />
             ) : null}
-            <SettingsRow
-              title="Version"
-              description={
-                primaryServerUpdateState.status !== "idle" ? (
-                  <ServerUpdateProgress state={primaryServerUpdateState} />
-                ) : (
-                  [
-                    primaryServerConfig?.environment.serverVersion ?? null,
-                    primaryEnvironment?.displayUrl ?? null,
-                  ]
-                    .filter((value): value is string => value !== null)
-                    .join(" · ") || "Loading…"
-                )
-              }
-              control={
-                primaryVersionMismatch &&
-                primaryEnvironmentId !== null &&
-                primaryServerUpdateState.status !== "running" ? (
-                  <ServerUpdateAction
-                    size="sm"
-                    environmentId={primaryEnvironmentId}
-                    serverLabel={
-                      primaryEnvironment ? `${primaryEnvironment.label} server` : "server"
-                    }
-                    selfUpdate={resolveServerSelfUpdateCapability(primaryServerConfig)}
-                    desktopAppUpdate={supportsDesktopAppUpdate(primaryServerConfig)}
-                    threadContinuation={supportsServerUpdateThreadContinuation(primaryServerConfig)}
-                    targetVersion={primaryVersionMismatch.clientVersion}
-                    label={
-                      primaryServerUpdateState.status === "failed"
-                        ? "Retry update"
-                        : `Update to ${primaryVersionMismatch.clientVersion}`
-                    }
-                  />
-                ) : primaryServerUpdateState.status === "idle" && primaryServerConfig ? (
-                  <span className="text-xs text-muted-foreground">Up to date</span>
-                ) : undefined
-              }
-            />
-            {desktopBridge ? (
+            <LocalEnvironmentSetting />
+            {canManageLocalBackend ? (
+              <SettingsRow
+                title="Version"
+                description={
+                  primaryServerUpdateState.status !== "idle" ? (
+                    <ServerUpdateProgress state={primaryServerUpdateState} />
+                  ) : (
+                    [
+                      primaryServerConfig?.environment.serverVersion ?? null,
+                      primaryEnvironment?.displayUrl ?? null,
+                    ]
+                      .filter((value): value is string => value !== null)
+                      .join(" · ") || "Loading…"
+                  )
+                }
+                control={
+                  primaryVersionMismatch &&
+                  primaryEnvironmentId !== null &&
+                  primaryServerUpdateState.status !== "running" ? (
+                    <ServerUpdateAction
+                      size="sm"
+                      environmentId={primaryEnvironmentId}
+                      serverLabel={
+                        primaryEnvironment ? `${primaryEnvironment.label} server` : "server"
+                      }
+                      selfUpdate={resolveServerSelfUpdateCapability(primaryServerConfig)}
+                      desktopAppUpdate={supportsDesktopAppUpdate(primaryServerConfig)}
+                      threadContinuation={supportsServerUpdateThreadContinuation(
+                        primaryServerConfig,
+                      )}
+                      targetVersion={primaryVersionMismatch.clientVersion}
+                      label={
+                        primaryServerUpdateState.status === "failed"
+                          ? "Retry update"
+                          : `Update to ${primaryVersionMismatch.clientVersion}`
+                      }
+                    />
+                  ) : primaryServerUpdateState.status === "idle" && primaryServerConfig ? (
+                    <span className="text-xs text-muted-foreground">Up to date</span>
+                  ) : undefined
+                }
+              />
+            ) : null}
+            {canManageLocalBackend && desktopBridge ? (
               <>
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
@@ -3619,12 +3634,12 @@ export function ConnectionsSettings() {
                 {renderWslRow()}
                 <CloudLinkRow canManageRelay={canManageRelay} />
               </>
-            ) : (
+            ) : canManageLocalBackend ? (
               <>
                 {renderDisabledNetworkAccessRow()}
                 <CloudLinkRow canManageRelay={canManageRelay} />
               </>
-            )}
+            ) : null}
           </SettingsSection>
 
           {isLocalBackendRemotelyReachable ? (

@@ -1,4 +1,8 @@
-const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
+const NIGHTLY_SERVER_VERSION_PATTERN = /^[^-+]+-(?:nightly|preview)\.\d{8}\.\d+$/;
+// The same shape as a suffix, because stripping it has to leave the version
+// behind. The anchored pattern above matches the whole string, so reusing it
+// for a replace would blank the version out entirely.
+const NIGHTLY_VERSION_SUFFIX_PATTERN = /-(?:nightly|preview)\.\d{8}\.\d+$/;
 
 export function formatAppDisplayName(input: {
   readonly baseName: string;
@@ -19,7 +23,7 @@ export function formatDisplayedAppVersion(input: {
     return input.version;
   }
 
-  return input.version.replace(NIGHTLY_SERVER_VERSION_PATTERN, "");
+  return input.version.replace(NIGHTLY_VERSION_SUFFIX_PATTERN, "");
 }
 
 export function resolveServerBackedAppStageLabel(input: {

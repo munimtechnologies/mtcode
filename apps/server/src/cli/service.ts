@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
@@ -28,7 +29,11 @@ export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =
       const windows = yield* Effect.promise(() => import("../cloud/bootServiceWindows.ts"));
       return windows.layer(input);
     }),
-  ).pipe(Layer.provide(ProcessRunner.layer));
+  ).pipe(
+    Layer.provide(ProcessRunner.layer),
+    // Archive-distributed versions download the release archive here.
+    Layer.provide(FetchHttpClient.layer),
+  );
 };
 
 export type ServiceReconcileResult =
@@ -45,6 +50,7 @@ export type ServiceReconcileResult =
 /** Install, update, or repair the service using the CLI version running this command. */
 export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
   readonly allowDowngrade?: boolean;
+  readonly start?: boolean;
 }) {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -96,7 +102,7 @@ export function formatServiceStatus(
       `  ${locationLabel}: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Use \`npx t3@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
+      `  Next: Run \`t3 update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`t3 service install\` explicitly.`,
     ].join("\n");
   }
   return [
@@ -105,7 +111,7 @@ export function formatServiceStatus(
     `  ${locationLabel}: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : [`  Next: Run \`npx t3@${cliVersion} service update\`.`]),
+    ...(status.current ? [] : ["  Next: Run `t3 service install` to repair it."]),
   ].join("\n");
 }
 
@@ -168,18 +174,43 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
   ),
 );
 
+// Kept one release for muscle memory and old docs. It did what `t3 service
+// install` does; the way to move to a newer release is `t3 update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
+  Command.withDescription("Deprecated. Run `t3 update` to move to a newer release."),
+  Command.unlisted,
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        yield* Console.log(
+          "`t3 service update` is deprecated: run `t3 update` to move to a newer release, or `t3 service install` to repair the service. Repairing now.",
+        );
+        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
+        yield* reportReconcileResult(
+          result,
+          `${resolveAppDisplayName()} service is already using t3@${packageJson.version}.`,
+        );
+      }),
+    ),
+  ),
+);
+
+const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe(
   Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx t3@latest service update` for the latest release.",
+    "Restart the background service. Picks up a version installed by `t3 update` that was not restarted at the time.",
   ),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
-        yield* reportReconcileResult(
-          result,
-          `${resolveAppDisplayName()} service is already using t3@${packageJson.version}.`,
+        const service = yield* BootService.BootService;
+        const status = yield* service.status;
+        const restarted = yield* service.restart;
+        yield* Console.log(
+          restarted
+            ? `Restarted the T3 Code service${status.installedVersion === undefined ? "" : ` on t3@${status.installedVersion}`}.`
+            : "T3 Code service is not installed.",
         );
       }),
     ),
@@ -309,8 +340,9 @@ export const serviceCommand = Command.make("service").pipe(
   Command.withDescription(`Manage the ${resolveAppDisplayName()} background service.`),
   Command.withSubcommands([
     serviceInstallCommand,
+    serviceRestartCommand,
     serviceUninstallCommand,
-    serviceUpdateCommand,
     serviceStatusCommand,
+    serviceUpdateCommand,
   ]),
 );

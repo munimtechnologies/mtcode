@@ -518,7 +518,6 @@ describe("ClientSettings sidebar", () => {
     expect(settings.legacySidebarEnabled).toBe(false);
     expect(settings.tabsEnabled).toBe(false);
     expect(settings.sidebarActiveThreadSortOrder).toBe("updated_at");
-    expect(settings.sidebarCompactThreadRows).toBe(false);
   });
 
   it("accepts an active thread sort preference", () => {
@@ -526,15 +525,6 @@ describe("ClientSettings sidebar", () => {
       decodeClientSettingsPatch({ sidebarActiveThreadSortOrder: "updated_at" })
         .sidebarActiveThreadSortOrder,
     ).toBe("updated_at");
-  });
-
-  it("preserves an explicit compact thread row preference", () => {
-    expect(decodeClientSettings({ sidebarCompactThreadRows: true }).sidebarCompactThreadRows).toBe(
-      true,
-    );
-    expect(
-      decodeClientSettingsPatch({ sidebarCompactThreadRows: true }).sidebarCompactThreadRows,
-    ).toBe(true);
   });
 
   it("preserves an explicit tabsEnabled setting", () => {
@@ -552,6 +542,14 @@ describe("ClientSettings sidebar", () => {
     expect(decoded.legacySidebarEnabled).toBe(false);
     expect(decoded).not.toHaveProperty("sidebarV2Enabled");
     expect(decoded).not.toHaveProperty("sidebarV2ConfiguredByUser");
+  });
+
+  it("drops the retired compact sidebar keys for users who opted in", () => {
+    const stored = { compactSidebarEnabled: true, sidebarCompactThreadRows: true };
+    const decoded = decodeClientSettings(stored);
+    expect(decoded).not.toHaveProperty("compactSidebarEnabled");
+    expect(decoded).not.toHaveProperty("sidebarCompactThreadRows");
+    expect(decodeClientSettingsPatch(stored)).toEqual({});
   });
 
   it("preserves an explicit legacy sidebar opt-in", () => {

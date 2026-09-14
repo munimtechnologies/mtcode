@@ -47,6 +47,8 @@ export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number
 
 const MODEL_PICKER_KEYBINDING_COMMANDS = [
   "modelPicker.toggle",
+  "modelPicker.previousProvider",
+  "modelPicker.nextProvider",
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ModelPickerKeybindingCommand = (typeof MODEL_PICKER_KEYBINDING_COMMANDS)[number];
@@ -61,6 +63,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "rightPanel.toggle",
   "rightPanel.toggleMaximized",
   "rightPanel.close",
+  "pullRequest.copyNumber",
   "diff.toggle",
   "preview.toggle",
   "preview.refresh",
@@ -76,6 +79,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.stash",
   "reasoning.decrease",
   "reasoning.increase",
+  "composer.host",
+  "composer.effort",
+  "composer.mode",
+  "composer.workspace",
+  "composer.previousWorktree",
+  "composer.branch",
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",

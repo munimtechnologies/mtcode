@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import { HttpClient } from "effect/unstable/http";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeOS from "node:os";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -27,8 +28,10 @@ import {
 } from "./serviceProtocol.ts";
 
 const plan = {
-  nodePath: "C:\\Program Files\\nodejs\\node.exe",
-  launcherPath: "C:\\Users\\me\\.t3\\runtime\\service-launcher.mjs",
+  program: [
+    "C:\\Users\\me\\.t3\\runtime\\versions\\1.2.3\\t3.exe",
+    "__service-launcher",
+  ] as ReadonlyArray<string>,
   baseDir: "C:\\Users\\me\\.t3",
   logPath: "C:\\Users\\me\\.t3\\userdata\\logs\\boot-service.log",
   unitPath:
@@ -50,7 +53,7 @@ it("starts the launcher with no window and redirects both streams to the log", (
   expect(script).toContain("$startInfo.UseShellExecute = $false");
   // Doubling the outer quote is what carries a fully quoted command through cmd.
   expect(script).toContain(
-    `/c ""${plan.nodePath}" "${plan.launcherPath}" >> "${plan.logPath}" 2>&1"`,
+    `/c ""${plan.program[0]}" "${plan.program[1]}" >> "${plan.logPath}" 2>&1"`,
   );
 });
 
@@ -110,25 +113,27 @@ it("refuses to guess when the probe output is unreadable", () => {
 it("spots a percent sign, which the command shell would rewrite silently", () => {
   expect(
     BootServiceWindows.findPercentInPaths([
-      ["the Node executable", "C:\\node.exe"],
-      ["the data directory", "C:\\pct %TEMP% dir\\launcher.mjs"],
+      ["the t3 runtime", "C:\\Users\\me\\.t3\\runtime\\versions\\1.2.3\\t3.exe"],
+      ["the data directory", "C:\\pct %TEMP% dir"],
     ]),
   ).toBe("the data directory");
   expect(
-    BootServiceWindows.findPercentInPaths([["the Node executable", "C:\\node.exe"]]),
+    BootServiceWindows.findPercentInPaths([["the t3 runtime", "C:\\Users\\me\\.t3"]]),
   ).toBeUndefined();
 });
 
 const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function* (
   platform: NodeJS.Platform = "win32",
   execPath = "C:\\node.exe",
+  // The data directory is what the generated script quotes, so a percent sign
+  // is injected here rather than through the host executable.
+  baseDirName = ".t3",
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-boot-service-win-test-" });
   const appData = path.join(home, "AppData", "Roaming");
-  const baseDir = path.join(home, ".t3");
-  const sourceLauncher = path.join(home, "service-launcher.mjs");
+  const baseDir = path.join(home, baseDirName);
   const runtimeDir = path.join(baseDir, "runtime");
   const statePath = path.join(runtimeDir, "service-state.json");
   const startupScriptPath = path.join(runtimeDir, "service-startup.ps1");
@@ -141,8 +146,7 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
     "Startup",
     BootServiceWindows.SHORTCUT_FILE,
   );
-  yield* fs.writeFileString(sourceLauncher, "export {};\n");
-  const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3");
+  const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3", "win32");
   yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
   yield* fs.writeFileString(runtime.entryPath, "export {};\n");
   yield* fs.writeFileString(runtime.sentinelPath, "1.2.3\n");
@@ -202,7 +206,7 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
                 ((yield* fs.exists(shortcutPath).pipe(Effect.orElseSucceed(() => false)))
                   ? `target=${control.shortcutTarget}\narguments=${control.shortcutArguments}\n`
                   : "")
-              : input.args[1] === "--version"
+              : action === "--version"
                 ? "t3 v1.2.3\n"
                 : "",
           stderr: "",
@@ -220,7 +224,7 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
     baseDir,
     logsDir: path.join(baseDir, "userdata", "logs"),
     cliVersion: "1.2.3",
-    host: { execPath, launcherSourcePath: sourceLauncher },
+    host: { execPath },
     stopRequestTimeout: Duration.millis(30),
   }).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
@@ -229,6 +233,10 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
         Layer.succeed(HostProcessPlatform, platform),
         Layer.succeed(HostProcessExecutablePath, "C:\\node.exe"),
         Layer.succeed(HostProcessArguments, ["C:\\node.exe", path.join(home, "bin.mjs")]),
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make(() => Effect.die("no release download expected")),
+        ),
         ConfigProvider.layer(
           ConfigProvider.fromEnv({ env: { APPDATA: appData, SystemRoot: "C:\\Windows" } }),
         ),
@@ -262,6 +270,7 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
   return {
     service,
     fs,
+    runtimeEntryPath: runtime.entryPath,
     stopRequestPath,
     statePath,
     startupScriptPath,
@@ -275,14 +284,15 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
 it.layer(NodeServices.layer)("windows boot service", (it) => {
   it.effect("installs, reports current state, and uninstalls", () =>
     Effect.gen(function* () {
-      const { service, fs, statePath, shortcutPath } = yield* makeHarness();
+      const { service, fs, runtimeEntryPath, statePath, shortcutPath } = yield* makeHarness();
       const installed = yield* service.install();
 
       expect(parseServiceState(yield* fs.readFileString(statePath))).toEqual({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
         activeVersion: "1.2.3",
       });
-      expect(yield* fs.readFileString(installed.launcherPath)).toBe("export {};\n");
+      // The pinned runtime executable is the launcher; it hosts it as a subcommand.
+      expect(installed.program).toEqual([runtimeEntryPath, "__service-launcher"]);
       expect(yield* fs.exists(shortcutPath)).toBe(true);
       expect((yield* service.status).current).toBe(true);
       expect((yield* service.status).kind).toBe("win32-startup-shortcut");
@@ -395,7 +405,7 @@ it.layer(NodeServices.layer)("windows boot service", (it) => {
 
   it.effect("names the offending path when it holds a percent sign", () =>
     Effect.gen(function* () {
-      const { service } = yield* makeHarness("win32", "C:\\pct %TEMP% dir\\node.exe");
+      const { service } = yield* makeHarness("win32", "C:\\node.exe", ".t3 pct %TEMP%");
 
       const error = yield* service.install().pipe(Effect.flip);
       // The generic install error prints fixed text, so a dedicated tag is what
