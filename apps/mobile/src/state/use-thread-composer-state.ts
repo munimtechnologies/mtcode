@@ -341,7 +341,7 @@ export function useThreadComposerState() {
     );
   }, [selectedThreadDetail, selectedThreadSessionActivity, selectedThreadShell]);
 
-  const onSendMessage = useCallback(async () => {
+  const onSendMessage = useCallback(async (messageOverride?: string) => {
     if (!selectedThreadShell || !AsyncResult.isSuccess(preferences)) {
       return null;
     }
@@ -357,7 +357,7 @@ export function useThreadComposerState() {
     const draft = getComposerDraftSnapshot(threadKey);
     if (appAtomRegistry.get(composerContextImportsAtom)[threadKey]) return null;
     const thread = selectedThreadDetail ?? selectedThreadShell;
-    const text = draft.text.trim();
+    const text = (messageOverride ?? draft.text).trim();
     const attachments = draft.attachments;
     if (
       composerAttachmentUploadBlockReason({

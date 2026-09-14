@@ -1,5 +1,5 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
@@ -29,9 +29,18 @@ interface ComposerPrimaryActionsProps {
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  canContinueInterruptedTurn?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onContinueInterruptedTurn?: (() => void) | undefined;
   onImplementPlanInNewThread: () => void;
+}
+
+export function resolveComposerIdlePrimaryAction(input: {
+  canContinueInterruptedTurn: boolean;
+  hasSendableContent: boolean;
+}): "continue" | "send" {
+  return input.canContinueInterruptedTurn && !input.hasSendableContent ? "continue" : "send";
 }
 
 const formatPendingPrimaryActionLabel = (input: {
@@ -69,8 +78,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isPreparingWorktree,
   hasSendableContent,
   preserveComposerFocusOnPointerDown = false,
+  canContinueInterruptedTurn = false,
   onPreviousPendingQuestion,
   onInterrupt,
+  onContinueInterruptedTurn,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
@@ -215,9 +226,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
+  const showContinueInterruptedTurn =
+    resolveComposerIdlePrimaryAction({ canContinueInterruptedTurn, hasSendableContent }) ===
+      "continue" && onContinueInterruptedTurn !== undefined;
   const sendButton = (
     <button
-      type="submit"
+      type={showContinueInterruptedTurn ? "button" : "submit"}
       className={cn(
         "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8",
         stageBackdropVariant
@@ -225,12 +239,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
       )}
       {...pointerFocusProps}
+      onClick={showContinueInterruptedTurn ? onContinueInterruptedTurn : undefined}
       disabled={
         isSendBusy ||
         isSendDisabled ||
         isConnecting ||
         isEnvironmentUnavailable ||
-        !hasSendableContent
+        (!showContinueInterruptedTurn && !hasSendableContent)
       }
       aria-label={
         isEnvironmentUnavailable
@@ -245,6 +260,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                   ? "Sending"
                   : isRunning
                     ? "Queue message"
+                    : showContinueInterruptedTurn
+                      ? "Continue generation"
                     : "Send message"
       }
     >
@@ -255,6 +272,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ) : null}
       {isConnecting || isSendBusy ? (
         <Spinner className="size-3.5" aria-hidden="true" />
+      ) : showContinueInterruptedTurn ? (
+        <ChevronRightIcon className="size-4" aria-hidden="true" />
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
           <path
