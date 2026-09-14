@@ -83,8 +83,11 @@ const make = Effect.gen(function* () {
           project.value.workspaceRoot,
           "This thread's project is not a git repository.",
         );
-        const worktreePath = yield* canonical(target.repository.rootPath);
-        if (worktreePath === (yield* canonical(home.repository.rootPath))) {
+        // Persist git's own spelling of the root, which is what session cwds and
+        // status lookups report; canonical forms are only for the checks below.
+        const worktreePath = path.normalize(target.repository.rootPath);
+        const canonicalRoot = yield* canonical(worktreePath);
+        if (canonicalRoot === (yield* canonical(home.repository.rootPath))) {
           return yield* new WorktreeHandoffPathInvalidError({
             detail:
               "That is the project's own checkout, which this thread uses when it has no worktree.",
