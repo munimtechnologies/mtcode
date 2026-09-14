@@ -109,18 +109,20 @@ const repositories: Record<string, VcsRepositoryIdentity> = {
 };
 
 const makeHarness = Effect.fn("makeWorktreeToolkitHarness")(function* (
-  options: { readonly headBranch?: string | null } = {},
+  options: { readonly headBranch?: string | null; readonly headExitCode?: number } = {},
 ) {
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const headBranch = options.headBranch === undefined ? "feature" : options.headBranch;
+  // `git symbolic-ref --quiet` exits 1 for a detached HEAD and 128 for other failures.
+  const headExitCode = options.headExitCode ?? (headBranch === null ? 1 : 0);
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Ref.update(commands, (recorded) => [...recorded, command]).pipe(Effect.as({ sequence: 1 }));
   const driver = {
     execute: () =>
       Effect.succeed({
-        exitCode: headBranch === null ? 128 : 0,
-        stdout: headBranch === null ? "" : `${headBranch}\n`,
-        stderr: headBranch === null ? "fatal: ref HEAD is not a symbolic ref\n" : "",
+        exitCode: headExitCode,
+        stdout: headExitCode === 0 ? `${headBranch}\n` : "",
+        stderr: headExitCode === 128 ? "fatal: not a git repository\n" : "",
         stdoutTruncated: false,
         stderrTruncated: false,
       }),
@@ -223,6 +225,15 @@ describe("worktree toolkit handlers", () => {
       const result = yield* harness.call({ path: LINKED_WORKTREE });
       expect(result.branch).toBeNull();
       expect(yield* Ref.get(harness.commands)).toMatchObject([{ branch: null }]);
+    }),
+  );
+
+  it.effect("fails without touching the thread when HEAD cannot be read", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ headExitCode: 128 });
+      const error = yield* harness.call({ path: LINKED_WORKTREE }).pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "WorktreeHandoffFailedError" });
+      expect(yield* Ref.get(harness.commands)).toEqual([]);
     }),
   );
 

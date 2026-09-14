@@ -1,4 +1,9 @@
-import { CommandId, type ThreadId, type VcsRepositoryIdentity } from "@t3tools/contracts";
+import {
+  CommandId,
+  VcsProcessExitError,
+  type ThreadId,
+  type VcsRepositoryIdentity,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -100,15 +105,28 @@ const make = Effect.gen(function* () {
           });
         }
 
+        // With --quiet a detached HEAD exits 1 and any other failure exits 128.
         // A detached HEAD has no branch; the thread then shows the worktree without one.
+        const operation = "WorktreeToolkit.headBranch";
         const head = yield* target.driver
           .execute({
-            operation: "WorktreeToolkit.headBranch",
+            operation,
             cwd: worktreePath,
-            args: ["symbolic-ref", "--short", "HEAD"],
+            args: ["symbolic-ref", "--quiet", "--short", "HEAD"],
             allowNonZeroExit: true,
           })
           .pipe(Effect.mapError((cause) => new WorktreeHandoffFailedError({ cause })));
+        if (head.exitCode !== 0 && head.exitCode !== 1) {
+          return yield* new WorktreeHandoffFailedError({
+            cause: new VcsProcessExitError({
+              operation,
+              command: "git symbolic-ref",
+              cwd: worktreePath,
+              exitCode: head.exitCode,
+              detail: head.stderr.trim() || "Could not read the worktree's HEAD.",
+            }),
+          });
+        }
         const branch = head.exitCode === 0 ? head.stdout.trim() || null : null;
 
         yield* engine
