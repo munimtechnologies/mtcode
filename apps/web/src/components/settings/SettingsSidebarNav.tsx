@@ -28,6 +28,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useCompactSidebarEnabled } from "../../hooks/useSettings";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -120,12 +121,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
   );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
+  const compactSidebarEnabled = useCompactSidebarEnabled();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const searchableItems = useAvailableSettingsSearchItems();
   const results = useMemo(() => searchSettings(query, searchableItems), [query, searchableItems]);
-  const isSearching = query.trim().length > 0;
+  const isSearching = query.trim().length > 0 && !(compactSidebarEnabled && !isMobile && !open);
   const hasResults = results.length > 0;
 
   useEffect(() => {
@@ -243,7 +245,18 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
-          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
+          <SidebarMenuButton
+            className="hidden group-data-[collapsible=icon]:flex"
+            aria-label="Search settings"
+            tooltip="Search settings"
+            onClick={() => {
+              setOpen(true);
+              requestAnimationFrame(() => searchInputRef.current?.focus());
+            }}
+          >
+            <SearchIcon />
+          </SidebarMenuButton>
+          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden">
             <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
             <Input
               ref={searchInputRef}
@@ -340,10 +353,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   <SidebarMenuItem key={item.to}>
                     <SidebarMenuButton
                       isActive={isActive}
+                      aria-label={item.label}
+                      tooltip={item.label}
                       onClick={() => handleSectionClick(item.to)}
                     >
                       <Icon />
-                      <span className="truncate">{item.label}</span>
+                      <span className="truncate group-data-[collapsible=icon]:hidden">
+                        {item.label}
+                      </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
@@ -353,12 +370,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
-        <Suspense fallback={null}>
-          <T3ConnectSidebarSignIn />
-        </Suspense>
-        {/* The avatar keeps its own box: without it a long utility label
-            pushed it off the rail (see "a stray sidebar avatar"). */}
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="contents group-data-[collapsible=icon]:hidden">
+          <Suspense fallback={null}>
+            <T3ConnectSidebarSignIn />
+          </Suspense>
+        </div>
+        <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
           <div className="min-w-0 flex-1">
             <SidebarUtilityMenu />
           </div>

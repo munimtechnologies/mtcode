@@ -5,6 +5,7 @@ export type SettingsSheetTarget =
   | "SettingsProjectGrouping"
   | "SettingsVoiceDictation"
   | "SettingsClientStorage"
+  | "SettingsDiagnostics"
   | "SettingsOpenSourceLicenses"
   | "SettingsUsage";
 

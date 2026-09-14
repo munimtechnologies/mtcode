@@ -247,6 +247,12 @@ function projectEntriesFailureContext(error: WorkspaceEntries.WorkspaceEntriesEr
         failure: "workspace_root_not_directory",
         normalizedCwd: error.normalizedWorkspaceRoot,
       };
+    case "WorkspaceEntriesReadDirectoryError":
+      return {
+        failure: "directory_list_failed",
+        ...(error.cwd !== undefined ? { normalizedCwd: error.cwd } : {}),
+        detail: error.message,
+      };
     case "WorkspaceSearchIndexCreateFailed":
       return {
         failure: "search_index_create_failed",
@@ -653,6 +659,7 @@ const makeWsRpcLayer = (
       const sourceControlSshPasswordPrompts =
         yield* SourceControlSshPasswordPrompts.SourceControlSshPasswordPrompts;
       const pullRequests = yield* PullRequestService.PullRequestService;
+      const withPullRequestViewer = pullRequests.withRoutingCredential;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -1145,6 +1152,49 @@ const makeWsRpcLayer = (
             });
 
           const bootstrapProgram = Effect.gen(function* () {
+            const prepareWorktree = bootstrap?.prepareWorktree;
+            let shouldPrepareWorktree = prepareWorktree
+              ? yield* gitWorkflow.isRepository(prepareWorktree.projectCwd)
+              : false;
+            let worktreeBaseRef = prepareWorktree?.baseBranch ?? null;
+
+            if (prepareWorktree && shouldPrepareWorktree) {
+              // "Start from origin" is a stored default; repos without the
+              // requested remote branch fall back to the local base branch.
+              const startFromOrigin =
+                prepareWorktree.startFromOrigin === true &&
+                (yield* gitWorkflow.remoteExists({
+                  cwd: prepareWorktree.projectCwd,
+                  remoteName: "origin",
+                }));
+              if (startFromOrigin) {
+                yield* gitWorkflow.fetchRemote({
+                  cwd: prepareWorktree.projectCwd,
+                  remoteName: "origin",
+                });
+                const remoteBaseExists = yield* gitWorkflow.remoteBranchExists({
+                  cwd: prepareWorktree.projectCwd,
+                  refName: prepareWorktree.baseBranch,
+                  remoteName: "origin",
+                });
+                if (remoteBaseExists) {
+                  const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
+                    cwd: prepareWorktree.projectCwd,
+                    refName: prepareWorktree.baseBranch,
+                    fallbackRemoteName: "origin",
+                  });
+                  worktreeBaseRef = resolvedRemoteBase.commitSha;
+                }
+              }
+
+              const resolvedWorktreeBaseRef = worktreeBaseRef ?? prepareWorktree.baseBranch;
+              shouldPrepareWorktree = yield* gitWorkflow.hasCommit({
+                cwd: prepareWorktree.projectCwd,
+                refName: resolvedWorktreeBaseRef,
+              });
+              worktreeBaseRef = resolvedWorktreeBaseRef;
+            }
+
             if (bootstrap?.createThread) {
               const created = yield* dispatchFromClient({
                 type: "thread.create",
@@ -1167,40 +1217,12 @@ const makeWsRpcLayer = (
               createdThread = true;
             }
 
-            if (bootstrap?.prepareWorktree) {
-              let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch;
-              // "Start from origin" is a stored default; repos without the
-              // requested remote branch fall back to the local base branch.
-              const startFromOrigin =
-                bootstrap.prepareWorktree.startFromOrigin === true &&
-                (yield* gitWorkflow.remoteExists({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  remoteName: "origin",
-                }));
-              if (startFromOrigin) {
-                yield* gitWorkflow.fetchRemote({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  remoteName: "origin",
-                });
-                const remoteBaseExists = yield* gitWorkflow.remoteBranchExists({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  refName: bootstrap.prepareWorktree.baseBranch,
-                  remoteName: "origin",
-                });
-                if (remoteBaseExists) {
-                  const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                    cwd: bootstrap.prepareWorktree.projectCwd,
-                    refName: bootstrap.prepareWorktree.baseBranch,
-                    fallbackRemoteName: "origin",
-                  });
-                  worktreeBaseRef = resolvedRemoteBase.commitSha;
-                }
-              }
+            if (prepareWorktree && shouldPrepareWorktree && worktreeBaseRef) {
               const worktree = yield* gitWorkflow.createWorktree({
-                cwd: bootstrap.prepareWorktree.projectCwd,
+                cwd: prepareWorktree.projectCwd,
                 refName: worktreeBaseRef,
-                newRefName: bootstrap.prepareWorktree.branch,
-                baseRefName: bootstrap.prepareWorktree.baseBranch,
+                newRefName: prepareWorktree.branch,
+                baseRefName: prepareWorktree.baseBranch,
                 path: null,
               });
               targetWorktreePath = worktree.worktree.path;
@@ -2402,14 +2424,34 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "pull-requests" },
           ),
+        [WS_METHODS.pullRequestsRoutingIdentity]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsRoutingIdentity,
+            pullRequests.routingIdentity(input),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
+        [WS_METHODS.pullRequestsRouting]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsRouting, pullRequests.routing(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
         [WS_METHODS.pullRequestsSummary]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsSummary, pullRequests.summary(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsSummary,
+            withPullRequestViewer(input, pullRequests.summary(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsStack]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsStack, pullRequests.stack(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsStack,
+            withPullRequestViewer(input, pullRequests.stack(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsLinkedThreads]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsLinkedThreads,
@@ -2425,17 +2467,25 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsDetail]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsDetail, pullRequests.detail(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsDetail,
+            withPullRequestViewer(input, pullRequests.detail(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsActivity]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsActivity, pullRequests.activity(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsActivity,
+            withPullRequestViewer(input, pullRequests.activity(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsThreadComments]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsThreadComments,
-            pullRequests.threadComments(input),
+            withPullRequestViewer(input, pullRequests.threadComments(input)),
             {
               "rpc.aggregate": "pull-requests",
             },
@@ -2443,61 +2493,75 @@ const makeWsRpcLayer = (
         [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsDiffFileContents,
-            pullRequests.diffFileContents(input),
+            withPullRequestViewer(input, pullRequests.diffFileContents(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsRunAction]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsRunAction,
-            pullRequests
-              .runAction(input)
-              .pipe(
-                Effect.tap(() =>
-                  resolvePullRequestSyncKey(input).pipe(
-                    Effect.flatMap((key) =>
-                      key === null ? Effect.void : pullRequestSync.requestSync(key),
-                    ),
+            withPullRequestViewer(input, pullRequests.runAction(input)).pipe(
+              Effect.tap(() =>
+                resolvePullRequestSyncKey(input).pipe(
+                  Effect.flatMap((key) =>
+                    key === null ? Effect.void : pullRequestSync.requestSync(key),
                   ),
                 ),
               ),
+            ),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsUpdate]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsUpdate, pullRequests.update(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsUpdate,
+            withPullRequestViewer(input, pullRequests.update(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsComment]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsComment, pullRequests.comment(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsComment,
+            withPullRequestViewer(input, pullRequests.comment(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsUpdateComment]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsUpdateComment,
-            pullRequests.updateComment(input),
+            withPullRequestViewer(input, pullRequests.updateComment(input)),
             {
               "rpc.aggregate": "pull-requests",
             },
           ),
         [WS_METHODS.pullRequestsSubmitReview]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsSubmitReview, pullRequests.submitReview(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsSubmitReview,
+            withPullRequestViewer(input, pullRequests.submitReview(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsReplyToThread]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsReplyToThread,
-            pullRequests.replyToThread(input),
+            withPullRequestViewer(input, pullRequests.replyToThread(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsSetThreadResolution]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsSetThreadResolution,
-            pullRequests.setThreadResolution(input),
+            withPullRequestViewer(input, pullRequests.setThreadResolution(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsSetReaction]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsSetReaction, pullRequests.setReaction(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsSetReaction,
+            withPullRequestViewer(input, pullRequests.setReaction(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.pullRequestsInvalidate]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsInvalidate,
@@ -2525,25 +2589,29 @@ const makeWsRpcLayer = (
         [WS_METHODS.pullRequestsReviewerCandidates]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsReviewerCandidates,
-            pullRequests.reviewerCandidates(input),
+            withPullRequestViewer(input, pullRequests.reviewerCandidates(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsRequestReviewers]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsRequestReviewers,
-            pullRequests.requestReviewers(input),
+            withPullRequestViewer(input, pullRequests.requestReviewers(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsLabelCandidates]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsLabelCandidates,
-            pullRequests.labelCandidates(input),
+            withPullRequestViewer(input, pullRequests.labelCandidates(input)),
             { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.pullRequestsSetLabels]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsSetLabels, pullRequests.setLabels(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
+          observeRpcEffect(
+            WS_METHODS.pullRequestsSetLabels,
+            withPullRequestViewer(input, pullRequests.setLabels(input)),
+            {
+              "rpc.aggregate": "pull-requests",
+            },
+          ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,

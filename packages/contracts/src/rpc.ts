@@ -131,6 +131,9 @@ import {
   PullRequestOperationError,
   PullRequestReactionInput,
   PullRequestRef,
+  PullRequestRoutingResult,
+  PullRequestRoutingIdentityInput,
+  PullRequestRoutingIdentityResult,
   PullRequestStack,
   PullRequestLinkedThreadsResult,
   PullRequestSummary,
@@ -439,6 +442,8 @@ export const WS_METHODS = {
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
   pullRequestsSummary: "pullRequests.summary",
+  pullRequestsRouting: "pullRequests.routing",
+  pullRequestsRoutingIdentity: "pullRequests.routingIdentity",
   pullRequestsStack: "pullRequests.stack",
   pullRequestsLinkedThreads: "pullRequests.linkedThreads",
   pullRequestsDetail: "pullRequests.detail",
@@ -889,6 +894,18 @@ export const WsPullRequestsMergeUpstreamReleaseRpc = Rpc.make(
     error: PullRequestRpcError,
   },
 );
+const WsPullRequestsRoutingRpc = Rpc.make(WS_METHODS.pullRequestsRouting, {
+  payload: PullRequestRef,
+  success: PullRequestRoutingResult,
+  error: PullRequestRpcError,
+});
+
+const WsPullRequestsRoutingIdentityRpc = Rpc.make(WS_METHODS.pullRequestsRoutingIdentity, {
+  payload: PullRequestRoutingIdentityInput,
+  success: PullRequestRoutingIdentityResult,
+  error: PullRequestRpcError,
+});
+
 const WsPullRequestsSummaryRpc = Rpc.make(WS_METHODS.pullRequestsSummary, {
   payload: PullRequestRef,
   success: PullRequestSummary,
@@ -1626,6 +1643,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsUpstreamReleaseRpc,
   WsPullRequestsMergeUpstreamReleaseRpc,
   WsPullRequestsSummaryRpc,
+  WsPullRequestsRoutingRpc,
+  WsPullRequestsRoutingIdentityRpc,
   WsPullRequestsStackRpc,
   WsPullRequestsLinkedThreadsRpc,
   WsPullRequestsDetailRpc,

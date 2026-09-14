@@ -28,6 +28,8 @@ import { getAppScheme, getAppSchemeDev, getAppSchemePreview } from "./lib/brandi
 import { useThemeColor } from "./lib/useThemeColor";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 
+import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
+
 import "../global.css";
 
 if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {
@@ -86,6 +88,7 @@ function AppContent() {
   return (
     <>
       <SplashScreenCoordinator />
+      <SubscriptionUsageCoordinator />
       <GestureHandlerRootView className="flex-1">
         <KeyboardProvider statusBarTranslucent>
           <SafeAreaProvider>
