@@ -83,16 +83,20 @@ export function TerminalSearchBar(props: TerminalSearchBarProps) {
         <SearchOptionButton
           active={props.caseSensitive}
           label="Match case"
-          className="size-auto h-5 w-6 rounded-none text-[11px] sm:size-auto sm:h-5 sm:w-6 min-w-0"
+          className="size-auto h-5 w-6 rounded-none text-[11px] sm:size-auto sm:h-5 sm:w-6 sm:text-[11px] min-w-0"
           onClick={() => props.onCaseSensitiveChange(!props.caseSensitive)}
         >
           Aa
         </SearchOptionButton>
       </div>
-      <div className="h-4 w-px bg-border/80" />
-      <span className="min-w-9 text-center text-[11px] tabular-nums text-muted-foreground">
-        {count}
-      </span>
+      {count ? (
+        <>
+          <div className="h-4 w-px bg-border/80" />
+          <span className="min-w-9 px-1 text-center text-[11px] tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        </>
+      ) : null}
       <div className="h-4 w-px bg-border/80" />
       <TerminalActionButton
         icon={ChevronUp}

@@ -1511,7 +1511,7 @@ export default function ThreadTerminalDrawer({
       ) : null}
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
+        <div className="pointer-events-none absolute right-2 top-2 z-20 flex">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <div ref={setFindSlot} className="contents" />
             <div className="h-4 w-px bg-border/80" />
