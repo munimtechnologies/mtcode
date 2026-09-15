@@ -95,7 +95,7 @@ import {
   type ThreadInspectorMode,
 } from "./thread-inspector-content-stack";
 import { threadRouteIsHydrating } from "./thread-route-hydration";
-import { resolveThreadVisit, VISIT_DISPATCH_THROTTLE_MS } from "./threadVisitedState";
+import { resolveVisitWatermark, shouldAcknowledgeThreadVisit } from "./threadVisitedState";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -369,67 +369,58 @@ function ThreadRouteContent(
     const subscription = AppState.addEventListener("change", setAppState);
     return () => subscription.remove();
   }, []);
-  // Records the server-side visited watermark while this route is focused so
-  // the Done indicator clears on every client. Files, Review, and Terminal
-  // are native pushes that blur this route, so a completion that lands
-  // behind them stays unread until the user comes back. The watermark is the
-  // shell's updatedAt; the completion comes from the loaded detail so a slow
-  // or failed message load cannot mark a completion read before the user
-  // can see it. A cached detail (stream paused while the thread was not in
-  // use) still shows its messages, so it counts as loaded. lastVisitedAt is
-  // read through a ref and kept out of the deps: another client marking the
-  // thread unread must not trigger an immediate re-visit.
+  // Reading a completed thread stamps its visited watermark at the shell's
+  // updatedAt so the Done indicator clears on every client. Files, Review,
+  // and Terminal are native pushes that blur this route, so a completion that
+  // lands behind them stays unread until the user comes back. The completion
+  // comes from the loaded detail so a slow or failed message load cannot mark
+  // a completion read before the user can see it; a cached detail (stream
+  // paused while the thread was not in use) still shows its messages, so it
+  // counts as loaded. lastVisitedAt and updatedAt are read through refs and
+  // kept out of the deps: another client marking the thread unread must not
+  // trigger an immediate re-visit, and streaming activity bumps must not
+  // send a visit per bump. A new completion changes completedAt, which is a
+  // dep, so it is still visited.
   const selectedThreadEnvironmentId = selectedThread?.environmentId ?? null;
   const selectedThreadId = selectedThread?.id ?? null;
-  const selectedThreadUpdatedAt = selectedThread?.updatedAt ?? null;
   const selectedThreadDetailLoaded =
     selectedThreadDetailState.status === "live" || selectedThreadDetailState.status === "cached";
   const selectedThreadCompletedAt = selectedThreadDetail?.latestTurn?.completedAt ?? null;
+  const selectedThreadUpdatedAtRef = useRef(selectedThread?.updatedAt);
+  selectedThreadUpdatedAtRef.current = selectedThread?.updatedAt;
   const selectedThreadLastVisitedAtRef = useRef(selectedThread?.lastVisitedAt);
   selectedThreadLastVisitedAtRef.current = selectedThread?.lastVisitedAt;
-  // Keyed by thread: this route content survives navigating between threads,
-  // and thread A's throttle window must not defer thread B's first visit.
-  const lastVisitDispatchRef = useRef({ threadKey: "", at: 0 });
   useFocusEffect(
     useCallback(() => {
       if (
         selectedThreadEnvironmentId === null ||
         selectedThreadId === null ||
-        selectedThreadUpdatedAt === null
+        selectedThreadCompletedAt === null
       ) {
         return;
       }
-      const urgency = resolveThreadVisit({
-        appState,
-        connectionState: routeConnectionState,
-        supported: supportsVisitedTracking,
-        detailLoaded: selectedThreadDetailLoaded,
-        updatedAt: selectedThreadUpdatedAt,
-        completedAt: selectedThreadCompletedAt,
-        lastVisitedAt: selectedThreadLastVisitedAtRef.current,
-      });
-      if (urgency === "skip") return;
-      const threadKey = `${selectedThreadEnvironmentId}:${selectedThreadId}`;
-      const dispatch = () => {
-        // The trailing timer can fire after the app went to the background;
-        // an inactive app is not reading.
-        if (AppState.currentState !== "active") return;
-        lastVisitDispatchRef.current = { threadKey, at: Date.now() };
-        void visitThread({
-          environmentId: selectedThreadEnvironmentId,
-          input: { threadId: selectedThreadId, visitedAt: selectedThreadUpdatedAt },
-        });
-      };
-      // Mid-turn activity bumps arrive several times a second; coalesce them
-      // into a trailing visit so the newest watermark wins without a flood.
-      const previous = lastVisitDispatchRef.current;
-      const elapsed = previous.threadKey === threadKey ? Date.now() - previous.at : Infinity;
-      if (urgency === "now" || elapsed >= VISIT_DISPATCH_THROTTLE_MS) {
-        dispatch();
+      if (
+        !shouldAcknowledgeThreadVisit({
+          appState,
+          connectionState: routeConnectionState,
+          supported: supportsVisitedTracking,
+          detailLoaded: selectedThreadDetailLoaded,
+          completedAt: selectedThreadCompletedAt,
+          lastVisitedAt: selectedThreadLastVisitedAtRef.current,
+        })
+      ) {
         return;
       }
-      const timer = setTimeout(dispatch, VISIT_DISPATCH_THROTTLE_MS - elapsed);
-      return () => clearTimeout(timer);
+      void visitThread({
+        environmentId: selectedThreadEnvironmentId,
+        input: {
+          threadId: selectedThreadId,
+          visitedAt: resolveVisitWatermark({
+            updatedAt: selectedThreadUpdatedAtRef.current,
+            completedAt: selectedThreadCompletedAt,
+          }),
+        },
+      });
     }, [
       appState,
       routeConnectionState,
@@ -437,7 +428,6 @@ function ThreadRouteContent(
       selectedThreadDetailLoaded,
       selectedThreadEnvironmentId,
       selectedThreadId,
-      selectedThreadUpdatedAt,
       supportsVisitedTracking,
       visitThread,
     ]),

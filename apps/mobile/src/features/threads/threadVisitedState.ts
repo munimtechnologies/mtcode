@@ -1,38 +1,43 @@
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { AppStateStatus } from "react-native";
 
-/** Trailing coalesce window for visit watermarks while a turn streams. */
-export const VISIT_DISPATCH_THROTTLE_MS = 10_000;
-
 /**
- * Decides whether the focused thread route should record a visit and how
- * urgently. Skipped when the app is not in front, the environment is not
- * connected, the server does not track visits, the thread's messages have
- * not loaded (the user cannot have read what they cannot see), or the
- * server watermark already covers the thread's latest update. An unseen
- * completion sends immediately; mid-turn activity bumps coalesce into a
- * trailing visit so streaming does not flood the server.
+ * Whether the focused thread route should record a visit. The Done indicator
+ * only compares the latest completion to the visited watermark, so a visit
+ * is worth sending only when a completion is unseen: never while the app is
+ * not in front, the environment is not connected, the server does not track
+ * visits, the thread's messages have not loaded (the user cannot have read
+ * what they cannot see), or the watermark already covers the completion.
  */
-export function resolveThreadVisit(input: {
+export function shouldAcknowledgeThreadVisit(input: {
   readonly appState: AppStateStatus;
   readonly connectionState: EnvironmentConnectionPhase;
   readonly supported: boolean;
   readonly detailLoaded: boolean;
-  readonly updatedAt: string;
   readonly completedAt: string | null | undefined;
   readonly lastVisitedAt: string | null | undefined;
-}): "now" | "throttled" | "skip" {
+}): boolean {
   if (input.appState !== "active" || input.connectionState !== "connected" || !input.supported) {
-    return "skip";
+    return false;
   }
-  if (!input.detailLoaded) return "skip";
-  const updatedAtMs = Date.parse(input.updatedAt);
-  if (!Number.isFinite(updatedAtMs)) return "skip";
+  if (!input.detailLoaded || !input.completedAt) return false;
+  const completedAtMs = Date.parse(input.completedAt);
+  if (!Number.isFinite(completedAtMs)) return false;
   const lastVisitedAtMs = input.lastVisitedAt ? Date.parse(input.lastVisitedAt) : NaN;
-  if (Number.isFinite(lastVisitedAtMs) && lastVisitedAtMs >= updatedAtMs) return "skip";
-  const completedAtMs = input.completedAt ? Date.parse(input.completedAt) : NaN;
-  const hasUnseenCompletion =
-    Number.isFinite(completedAtMs) &&
-    (!Number.isFinite(lastVisitedAtMs) || completedAtMs > lastVisitedAtMs);
-  return hasUnseenCompletion ? "now" : "throttled";
+  return !Number.isFinite(lastVisitedAtMs) || lastVisitedAtMs < completedAtMs;
+}
+
+/**
+ * The watermark a visit stamps: the shell's updatedAt so later activity still
+ * compares as unseen, floored at the completion being acknowledged.
+ */
+export function resolveVisitWatermark(input: {
+  readonly updatedAt: string | null | undefined;
+  readonly completedAt: string;
+}): string {
+  const updatedAtMs = Date.parse(input.updatedAt ?? "");
+  const completedAtMs = Date.parse(input.completedAt);
+  return Number.isFinite(updatedAtMs) && updatedAtMs > completedAtMs && input.updatedAt
+    ? input.updatedAt
+    : input.completedAt;
 }

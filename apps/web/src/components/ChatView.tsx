@@ -536,9 +536,6 @@ import {
   recallableComposerPrompt,
 } from "./chat/composerPromptHistory";
 
-/** Trailing coalesce window for visit watermarks while a turn streams. */
-const VISIT_DISPATCH_THROTTLE_MS = 10_000;
-
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_QUEUED_MESSAGES: QueuedComposerMessage[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -2115,23 +2112,28 @@ export default function ChatView(props: ChatViewProps) {
   const activeRunningTurnId =
     (activeThread?.session?.status === "running" ? activeThread.session.activeTurnId : null) ??
     (activeLatestTurn?.state === "running" ? activeLatestTurn.turnId : null);
-  // Reading a thread advances its visited watermark to the shell's updatedAt
-  // and clears the sidebar's Done badge everywhere. Only a focused, visible
-  // document counts as reading; a completion that lands in a background tab
-  // stays unread until the user comes back. Listeners stay attached for the
-  // life of the effect so a later refocus re-visits (the hook skips the send
-  // when the server watermark already covers it). An unseen completion is
-  // sent immediately; mid-turn activity bumps, several per second while a
-  // turn streams, coalesce into one trailing visit per throttle window.
+  // Reading a completed thread stamps its visited watermark at the shell's
+  // updatedAt and clears the Done badge everywhere. The badge only compares
+  // completedAt to the watermark, so the visit is sent when a completion is
+  // unseen, not while a turn streams: mid-turn visits would be an event per
+  // client per bump for no visible change. Only a focused, visible document
+  // counts as reading; a completion that lands in a background tab stays
+  // unread until the user comes back, and the listeners stay attached so a
+  // later refocus visits. lastVisitedAt is read through a ref and kept out
+  // of the deps: another client (or this one, from the menu) marking the
+  // thread unread must not trigger an immediate re-visit. A new completion
+  // changes completedAt, which is a dep, so it is still visited.
   // The environment config decides whether the visit is a server command or
   // a local write, and the command needs a live socket, so wait for both:
   // a visit sent early would be misfiled locally or fail silently. Both are
   // deps, so the effect re-runs once config lands or the socket reconnects.
   const serverThreadEnvironmentId = serverThread?.environmentId;
   const serverThreadId = serverThread?.id;
-  const serverThreadUpdatedAt = serverThread?.updatedAt;
   const serverThreadCompletedAt = serverThread?.latestTurn?.completedAt;
-  const serverThreadLastVisitedAt = serverThread?.lastVisitedAt;
+  const serverThreadUpdatedAtRef = useRef(serverThread?.updatedAt);
+  serverThreadUpdatedAtRef.current = serverThread?.updatedAt;
+  const serverThreadLastVisitedAtRef = useRef(serverThread?.lastVisitedAt);
+  serverThreadLastVisitedAtRef.current = serverThread?.lastVisitedAt;
   const serverThreadConfigLoaded =
     serverThreadEnvironmentId !== undefined && serverConfigs.has(serverThreadEnvironmentId);
   // Only the server command needs a live socket; the legacy local write
@@ -2146,54 +2148,37 @@ export default function ChatView(props: ChatViewProps) {
     !serverThreadSupportsVisitedTracking ||
     (serverThreadEnvironmentId !== undefined &&
       environmentById.get(serverThreadEnvironmentId)?.connection.phase === "connected");
-  // Keyed by thread: the same ChatView instance serves consecutive threads,
-  // and thread A's throttle window must not defer thread B's first visit.
-  const lastVisitDispatchRef = useRef({ threadKey: "", at: 0 });
   useEffect(() => {
     if (
       !serverThreadEnvironmentId ||
       !serverThreadId ||
-      !serverThreadUpdatedAt ||
+      !serverThreadCompletedAt ||
       !serverThreadConfigLoaded ||
       !serverThreadConnected
     ) {
       return;
     }
     const threadRef = scopeThreadRef(serverThreadEnvironmentId, serverThreadId);
-    const threadKey = scopedThreadKey(threadRef);
-    const isReading = () => document.visibilityState === "visible" && document.hasFocus();
-    let timer: number | undefined;
-    const dispatch = () => {
-      timer = undefined;
-      // The trailing timer can fire after the tab went to the background;
-      // a hidden document is not reading.
-      if (!isReading()) return;
-      lastVisitDispatchRef.current = { threadKey, at: Date.now() };
-      markVisited(threadRef, serverThreadUpdatedAt);
-    };
+    const completedAtMs = Date.parse(serverThreadCompletedAt);
+    if (!Number.isFinite(completedAtMs)) return;
     const visit = () => {
-      if (!isReading()) return;
-      if (timer !== undefined) return;
-      const lastVisitedAtMs = serverThreadLastVisitedAt
-        ? Date.parse(serverThreadLastVisitedAt)
-        : NaN;
-      const completedAtMs = serverThreadCompletedAt ? Date.parse(serverThreadCompletedAt) : NaN;
-      const hasUnseenCompletion =
-        Number.isFinite(completedAtMs) &&
-        (!Number.isFinite(lastVisitedAtMs) || completedAtMs > lastVisitedAtMs);
-      const previous = lastVisitDispatchRef.current;
-      const elapsed = previous.threadKey === threadKey ? Date.now() - previous.at : Infinity;
-      if (hasUnseenCompletion || elapsed >= VISIT_DISPATCH_THROTTLE_MS) {
-        dispatch();
-        return;
-      }
-      timer = window.setTimeout(dispatch, VISIT_DISPATCH_THROTTLE_MS - elapsed);
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      const lastVisitedAtMs = Date.parse(serverThreadLastVisitedAtRef.current ?? "");
+      if (Number.isFinite(lastVisitedAtMs) && lastVisitedAtMs >= completedAtMs) return;
+      // The watermark is updatedAt so later activity still compares as
+      // unseen; it is at least completedAt once a turn has completed.
+      const updatedAtMs = Date.parse(serverThreadUpdatedAtRef.current ?? "");
+      markVisited(
+        threadRef,
+        Number.isFinite(updatedAtMs) && updatedAtMs > completedAtMs
+          ? (serverThreadUpdatedAtRef.current as string)
+          : serverThreadCompletedAt,
+      );
     };
     visit();
     window.addEventListener("focus", visit);
     document.addEventListener("visibilitychange", visit);
     return () => {
-      if (timer !== undefined) window.clearTimeout(timer);
       window.removeEventListener("focus", visit);
       document.removeEventListener("visibilitychange", visit);
     };
@@ -2204,8 +2189,6 @@ export default function ChatView(props: ChatViewProps) {
     serverThreadConnected,
     serverThreadEnvironmentId,
     serverThreadId,
-    serverThreadLastVisitedAt,
-    serverThreadUpdatedAt,
   ]);
   useEffect(() => {
     setMountedTerminalThreadKeys((currentThreadIds) => {
