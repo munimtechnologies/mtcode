@@ -553,7 +553,6 @@ export interface GhosttyTerminalSearchState {
   readonly matchCount: number;
   readonly activeIndex: number;
   readonly truncated: boolean;
-  readonly error: string | null;
 }
 
 export interface GhosttyTerminalSurfaceOptions {
@@ -664,7 +663,6 @@ export class GhosttyTerminalSurface {
   private searchRefreshTimer: number | null = null;
   private searchPreviousActiveMatch: TerminalSearchMatch | null = null;
   private searchTruncated = false;
-  private searchError: string | null = null;
 
   private constructor(
     mount: HTMLElement,
@@ -1091,9 +1089,7 @@ export class GhosttyTerminalSurface {
     this.searchQuery = query;
     this.searchOptions = options;
     this.clearSearchRefreshTimer();
-    const result = query
-      ? this.computeSearch(query, options)
-      : { matches: [], truncated: false, error: null };
+    const result = query ? this.computeSearch(query, options) : { matches: [], truncated: false };
     return this.applySearchResult(result, this.initialSearchIndex(result.matches), true);
   }
 
@@ -1113,7 +1109,7 @@ export class GhosttyTerminalSurface {
     this.searchQuery = "";
     this.searchOptions = null;
     this.clearSearchRefreshTimer();
-    this.applySearchResult({ matches: [], truncated: false, error: null }, -1, false);
+    this.applySearchResult({ matches: [], truncated: false }, -1, false);
   }
 
   private getSearchState(): GhosttyTerminalSearchState {
@@ -1121,7 +1117,6 @@ export class GhosttyTerminalSurface {
       matchCount: this.searchMatches.length,
       activeIndex: this.searchActiveIndex,
       truncated: this.searchTruncated,
-      error: this.searchError,
     };
   }
 
@@ -1141,7 +1136,6 @@ export class GhosttyTerminalSurface {
     if (this.disposed) return this.getSearchState();
     this.searchMatches = [...result.matches];
     this.searchTruncated = result.truncated;
-    this.searchError = result.error;
     const match = this.searchMatches[activeIndex];
     this.searchActiveIndex = match ? activeIndex : -1;
     this.searchPreviousActiveMatch = match ?? null;
@@ -1194,8 +1188,7 @@ export class GhosttyTerminalSurface {
     const changed =
       previous.matchCount !== next.matchCount ||
       previous.activeIndex !== next.activeIndex ||
-      previous.truncated !== next.truncated ||
-      previous.error !== next.error;
+      previous.truncated !== next.truncated;
     if (changed) this.options.onSearchChange?.(next);
   }
 

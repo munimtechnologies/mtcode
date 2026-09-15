@@ -4,7 +4,6 @@ export const MAX_TERMINAL_SEARCH_MATCHES = 2000;
 
 export interface TerminalSearchOptions {
   readonly caseSensitive: boolean;
-  readonly regex: boolean;
 }
 
 export interface TerminalSearchRows {
@@ -25,7 +24,6 @@ export interface TerminalSearchMatch {
 export interface TerminalSearchResult {
   readonly matches: readonly TerminalSearchMatch[];
   readonly truncated: boolean;
-  readonly error: string | null;
 }
 
 export interface TerminalSearchHighlight {
@@ -40,8 +38,8 @@ export interface TerminalSearchCellRow {
 }
 
 function searchPattern(query: string, options: TerminalSearchOptions): RegExp {
-  const source = options.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(source, options.caseSensitive ? "g" : "gi");
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped, options.caseSensitive ? "g" : "gi");
 }
 
 function positionForOffset(
@@ -56,19 +54,14 @@ function positionForOffset(
   return null;
 }
 
-/** Finds literal or regular-expression matches across terminal soft wraps. */
+/** Finds literal matches across terminal soft wraps. */
 export function findTerminalSearchMatches(
   rows: TerminalSearchRows,
   query: string,
   options: TerminalSearchOptions,
 ): TerminalSearchResult {
-  if (query.length === 0) return { matches: [], truncated: false, error: null };
-  let pattern: RegExp;
-  try {
-    pattern = searchPattern(query, options);
-  } catch {
-    return { matches: [], truncated: false, error: "Invalid regular expression" };
-  }
+  if (query.length === 0) return { matches: [], truncated: false };
+  const pattern = searchPattern(query, options);
 
   const getLine = (index: number) =>
     index < rows.texts.length
@@ -90,19 +83,14 @@ export function findTerminalSearchMatches(
     if (line.text.length === 0) continue;
     pattern.lastIndex = 0;
     for (let match = pattern.exec(line.text); match !== null; match = pattern.exec(line.text)) {
-      if (match[0].length === 0) {
-        pattern.lastIndex = match.index + 1;
-        continue;
-      }
       const start = positionForOffset(line, match.index);
       const inclusiveEnd = positionForOffset(line, match.index + match[0].length - 1);
       if (start === null || inclusiveEnd === null) continue;
-      if (matches.length === MAX_TERMINAL_SEARCH_MATCHES)
-        return { matches, truncated: true, error: null };
+      if (matches.length === MAX_TERMINAL_SEARCH_MATCHES) return { matches, truncated: true };
       matches.push({ start, end: { row: inclusiveEnd.row, offset: inclusiveEnd.offset + 1 } });
     }
   }
-  return { matches, truncated: false, error: null };
+  return { matches, truncated: false };
 }
 
 function columnForOffset(

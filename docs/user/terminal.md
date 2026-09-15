@@ -12,5 +12,7 @@ history. A client can show less scrollback than the server keeps.
 With a terminal focused, press `mod+f` to search its output and scrollback.
 `mod` is Command on macOS and Ctrl on Windows and Linux; `Ctrl+Shift+F` also
 works. Enter moves to the next match and Shift+Enter to the previous one. Use
-the toggles for case-sensitive or regular-expression search, and Escape to
-close. Rebind **Terminal: Find** in Settings → Keybindings.
+the toggle for case-sensitive search, and Escape to close. The find bar can be
+dragged by its grip handle between the top-right and bottom-right corners of the
+terminal and remembers your preference. Rebind **Terminal: Find** in Settings →
+Keybindings.

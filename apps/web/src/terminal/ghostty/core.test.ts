@@ -385,7 +385,7 @@ const searchTheme = {
   background: { r: 0, g: 0, b: 0 },
   cursor: { r: 255, g: 255, b: 255 },
 };
-const searchOptions = { caseSensitive: false, regex: false };
+const searchOptions = { caseSensitive: false };
 
 describe("GhosttyTerminalCore.searchRows", () => {
   const cores = new Set<GhosttyTerminalCore>();

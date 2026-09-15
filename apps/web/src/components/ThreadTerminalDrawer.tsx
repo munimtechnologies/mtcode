@@ -107,7 +107,6 @@ const INITIAL_TERMINAL_SEARCH = {
   open: false,
   query: "",
   caseSensitive: false,
-  regex: false,
 };
 
 function maxDrawerHeight(): number {
@@ -376,7 +375,6 @@ export function TerminalViewport({
     matchCount: 0,
     activeIndex: -1,
     truncated: false,
-    error: null,
   });
   const [searchFocusRequestId, setSearchFocusRequestId] = useState(0);
   const searchRef = useRef(search);
@@ -1058,18 +1056,15 @@ export function TerminalViewport({
         <TerminalSearchBar
           query={search.query}
           caseSensitive={search.caseSensitive}
-          regex={search.regex}
           matchCount={searchState.matchCount}
           activeIndex={searchState.activeIndex}
           truncated={searchState.truncated}
-          error={searchState.error}
           focusRequestId={searchFocusRequestId}
           isFindShortcut={(event) =>
             isTerminalFindShortcut(event, keybindings, TERMINAL_SHORTCUT_OPTIONS)
           }
           onQueryChange={(query) => updateSearch({ query })}
           onCaseSensitiveChange={(caseSensitive) => updateSearch({ caseSensitive })}
-          onRegexChange={(regex) => updateSearch({ regex })}
           onNext={() => stepSearch(1)}
           onPrevious={() => stepSearch(-1)}
           onClose={handleSearchClose}
