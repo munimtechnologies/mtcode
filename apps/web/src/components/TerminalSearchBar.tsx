@@ -69,15 +69,20 @@ export function TerminalSearchBar(props: TerminalSearchBarProps) {
   );
   const row = (
     <>
-      <input
-        ref={inputRef}
-        type="text"
-        value={props.query}
-        onChange={(event) => props.onQueryChange(event.target.value)}
-        className="h-5 w-32 bg-transparent px-1.5 text-xs leading-5 text-foreground outline-none placeholder:text-muted-foreground"
-        placeholder="Find"
-        aria-label="Find in terminal"
-      />
+      <span className="relative flex w-36 items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          value={props.query}
+          onChange={(event) => props.onQueryChange(event.target.value)}
+          className="h-5 w-full bg-transparent pr-11 pl-1.5 text-xs leading-5 text-foreground outline-none placeholder:text-muted-foreground"
+          placeholder="Find"
+          aria-label="Find in terminal"
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-[10px] text-muted-foreground/70 italic tabular-nums">
+          {count}
+        </span>
+      </span>
       <div className="h-4 w-px bg-border/80" />
       <div className="flex" onMouseDown={(event) => event.preventDefault()}>
         <SearchOptionButton
@@ -89,14 +94,6 @@ export function TerminalSearchBar(props: TerminalSearchBarProps) {
           Aa
         </SearchOptionButton>
       </div>
-      {count ? (
-        <>
-          <div className="h-4 w-px bg-border/80" />
-          <span className="min-w-9 px-1 text-center text-[11px] tabular-nums text-muted-foreground">
-            {count}
-          </span>
-        </>
-      ) : null}
       <div className="h-4 w-px bg-border/80" />
       <TerminalActionButton
         icon={ChevronUp}
