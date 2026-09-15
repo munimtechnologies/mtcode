@@ -1,4 +1,4 @@
-import { ArrowUpIcon, ClockIcon } from "lucide-react";
+import { ArrowUpIcon, ClockIcon, PencilIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -304,6 +304,7 @@ interface TimelineRowSharedState {
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   onSteerQueuedMessage: (id: string) => void;
   steerQueuedMessageShortcutLabel: string | null;
+  onEditQueuedMessage: (id: string) => void;
   onRemoveQueuedMessage: (id: string) => void;
 }
 
@@ -476,6 +477,7 @@ interface MessagesTimelineProps {
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
   onSteerQueuedMessage?: (id: string) => void;
   steerQueuedMessageShortcutLabel?: string | null;
+  onEditQueuedMessage?: (id: string) => void;
   onRemoveQueuedMessage?: (id: string) => void;
 }
 
@@ -541,6 +543,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   queuedMessages = EMPTY_QUEUED_MESSAGES,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
+  onEditQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -995,6 +998,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
+      onEditQueuedMessage,
       onRemoveQueuedMessage,
     }),
     [
@@ -1037,6 +1041,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenWorktreeSetupTerminal,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
+      onEditQueuedMessage,
       onRemoveQueuedMessage,
     ],
   );
@@ -1662,14 +1667,32 @@ function QueuedMessageTimelineRow({
                     variant="ghost-muted"
                     className="size-6"
                     onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => ctx.onEditQueuedMessage(queuedMessage.id)}
+                    aria-label="Edit queued message"
+                  />
+                }
+              >
+                <PencilIcon className="size-3.5" aria-hidden />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Edit in composer</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    className="size-6"
+                    onPointerDown={(event) => event.preventDefault()}
                     onClick={() => ctx.onRemoveQueuedMessage(queuedMessage.id)}
-                    aria-label="Cancel and return to the composer"
+                    aria-label="Remove queued message"
                   />
                 }
               >
                 <XIcon className="size-3.5" aria-hidden />
               </TooltipTrigger>
-              <TooltipPopup side="bottom">Cancel and return to the composer</TooltipPopup>
+              <TooltipPopup side="bottom">Remove queued message</TooltipPopup>
             </Tooltip>
           </div>
         </div>
