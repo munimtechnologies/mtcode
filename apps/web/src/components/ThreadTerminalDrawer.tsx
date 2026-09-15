@@ -42,6 +42,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { Button } from "~/components/ui/button";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
+import { TerminalSearchBar } from "~/components/TerminalSearchBar";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
@@ -54,6 +55,7 @@ import {
 import {
   GhosttyTerminalSurface,
   type GhosttyTerminalSurfaceOptions,
+  type GhosttyTerminalSearchState,
 } from "~/terminal/ghostty/surface";
 import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
 import { useOpenInPreferredEditor } from "../editorPreferences";
@@ -61,6 +63,7 @@ import { isTerminalUrl, resolvePathLinkTarget } from "../terminal-links";
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
+  isTerminalFindShortcut,
   isTerminalNewShortcut,
   isTerminalSplitShortcut,
   isTerminalSplitVerticalShortcut,
@@ -92,6 +95,20 @@ import {
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
+const TERMINAL_SHORTCUT_OPTIONS = {
+  context: {
+    terminalFocus: true,
+    terminalOpen: true,
+    previewFocus: false,
+    previewOpen: false,
+  },
+};
+const INITIAL_TERMINAL_SEARCH = {
+  open: false,
+  query: "",
+  caseSensitive: false,
+  regex: false,
+};
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -354,6 +371,15 @@ export function TerminalViewport({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
   const visibleRef = useRef(visible);
+  const [search, setSearch] = useState(INITIAL_TERMINAL_SEARCH);
+  const [searchState, setSearchState] = useState<GhosttyTerminalSearchState>({
+    matchCount: 0,
+    activeIndex: -1,
+    truncated: false,
+    error: null,
+  });
+  const [searchFocusRequestId, setSearchFocusRequestId] = useState(0);
+  const searchRef = useRef(search);
   const environmentId = threadRef.environmentId;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
@@ -377,6 +403,39 @@ export function TerminalViewport({
   // cannot be mistaken for the active flow.
   const openSelectionMenuRequestIdRef = useRef<number | null>(null);
   const keybindingsRef = useRef(keybindings);
+
+  const handleSearchChange = useEffectEvent((state: GhosttyTerminalSearchState) => {
+    if (searchRef.current.open) setSearchState(state);
+  });
+
+  const updateSearch = (next: Partial<typeof INITIAL_TERMINAL_SEARCH>): void => {
+    const updated = { ...searchRef.current, ...next };
+    searchRef.current = updated;
+    setSearch(updated);
+    const term = terminalRef.current;
+    if (!updated.open) {
+      term?.clearSearch();
+      return;
+    }
+    const state = term?.setSearch(updated.query, updated);
+    if (state) setSearchState(state);
+  };
+
+  const openSearch = useEffectEvent(() => {
+    updateSearch({ open: true });
+    setSearchFocusRequestId((prev) => prev + 1);
+  });
+
+  const stepSearch = (direction: 1 | -1) => {
+    const term = terminalRef.current;
+    if (term) setSearchState(direction === 1 ? term.searchNext() : term.searchPrevious());
+  };
+
+  const handleSearchClose = () => {
+    updateSearch({ open: false });
+    terminalRef.current?.focus();
+  };
+
   const runtimeEnvKey = useMemo(() => runtimeEnvSignature(runtimeEnv), [runtimeEnv]);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
@@ -501,6 +560,7 @@ export function TerminalViewport({
         onSelectionChange: () => handleSelectionChange(),
         beforeKey: (event) => handleBeforeKey(event),
         onLinkActivate: (text, event) => handleLinkActivate(text, event),
+        onSearchChange: (state) => handleSearchChange(state),
         // The surface listens from construction, so a right-click can land
         // while `create` is still awaiting WASM — before the handler below it
         // exists. The ref is only assigned once that setup has run.
@@ -519,6 +579,11 @@ export function TerminalViewport({
       terminal.setTheme(terminalThemeFromApp(mount));
       setupTerminal = terminal;
       terminalRef.current = terminal;
+      const currentSearch = searchRef.current;
+      if (currentSearch.open && currentSearch.query.length > 0) {
+        const state = terminal.setSearch(currentSearch.query, currentSearch);
+        setSearchState(state);
+      }
       // Client settings hydrate asynchronously; a font preference that landed
       // while the surface was loading found terminalRef null, so its setFont
       // was dropped. Re-apply whatever is current once the terminal exists.
@@ -744,16 +809,21 @@ export function TerminalViewport({
 
       function handleBeforeKey(event: KeyboardEvent): boolean {
         const currentKeybindings = keybindingsRef.current;
-        const options = { context: { terminalFocus: true, terminalOpen: true } };
         if (preventTerminalCloseShortcut(event, currentKeybindings)) {
           return false;
         }
+        if (isTerminalFindShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS)) {
+          event.preventDefault();
+          event.stopPropagation();
+          openSearch();
+          return false;
+        }
         if (
-          isTerminalToggleShortcut(event, currentKeybindings, options) ||
-          isTerminalSplitShortcut(event, currentKeybindings, options) ||
-          isTerminalSplitVerticalShortcut(event, currentKeybindings, options) ||
-          isTerminalNewShortcut(event, currentKeybindings, options) ||
-          isDiffToggleShortcut(event, currentKeybindings, options)
+          isTerminalToggleShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
+          isTerminalSplitShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
+          isTerminalSplitVerticalShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
+          isTerminalNewShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
+          isDiffToggleShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS)
         ) {
           return false;
         }
@@ -978,11 +1048,34 @@ export function TerminalViewport({
     };
   }, [drawerHeight, environmentId, resizeEpoch, terminalId, threadId]);
   return (
-    <div
-      ref={containerRef}
-      tabIndex={-1}
-      className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
+      />
+      {visible && search.open && (
+        <TerminalSearchBar
+          query={search.query}
+          caseSensitive={search.caseSensitive}
+          regex={search.regex}
+          matchCount={searchState.matchCount}
+          activeIndex={searchState.activeIndex}
+          truncated={searchState.truncated}
+          error={searchState.error}
+          focusRequestId={searchFocusRequestId}
+          isFindShortcut={(event) =>
+            isTerminalFindShortcut(event, keybindings, TERMINAL_SHORTCUT_OPTIONS)
+          }
+          onQueryChange={(query) => updateSearch({ query })}
+          onCaseSensitiveChange={(caseSensitive) => updateSearch({ caseSensitive })}
+          onRegexChange={(regex) => updateSearch({ regex })}
+          onNext={() => stepSearch(1)}
+          onPrevious={() => stepSearch(-1)}
+          onClose={handleSearchClose}
+        />
+      )}
+    </div>
   );
 }
 
