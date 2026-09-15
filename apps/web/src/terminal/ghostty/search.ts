@@ -1,3 +1,5 @@
+import { collectWrappedTerminalLinkLine, type WrappedTerminalLinkLine } from "../../terminal-links";
+
 export const MAX_TERMINAL_SEARCH_MATCHES = 2000;
 
 export interface TerminalSearchOptions {
@@ -37,38 +39,19 @@ export interface TerminalSearchCellRow {
   readonly cells: readonly { readonly text: string; readonly wide: number }[];
 }
 
-function logicalLines(rows: TerminalSearchRows): { text: string; startRow: number }[] {
-  const lines: { text: string; startRow: number }[] = [];
-  const rowCount = Math.max(rows.texts.length, rows.wraps.length);
-  let text = "";
-  let startRow = 0;
-  for (let row = 0; row < rowCount; row += 1) {
-    text += rows.texts[row] ?? "";
-    if (rows.wraps[row] === true && row < rowCount - 1) continue;
-    const trimmedText = text.trimEnd();
-    if (trimmedText.length > 0) lines.push({ text: trimmedText, startRow });
-    text = "";
-    startRow = row + 1;
-  }
-  return lines;
-}
-
 function searchPattern(query: string, options: TerminalSearchOptions): RegExp {
   const source = options.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(source, options.caseSensitive ? "g" : "gi");
 }
 
 function positionForOffset(
-  texts: readonly string[],
-  startRow: number,
+  line: WrappedTerminalLinkLine,
   offset: number,
 ): TerminalSearchPosition | null {
-  let consumedCharacters = 0;
-  for (let row = startRow; row < texts.length; row += 1) {
-    const rowLength = (texts[row] ?? "").length;
-    if (offset < consumedCharacters + rowLength)
-      return { row, offset: offset - consumedCharacters };
-    consumedCharacters += rowLength;
+  for (const segment of line.segments) {
+    if (offset >= segment.startIndex && offset < segment.endIndex) {
+      return { row: segment.bufferLineNumber - 1, offset: offset - segment.startIndex };
+    }
   }
   return null;
 }
@@ -86,20 +69,33 @@ export function findTerminalSearchMatches(
   } catch {
     return { matches: [], truncated: false, error: "Invalid regular expression" };
   }
+
+  const getLine = (index: number) =>
+    index < rows.texts.length
+      ? {
+          isWrapped: index > 0 && rows.wraps[index - 1] === true,
+          translateToString: (trimRight = false) => {
+            const text = rows.texts[index] ?? "";
+            return trimRight ? text.trimEnd() : text;
+          },
+        }
+      : null;
+
   const matches: TerminalSearchMatch[] = [];
-  for (const line of logicalLines(rows)) {
+  let row = 0;
+  while (row < rows.texts.length) {
+    const line = collectWrappedTerminalLinkLine(row + 1, getLine);
+    if (!line) break;
+    row = line.segments.at(-1)?.bufferLineNumber ?? row + 1;
+    if (line.text.length === 0) continue;
     pattern.lastIndex = 0;
     for (let match = pattern.exec(line.text); match !== null; match = pattern.exec(line.text)) {
       if (match[0].length === 0) {
         pattern.lastIndex = match.index + 1;
         continue;
       }
-      const start = positionForOffset(rows.texts, line.startRow, match.index);
-      const inclusiveEnd = positionForOffset(
-        rows.texts,
-        line.startRow,
-        match.index + match[0].length - 1,
-      );
+      const start = positionForOffset(line, match.index);
+      const inclusiveEnd = positionForOffset(line, match.index + match[0].length - 1);
       if (start === null || inclusiveEnd === null) continue;
       if (matches.length === MAX_TERMINAL_SEARCH_MATCHES)
         return { matches, truncated: true, error: null };

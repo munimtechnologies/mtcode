@@ -2,6 +2,8 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef } from "react";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { SearchOptionButton } from "~/components/search/SearchOptionButton";
+
 const STATUS_CLASS = "inline-block min-w-12 tabular-nums text-xs text-muted-foreground";
 
 export interface TerminalSearchBarProps {
@@ -41,10 +43,6 @@ export function TerminalSearchBar(props: TerminalSearchBarProps) {
     event.preventDefault();
     event.stopPropagation();
   };
-  const toggles = [
-    [".*", "Use regular expression", props.regex, props.onRegexChange],
-    ["Aa", "Match case", props.caseSensitive, props.onCaseSensitiveChange],
-  ] as const;
   const actions = [
     [ChevronUp, "Previous match", props.onPrevious, props.matchCount === 0],
     [ChevronDown, "Next match", props.onNext, props.matchCount === 0],
@@ -67,22 +65,22 @@ export function TerminalSearchBar(props: TerminalSearchBarProps) {
         nativeInput
       />
 
-      {toggles.map(([label, ariaLabel, value, setValue]) => (
-        <Button
-          key={ariaLabel}
-          variant="ghost"
-          size="icon-micro"
-          aria-label={ariaLabel}
-          aria-pressed={value}
-          onClick={() => setValue(!value)}
-          onMouseDown={(e) => e.preventDefault()}
-          className={
-            value ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"
-          }
+      <div onMouseDown={(e) => e.preventDefault()} className="flex items-center gap-0.5">
+        <SearchOptionButton
+          active={props.regex}
+          label="Use regular expression"
+          onClick={() => props.onRegexChange(!props.regex)}
         >
-          {label}
-        </Button>
-      ))}
+          .*
+        </SearchOptionButton>
+        <SearchOptionButton
+          active={props.caseSensitive}
+          label="Match case"
+          onClick={() => props.onCaseSensitiveChange(!props.caseSensitive)}
+        >
+          Aa
+        </SearchOptionButton>
+      </div>
 
       <span className={props.error ? "text-destructive" : STATUS_CLASS}>
         {props.error
