@@ -7518,12 +7518,13 @@ export default function ChatView(props: ChatViewProps) {
     const overflow = attachments.slice(attachmentRoom);
     const restoredImages = restored.filter((attachment) => attachment.type === "image");
     const restoredFiles = restored.filter((attachment) => attachment.type === "file");
-    // The composer syncs these refs from the draft in an effect; a send before
-    // that effect runs must already see the restored content.
-    composerImagesRef.current = [...composerImagesRef.current, ...restoredImages];
-    composerFilesRef.current = [...composerFilesRef.current, ...restoredFiles];
     if (restoredImages.length > 0) addComposerDraftImages(composerDraftTarget, restoredImages);
     if (restoredFiles.length > 0) addComposerDraftFiles(composerDraftTarget, restoredFiles);
+    // The store can reject duplicates or replace file reattachment markers.
+    // An immediate send must use the accepted draft, before the ref-sync effects run.
+    const restoredDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+    composerImagesRef.current = restoredDraft?.images ?? [];
+    composerFilesRef.current = restoredDraft?.files ?? [];
     if (overflow.length > 0 && activeThreadKey) {
       useQueuedMessageStore.getState().enqueue(activeThreadKey, {
         prompt: "",
