@@ -29,7 +29,6 @@ import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as Schema from "effect/Schema";
 import {
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -39,9 +38,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import { createPortal } from "react-dom";
 import { Button } from "~/components/ui/button";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
+import { TerminalActionButton } from "~/components/TerminalActionButton";
 import { TerminalSearchBar } from "~/components/TerminalSearchBar";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
@@ -68,6 +68,7 @@ import {
   isTerminalSplitShortcut,
   isTerminalSplitVerticalShortcut,
   isTerminalToggleShortcut,
+  shortcutLabelForCommand,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
 } from "../keybindings";
@@ -340,6 +341,7 @@ interface TerminalViewportProps {
   resizeEpoch: number;
   drawerHeight: number;
   keybindings: ResolvedKeybindingsConfig;
+  findSlot?: HTMLElement | null;
 }
 
 interface TerminalLaunchLocation {
@@ -366,6 +368,7 @@ export function TerminalViewport({
   resizeEpoch,
   drawerHeight,
   keybindings,
+  findSlot,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
@@ -1045,6 +1048,31 @@ export function TerminalViewport({
       window.cancelAnimationFrame(frame);
     };
   }, [drawerHeight, environmentId, resizeEpoch, terminalId, threadId]);
+  const findShortcutLabel = shortcutLabelForCommand(keybindings, "terminal.find", {
+    context: { terminalFocus: true, terminalOpen: true },
+  });
+  const searchBar = (
+    <TerminalSearchBar
+      open={search.open}
+      docked={Boolean(findSlot)}
+      query={search.query}
+      caseSensitive={search.caseSensitive}
+      matchCount={searchState.matchCount}
+      activeIndex={searchState.activeIndex}
+      truncated={searchState.truncated}
+      focusRequestId={searchFocusRequestId}
+      isFindShortcut={(event) =>
+        isTerminalFindShortcut(event, keybindings, TERMINAL_SHORTCUT_OPTIONS)
+      }
+      {...(findShortcutLabel ? { findShortcutLabel } : {})}
+      onOpen={() => openSearch()}
+      onQueryChange={(query) => updateSearch({ query })}
+      onCaseSensitiveChange={(caseSensitive) => updateSearch({ caseSensitive })}
+      onNext={() => stepSearch(1)}
+      onPrevious={() => stepSearch(-1)}
+      onClose={handleSearchClose}
+    />
+  );
   return (
     <div className="relative h-full w-full">
       <div
@@ -1052,24 +1080,7 @@ export function TerminalViewport({
         tabIndex={-1}
         className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
       />
-      {visible && search.open && (
-        <TerminalSearchBar
-          query={search.query}
-          caseSensitive={search.caseSensitive}
-          matchCount={searchState.matchCount}
-          activeIndex={searchState.activeIndex}
-          truncated={searchState.truncated}
-          focusRequestId={searchFocusRequestId}
-          isFindShortcut={(event) =>
-            isTerminalFindShortcut(event, keybindings, TERMINAL_SHORTCUT_OPTIONS)
-          }
-          onQueryChange={(query) => updateSearch({ query })}
-          onCaseSensitiveChange={(caseSensitive) => updateSearch({ caseSensitive })}
-          onNext={() => stepSearch(1)}
-          onPrevious={() => stepSearch(-1)}
-          onClose={handleSearchClose}
-        />
-      )}
+      {visible && (findSlot ? createPortal(searchBar, findSlot) : searchBar)}
     </div>
   );
 }
@@ -1104,35 +1115,6 @@ interface ThreadTerminalDrawerProps {
   terminalLabelsById?: ReadonlyMap<string, string>;
   /** Prefer per-session launch locations when the server already knows a terminal. */
   terminalLaunchLocationsById?: ReadonlyMap<string, TerminalLaunchLocation>;
-}
-
-interface TerminalActionButtonProps {
-  label: string;
-  className: string;
-  onClick: () => void;
-  children: ReactNode;
-}
-
-function TerminalActionButton({ label, className, onClick, children }: TerminalActionButtonProps) {
-  return (
-    <Popover>
-      <PopoverTrigger
-        openOnHover
-        render={<button type="button" className={className} onClick={onClick} aria-label={label} />}
-      >
-        {children}
-      </PopoverTrigger>
-      <PopoverPopup
-        tooltipStyle
-        side="bottom"
-        sideOffset={6}
-        align="center"
-        className="pointer-events-none select-none"
-      >
-        {label}
-      </PopoverPopup>
-    </Popover>
-  );
 }
 
 export default function ThreadTerminalDrawer({
@@ -1194,6 +1176,7 @@ export default function ThreadTerminalDrawer({
     setDrawerHeight(nextHeight);
   });
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const [findSlot, setFindSlot] = useState<HTMLDivElement | null>(null);
   const drawerHeightRef = useRef(drawerHeight);
   const lastSyncedHeightRef = useRef(controlledDrawerHeight);
   const onHeightChangeRef = useRef(onHeightChange);
@@ -1530,6 +1513,8 @@ export default function ThreadTerminalDrawer({
       {!hasTerminalSidebar && (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
+            <div ref={setFindSlot} className="contents" />
+            <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
                 hasReachedSplitLimit
@@ -1666,6 +1651,7 @@ export default function ThreadTerminalDrawer({
                   resizeEpoch={resizeEpoch}
                   drawerHeight={drawerHeight}
                   keybindings={keybindings}
+                  findSlot={findSlot}
                 />
               </div>
             )}
