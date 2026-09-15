@@ -2146,7 +2146,9 @@ export default function ChatView(props: ChatViewProps) {
     !serverThreadSupportsVisitedTracking ||
     (serverThreadEnvironmentId !== undefined &&
       environmentById.get(serverThreadEnvironmentId)?.connection.phase === "connected");
-  const lastVisitDispatchAtRef = useRef(0);
+  // Keyed by thread: the same ChatView instance serves consecutive threads,
+  // and thread A's throttle window must not defer thread B's first visit.
+  const lastVisitDispatchRef = useRef({ threadKey: "", at: 0 });
   useEffect(() => {
     if (
       !serverThreadEnvironmentId ||
@@ -2158,14 +2160,19 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const threadRef = scopeThreadRef(serverThreadEnvironmentId, serverThreadId);
+    const threadKey = scopedThreadKey(threadRef);
+    const isReading = () => document.visibilityState === "visible" && document.hasFocus();
     let timer: number | undefined;
     const dispatch = () => {
       timer = undefined;
-      lastVisitDispatchAtRef.current = Date.now();
+      // The trailing timer can fire after the tab went to the background;
+      // a hidden document is not reading.
+      if (!isReading()) return;
+      lastVisitDispatchRef.current = { threadKey, at: Date.now() };
       markVisited(threadRef, serverThreadUpdatedAt);
     };
     const visit = () => {
-      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      if (!isReading()) return;
       if (timer !== undefined) return;
       const lastVisitedAtMs = serverThreadLastVisitedAt
         ? Date.parse(serverThreadLastVisitedAt)
@@ -2174,7 +2181,8 @@ export default function ChatView(props: ChatViewProps) {
       const hasUnseenCompletion =
         Number.isFinite(completedAtMs) &&
         (!Number.isFinite(lastVisitedAtMs) || completedAtMs > lastVisitedAtMs);
-      const elapsed = Date.now() - lastVisitDispatchAtRef.current;
+      const previous = lastVisitDispatchRef.current;
+      const elapsed = previous.threadKey === threadKey ? Date.now() - previous.at : Infinity;
       if (hasUnseenCompletion || elapsed >= VISIT_DISPATCH_THROTTLE_MS) {
         dispatch();
         return;

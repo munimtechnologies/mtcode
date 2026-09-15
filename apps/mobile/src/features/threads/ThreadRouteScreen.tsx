@@ -387,7 +387,9 @@ function ThreadRouteContent(
   const selectedThreadCompletedAt = selectedThreadDetail?.latestTurn?.completedAt ?? null;
   const selectedThreadLastVisitedAtRef = useRef(selectedThread?.lastVisitedAt);
   selectedThreadLastVisitedAtRef.current = selectedThread?.lastVisitedAt;
-  const lastVisitDispatchAtRef = useRef(0);
+  // Keyed by thread: this route content survives navigating between threads,
+  // and thread A's throttle window must not defer thread B's first visit.
+  const lastVisitDispatchRef = useRef({ threadKey: "", at: 0 });
   useFocusEffect(
     useCallback(() => {
       if (
@@ -407,8 +409,12 @@ function ThreadRouteContent(
         lastVisitedAt: selectedThreadLastVisitedAtRef.current,
       });
       if (urgency === "skip") return;
+      const threadKey = `${selectedThreadEnvironmentId}:${selectedThreadId}`;
       const dispatch = () => {
-        lastVisitDispatchAtRef.current = Date.now();
+        // The trailing timer can fire after the app went to the background;
+        // an inactive app is not reading.
+        if (AppState.currentState !== "active") return;
+        lastVisitDispatchRef.current = { threadKey, at: Date.now() };
         void visitThread({
           environmentId: selectedThreadEnvironmentId,
           input: { threadId: selectedThreadId, visitedAt: selectedThreadUpdatedAt },
@@ -416,7 +422,8 @@ function ThreadRouteContent(
       };
       // Mid-turn activity bumps arrive several times a second; coalesce them
       // into a trailing visit so the newest watermark wins without a flood.
-      const elapsed = Date.now() - lastVisitDispatchAtRef.current;
+      const previous = lastVisitDispatchRef.current;
+      const elapsed = previous.threadKey === threadKey ? Date.now() - previous.at : Infinity;
       if (urgency === "now" || elapsed >= VISIT_DISPATCH_THROTTLE_MS) {
         dispatch();
         return;
