@@ -75,25 +75,13 @@ describe("buildThreadActionMenuItems", () => {
     expect(ids(baseState)).toEqual(expect.arrayContaining(["pin", "settle", "snooze"]));
   });
 
-  it("renders auto-settle as a check item that mirrors the thread state", () => {
+  it("flips the auto-settle label with the thread state", () => {
     const on = buildThreadActionMenuItems(baseState).find((item) => item.id === "auto-settle");
-    expect(on).toMatchObject({ label: "Auto-settle", checked: true });
+    expect(on?.label).toBe("Disable auto-settle");
     const off = buildThreadActionMenuItems({ ...baseState, autoSettleEnabled: false }).find(
       (item) => item.id === "auto-settle",
     );
-    expect(off).toMatchObject({ checked: false });
-    expect(
-      ids({ ...baseState, supports: { ...baseState.supports, autoSettleOptOut: false } }),
-    ).not.toContain("auto-settle");
-  });
-
-  it("shows auto-settle as a check item that mirrors the thread state", () => {
-    const on = buildThreadActionMenuItems(baseState).find((item) => item.id === "auto-settle");
-    expect(on).toMatchObject({ label: "Auto-settle", checked: true });
-    const off = buildThreadActionMenuItems({ ...baseState, autoSettleEnabled: false }).find(
-      (item) => item.id === "auto-settle",
-    );
-    expect(off?.checked).toBe(false);
+    expect(off?.label).toBe("Enable auto-settle");
     expect(
       ids({ ...baseState, supports: { ...baseState.supports, autoSettleOptOut: false } }),
     ).not.toContain("auto-settle");

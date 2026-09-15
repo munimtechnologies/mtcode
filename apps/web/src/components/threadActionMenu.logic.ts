@@ -84,11 +84,17 @@ export function buildThreadActionMenuItems(
             : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
         ]
       : []),
-    // A check item: the state is visible without opening anything, and one
-    // click flips it. Off keeps long-running threads out of the settled shelf
-    // no matter how quiet they get or what happens to their pull request.
+    // Verb flips with state like Pin/Unpin, so the label itself says which
+    // way the thread is set. Disabled keeps long-running threads out of the
+    // settled shelf no matter how quiet they get or what their PR does.
     ...(state.supports.autoSettleOptOut
-      ? [{ id: "auto-settle" as const, label: "Auto-settle", checked: state.autoSettleEnabled }]
+      ? [
+          {
+            id: "auto-settle" as const,
+            label: state.autoSettleEnabled ? "Disable auto-settle" : "Enable auto-settle",
+            icon: "circle-check",
+          },
+        ]
       : []),
     ...(state.supports.snooze
       ? [

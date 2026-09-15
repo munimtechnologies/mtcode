@@ -571,8 +571,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       variant,
     ],
   );
-  // Check item: on shows the check, off leaves it clear. iOS renders the
-  // state natively; Android shows the title only, so it carries the state.
+  // Verb flips with state like Pin/Unpin, so the title says which way the
+  // thread is set without a native check state.
   const autoSettleMenuItems = useMemo<MenuAction[]>(
     () =>
       props.autoSettleOptOutSupported
@@ -580,12 +580,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             {
               id: "auto-settle",
               title:
-                Platform.OS === "ios"
-                  ? "Auto-settle"
-                  : thread.autoSettleDisabledAt == null
-                    ? "Auto-settle: on"
-                    : "Auto-settle: off",
-              state: thread.autoSettleDisabledAt == null ? "on" : "off",
+                thread.autoSettleDisabledAt == null ? "Disable auto-settle" : "Enable auto-settle",
+              image: "checkmark.circle",
             } satisfies MenuAction,
           ]
         : [],
