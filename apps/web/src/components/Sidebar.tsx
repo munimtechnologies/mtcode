@@ -4131,10 +4131,11 @@ export default function Sidebar() {
           case "unpin":
             attemptUnpin(threadRef);
             return;
-          case "auto-settle": {
+          case "auto-settle:enabled":
+          case "auto-settle:disabled": {
             const result = await setThreadAutoSettle(
               threadRef,
-              thread.autoSettleDisabledAt != null,
+              clicked.value === "auto-settle:enabled",
             );
             if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
               const error = squashAtomCommandFailure(result);

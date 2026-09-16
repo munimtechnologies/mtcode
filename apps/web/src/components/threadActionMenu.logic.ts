@@ -14,6 +14,8 @@ export type ThreadActionMenuId =
   | "settle"
   | "unsettle"
   | "auto-settle"
+  | "auto-settle:enabled"
+  | "auto-settle:disabled"
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
@@ -84,18 +86,6 @@ export function buildThreadActionMenuItems(
             : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
         ]
       : []),
-    // Verb flips with state like Pin/Unpin, so the label itself says which
-    // way the thread is set. Disabled keeps long-running threads out of the
-    // settled shelf no matter how quiet they get or what their PR does.
-    ...(state.supports.autoSettleOptOut
-      ? [
-          {
-            id: "auto-settle" as const,
-            label: state.autoSettleEnabled ? "Disable auto-settle" : "Enable auto-settle",
-            icon: "circle-check",
-          },
-        ]
-      : []),
     ...(state.supports.snooze
       ? [
           state.isSnoozed
@@ -127,6 +117,31 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    // A submenu with the current option checked, not a one-shot action:
+    // this is a setting, and it sits with the other per-thread settings
+    // rather than the lifecycle verbs above. Disabled keeps long-running
+    // threads out of the settled shelf no matter how quiet they get.
+    ...(state.supports.autoSettleOptOut
+      ? [
+          {
+            id: "auto-settle" as const,
+            label: "Auto-settle behavior",
+            icon: "timer",
+            children: [
+              {
+                id: "auto-settle:enabled" as const,
+                label: "Enabled",
+                checked: state.autoSettleEnabled,
+              },
+              {
+                id: "auto-settle:disabled" as const,
+                label: "Disabled",
+                checked: !state.autoSettleEnabled,
+              },
+            ],
+          },
+        ]
+      : []),
     {
       id: "copy",
       label: "Copy",
