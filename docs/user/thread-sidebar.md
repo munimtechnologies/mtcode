@@ -34,7 +34,9 @@ scroll position instead of following the thread to its new place in the list.
 
 Pinning prevents automatic settlement. A pinned thread stays active through
 inactivity and merged/closed pull requests until you unpin it or settle it
-manually. Settling a thread removes its pin.
+manually. To let pinned threads settle like any other thread, turn on
+**Auto-settle pinned threads** in **Settings → General**. Settling a thread
+removes its pin.
 
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
