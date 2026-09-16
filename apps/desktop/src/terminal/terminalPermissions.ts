@@ -21,7 +21,7 @@ export class TerminalPermissionError extends Schema.TaggedErrorClass<TerminalPer
   override get message() {
     switch (this.reason) {
       case "denied":
-        return "Terminal access was denied. Allow T3 Code to control this terminal in System Settings → Privacy & Security → Automation, then select it again.";
+        return "Terminal access was denied. Allow this app to control the terminal in System Settings → Privacy & Security → Automation, then select it again.";
       case "timeout":
         return "Terminal permission timed out. Respond to the macOS permission prompt, then select the terminal again.";
       case "unavailable":
