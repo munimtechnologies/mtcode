@@ -1,4 +1,5 @@
 import {
+  BrowserProfileId,
   EnvironmentId,
   type PreviewAutomationHost,
   PreviewAutomationOperation,
@@ -114,6 +115,19 @@ export class PreviewAutomationRecordingNotActiveError extends Schema.TaggedError
 
   override get message(): string {
     return `Preview automation request ${this.requestId} found no active recording for tab ${this.tabId ?? "unassigned"} on environment ${this.environmentId} thread ${this.threadId}.`;
+  }
+}
+
+export class PreviewAutomationProfileNotFoundError extends Schema.TaggedError<PreviewAutomationProfileNotFoundError>()(
+  "PreviewAutomationProfileNotFoundError",
+  { profileId: BrowserProfileId },
+) {
+  get responseTag() {
+    return "PreviewAutomationExecutionError" as const;
+  }
+
+  override get message(): string {
+    return `Browser profile ${this.profileId} does not exist on this desktop. Choose an existing profile from Settings → Integrations → Browser profiles.`;
   }
 }
 
@@ -323,6 +337,7 @@ export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationRecordingTooLargeError,
   PreviewAutomationRecordingDeadlineExpiredError,
+  PreviewAutomationProfileNotFoundError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,
