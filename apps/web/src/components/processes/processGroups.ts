@@ -1,6 +1,7 @@
-import { PROVIDER_DISPLAY_NAMES, type ServerProcessDiagnosticsEntry } from "@t3tools/contracts";
+import type { ServerProcessDiagnosticsEntry } from "@t3tools/contracts";
 
 import { APP_BASE_NAME } from "~/branding";
+import { providerDisplayName } from "~/lib/providerDisplayName";
 
 export type ProcessGroupKind = "provider" | "terminal" | "listener" | "server";
 
@@ -22,15 +23,6 @@ export interface ProcessGroup {
 const SERVER_GROUP_KEY = "server";
 
 export const SERVER_HELPERS_GROUP_LABEL = `${APP_BASE_NAME} server helpers`;
-
-/** "Codex" for `codex`; an unknown driver kind is title-cased instead of hidden. */
-export function providerDisplayName(provider: string | null): string | null {
-  if (provider === null) return null;
-  return (
-    (PROVIDER_DISPLAY_NAMES as Partial<Record<string, string>>)[provider] ??
-    provider.charAt(0).toUpperCase() + provider.slice(1).replace(/[-_]+/g, " ")
-  );
-}
 
 /**
  * Bucket the server's process list by where each process came from, keeping

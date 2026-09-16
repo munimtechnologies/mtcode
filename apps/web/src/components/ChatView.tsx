@@ -301,6 +301,11 @@ import {
   DraftId,
 } from "../composerDraftStore";
 import {
+  latestTurnUsage as latestTurnUsageFrom,
+  turnUsageByTurnId as turnUsageByTurnIdFrom,
+} from "../turnUsage";
+import { useUsagePlanLabel } from "../usagePlan";
+import {
   formatTerminalContextLabel,
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -2916,6 +2921,12 @@ export default function ChatView(props: ChatViewProps) {
     conversationProviderStatus.supportsConversationRollback !== false;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const turnUsageByTurnId = useMemo(
+    () => turnUsageByTurnIdFrom(threadActivities),
+    [threadActivities],
+  );
+  const latestTurnUsage = useMemo(() => latestTurnUsageFrom(threadActivities), [threadActivities]);
+  const usagePlanLabel = useUsagePlanLabel(activeThread?.session?.providerInstanceId ?? null);
   const latestCheckpointCompletedAt = activeThread?.checkpoints.at(-1)?.completedAt ?? null;
   const workspaceMutationId = useMemo(() => {
     const activityId = latestWorkspaceMutationId(threadActivities);
@@ -10215,6 +10226,8 @@ export default function ChatView(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                turnUsageByTurnId={turnUsageByTurnId}
+                turnUsagePlanLabel={usagePlanLabel}
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
                 {...(!paintOnlyDisplayedTimeline
@@ -10409,6 +10422,8 @@ export default function ChatView(props: ChatViewProps) {
                             phase={phase}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
+                            latestTurnUsage={latestTurnUsage}
+                            usagePlanLabel={usagePlanLabel}
                             isRevertingCheckpoint={isRevertingCheckpoint}
                             sendDisabledReason={
                               isRevertingCheckpoint

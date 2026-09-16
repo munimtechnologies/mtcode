@@ -12,6 +12,8 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as NodeOS from "node:os";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -125,9 +127,65 @@ function normalizeClaudeAuthMethod(authMethod: string | undefined): string | und
   return undefined;
 }
 
-function formatClaudeSubscriptionAuthLabel(subscriptionType: string): string {
-  const subscriptionLabel =
-    claudeSubscriptionLabel(subscriptionType) ?? toTitleCaseWords(subscriptionType);
+/**
+ * Claude Code keeps the account's rate limit tier next to its OAuth account
+ * in `~/.claude.json` (`organizationRateLimitTier` / `userRateLimitTier`,
+ * e.g. `default_claude_max_20x`). The SDK's account info only says "max", so
+ * this is where the 5x / 20x multiplier comes from. Best effort: a missing or
+ * unreadable file simply yields no tier.
+ */
+const ClaudeAccountFile = Schema.Struct({
+  oauthAccount: Schema.optional(
+    Schema.Struct({
+      organizationRateLimitTier: Schema.optional(Schema.NullOr(Schema.String)),
+      userRateLimitTier: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+  ),
+});
+const decodeClaudeAccountFile = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ClaudeAccountFile),
+);
+
+const readClaudeRateLimitTier: Effect.Effect<
+  string | undefined,
+  never,
+  FileSystem.FileSystem | Path.Path
+> = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
+  const candidates = [
+    ...(configDir ? [path.join(configDir, ".claude.json")] : []),
+    path.join(NodeOS.homedir(), ".claude.json"),
+  ];
+  for (const file of candidates) {
+    const parsed = yield* fs
+      .readFileString(file)
+      .pipe(Effect.flatMap(decodeClaudeAccountFile), Effect.option);
+    if (Option.isNone(parsed)) continue;
+    const tier =
+      parsed.value.oauthAccount?.userRateLimitTier ??
+      parsed.value.oauthAccount?.organizationRateLimitTier;
+    if (typeof tier === "string" && tier.trim()) return tier.trim();
+  }
+  return undefined;
+});
+
+/** "Max" plus the tier multiplier when the tier says so: `default_claude_max_20x` → "Max 20x". */
+function withClaudeTierMultiplier(label: string, rateLimitTier: string | undefined): string {
+  const multiplier = rateLimitTier?.match(/(\d+)x\b/i)?.[1];
+  if (!multiplier || /\d+x/i.test(label)) return label;
+  return `${label} ${multiplier}x`;
+}
+
+function formatClaudeSubscriptionAuthLabel(
+  subscriptionType: string,
+  rateLimitTier?: string,
+): string {
+  const subscriptionLabel = withClaudeTierMultiplier(
+    claudeSubscriptionLabel(subscriptionType) ?? toTitleCaseWords(subscriptionType),
+    rateLimitTier,
+  );
   const normalized = subscriptionLabel.toLowerCase().replace(/[\s_-]+/g, "");
 
   if (normalized.startsWith("claude") && normalized.endsWith("subscription")) {
@@ -144,6 +202,7 @@ function formatClaudeSubscriptionAuthLabel(subscriptionType: string): string {
 
 function claudeAuthMetadata(input: {
   readonly subscriptionType: string | undefined;
+  readonly rateLimitTier?: string | undefined;
   readonly authMethod: string | undefined;
 }): { readonly type: string; readonly label: string } | undefined {
   if (normalizeClaudeAuthMethod(input.authMethod) === "apiKey") {
@@ -156,7 +215,7 @@ function claudeAuthMetadata(input: {
   if (input.subscriptionType) {
     return {
       type: input.subscriptionType,
-      label: formatClaudeSubscriptionAuthLabel(input.subscriptionType),
+      label: formatClaudeSubscriptionAuthLabel(input.subscriptionType, input.rateLimitTier),
     };
   }
 
@@ -636,9 +695,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const rateLimitTier = capabilities.subscriptionType ? yield* readClaudeRateLimitTier : undefined;
   const authMetadata =
     claudeAuthMetadata({
       subscriptionType: capabilities.subscriptionType,
+      rateLimitTier,
       authMethod: capabilities.tokenSource,
     }) ?? apiProviderAuthMetadata(capabilities.apiProvider);
   const usageLimits = !capabilities.usage
