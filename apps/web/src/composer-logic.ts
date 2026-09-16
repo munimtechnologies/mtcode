@@ -27,6 +27,12 @@ export type ComposerSlashCommand =
   | "goal clear";
 export type ComposerSubmissionIntent = "foreground" | "background";
 
+/** Extra send behavior chosen from the composer, beyond the enter/shortcut intent. */
+export interface ComposerSendOptions {
+  /** Hold the message in the thread queue until this UTC instant. */
+  readonly scheduledFor?: string;
+}
+
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
   query: string;

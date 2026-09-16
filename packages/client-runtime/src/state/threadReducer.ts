@@ -458,7 +458,13 @@ export function applyThreadDetailEvent(
           ...thread,
           messages: thread.messages.map((message) =>
             message.id === event.payload.messageId
-              ? { ...message, deliveryState: "queued" as const }
+              ? {
+                  ...message,
+                  deliveryState: "queued" as const,
+                  ...(event.payload.scheduledFor !== undefined
+                    ? { scheduledFor: event.payload.scheduledFor }
+                    : {}),
+                }
               : message,
           ),
           updatedAt: event.occurredAt,
@@ -474,7 +480,7 @@ export function applyThreadDetailEvent(
             if (message.id !== event.payload.messageId) {
               return message;
             }
-            const { deliveryState: _, ...deliveredMessage } = message;
+            const { deliveryState: _, scheduledFor: _released, ...deliveredMessage } = message;
             return deliveredMessage;
           }),
           updatedAt: event.occurredAt,

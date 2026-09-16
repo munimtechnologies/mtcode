@@ -13,6 +13,7 @@ import type {
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+import { formatScheduledSendLabel } from "@t3tools/shared/scheduledSend";
 import {
   parseComposerContextHref,
   collectComposerContextReferences,
@@ -1597,7 +1598,11 @@ function renderFeedEntry(
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             {message.deliveryState === "queued" ? (
               <>
-                <Text className="font-t3-medium text-xs text-foreground-muted">Queued</Text>
+                <Text className="font-t3-medium text-xs text-foreground-muted">
+                  {message.scheduledFor !== undefined
+                    ? `Scheduled for ${formatScheduledSendLabel(message.scheduledFor)}`
+                    : "Queued"}
+                </Text>
                 <Pressable
                   accessibilityLabel="Cancel queued message"
                   accessibilityRole="button"

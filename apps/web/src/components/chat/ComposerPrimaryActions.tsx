@@ -1,11 +1,12 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { CalendarClockIcon, ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 interface PendingActionState {
@@ -32,6 +33,8 @@ interface ComposerPrimaryActionsProps {
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
+  /** Opens the scheduled-send picker. Absent when the server cannot hold scheduled turns. */
+  onScheduleMessage?: (() => void) | undefined;
 }
 
 const formatPendingPrimaryActionLabel = (input: {
@@ -72,6 +75,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
+  onScheduleMessage,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
@@ -269,14 +273,42 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </button>
   );
 
+  const scheduleButton =
+    onScheduleMessage !== undefined && hasSendableContent ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              className="flex size-9 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:size-8"
+              {...pointerFocusProps}
+              onClick={onScheduleMessage}
+              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+              aria-label="Schedule send"
+            />
+          }
+        >
+          <CalendarClockIcon className="size-4" aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Schedule send</TooltipPopup>
+      </Tooltip>
+    ) : null;
+
   if (!isRunning) {
-    return sendButton;
+    if (scheduleButton === null) return sendButton;
+    return (
+      <div className="flex items-center justify-end gap-1.5">
+        {scheduleButton}
+        {sendButton}
+      </div>
+    );
   }
 
   // While a turn runs, a sendable draft queues for the next tool boundary, so
   // the send button stays next to Stop on every viewport.
   return (
     <>
+      {scheduleButton}
       {renderStopGenerationButton(false)}
       {hasSendableContent ? sendButton : null}
     </>
