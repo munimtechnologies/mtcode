@@ -252,6 +252,7 @@ export const make = Effect.gen(function* () {
       threadPinReorder: true,
       threadActiveReorder: true,
       threadAutoSettleOptOut: true,
+      threadVisitedTracking: true,
       threadTitleRegeneration: true,
       sourceControlSshPasswordPrompts: true,
       providerHandoff: true,

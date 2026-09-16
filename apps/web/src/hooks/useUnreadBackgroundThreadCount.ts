@@ -28,7 +28,9 @@ export function countUnreadBackgroundThreads(
   let count = 0;
   for (const thread of threads) {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-    const lastVisitedAt = threadLastVisitedAtById[threadKey];
+    // The server watermark wins when the server tracks visits; older servers
+    // leave lastVisitedAt undefined and this device's local marker applies.
+    const lastVisitedAt = thread.lastVisitedAt ?? threadLastVisitedAtById[threadKey];
     if (isThreadUnreadBackground(thread, lastVisitedAt, currentRouteThreadKey)) {
       count++;
     }

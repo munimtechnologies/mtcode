@@ -1,5 +1,5 @@
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
-import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -36,11 +36,11 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
-import { useUiStateStore } from "../uiStateStore";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import { useThreadVisitedState } from "./useThreadVisitedState";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -97,7 +97,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
-  const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
+  const { markUnread } = useThreadVisitedState();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -265,7 +265,7 @@ export function useThreadActionMenu(input: {
             );
             return;
           case "mark-unread":
-            markThreadUnread(scopedThreadKey(threadRef), thread.latestTurn?.completedAt);
+            markUnread(threadRef, thread.latestTurn?.completedAt);
             return;
           case "copy-path": {
             const workspacePath = thread.worktreePath ?? projectCwd;
@@ -353,7 +353,7 @@ export function useThreadActionMenu(input: {
       deleteThread,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
-      markThreadUnread,
+      markUnread,
       onStartRename,
       pinThread,
       projectCwd,

@@ -779,6 +779,8 @@ export const OrchestrationThread = Schema.Struct({
   // instead of sinking back to its creation-order slot. Cleared on settle.
   // Optional so payloads from pre-stamp servers still decode.
   unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Optional so payloads and cached snapshots from pre-tracking servers decode.
+  lastVisitedAt: Schema.optional(IsoDateTime),
   // Snooze is an overlay on the active lifecycle, not a fourth destination:
   // a snoozed thread stays "active" in the model and is only suppressed from
   // the inbox until snoozedUntil passes (or the thread raises its hand).
@@ -870,6 +872,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // See OrchestrationThread.unsettledAt: last re-entry into the active list.
   unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  lastVisitedAt: Schema.optional(IsoDateTime),
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
@@ -1140,6 +1143,24 @@ const ThreadUnsettleCommand = Schema.Struct({
   // (the decider emits thread.unsettled(reason: "activity") events directly,
   // never through this command), so a client cannot forge the neutral reset.
   reason: Schema.Literal("user"),
+});
+
+const ThreadViewCommand = Schema.Struct({
+  type: Schema.Literal("thread.visit"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  /**
+   * Watermark of the thread state the viewer has seen (typically the shell's
+   * updatedAt). The server keeps the maximum of the stored and supplied
+   * values, so replays and out-of-order deliveries cannot move it backwards.
+   */
+  visitedAt: IsoDateTime,
+});
+
+const ThreadMarkUnreadCommand = Schema.Struct({
+  type: Schema.Literal("thread.mark-unread"),
+  commandId: CommandId,
+  threadId: ThreadId,
 });
 
 const ThreadSnoozeCommand = Schema.Struct({
@@ -1481,6 +1502,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnarchiveCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadViewCommand,
+  ThreadMarkUnreadCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadGoalSetCommand,
@@ -1522,6 +1545,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnarchiveCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadViewCommand,
+  ThreadMarkUnreadCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadGoalSetCommand,
@@ -1982,6 +2007,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   // thread.pull-request-linked still decode and replay into the link table.
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  lastVisitedAt: Schema.optional(IsoDateTime),
   updatedAt: IsoDateTime,
 });
 
