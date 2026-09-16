@@ -147,7 +147,9 @@ export interface ThreadComposerProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
-  readonly onSendMessage: (messageOverride?: string) => Promise<MessageId | null>;
+  /** One-tap Continue after Stop: a Continuation Turn, not a "Continue" message. */
+  readonly onContinueThread: () => Promise<void>;
+  readonly onSendMessage: () => Promise<MessageId | null>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
@@ -357,7 +359,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       draftKey: composerOwnerKey,
     });
   };
-  const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
+  const { onSendMessage, onContinueThread, onChangeDraftMessage, onShowUsageLimits } = props;
   // T3 owns /usage-limits only where Limits has data for the selected provider;
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
@@ -543,19 +545,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
     try {
-      const messageId = await onSendMessage("Continue");
-      if (messageId === null) return;
+      await onContinueThread();
       armAgentAwarenessLiveActivityForLocalWork({
         environmentId: props.environmentId,
         threadTitle: props.selectedThread.title,
-        projectTitle: props.environmentLabel ?? "T3 Code",
+        projectTitle: props.environmentLabel ?? getProductName(),
       });
     } finally {
       inFlightThreadIdsRef.current.delete(threadKey);
     }
   }, [
     canContinue,
-    onSendMessage,
+    onContinueThread,
     props.environmentId,
     props.environmentLabel,
     props.selectedThread.id,

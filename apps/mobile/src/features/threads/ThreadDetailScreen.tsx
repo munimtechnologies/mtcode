@@ -180,7 +180,9 @@ export interface ThreadDetailScreenProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
-  readonly onSendMessage: (messageOverride?: string) => Promise<MessageId | null>;
+  /** One-tap Continue after Stop: a Continuation Turn, not a "Continue" message. */
+  readonly onContinueThread: () => Promise<void>;
+  readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onCancelQueuedMessage: (messageId: MessageId) => void;
   readonly onCorrectMessage: (input: {
     readonly targetMessageId: MessageId;
@@ -913,12 +915,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     selectedThreadKey,
   ]);
 
-  const handleSendMessage = useCallback(async (messageOverride?: string) => {
+  const handleSendMessage = useCallback(async () => {
     const targetThreadKey = selectedThreadKey;
     const hasUserMessage = selectedThreadFeed.some(
       (entry) => entry.type === "message" && entry.message.role === "user",
     );
-    const messageId = await props.onSendMessage(messageOverride);
+    const messageId = await props.onSendMessage();
     if (messageId === null || selectedThreadKeyRef.current !== targetThreadKey) {
       return messageId;
     }
@@ -1301,6 +1303,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onNativePasteText={props.onNativePasteText}
                     onRemoveDraftImage={props.onRemoveDraftImage}
                     onStopThread={props.onStopThread}
+                    onContinueThread={props.onContinueThread}
                     onSendMessage={handleSendMessage}
                     onShowUsageLimits={showUsageLimits}
                     onUpdateModelSelection={props.onUpdateThreadModelSelection}

@@ -1400,6 +1400,18 @@ const ThreadTurnInterruptCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// One-tap Continue after an interrupted Turn. A Continuation is a Turn with no
+// user message (ADR 0005): the server authors the prompt, so no text travels.
+const ThreadTurnContinueCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.continue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // The interrupted Turn the user saw; a stale tap after a newer Turn is refused.
+  interruptedTurnId: TurnId,
+  modelSelection: Schema.optional(ModelSelection),
+  createdAt: IsoDateTime,
+});
+
 const ThreadApprovalRespondCommand = Schema.Struct({
   type: Schema.Literal("thread.approval.respond"),
   commandId: CommandId,
@@ -1488,6 +1500,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadQueuedTurnCancelCommand,
   ThreadMessageCorrectCommand,
   ThreadTurnInterruptCommand,
+  ThreadTurnContinueCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadUserInputDismissCommand,
@@ -1528,6 +1541,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadQueuedTurnCancelCommand,
   ThreadMessageCorrectCommand,
   ThreadTurnInterruptCommand,
+  ThreadTurnContinueCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadUserInputDismissCommand,
@@ -2026,6 +2040,9 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   // Continuations have no user message; idle Goal set still supplies one.
   messageId: Schema.optional(MessageId),
+  // Which Continuation this is when there is no message. Absent for Goal
+  // Continuations (the Objective supplies the prompt) and for real messages.
+  continuation: Schema.optional(Schema.Literal("interrupted-turn")),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),

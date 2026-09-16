@@ -274,6 +274,7 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const continueThreadTurn = useAtomCommand(threadEnvironment.continueTurn, "thread continue");
   const cancelQueuedTurn = useAtomCommand(
     threadEnvironment.cancelQueuedTurn,
     "queued message cancellation",
@@ -673,6 +674,20 @@ function ThreadRouteContent(
       },
     });
   }, [interruptThreadTurn, selectedThread]);
+  // One-tap Continue after Stop: a Continuation Turn with no user message
+  // (docs/adr/0005), so nothing is typed into the draft or the feed.
+  const handleContinueThread = useCallback(async () => {
+    if (!selectedThread || selectedThread.latestTurn?.state !== "interrupted") {
+      return;
+    }
+    await continueThreadTurn({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        interruptedTurnId: selectedThread.latestTurn.turnId,
+      },
+    });
+  }, [continueThreadTurn, selectedThread]);
 
   const handleCancelQueuedMessage = useCallback(
     (messageId: MessageId) => {
@@ -1087,6 +1102,7 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
+          onContinueThread={handleContinueThread}
           onSendMessage={composer.onSendMessage}
           onCancelQueuedMessage={handleCancelQueuedMessage}
           onCorrectMessage={handleCorrectMessage}

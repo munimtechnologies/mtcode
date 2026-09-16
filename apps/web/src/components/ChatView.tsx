@@ -1529,6 +1529,9 @@ export default function ChatView(props: ChatViewProps) {
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
+  const continueThreadTurn = useAtomCommand(threadEnvironment.continueTurn, {
+    reportFailure: false,
+  });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -4179,6 +4182,26 @@ export default function ChatView(props: ChatViewProps) {
   }, [interruptThreadTurn]);
   const canInterruptRunningThread =
     buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
+  // One-tap Continue after Stop. A Continuation Turn, not a "Continue" user
+  // message (docs/adr/0005): nothing is typed into the composer or the timeline.
+  const onContinueInterruptedTurn = useCallback(async () => {
+    const { activeThread, setThreadError } = interruptContextRef.current;
+    if (!activeThread || activeThread.latestTurn?.state !== "interrupted") return;
+    const result = await continueThreadTurn({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        interruptedTurnId: activeThread.latestTurn.turnId,
+      },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setThreadError(
+        activeThread.id,
+        error instanceof Error ? error.message : "Failed to continue the interrupted turn.",
+      );
+    }
+  }, [continueThreadTurn]);
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -10587,6 +10610,7 @@ export default function ChatView(props: ChatViewProps) {
                             onCompactContext={onCompactContext}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
+                            onContinueInterruptedTurn={onContinueInterruptedTurn}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={

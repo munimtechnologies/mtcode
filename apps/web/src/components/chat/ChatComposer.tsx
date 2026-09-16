@@ -1429,6 +1429,8 @@ export interface ChatComposerProps {
   onCompactContext: () => void;
   onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
+  /** One-tap Continue after Stop: starts a Continuation Turn with no user message. */
+  onContinueInterruptedTurn: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -1541,6 +1543,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onCompactContext,
     onSend,
     onInterrupt,
+    onContinueInterruptedTurn,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -5847,12 +5850,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const handleInterruptPrimaryAction = useCallback(() => {
     void onInterrupt();
   }, [onInterrupt]);
+  // Upstream #11716 typed "Continue" into the draft and submitted it. The fork
+  // keeps Continuations message-less (docs/adr/0005), so the host dispatches
+  // thread.turn.continue and the composer stays untouched.
   const handleContinueInterruptedTurnPrimaryAction = useCallback(() => {
-    const prompt = "Continue";
-    promptRef.current = prompt;
-    setComposerDraftPrompt(composerDraftTarget, prompt);
-    void submitComposer();
-  }, [composerDraftTarget, promptRef, setComposerDraftPrompt, submitComposer]);
+    void onContinueInterruptedTurn();
+  }, [onContinueInterruptedTurn]);
   const handleImplementPlanInNewThreadPrimaryAction = useCallback(() => {
     void onImplementPlanInNewThread();
   }, [onImplementPlanInNewThread]);

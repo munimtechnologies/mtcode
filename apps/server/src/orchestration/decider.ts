@@ -200,7 +200,8 @@ function threadHasContinuationForLatestTurn(thread: {
   const completedAtMs = Date.parse(completedAt);
   return thread.activities.some(
     (activity) =>
-      activity.kind === "goal.continued" && Date.parse(activity.createdAt) >= completedAtMs,
+      (activity.kind === "goal.continued" || activity.kind === "turn.continued") &&
+      Date.parse(activity.createdAt) >= completedAtMs,
   );
 }
 
@@ -1285,6 +1286,72 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: thread.runtimeMode,
         })),
       ];
+    }
+
+    case "thread.turn.continue": {
+      // The composer's one-tap Continue. Same shape as a Goal Continuation
+      // (ADR 0005): an activity records it, the Turn starts with no user
+      // message, and ProviderCommandReactor authors the prompt.
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (
+        thread.latestTurn?.state !== "interrupted" ||
+        thread.latestTurn.turnId !== command.interruptedTurnId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' latest Turn '${thread.latestTurn?.turnId ?? "none"}' is not the interrupted Turn '${command.interruptedTurnId}'.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      if (!isThreadIdleForGoal(thread, occurredAt)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is not idle and cannot continue the interrupted Turn.`,
+        });
+      }
+      if (hasOpenBlockingRequest(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a pending approval or user-input request and cannot continue the interrupted Turn.`,
+        });
+      }
+      if (threadHasContinuationForLatestTurn(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already continued after Turn '${command.interruptedTurnId}'.`,
+        });
+      }
+      const activityEvent = yield* goalActivityAppendedEvent({
+        commandId: command.commandId,
+        threadId: command.threadId,
+        occurredAt,
+        kind: "turn.continued",
+        summary: "Continued after interruption",
+      });
+      const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.turn-start-requested",
+        payload: {
+          threadId: command.threadId,
+          continuation: "interrupted-turn",
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
+            : {}),
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          createdAt: occurredAt,
+        },
+      };
+      return [activityEvent, turnStartRequestedEvent];
     }
 
     case "thread.goal.block": {
