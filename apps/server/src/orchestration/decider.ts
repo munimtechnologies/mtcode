@@ -2084,6 +2084,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               updatedAt: command.createdAt,
             },
           };
+      // A scheduled send always waits in the durable queue; the reactor
+      // releases it once the instant passes and the thread is free.
+      if (command.scheduledFor !== undefined) {
+        if (!Number.isFinite(Date.parse(command.scheduledFor))) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Scheduled send time must be a valid instant.",
+          });
+        }
+        if (command.deliveryMode === "immediate") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "A scheduled send cannot use immediate delivery.",
+          });
+        }
+      }
+      const queueTurn =
+        command.deliveryMode === "after-current" || command.scheduledFor !== undefined;
       const turnIntentEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -2092,10 +2110,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandId: command.commandId,
         })),
         ...(userMessageEvent ? { causationEventId: userMessageEvent.eventId } : {}),
-        type:
-          command.deliveryMode === "after-current"
-            ? "thread.turn-queued"
-            : "thread.turn-start-requested",
+        type: queueTurn ? "thread.turn-queued" : "thread.turn-start-requested",
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
@@ -2106,6 +2121,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(command.scheduledFor !== undefined ? { scheduledFor: command.scheduledFor } : {}),
           createdAt: command.createdAt,
         },
       };

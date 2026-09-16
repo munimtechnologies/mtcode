@@ -20,17 +20,20 @@ import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shar
 import { buildGoalContinuationPrompt } from "@t3tools/shared/goalContinuation";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -58,6 +61,7 @@ import {
   type ThreadTitleMessage,
 } from "../../textGeneration/ThreadTitleContext.ts";
 import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
+import { findNextDueQueuedTurn, nextQueuedTurnWakeMs } from "../turnQueueScheduling.ts";
 import {
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
@@ -1661,6 +1665,35 @@ const make = Effect.gen(function* () {
     },
   );
 
+  // One pending wake-up per thread for the earliest scheduled turn. Re-armed on
+  // every dispatch attempt so cancels and new schedules cannot leave a stale timer.
+  const scheduledTurnWakeups = new Map<ThreadId, Fiber.Fiber<void>>();
+  // Assigned once tryDispatchNextQueuedTurn exists; the two are mutually recursive.
+  let releaseScheduledTurn: (threadId: ThreadId) => Effect.Effect<void, never, Scope.Scope> = () =>
+    Effect.void;
+  const armScheduledTurnWakeup = Effect.fn("armScheduledTurnWakeup")(function* (
+    threadId: ThreadId,
+    wakeMs: number | null,
+    nowMs: number,
+  ) {
+    const previous = scheduledTurnWakeups.get(threadId);
+    if (previous !== undefined) {
+      scheduledTurnWakeups.delete(threadId);
+      yield* Fiber.interrupt(previous);
+    }
+    if (wakeMs === null) return;
+    const fiber = yield* Effect.sleep(Duration.millis(Math.max(0, wakeMs - nowMs))).pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          if (scheduledTurnWakeups.get(threadId) === fiber) scheduledTurnWakeups.delete(threadId);
+          return releaseScheduledTurn(threadId);
+        }),
+      ),
+      Effect.forkScoped,
+    );
+    scheduledTurnWakeups.set(threadId, fiber);
+  });
+
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
   ) {
@@ -1668,7 +1701,10 @@ const make = Effect.gen(function* () {
     if (rows.some((row) => row.status === "handoff")) {
       return;
     }
-    const next = rows.find((row) => row.status === "queued");
+    const nowMs = yield* Clock.currentTimeMillis;
+    const queuedRows = rows.filter((row) => row.status === "queued");
+    yield* armScheduledTurnWakeup(threadId, nextQueuedTurnWakeMs(queuedRows, nowMs), nowMs);
+    const next = findNextDueQueuedTurn(queuedRows, nowMs);
     if (next === undefined) {
       return;
     }
@@ -1702,6 +1738,17 @@ const make = Effect.gen(function* () {
       createdAt,
     });
   });
+  releaseScheduledTurn = (threadId) =>
+    tryDispatchNextQueuedTurn(threadId).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.logWarning("provider command reactor failed to release a scheduled turn", {
+              threadId,
+              cause: Cause.pretty(cause),
+            }),
+      ),
+    );
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,

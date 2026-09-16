@@ -118,6 +118,7 @@ const ProjectionThreadMessageDbRowSchema = Schema.Struct({
   attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
   context: Schema.NullOr(Schema.fromJsonString(OrchestrationMessageContext)),
   deliveryState: Schema.NullOr(Schema.Literal("queued")),
+  scheduledFor: Schema.NullOr(IsoDateTime),
 });
 const ProjectionTurnStartMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
   Struct.assign({ hasOtherUserMessages: Schema.Number }),
@@ -742,6 +743,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           context_json AS "context",
           is_streaming AS "isStreaming",
           delivery_state AS "deliveryState",
+          (
+            SELECT queued_turn.scheduled_for
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "scheduledFor",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -770,6 +777,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           context_json AS "context",
           is_streaming AS "isStreaming",
           delivery_state AS "deliveryState",
+          (
+            SELECT queued_turn.scheduled_for
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "scheduledFor",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1382,6 +1395,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         context_json AS "context",
         is_streaming AS "isStreaming",
         delivery_state AS "deliveryState",
+        (
+          SELECT queued_turn.scheduled_for
+          FROM projection_thread_turn_queue AS queued_turn
+          WHERE queued_turn.message_id = projection_thread_messages.message_id
+            AND queued_turn.status = 'queued'
+        ) AS "scheduledFor",
         created_at AS "createdAt",
         updated_at AS "updatedAt",
         EXISTS (
@@ -1419,6 +1438,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           context_json AS "context",
           is_streaming AS "isStreaming",
           delivery_state AS "deliveryState",
+          (
+            SELECT queued_turn.scheduled_for
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "scheduledFor",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1863,6 +1888,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           context_json AS "context",
           is_streaming AS "isStreaming",
           delivery_state AS "deliveryState",
+          (
+            SELECT queued_turn.scheduled_for
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "scheduledFor",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -2287,6 +2318,7 @@ pending_approval_requests AS (
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
+                  ...(row.scheduledFor !== null ? { scheduledFor: row.scheduledFor } : {}),
                 });
                 messagesByThread.set(row.threadId, threadMessages);
               }
@@ -2620,6 +2652,7 @@ pending_approval_requests AS (
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deliveryState: "queued",
+                  ...(row.scheduledFor !== null ? { scheduledFor: row.scheduledFor } : {}),
                 });
                 queuedMessagesByThread.set(row.threadId, messages);
               }
@@ -3719,6 +3752,7 @@ pending_approval_requests AS (
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
+            ...(row.scheduledFor !== null ? { scheduledFor: row.scheduledFor } : {}),
           };
           if (row.attachments !== null) {
             Object.assign(message, { attachments: row.attachments });

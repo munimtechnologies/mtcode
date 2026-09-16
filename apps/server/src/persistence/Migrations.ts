@@ -73,6 +73,8 @@ import Migration0053 from "./Migrations/050_ProjectionThreadPullRequests.ts";
 import Migration0054 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 // Upstream 052; renumbered to the next free fork id.
 import Migration0055 from "./Migrations/052_ProjectionThreadTitleState.ts";
+// Fork-only: scheduled send time on queued turns (ported from KamiCode).
+import Migration0066 from "./Migrations/066_ProjectionThreadTurnQueueScheduledFor.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -140,6 +142,7 @@ const migrationEntries = [
   [53, "ProjectionThreadPullRequests", Migration0053],
   [54, "ProjectionThreadMessageContext", Migration0054],
   [55, "ProjectionThreadTitleState", Migration0055],
+  [66, "ProjectionThreadTurnQueueScheduledFor", Migration0066],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

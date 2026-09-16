@@ -518,6 +518,8 @@ export const OrchestrationMessage = Schema.Struct({
   // Present while a user message is durably waiting for the active turn to
   // finish. Optional keeps cached snapshots from older servers compatible.
   deliveryState: Schema.optional(Schema.Literal("queued")),
+  // Present on a queued user message that the server holds until this instant.
+  scheduledFor: Schema.optional(IsoDateTime),
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 
@@ -1345,6 +1347,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
+  // Hold the turn in the thread queue until this instant. Implies queued delivery.
+  scheduledFor: Schema.optional(IsoDateTime),
   // Server-authored only: ClientThreadTurnStartCommand intentionally omits
   // this field so clients and providers cannot forge another thread's identity.
   sourceThreadMessage: Schema.optional(SourceThreadMessageReference),
@@ -1369,6 +1373,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
+  scheduledFor: Schema.optional(IsoDateTime),
   createdAt: IsoDateTime,
 });
 
@@ -2033,6 +2038,8 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Only meaningful on `thread.turn-queued`: the queue holds the turn until then.
+  scheduledFor: Schema.optional(IsoDateTime),
   createdAt: IsoDateTime,
 });
 
