@@ -906,11 +906,6 @@ function capitalize(value: string): string {
 function ArchivedThreadsSettingsSection() {
   return (
     <SettingsSection title="Threads">
-      <SettingsRow
-        icon="arrow.down.circle"
-        label="Import Conversations"
-        target="SettingsImportConversations"
-      />
       <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
     </SettingsSection>
   );
