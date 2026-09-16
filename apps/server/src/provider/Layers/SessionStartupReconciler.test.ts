@@ -25,7 +25,7 @@ const now = "2026-01-01T00:00:00.000Z";
 interface TestSession {
   readonly threadId: ThreadId;
   readonly status: "starting" | "running" | "ready" | "interrupted" | "stopped" | "error";
-  readonly providerName: "codex" | "claudeAgent";
+  readonly providerName: "codex" | "claudeAgent" | "pi";
   readonly runtimeMode: "approval-required" | "full-access" | "auto-accept-edits";
   readonly activeTurnId: TurnId | null;
   readonly lastError: string | null;
@@ -215,6 +215,28 @@ describe("SessionStartupReconciler", () => {
       expect(resume.threadId).toBe(threadId);
       expect(resume.message.role).toBe("user");
       expect(resume.message.text).toContain("Continue exactly where you left off");
+    }
+  });
+
+  it("settles a resumable Pi session as an error instead of resuming it", async () => {
+    const threadId = ThreadId.make("thread-orphan-pi");
+    const harness = createHarness({
+      threads: [
+        makeThreadShell(threadId, { ...runningSession(threadId), providerName: "pi" }),
+      ],
+      resumableThreadIds: [threadId],
+    });
+
+    await runReconcile();
+
+    expect(harness.dispatched).toHaveLength(1);
+    const settle = harness.dispatched[0]!;
+    expect(settle.type).toBe("thread.session.set");
+    if (settle.type === "thread.session.set") {
+      expect(settle.threadId).toBe(threadId);
+      expect(settle.session.status).toBe("error");
+      expect(settle.session.providerName).toBe("pi");
+      expect(settle.session.lastError).toContain("did not survive");
     }
   });
 

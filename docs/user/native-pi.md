@@ -13,9 +13,9 @@ including live progress, completion state, model, and usage when the tool report
 them. child and forked pi session files do not add separate sidebar threads; t3
 keeps the root conversation in the sidebar and its delegated work in Agents.
 
-on web, choose **new native pi session** from the command palette while a
-project is active. on mobile, choose **native pi** as the run target in the
-normal new-task composer. both flows return to the ordinary thread screen.
+on web and desktop, choose **new native pi session** from the command palette
+while a project is active. the flow returns to the ordinary thread screen.
+native sessions are not listed in the mobile app yet.
 
 ## session states
 

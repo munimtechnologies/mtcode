@@ -73,6 +73,7 @@ import Migration0053 from "./Migrations/050_ProjectionThreadPullRequests.ts";
 import Migration0054 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 // Upstream 052; renumbered to the next free fork id.
 import Migration0055 from "./Migrations/052_ProjectionThreadTitleState.ts";
+import Migration0071 from "./Migrations/071_PiExternalLifecycleOverrides.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -140,6 +141,7 @@ const migrationEntries = [
   [53, "ProjectionThreadPullRequests", Migration0053],
   [54, "ProjectionThreadMessageContext", Migration0054],
   [55, "ProjectionThreadTitleState", Migration0055],
+  [71, "PiExternalLifecycleOverrides", Migration0071],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

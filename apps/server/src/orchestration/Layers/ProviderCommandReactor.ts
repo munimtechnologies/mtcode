@@ -870,6 +870,8 @@ const make = Effect.gen(function* () {
 
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    /** Accepted command id. Managed Pi turns key supervisor admission on it. */
+    readonly operationId?: CommandId;
     readonly messageText: string;
     readonly messageId?: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -941,6 +943,7 @@ const make = Effect.gen(function* () {
 
     return {
       threadId: input.threadId,
+      ...(input.operationId !== undefined ? { operationId: input.operationId } : {}),
       ...(inputWithHandoffPrelude ? { input: inputWithHandoffPrelude } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
@@ -1597,6 +1600,7 @@ const make = Effect.gen(function* () {
     }
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
+      ...(event.commandId === null ? {} : { operationId: event.commandId }),
       ...(messageId === undefined ? {} : { messageId }),
       messageText: providerMessageText,
       ...(attachments !== undefined ? { attachments } : {}),

@@ -51,6 +51,13 @@ const planForOrphan = (input: {
   if (!input.hasResumeCursor || input.archived) {
     return "error";
   }
+  // A managed Pi process is owned by the host supervisor and outlives the
+  // server, so it may still be mid-turn when the sweep runs. The durable
+  // admission recovery that could reattach to that turn is not ported, and an
+  // automatic continuation would race it; only a fresh user message continues.
+  if (input.thread.session?.providerName === "pi") {
+    return "error";
+  }
   if (input.thread.goal?.status === "active" || input.thread.hasQueuedTurns === true) {
     return "interrupt";
   }
