@@ -55,6 +55,7 @@ export const ProjectionThread = Schema.Struct({
   titleRegenerationStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   goal: Schema.optional(Schema.NullOr(OrchestrationThreadGoal)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
+  usageLimitResumeAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,
   hasActionableProposedPlan: NonNegativeInt,

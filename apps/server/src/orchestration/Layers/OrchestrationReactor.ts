@@ -12,6 +12,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import { TurnWatchdogReactor } from "../Services/TurnWatchdogReactor.ts";
 import * as ThreadSettlementReactor from "../ThreadSettlementReactor.ts";
+import * as UsageLimitResumeReactor from "../UsageLimitResumeReactor.ts";
 import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
@@ -24,6 +25,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const threadDeletionReactor = yield* ThreadDeletionReactor;
   const turnWatchdogReactor = yield* TurnWatchdogReactor;
   const threadSettlementReactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+  const usageLimitResumeReactor = yield* UsageLimitResumeReactor.UsageLimitResumeReactor;
   const pullRequestSyncReactor = yield* PullRequestSyncReactor.PullRequestSyncReactor;
   const threadPullRequestReactor = yield* ThreadPullRequestReactor.ThreadPullRequestReactor;
   const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
@@ -40,6 +42,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* turnWatchdogReactor.start();
     yield* threadPullRequestReactor.start();
     yield* threadSettlementReactor.start();
+    yield* usageLimitResumeReactor.start();
     yield* pullRequestSyncReactor.start();
     yield* agentAwarenessRelay.start();
   });

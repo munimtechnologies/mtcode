@@ -561,6 +561,12 @@ export const OrchestrationSession = Schema.Struct({
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   activeTurnId: Schema.NullOr(TurnId),
   lastError: Schema.NullOr(TrimmedNonEmptyString),
+  // Classification of lastError. "usage_limit" means the provider refused the
+  // turn for subscription quota, not a crash: clients soften the failure and
+  // may offer to resume when lastErrorResetsAt passes. Optional so payloads
+  // from servers that do not classify errors still decode.
+  lastErrorKind: Schema.optional(Schema.Literals(["usage_limit"])),
+  lastErrorResetsAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
@@ -804,6 +810,11 @@ export const OrchestrationThread = Schema.Struct({
   // servers still decode.
   goal: Schema.optional(Schema.NullOr(OrchestrationThreadGoal)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
+  // When a usage-limit failure may be retried, or null once that failure has
+  // cleared. The user arms this from the composer card and it disarms when a
+  // later turn starts; shells carry it so the list can count down without the
+  // full thread. Optional so payloads from pre-resume servers still decode.
+  usageLimitResumeAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -876,6 +887,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   // Optional so older clients still decode shells that omit it.
   goal: Schema.optional(Schema.NullOr(OrchestrationThreadGoalShell)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
+  // See OrchestrationThread.usageLimitResumeAt: when a usage-limit failure may
+  // be retried, or null once cleared. Optional so older servers still decode.
+  usageLimitResumeAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   // Durable server queue state. Optional so older servers and cached shells
@@ -1145,6 +1159,29 @@ const ThreadSnoozeCommand = Schema.Struct({
   // will arrive as an optional condition field alongside this; time-based
   // snooze is just the first kind of condition.
   snoozedUntil: IsoDateTime,
+});
+
+// Arms the auto-resume for a thread parked on a usage-limit failure: the
+// server sweep re-dispatches the turn with "Continue where you left off."
+// once `resumeAt` passes. A user message sent meanwhile wins the race (the
+// decider disarms on turn start), and the composer's toggle cancels by
+// dispatching the disarm twin below.
+export const ThreadUsageResumeArmCommand = Schema.Struct({
+  type: Schema.Literal("thread.usage-resume.arm"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  resumeAt: IsoDateTime,
+  createdAt: IsoDateTime,
+});
+
+// Clears an armed resume. A later turn start disarms by itself, so this only
+// runs while the thread sits parked: the user cancels the auto-start, or the
+// provider reactor cleans up a stale arm after an early recovery.
+export const ThreadUsageResumeDisarmCommand = Schema.Struct({
+  type: Schema.Literal("thread.usage-resume.disarm"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
 });
 
 const ThreadUnsnoozeCommand = Schema.Struct({
@@ -1494,6 +1531,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadConversationRevertCommand,
   ThreadSessionStopCommand,
+  ThreadUsageResumeArmCommand,
+  ThreadUsageResumeDisarmCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -1534,6 +1573,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadConversationRevertCommand,
   ThreadSessionStopCommand,
+  ThreadUsageResumeArmCommand,
+  ThreadUsageResumeDisarmCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -1702,6 +1743,8 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 const InternalOrchestrationCommand = Schema.Union([
   ThreadQueuedTurnDispatchCommand,
   ThreadAutoSettleCommand,
+  ThreadUsageResumeArmCommand,
+  ThreadUsageResumeDisarmCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
   ThreadSessionSetCommand,
@@ -1771,6 +1814,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.reverted",
   "thread.session-stop-requested",
   "thread.session-set",
+  "thread.usage-resume-armed",
+  "thread.usage-resume-disarmed",
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
@@ -2114,6 +2159,16 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadUsageResumeArmedPayload = Schema.Struct({
+  threadId: ThreadId,
+  resumeAt: IsoDateTime,
+});
+
+export const ThreadUsageResumeDisarmedPayload = Schema.Struct({
+  threadId: ThreadId,
+  reason: Schema.Literals(["turn-started", "cleared"]),
+});
+
 /**
  * Which client connection dispatched the command that produced an event.
  * Stamped by the orchestration engine on client-dispatched commands; absent on
@@ -2375,6 +2430,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.usage-resume-armed"),
+    payload: ThreadUsageResumeArmedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.usage-resume-disarmed"),
+    payload: ThreadUsageResumeDisarmedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

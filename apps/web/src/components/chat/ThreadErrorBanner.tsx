@@ -1,8 +1,9 @@
 import { memo, useRef } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import { CheckIcon, CircleAlertIcon, CopyIcon, XIcon } from "lucide-react";
+import { CheckIcon, CircleAlertIcon, CopyIcon, HourglassIcon, XIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { UsageLimitCountdown } from "./UsageLimitCountdown";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { anchoredToastManager } from "../ui/toast";
 
@@ -101,6 +102,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
   copyContext,
   onDismiss,
+  usageLimitResetsAt,
 }: {
   error: string | null;
   copyContext?: {
@@ -109,8 +111,35 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
     readonly threadId?: string | null;
   };
   onDismiss?: () => void;
+  /** Renders the calm reached-your-limit notice instead of the raw error. */
+  usageLimitResetsAt?: string | null;
 }) {
   if (!error) return null;
+  if (usageLimitResetsAt) {
+    return (
+      <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
+        <Alert variant="info" controlAlignment="first-line" className="alert-glass">
+          <HourglassIcon />
+          <AlertDescription>
+            Reached your plan's usage limit ·{" "}
+            <UsageLimitCountdown resetsAt={usageLimitResetsAt} prefix="tokens return in" />
+          </AlertDescription>
+          {onDismiss && (
+            <AlertAction>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Dismiss usage limit notice"
+                onClick={onDismiss}
+              >
+                <XIcon />
+              </Button>
+            </AlertAction>
+          )}
+        </Alert>
+      </div>
+    );
+  }
   const clipboardText = formatThreadErrorClipboardText({ error, ...copyContext });
 
   return (
