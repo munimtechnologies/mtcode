@@ -145,7 +145,7 @@ function LocalSettingsRouteScreen() {
     }
     Alert.alert(
       "Disable notifications",
-      "Open Android settings to disable notifications for T3 Code.",
+      `Open Android settings to disable notifications for ${getProductName()}.`,
       [
         { text: "Cancel", style: "cancel" },
         { text: "Open Settings", onPress: () => void Linking.openSettings() },
