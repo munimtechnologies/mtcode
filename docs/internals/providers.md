@@ -42,6 +42,19 @@ Opening a provider session can start MCP servers, run hooks, or launch a login b
 session creation for this reason. Antigravity likewise reserves authenticated catalog sessions for
 explicit setup or model refresh; background checks use initialization only.
 
+[Devin probes](../../apps/server/src/provider/Layers/DevinProvider.ts) are CLI-only —
+`devin version`, `devin auth status`, `devin models list --format json` — and never spawn
+`devin acp`. The Devin CLI reads its stored credentials automatically, so sending the advertised
+`devin-browser` authenticate method would open a browser on every session spawn even for a
+signed-in user. The [runtime](../../apps/server/src/provider/acp/DevinAcpSupport.ts) therefore
+issues `authenticate` only when no ambient credential exists and the caller opted in to an
+interactive login. Devin has no `session/set_model`; model selection rides the session's
+`category: "model"` config option. `devin acp` advertises no HTTP/SSE MCP transports, so the
+thread's T3 MCP endpoint reaches it through a
+[stdio bridge script](../../apps/server/src/mcp/McpStdioBridge.ts) the agent launches. An agent
+that does advertise `http` gets the endpoint directly; the `http` entry also remains as a fallback
+when the bridge script cannot be written.
+
 [Antigravity sign-in](../../apps/server/src/provider/AntigravityAuth.ts) belongs to the initiating
 T3 auth session. The client carries the return URL back to the environment because the provider's
 loopback listener may be on another machine. Forward only the callback for the owned pending flow;
