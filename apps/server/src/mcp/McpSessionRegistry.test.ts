@@ -80,9 +80,23 @@ it.effect("always grants pull-requests and gates browser and device access indep
         .resolve(issued.config.authorizationHeader.replace(/^Bearer\s+/, ""))
         .pipe(Effect.map((scope) => [...(scope?.capabilities ?? [])].sort()));
 
-    expect(yield* capabilitiesOf(withPreview)).toEqual(["preview", "pull-requests", "thread-metadata", "worktree"]);
-    expect(yield* capabilitiesOf(withoutPreview)).toEqual(["pull-requests", "thread-metadata", "worktree"]);
-    expect(yield* capabilitiesOf(withDevice)).toEqual(["device", "pull-requests", "thread-metadata", "worktree"]);
+    expect(yield* capabilitiesOf(withPreview)).toEqual([
+      "preview",
+      "pull-requests",
+      "thread-metadata",
+      "worktree",
+    ]);
+    expect(yield* capabilitiesOf(withoutPreview)).toEqual([
+      "pull-requests",
+      "thread-metadata",
+      "worktree",
+    ]);
+    expect(yield* capabilitiesOf(withDevice)).toEqual([
+      "device",
+      "pull-requests",
+      "thread-metadata",
+      "worktree",
+    ]);
   }),
 );
 
@@ -161,5 +175,21 @@ it.effect("does not keep credentials of other threads alive", () =>
     timestamp += 2;
 
     expect(yield* registry.resolve(token)).toBeUndefined();
+  }),
+);
+
+it.effect("preserves the explicitly granted toolkit capabilities", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("monitor-only"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(["monitor"]),
+    });
+    const resolved = yield* registry.resolve(
+      issued.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(Array.from(resolved!.capabilities)).toEqual(["pull-requests", "monitor"]);
+    expect(Array.from(issued.config.capabilities)).toEqual(["pull-requests", "monitor"]);
   }),
 );

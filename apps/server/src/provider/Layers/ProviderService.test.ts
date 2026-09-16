@@ -5196,7 +5196,13 @@ describe("agent browser access", () => {
       assert.deepEqual(issued, [
         {
           threadId,
-          capabilities: ["pull-requests", "thread-metadata", "thread-reference", "worktree"],
+          capabilities: [
+            "monitor",
+            "pull-requests",
+            "thread-metadata",
+            "thread-reference",
+            "worktree",
+          ],
         },
       ]);
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -5213,6 +5219,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "monitor",
             "preview",
             "pull-requests",
             "thread-metadata",
@@ -5235,6 +5242,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "monitor",
             "pull-requests",
             "thread-metadata",
             "thread-reference",
@@ -5252,7 +5260,13 @@ describe("agent browser access", () => {
       assert.deepEqual(issued, [
         {
           threadId,
-          capabilities: ["pull-requests", "thread-metadata", "thread-reference", "worktree"],
+          capabilities: [
+            "monitor",
+            "pull-requests",
+            "thread-metadata",
+            "thread-reference",
+            "worktree",
+          ],
         },
       ]);
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -5267,6 +5281,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "monitor",
             "pull-requests",
             "thread-metadata",
             "thread-reference",
@@ -5285,6 +5300,7 @@ describe("agent browser access", () => {
         {
           threadId,
           capabilities: [
+            "monitor",
             "preview",
             "pull-requests",
             "thread-metadata",
@@ -5307,6 +5323,7 @@ describe("agent browser access", () => {
           threadId,
           capabilities: [
             "device",
+            "monitor",
             "pull-requests",
             "thread-metadata",
             "thread-reference",
@@ -5332,6 +5349,7 @@ describe("agent browser access", () => {
         {
           threadId,
           capabilities: [
+            "monitor",
             "preview",
             "pull-requests",
             "thread-metadata",

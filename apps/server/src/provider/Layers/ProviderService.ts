@@ -55,10 +55,10 @@ import * as Stream from "effect/Stream";
 
 import { appendUserInputAttachmentPaths } from "../userInputAttachments.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import type { McpCapability } from "../../mcp/McpInvocationContext.ts";
 import * as ServerConfig from "../../config.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
 import { ensureAgentDeviceShim } from "../../device/AgentDeviceShim.ts";
-import type * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import {
   increment,
   providerMetricAttributes,
@@ -911,7 +911,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   ) {
     // `thread-reference` needs no setting behind it: the `#` chip that cites
     // another thread is always available, so its read-only tool always is too.
-    const capabilities = new Set<McpInvocationContext.McpCapability>([
+    const capabilities = new Set<McpCapability>([
       "pull-requests",
       "thread-metadata",
       "thread-reference",
@@ -950,9 +950,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     } satisfies Record<string, string>;
   });
 
-  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
+  const prepareMcpSession = (
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+    provider: ProviderDriverKind,
+  ) =>
     Effect.gen(function* () {
       const capabilities = yield* agentAccessCapabilities(threadId);
+      if (provider === "codex") capabilities.add("monitor");
       const credential = yield* issueMcpCredential({ threadId, providerInstanceId, capabilities });
       if (credential) {
         const deviceEnvironment = capabilities.has("device")
@@ -1279,7 +1284,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
+      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId, input.binding.provider);
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -1510,7 +1515,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
+        yield* prepareMcpSession(threadId, resolvedInstanceId, input.provider);
         const session = yield* adapter
           .startSession({
             ...input,
