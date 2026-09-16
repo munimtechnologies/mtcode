@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
+  CommandId,
   EventId,
   IsoDateTime,
   ProviderItemId,
@@ -68,6 +69,7 @@ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
+  operationId: Schema.optional(CommandId),
   /** Internal recovery signal. Allows an empty turn only for adapters that
       explicitly support promptless continuation. */
   continuation: Schema.optional(Schema.Boolean),
@@ -79,6 +81,7 @@ export const ProviderSendTurnInput = Schema.Struct({
   ),
   modelSelection: Schema.optional(ModelSelection),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  admissionMode: Schema.optional(Schema.Literal("recover-durable")),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 

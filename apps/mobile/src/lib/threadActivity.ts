@@ -265,6 +265,13 @@ export function isContextCompactionActivityGroup(
   );
 }
 
+export function isSessionRecapActivityGroup(entry: ThreadFeedActivityGroup): boolean {
+  return (
+    entry.activities.length === 1 &&
+    entry.activities[0]?.workEntry.sourceActivityKind === "session.recap"
+  );
+}
+
 function isUserInputActivityGroup(entry: ThreadFeedActivityGroup): boolean {
   return entry.activities.some((activity) => activity.workEntry.questionAnswer !== undefined);
 }
@@ -533,7 +540,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const viewedImagePath = extractActivityViewedImagePath(payload);
   const commandOutput = commandPreview.command ? extractCommandOutputText(payload?.data) : null;
   const output = commandOutput ? stripTrailingExitCode(commandOutput).output : null;
-  if (!taskDetailAsLabel && output) {
+  if (activity.kind === "session.recap" && typeof payload?.detail === "string") {
+    entry.detail = payload.detail;
+  } else if (!taskDetailAsLabel && output) {
     entry.detail = output;
   } else if (!taskDetailAsLabel && typeof payload?.detail === "string") {
     const detail = stripTrailingExitCode(payload.detail).output;
@@ -1564,6 +1573,7 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
 
     const isStandalone =
       entry.activity.workEntry.sourceActivityKind === "context-compaction" ||
+      entry.activity.workEntry.sourceActivityKind === "session.recap" ||
       entry.activity.workEntry.questionAnswer !== undefined;
     if (isStandalone || firstActivityEntry?.turnId !== entry.turnId) {
       flushGroup();
@@ -1858,7 +1868,11 @@ function appendPresentedFeedEntry(
     result.push(entry);
     return;
   }
-  if (isContextCompactionActivityGroup(entry) || isUserInputActivityGroup(entry)) {
+  if (
+    isContextCompactionActivityGroup(entry) ||
+    isSessionRecapActivityGroup(entry) ||
+    isUserInputActivityGroup(entry)
+  ) {
     result.push(entry);
     return;
   }

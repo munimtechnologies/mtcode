@@ -36,6 +36,41 @@ import {
   type EnvironmentThreadStatus,
 } from "./threadState.ts";
 
+export type ThreadCapabilityAction =
+  | "send"
+  | "attachments"
+  | "steer"
+  | "followUp"
+  | "interrupt"
+  | "stop"
+  | "rename"
+  | "archive"
+  | "settle"
+  | "unsettle"
+  | "delete"
+  | "changeModel"
+  | "changeRuntimeMode"
+  | "changeInteractionMode"
+  | "checkpoints"
+  | "lifecycle"
+  | "approval"
+  | "userInput";
+
+export function threadAllows(
+  thread: Pick<OrchestrationThread, "backing">,
+  action: ThreadCapabilityAction,
+): boolean {
+  const backing = thread.backing;
+  if (backing === undefined) return true;
+  if (action === "steer" || action === "followUp") {
+    return backing.capabilities.streamingBehaviors.includes(action);
+  }
+  if (action === "lifecycle" || action === "approval" || action === "userInput") {
+    return false;
+  }
+  return backing.capabilities[action] === true;
+}
+
 function statusWithoutLiveData(data: Option.Option<OrchestrationThread>): EnvironmentThreadStatus {
   return Option.isSome(data) ? "cached" : "empty";
 }
@@ -127,6 +162,7 @@ function formatThreadError(cause: Cause.Cause<unknown>): string {
 }
 
 function shouldPersistThread(thread: OrchestrationThread): boolean {
+  if (thread.backing?.kind === "external") return false;
   const status = thread.session?.status;
   return status !== "starting" && status !== "running";
 }
@@ -315,6 +351,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       ? current
       : {
           ...current,
+          data:
+            Option.isSome(current.data) && current.data.value.backing?.kind === "external"
+              ? Option.none()
+              : current.data,
           status: "synchronizing" as const,
           error: Option.none(),
         },
@@ -346,6 +386,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       Effect.andThen(
         SubscriptionRef.update(state, (current) => ({
           ...current,
+          data:
+            Option.isSome(current.data) && current.data.value.backing?.kind === "external"
+              ? Option.none()
+              : current.data,
           status:
             current.status === "deleted" ? current.status : statusWithoutLiveData(current.data),
           error: Option.some(message),

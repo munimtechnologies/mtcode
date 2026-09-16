@@ -246,6 +246,31 @@ it.effect("rejects command fields that become empty after trim", () =>
   }),
 );
 
+it.effect("reserves external Pi thread ids from internal thread creation", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.create",
+        commandId: "cmd-1",
+        threadId: "external:pi:collision",
+        projectId: "project-1",
+        title: "Collision",
+        modelSelection: {
+          instanceId: "codex",
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-07-30T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("decodes thread.turn.start defaults for provider and runtime mode", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
@@ -420,6 +445,32 @@ it.effect("rejects malformed known attachment types instead of tolerating them",
       decode({ ...base, type: "image", mimeType: "application/pdf", sizeBytes: 12 }),
     );
     assert.strictEqual(Exit.isFailure(badMimeImage), true);
+  }),
+);
+
+it.effect("decodes guarded external takeover only on client turn starts", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-takeover",
+      threadId: "external:pi:path:session",
+      message: {
+        messageId: "msg-takeover",
+        role: "user",
+        text: "continue",
+        attachments: [],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      externalResume: "takeover",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    if (command.type !== "thread.turn.start") {
+      assert.fail(`Expected thread.turn.start, received ${command.type}.`);
+    }
+    assert.strictEqual(command.externalResume, "takeover");
+    assert.strictEqual("externalResume" in ThreadTurnStartCommand.fields, false);
   }),
 );
 

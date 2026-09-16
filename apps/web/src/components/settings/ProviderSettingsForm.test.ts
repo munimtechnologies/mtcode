@@ -35,6 +35,13 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("exposes Pi with its binary path setting", () => {
+    const pi = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("pi")];
+
+    expect(pi).toMatchObject({ label: "Pi", value: "pi" });
+    expect(deriveProviderSettingsFields(pi!).map((field) => field.key)).toEqual(["binaryPath"]);
+  });
+
   it("derives a select control with its choices for the Antigravity sign-in method", () => {
     const antigravity = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("antigravity")];
     expect(antigravity).toBeDefined();

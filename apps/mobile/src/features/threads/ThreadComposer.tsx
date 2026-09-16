@@ -9,6 +9,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type OrchestrationThread,
   type OrchestrationThreadShell,
   type ProviderInteractionMode,
   type RuntimeMode,
@@ -22,6 +23,8 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
+import { threadAllows } from "@t3tools/client-runtime/state/threads";
+import { threadComposerAllowsSend } from "../../state/thread-outbox-model";
 import {
   memo,
   useCallback,
@@ -130,10 +133,12 @@ export interface ThreadComposerProps {
   readonly bottomInset?: number;
   readonly connectionState: RemoteClientConnectionState;
   readonly environmentLabel: string | null;
-  readonly selectedThread: OrchestrationThreadShell;
+  readonly selectedThread: OrchestrationThread | OrchestrationThreadShell;
   readonly hasCompactableConversation: boolean;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
+  readonly indeterminateQueueCount: number;
+  readonly takeoverConfirmationQueueCount: number;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   /** Why sending is blocked right now (shown as the send button's label), or null. */
@@ -146,7 +151,10 @@ export interface ThreadComposerProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
-  readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onStopSession: () => void;
+  readonly onDiscardIndeterminateMessages: () => Promise<void>;
+  readonly onReviewQueuedExternalResumeMessages: () => Promise<void>;
+  readonly onSendMessage: (behavior?: "steer" | "followUp") => Promise<MessageId | null>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
@@ -310,7 +318,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const showStopAction =
     !hasContent &&
     (props.selectedThread.session?.status === "running" ||
-      props.selectedThread.session?.status === "starting");
+      props.selectedThread.session?.status === "starting") &&
+    threadAllows(props.selectedThread, "interrupt");
 
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
   const attachmentsUploading =
@@ -392,7 +401,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
-      selectedProviderStatus?.showInteractionModeToggle === false
+      selectedProviderStatus?.showInteractionModeToggle === false ||
+      !threadAllows(props.selectedThread, "changeInteractionMode")
         ? undefined
         : props.onUpdateInteractionMode,
     offersUsageLimits: usageLimitsOffered,
@@ -429,7 +439,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     (pendingPastedTextAttachmentCount > 0 ? "Attaching pasted text" : null) ??
     attachmentBlockReason;
   const canSend =
-    hasContent &&
+    threadComposerAllowsSend(props.selectedThread, hasContent) &&
     !contextImports[composerOwnerKey] &&
     !voiceInput.blocksSubmission &&
     sendBlockedReason === null &&
@@ -692,6 +702,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           >
             {!isExpanded ? (
               <ComposerAttachmentButton
+                disabled={!threadAllows(props.selectedThread, "attachments")}
                 supportsFiles={Boolean(
                   props.serverConfig?.environment.capabilities.fileAttachments,
                 )}
@@ -780,6 +791,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       paste.text.length >
                     PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
                   const canAttach =
+                    threadAllows(props.selectedThread, "attachments") &&
                     maxBytes !== null &&
                     countComposerDraftAttachmentsAfterSelection(composerOwnerKey, {
                       text: paste.value,
@@ -943,6 +955,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 ) : (
                   <View className="min-w-0 flex-1 flex-row items-center justify-between">
                     <ComposerAttachmentButton
+                      disabled={!threadAllows(props.selectedThread, "attachments")}
                       supportsFiles={Boolean(
                         props.serverConfig?.environment.capabilities.fileAttachments,
                       )}
@@ -993,6 +1006,50 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </ComposerDictationToolbar>
           </Animated.View>
         </ComposerSurface>
+
+        {props.takeoverConfirmationQueueCount > 0 ? (
+          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Review queued Pi messages"
+              className="mt-2 flex-row items-center justify-between gap-3 rounded-xl bg-subtle px-3 py-2 active:opacity-70"
+              onPress={() => void props.onReviewQueuedExternalResumeMessages()}
+            >
+              <Text className="min-w-0 flex-1 text-xs text-foreground-muted">
+                {props.takeoverConfirmationQueueCount} queued Pi message
+                {props.takeoverConfirmationQueueCount === 1 ? "" : "s"} need
+                {props.takeoverConfirmationQueueCount === 1 ? "s" : ""} confirmation.
+              </Text>
+              <Text className="text-xs font-t3-bold text-foreground">Review</Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
+
+        {/* Queue count */}
+        {props.queueCount > 0 ? (
+          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+            {props.indeterminateQueueCount > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Discard messages with unknown delivery status"
+                className="mt-2 flex-row items-center justify-between gap-3 rounded-xl bg-subtle px-3 py-2 active:opacity-70"
+                onPress={() => void props.onDiscardIndeterminateMessages()}
+              >
+                <Text className="min-w-0 flex-1 text-xs text-foreground-muted">
+                  {props.indeterminateQueueCount} message
+                  {props.indeterminateQueueCount === 1 ? "" : "s"} may not have been delivered.
+                </Text>
+                <Text className="text-xs font-t3-bold text-danger-foreground">Discard</Text>
+              </Pressable>
+            ) : (
+              <Text className="pt-2 text-xs text-foreground-muted">
+                {props.takeoverConfirmationQueueCount > 0
+                  ? "Confirm takeover to continue queued delivery."
+                  : `${props.queueCount} queued message${props.queueCount === 1 ? "" : "s"} will send automatically.`}
+              </Text>
+            )}
+          </Animated.View>
+        ) : null}
       </Animated.View>
 
       <VideoPreviewModal source={previewVideo} onRequestClose={closePreview} />

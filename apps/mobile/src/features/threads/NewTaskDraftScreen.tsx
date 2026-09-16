@@ -28,11 +28,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useFontFamily } from "../../lib/useFontFamily";
 
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
+  CommandId,
+  MessageId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   resolveEnvironmentMachineKind,
-  type EnvironmentId,
 } from "@t3tools/contracts";
 
 import {
@@ -99,6 +101,9 @@ import {
   countComposerDraftAttachmentsAfterSelection,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
+  nativePiStartPayloadFingerprint,
+  persistComposerDraftNativePiStartIdentity,
+  reusableNativePiStartIdentity,
   restoreComposerDraftSnapshot,
   updateComposerDraftSettings,
   scheduleUnusedComposerAttachmentCleanup,
@@ -121,12 +126,15 @@ import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { useNewTaskFlow } from "./new-task-flow-provider";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
+import { resolveProviderInteractionMode } from "./legacy-plan-mode";
 import { resolveDraftProjectSelection } from "./new-task-project-selection";
 import {
   resolveNewTaskBranchLabel,
   resolveNewTaskWorkspaceLabel,
 } from "./new-task-context-presentation";
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
+import { piExternalEnvironment } from "../../state/shell";
+import { newTaskTargetRequiresProvider } from "../../state/thread-outbox-model";
 import { selectIncomingShareAttachmentsForServer } from "../sharing/incoming-share-model";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
@@ -166,7 +174,6 @@ function NewTaskWorkspaceIcon(props: {
     </View>
   );
 }
-
 export function NewTaskDraftScreen(props: {
   readonly initialProjectRef?: {
     readonly environmentId?: string;
@@ -184,8 +191,13 @@ export function NewTaskDraftScreen(props: {
   readonly incomingShareId?: string;
 }) {
   const projects = useProjects();
+  const createNativePiSession = useAtomCommand(piExternalEnvironment.createSession, {
+    reportFailure: false,
+  });
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
+  const [runTarget, setRunTarget] = useState<"t3" | "pi">("t3");
+  const nativeStartInFlightRef = useRef(false);
   const {
     consumeShare,
     getShare,
@@ -207,6 +219,11 @@ export function NewTaskDraftScreen(props: {
     connectedEnvironments.find(
       (environment) => environment.environmentId === selectedProject.environmentId,
     )?.connectionState === "connected";
+  const nativePiSupported =
+    selectedEnvironmentServerConfig?.environment.capabilities.piExternalThreads === true;
+  useEffect(() => {
+    if (!nativePiSupported && runTarget === "pi") setRunTarget("t3");
+  }, [nativePiSupported, runTarget]);
   const modelUnavailable = environmentConnected && flow.selectedModelOption?.isUnavailable === true;
   // A project added by cloning exists before its files do: the prompt can be
   // written meanwhile, but Start waits for the clone.
@@ -991,8 +1008,18 @@ export function NewTaskDraftScreen(props: {
   });
   const showBranchLoading = flow.branchesLoading && flow.availableBranches.length === 0;
 
+  function handleRunTargetMenuAction(event: string) {
+    if (event === "run-target:t3") setRunTarget("t3");
+    if (event !== "run-target:pi") return;
+    if (flow.attachments.length > 0) {
+      Alert.alert("Remove attachments", "Native Pi sessions do not support attachments yet.");
+      return;
+    }
+    setRunTarget("pi");
+  }
+
   async function handlePickMedia(): Promise<void> {
-    if (isComposerInteractionLocked || voiceInput.isBusy) {
+    if (isComposerInteractionLocked || voiceInput.isBusy || runTarget === "pi") {
       return;
     }
     const capabilities = selectedEnvironmentServerConfig?.environment.capabilities;
@@ -1021,7 +1048,7 @@ export function NewTaskDraftScreen(props: {
   }
 
   async function handlePickFiles(): Promise<void> {
-    if (isComposerInteractionLocked || voiceInput.isBusy) {
+    if (isComposerInteractionLocked || voiceInput.isBusy || runTarget === "pi") {
       return;
     }
     const maxBytes =
@@ -1055,6 +1082,13 @@ export function NewTaskDraftScreen(props: {
 
   const handleNativePasteImages = useCallback(
     async (uris: ReadonlyArray<string>) => {
+      if (runTarget === "pi") {
+        Alert.alert(
+          "Attachments unavailable",
+          "Native Pi sessions do not support attachments yet.",
+        );
+        return;
+      }
       try {
         const insertion = flow.draftKey ? captureComposerDraftInsertion(flow.draftKey) : undefined;
         const images = await convertPastedImagesToAttachments({
@@ -1071,7 +1105,7 @@ export function NewTaskDraftScreen(props: {
         console.error("[native paste] error converting images", error);
       }
     },
-    [flow],
+    [flow, runTarget],
   );
 
   const handleNativePasteText = useCallback(
@@ -1102,6 +1136,7 @@ export function NewTaskDraftScreen(props: {
           paste.text.length >
         PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
       const canAttach =
+        runTarget !== "pi" &&
         maxBytes !== null &&
         countComposerDraftAttachmentsAfterSelection(draftKey, insertion) <
           PROVIDER_SEND_TURN_MAX_ATTACHMENTS &&
@@ -1169,7 +1204,7 @@ export function NewTaskDraftScreen(props: {
 
       insertPaste();
     },
-    [composerMenu, flow, selectedEnvironmentServerConfig],
+    [composerMenu, flow, runTarget, selectedEnvironmentServerConfig],
   );
 
   async function handleStart(): Promise<void> {
@@ -1206,15 +1241,17 @@ export function NewTaskDraftScreen(props: {
 
     if (
       attachmentBlockReason !== null ||
-      !modelSelection ||
+      (newTaskTargetRequiresProvider(runTarget) && !modelSelection) ||
       initialMessageText.length === 0 ||
       flow.submitting ||
-      (workspaceMode === "worktree" && !selectedBranchName)
+      (runTarget === "t3" && workspaceMode === "worktree" && !selectedBranchName)
     ) {
       return;
     }
     if (
+      runTarget === "t3" &&
       environmentConnected &&
+      modelSelection !== null &&
       isModelSelectionUnavailable(selectedEnvironmentServerConfig, modelSelection)
     ) {
       Alert.alert(
@@ -1227,6 +1264,7 @@ export function NewTaskDraftScreen(props: {
     // send it to the agent. A provider's same-named command, or a prompt carrying
     // attachments, goes through as usual.
     if (
+      runTarget === "t3" &&
       offersUsageLimits &&
       isUsageLimitsCommand(initialMessageText) &&
       draft.attachments.length === 0
@@ -1255,6 +1293,114 @@ export function NewTaskDraftScreen(props: {
     }
 
     const editingPendingTask = flow.editingPendingTask;
+
+    if (runTarget === "pi") {
+      if (nativeStartInFlightRef.current) return;
+      if (!nativePiSupported || !environmentConnected || editingPendingTask) {
+        Alert.alert(
+          "Native Pi unavailable",
+          "Connect to the environment and start a new task to create a native Pi session.",
+        );
+        return;
+      }
+      if (draft.attachments.length > 0) {
+        Alert.alert("Remove attachments", "Native Pi sessions do not support attachments yet.");
+        return;
+      }
+      const runtimeMode = draft.runtimeMode ?? flow.runtimeMode;
+      const interactionMode = resolveProviderInteractionMode(
+        selectedEnvironmentServerConfig?.providers.find(
+          (provider) => provider.instanceId === modelSelection?.instanceId,
+        ),
+        flow.planModeEnabled ? (draft.interactionMode ?? flow.interactionMode) : "default",
+      );
+      nativeStartInFlightRef.current = true;
+      flow.setSubmitting(true);
+      try {
+        const payloadFingerprint = nativePiStartPayloadFingerprint({
+          environmentId: selectedProject.environmentId,
+          cwd: selectedProject.workspaceRoot,
+          text: initialMessageText,
+          context: draft.context,
+          modelSelection,
+          runtimeMode,
+          interactionMode,
+        });
+        const persistedIdentity = reusableNativePiStartIdentity(
+          draft.nativePiStartIdentity,
+          payloadFingerprint,
+        );
+        const metadata = persistedIdentity ?? makeTurnCommandMetadata();
+        const createCommandId =
+          persistedIdentity?.createCommandId ?? `pi-create:${metadata.messageId}`;
+        try {
+          await persistComposerDraftNativePiStartIdentity(draftKey, {
+            createCommandId,
+            commandId: metadata.commandId,
+            messageId: metadata.messageId,
+            createdAt: metadata.createdAt,
+            payloadFingerprint,
+          });
+        } catch (error) {
+          Alert.alert(
+            "Could not save native Pi task",
+            error instanceof Error ? error.message : "The task identity could not be saved.",
+          );
+          return;
+        }
+        const result = await createNativePiSession({
+          environmentId: selectedProject.environmentId,
+          input: {
+            cwd: selectedProject.workspaceRoot,
+            commandId: CommandId.make(createCommandId),
+          },
+        });
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          Alert.alert(
+            "Could not create native Pi session",
+            error instanceof Error ? error.message : "The session could not be created.",
+          );
+          return;
+        }
+        try {
+          await enqueueThreadOutboxMessage({
+            environmentId: selectedProject.environmentId,
+            threadId: result.value.threadId,
+            messageId: MessageId.make(metadata.messageId),
+            commandId: CommandId.make(metadata.commandId),
+            text: initialMessageText,
+            context: draft.context,
+            attachments: [],
+            ...(modelSelection === null ? {} : { modelSelection }),
+            runtimeMode,
+            interactionMode,
+            awaitThreadVisibility: true,
+            createdAt: metadata.createdAt,
+          });
+        } catch (error) {
+          Alert.alert(
+            "Could not queue task",
+            error instanceof Error ? error.message : "The task could not be saved.",
+          );
+          return;
+        }
+        clearComposerDraftContent(draftKey);
+        navigation.dispatch(
+          StackActions.replace("Thread", {
+            environmentId: String(selectedProject.environmentId),
+            threadId: String(result.value.threadId),
+          }),
+        );
+      } finally {
+        nativeStartInFlightRef.current = false;
+        flow.setSubmitting(false);
+      }
+      return;
+    }
+    if (!modelSelection) {
+      return;
+    }
 
     // Every submission goes through the outbox: the drain uploads the
     // attachments and delivers the creation, retrying across reconnects.
@@ -1355,16 +1501,16 @@ export function NewTaskDraftScreen(props: {
     !isImportingContext &&
     !cloneBlocksStart &&
     attachmentBlockReason === null &&
-    !modelUnavailable &&
+    !(runTarget === "t3" && modelUnavailable) &&
     Boolean(flow.selectedProject) &&
-    Boolean(flow.selectedModel) &&
+    (!newTaskTargetRequiresProvider(runTarget) || Boolean(flow.selectedModel)) &&
     flow.prompt.trim().length > 0 &&
     isIncomingShareReady &&
     !isImportingShare &&
     !flow.submitting &&
     pendingPastedTextAttachmentCount === 0 &&
     !voiceInput.blocksSubmission &&
-    !(flow.workspaceMode === "worktree" && !flow.selectedBranchName);
+    !(runTarget === "t3" && flow.workspaceMode === "worktree" && !flow.selectedBranchName);
   const openDraftDocument = (attachment: ComposerDocumentAttachment) => {
     // A draft attachment lives only in the draft. Without its key the screen would fall through
     // to a remote lookup for bytes the server has never seen.
@@ -1530,10 +1676,25 @@ export function NewTaskDraftScreen(props: {
 
   const workspaceControls = (
     <View className="flex-row items-center gap-1 px-2">
+      {nativePiSupported ? (
+        <ComposerInlineControl
+          accessibilityHint={`Switches to ${runTarget === "t3" ? "native Pi" : "T3 orchestration"}`}
+          accessibilityLabel={`Run target: ${runTarget === "t3" ? "T3" : "native Pi"}`}
+          disabled={isComposerInteractionLocked || voiceInput.isBusy}
+          emphasized
+          label={runTarget === "t3" ? "T3" : "Pi"}
+          maxWidth={72}
+          onPress={() =>
+            handleRunTargetMenuAction(runTarget === "t3" ? "run-target:pi" : "run-target:t3")
+          }
+          showChevron={false}
+        />
+      ) : null}
+
       <ComposerInlineControl
         accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`}
         accessibilityLabel={workspaceLabel}
-        disabled={isComposerInteractionLocked || voiceInput.isBusy}
+        disabled={isComposerInteractionLocked || voiceInput.isBusy || runTarget === "pi"}
         iconNode={
           <NewTaskWorkspaceIcon
             workspaceMode={flow.workspaceMode}
@@ -1549,7 +1710,7 @@ export function NewTaskDraftScreen(props: {
       <ComposerInlineControl
         accessibilityLabel={`${flow.workspaceMode === "worktree" ? "Base branch" : "Branch"}: ${selectedBranchLabel}`}
         chevronDirection="right"
-        disabled={isComposerInteractionLocked}
+        disabled={isComposerInteractionLocked || runTarget === "pi"}
         icon="arrow.triangle.branch"
         label={showBranchLoading ? "Loading branches…" : selectedBranchLabel}
         maxWidth={190}
@@ -1601,7 +1762,7 @@ export function NewTaskDraftScreen(props: {
       ) : null}
       <View className="pb-1">{workspaceControls}</View>
 
-      {modelUnavailable ? (
+      {runTarget === "t3" && modelUnavailable ? (
         <Pressable
           accessibilityRole="button"
           className="px-3 py-2"
@@ -1680,7 +1841,7 @@ export function NewTaskDraftScreen(props: {
               ) : (
                 <>
                   <ComposerAttachmentButton
-                    disabled={isComposerInteractionLocked}
+                    disabled={isComposerInteractionLocked || runTarget === "pi"}
                     supportsFiles={Boolean(
                       selectedEnvironmentServerConfig?.environment.capabilities.fileAttachments,
                     )}

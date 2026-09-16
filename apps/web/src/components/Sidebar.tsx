@@ -1,4 +1,5 @@
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { threadEnvironmentAttribution } from "@t3tools/contracts";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
@@ -32,7 +33,6 @@ import {
 import {
   resolveEnvironmentMachineKind,
   type EnvironmentMachineKind,
-  type ProjectIconOverride,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -42,6 +42,7 @@ import {
   AlarmClockOffIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -100,10 +101,7 @@ import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
-import {
-  isSameSidebarThreadRef,
-  useSidebarPendingFileDropStore,
-} from "../sidebarPendingFileDropStore";
+import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import {
   buildSidebarProjectSnapshots,
@@ -160,6 +158,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  partitionPiExternalProjectsForSidebar,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
@@ -250,9 +249,12 @@ import {
 // stays behind an explicit Show more.
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
+const SETTLED_PROJECT_INITIAL_COUNT = 10;
+const SETTLED_PROJECT_PAGE_COUNT = 25;
 // Fresh keys deliberately reset both shelves to collapsed for existing users.
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const SETTLED_PROJECTS_EXPANDED_KEY = "t3code:sidebar:settled-projects-expanded";
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -341,6 +343,7 @@ function SidebarThreadTooltip({
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
 }) {
+  const attribution = threadEnvironmentAttribution(thread.backing, environmentLabel);
   const driverKind = providerEntry?.driverKind ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
   return (
@@ -362,13 +365,13 @@ function SidebarThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
             </div>
           ) : null}
-          {environmentLabel ? (
+          {attribution ? (
             <div className="flex min-w-0 items-center gap-2">
               <EnvironmentMachineIcon
                 kind={environmentMachine}
                 className="size-3 shrink-0 stroke-muted-foreground"
               />
-              <div className="min-w-0 truncate text-foreground/75">{environmentLabel}</div>
+              <div className="min-w-0 truncate text-foreground/75">{attribution}</div>
             </div>
           ) : null}
           {thread.branch ? (
@@ -720,7 +723,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   onNavigate: (draftId: DraftId) => void;
   onDiscard: (draftId: DraftId) => void;
 }) {
-  const { composer, draftId, onDiscard, onNavigate, session } = props;
+  const { composer, draftId, onDiscard, onNavigate } = props;
   const promptPreview =
     replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label)
       .trim()
@@ -968,8 +971,7 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
-  // Slim rows are either settled (action: un-settle) or merely quiet
-  // (seen Ready threads — action: settle).
+  // Slim rows are snoozed or settled; their action reverses that shelf state.
   variantAction: "settle" | "unsettle" | "unsnooze";
   // False on environments whose server predates thread.settle/unsettle:
   // the lifecycle affordances hide entirely rather than fail on click.
@@ -1595,7 +1597,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(
+                  rowSurfaceClassName,
+                  "flex h-9 items-center gap-2.5 overflow-visible px-2.5",
+                )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -2354,18 +2359,6 @@ export default function Sidebar() {
   // app restarts keep it.
   const projectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
   const setProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
-  // {value, label} items let Base UI drive the combobox selection contract
-  // while the popup search filters the same collection.
-  const projectScopeItems = useMemo(
-    () => [
-      { value: "all", label: "All projects" },
-      ...projectGroups.map((project) => ({
-        value: project.projectKey,
-        label: project.displayName,
-      })),
-    ],
-    [projectGroups],
-  );
   // Same-named projects on two machines are only told apart by where they
   // live, so rows on another machine carry its icon once the catalog spans
   // more than one environment; a single-machine catalog stays as it was.
@@ -2373,37 +2366,11 @@ export default function Sidebar() {
     () => projectGroupsSpanEnvironments(projectGroups),
     [projectGroups],
   );
-  const projectGroupByScopeKey = useMemo(
-    () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
-    [projectGroups],
-  );
-  const selectedProjectScopeItem = useMemo(
-    () =>
-      projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
-      projectScopeItems[0]!,
-    [projectScopeItems, projectScopeKey],
-  );
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
     { open: false, query: "" },
   );
   const projectScopeFilter = useComboboxFilter();
-  // Filtering derives from the same React state that controls the input, so
-  // the visible query and the visible list can never desync — the peer wiring
-  // in DiffPanel and BranchToolbarBranchSelector. "All projects" is the default
-  // row, not a searchable entry: it heads the list while the query is empty and
-  // drops out while filtering, so it can't outrank a project match under
-  // autoHighlight and no-hit queries reach the empty state.
-  const filteredProjectScopeItems = useMemo(
-    () =>
-      filterSidebarProjectScopeItems({
-        items: projectScopeItems,
-        query: projectScopeMenuState.query,
-        matches: (item, query) =>
-          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
-      }),
-    [projectScopeFilter, projectScopeItems, projectScopeMenuState.query],
-  );
   const scopedProjectGroup = useMemo(
     () =>
       projectScopeKey === null
@@ -2519,6 +2486,8 @@ export default function Sidebar() {
     activeThreads,
     snoozedThreads,
     settledThreads,
+    prominentProjectKeys,
+    settledProjectKeys,
     snoozeNow,
   } = useMemo(() => {
     // Snooze classification uses a REAL clock, not the quantized minute:
@@ -2527,12 +2496,7 @@ export default function Sidebar() {
     // memo exactly at the next wake boundary.
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    const visible = threads.filter(
-      (thread) =>
-        thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-    );
+    const visible = threads.filter((thread) => thread.archivedAt === null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
     const snoozed: EnvironmentThreadShell[] = [];
@@ -2582,6 +2546,17 @@ export default function Sidebar() {
         active.push(thread);
       }
     }
+    const prominentProjectKeys = new Set(
+      [...pinned, ...active, ...snoozed].map(
+        (thread) => `${thread.environmentId}:${thread.projectId}`,
+      ),
+    );
+    const settledProjectKeys = new Set(
+      settled.map((thread) => `${thread.environmentId}:${thread.projectId}`),
+    );
+    const inProjectScope = (thread: EnvironmentThreadShell) =>
+      scopedProjectKeys === null ||
+      scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`);
     // One shared rule on every platform (see sortPinnedThreadsByOrderKey):
     // user-arranged keys first, keyless threads in creation order below.
     // Server capability only gates DRAGGING — it must not influence the
@@ -2590,34 +2565,132 @@ export default function Sidebar() {
     const sortedPinned = sortPinnedThreadsForSidebar(pinned);
     const sortedActive = sortThreadsForSidebar(active);
     return {
-      pinnedThreads:
-        optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
-          ? sortedPinned
-          : orderItemsByPreferredIds({
-              items: sortedPinned,
-              preferredIds: optimisticDrop.order,
-              getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-            }),
+      pinnedThreads: (optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
+        ? sortedPinned
+        : orderItemsByPreferredIds({
+            items: sortedPinned,
+            preferredIds: optimisticDrop.order,
+            getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          })
+      ).filter(inProjectScope),
       draggableThreadKeys: draggable,
       activeReorderableThreadKeys: activeReorderable,
-      activeThreads:
-        optimisticDrop?.section !== "active" || optimisticDrop.order === null
-          ? sortedActive
-          : orderItemsByPreferredIds({
-              items: sortedActive,
-              preferredIds: optimisticDrop.order,
-              getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-            }),
+      activeThreads: (optimisticDrop?.section !== "active" || optimisticDrop.order === null
+        ? sortedActive
+        : orderItemsByPreferredIds({
+            items: sortedActive,
+            preferredIds: optimisticDrop.order,
+            getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          })
+      ).filter(inProjectScope),
+
       // Soonest wake first: "what comes back next" is the shelf's question.
-      snoozedThreads: snoozed.toSorted(
-        (left, right) =>
-          firstValidTimestampMs(left.snoozedUntil ?? null) -
-          firstValidTimestampMs(right.snoozedUntil ?? null),
-      ),
-      settledThreads: sortSettledThreadsForSidebar(settled),
+      snoozedThreads: snoozed
+        .filter(inProjectScope)
+        .toSorted(
+          (left, right) =>
+            firstValidTimestampMs(left.snoozedUntil ?? null) -
+            firstValidTimestampMs(right.snoozedUntil ?? null),
+        ),
+      settledThreads: sortSettledThreadsForSidebar(settled.filter(inProjectScope)),
+      prominentProjectKeys,
+      settledProjectKeys,
       snoozeNow: preciseNow,
     };
   }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+
+  const routeProjectKey = useMemo(() => {
+    if (routeTarget?.kind === "draft" && routeDraftThread !== null) {
+      return routeDraftThread.logicalProjectKey;
+    }
+    if (routeThreadRef === null) return null;
+    const routeThread = threads.find(
+      (thread) =>
+        thread.environmentId === routeThreadRef.environmentId &&
+        thread.id === routeThreadRef.threadId,
+    );
+    if (!routeThread) return null;
+    return (
+      projectGroups.find((project) =>
+        project.memberProjectRefs.some(
+          (ref) =>
+            ref.environmentId === routeThread.environmentId &&
+            ref.projectId === routeThread.projectId,
+        ),
+      )?.projectKey ?? null
+    );
+  }, [projectGroups, routeDraftThread, routeTarget?.kind, routeThreadRef, threads]);
+  const keptProjectKeys = useMemo(
+    () => new Set([projectScopeKey, routeProjectKey].filter((key): key is string => key !== null)),
+    [projectScopeKey, routeProjectKey],
+  );
+  const { visibleProjects: visibleProjectGroups, settledProjects: settledProjectGroups } = useMemo(
+    () =>
+      partitionPiExternalProjectsForSidebar({
+        projects: projectGroups,
+        prominentProjectKeys,
+        settledProjectKeys,
+        keepProjectKeys: keptProjectKeys,
+      }),
+    [keptProjectKeys, projectGroups, prominentProjectKeys, settledProjectKeys],
+  );
+  const [settledProjectsExpanded, setSettledProjectsExpanded] = useLocalStorage(
+    SETTLED_PROJECTS_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const [settledProjectVisibleCount, setSettledProjectVisibleCount] = useState(
+    SETTLED_PROJECT_INITIAL_COUNT,
+  );
+  const visibleSettledProjectGroups = settledProjectGroups.slice(0, settledProjectVisibleCount);
+  const hiddenSettledProjectCount =
+    settledProjectGroups.length - visibleSettledProjectGroups.length;
+  const projectGroupsForScopeMenu = useMemo(
+    () =>
+      projectScopeMenuState.query.trim().length > 0
+        ? [...visibleProjectGroups, ...settledProjectGroups]
+        : [
+            ...visibleProjectGroups,
+            ...(settledProjectsExpanded ? visibleSettledProjectGroups : []),
+          ],
+    [
+      projectScopeMenuState.query,
+      settledProjectGroups,
+      settledProjectsExpanded,
+      visibleProjectGroups,
+      visibleSettledProjectGroups,
+    ],
+  );
+  const projectScopeItems = useMemo(
+    () => [
+      { value: "all", label: "All projects" },
+      ...projectGroupsForScopeMenu.map((project) => ({
+        value: project.projectKey,
+        label: project.displayName,
+      })),
+    ],
+    [projectGroupsForScopeMenu],
+  );
+  const projectGroupByScopeKey = useMemo(
+    () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
+    [projectGroups],
+  );
+  const selectedProjectScopeItem = useMemo(
+    () =>
+      projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
+      projectScopeItems[0]!,
+    [projectScopeItems, projectScopeKey],
+  );
+  const filteredProjectScopeItems = useMemo(
+    () =>
+      filterSidebarProjectScopeItems({
+        items: projectScopeItems,
+        query: projectScopeMenuState.query,
+        matches: (item, query) =>
+          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
+      }),
+    [projectScopeFilter, projectScopeItems, projectScopeMenuState.query],
+  );
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -2679,8 +2752,7 @@ export default function Sidebar() {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
     // The open thread must never hide under "Show more": navigating into a
-    // deep settled thread (search, deep link) pulls its row into the visible
-    // tail so the highlight and the un-settle affordance stay reachable.
+    // deep settled thread pulls its row into the visible tail.
     if (routeThreadKey !== null) {
       const routeThread = settledThreads
         .slice(settledVisibleCount)
@@ -2735,6 +2807,7 @@ export default function Sidebar() {
     // elsewhere) keeps its row — with highlight and wake affordance — same
     // exception the settled tail's "Show more" makes.
     if (routeThreadKey === null) return EMPTY_THREADS;
+
     const routeThread = snoozedThreads.find(
       (thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
@@ -2744,7 +2817,7 @@ export default function Sidebar() {
 
   const orderedThreads = useMemo(
     () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    [activeThreads, pinnedThreads, renderedSettledThreads, visibleSnoozedThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -4463,6 +4536,42 @@ export default function Sidebar() {
                         })
                       }
                     />
+                    {settledProjectGroups.length > 0 &&
+                    projectScopeMenuState.query.trim().length === 0 ? (
+                      <div className="border-b border-border/70 px-2 py-1">
+                        <button
+                          type="button"
+                          aria-expanded={settledProjectsExpanded}
+                          onClick={() => setSettledProjectsExpanded((expanded) => !expanded)}
+                          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          {settledProjectsExpanded ? (
+                            <ChevronDownIcon className="size-4 shrink-0" />
+                          ) : (
+                            <ChevronRightIcon className="size-4 shrink-0" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate">Settled projects</span>
+                          <span className="text-xs tabular-nums">
+                            {settledProjectGroups.length}
+                          </span>
+                        </button>
+                        {settledProjectsExpanded && hiddenSettledProjectCount > 0 ? (
+                          <button
+                            type="button"
+                            className="flex h-8 w-full items-center rounded-md px-8 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                            onClick={() =>
+                              setSettledProjectVisibleCount(
+                                (count) => count + SETTLED_PROJECT_PAGE_COUNT,
+                              )
+                            }
+                          >
+                            Show {Math.min(SETTLED_PROJECT_PAGE_COUNT, hiddenSettledProjectCount)}{" "}
+                            more
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     <ComboboxEmpty>No matching projects.</ComboboxEmpty>
                     <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {

@@ -1,6 +1,7 @@
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { TextInputWrapper } from "expo-paste-input";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { threadAllows } from "@t3tools/client-runtime/state/threads";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, View, useWindowDimensions } from "react-native";
 import { KeyboardAvoidingView, KeyboardStickyView } from "react-native-keyboard-controller";
@@ -17,6 +18,7 @@ import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/
 import { useNativePaste } from "../../lib/useNativePaste";
 import { setPendingConnectionError } from "../../state/use-remote-environment-registry";
 import { appendReviewCommentToDraft } from "../../state/use-thread-composer-state";
+import { useThreadShell } from "../../state/entities";
 import {
   clearReviewCommentTarget,
   formatReviewCommentContext,
@@ -48,6 +50,8 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
   const target = useReviewCommentTarget();
   const { codeSurface } = useAppearanceCodeSurface();
   const { environmentId, threadId } = props.route.params;
+  const thread = useThreadShell({ environmentId, threadId });
+  const allowsAttachments = thread !== null && threadAllows(thread, "attachments");
   const [commentText, setCommentText] = useState("");
   const [highlightedLinesById, setHighlightedLinesById] = useState<
     Record<string, ReadonlyArray<ReviewHighlightedToken>>
@@ -83,6 +87,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
     navigation.goBack();
   }, [navigation]);
   const handleNativePaste = useNativePaste((uris) => {
+    if (!allowsAttachments) return;
     void (async () => {
       try {
         const images = await convertPastedImagesToAttachments({
@@ -97,6 +102,10 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
       }
     })();
   });
+
+  useEffect(() => {
+    if (!allowsAttachments) setAttachments([]);
+  }, [allowsAttachments]);
 
   useEffect(() => {
     if (!target || selectedLines.length === 0) {
@@ -127,6 +136,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
   }, [selectedLines, selectedTheme, target]);
 
   async function handlePickImages(): Promise<void> {
+    if (!allowsAttachments) return;
     const result = await pickComposerImages({ existingCount: attachments.length });
     if (result.images.length > 0) {
       setAttachments((current) => [...current, ...result.images]);
@@ -266,7 +276,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                       />
                     </TextInputWrapper>
                   </View>
-                  {attachments.length > 0 ? (
+                  {allowsAttachments && attachments.length > 0 ? (
                     <View className="px-4 pb-3 pt-2">
                       <ComposerAttachmentStrip
                         attachments={attachments}
@@ -289,11 +299,13 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
         </View>
         {!isAndroid && target ? (
           <View className="flex-row items-center gap-3 bg-sheet px-5 py-2">
-            <ControlPill
-              accessibilityLabel="Add image"
-              icon="plus"
-              onPress={() => void handlePickImages()}
-            />
+            {allowsAttachments ? (
+              <ControlPill
+                accessibilityLabel="Add image"
+                icon="plus"
+                onPress={() => void handlePickImages()}
+              />
+            ) : null}
             <View className="flex-1" />
             <ControlPill
               accessibilityLabel="Comment"
@@ -315,11 +327,13 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
             className="flex-row items-center gap-3 border-t border-border bg-sheet px-5 pt-2"
             style={{ paddingBottom: Math.max(insets.bottom, 10) }}
           >
-            <ControlPill
-              accessibilityLabel="Add image"
-              icon="plus"
-              onPress={() => void handlePickImages()}
-            />
+            {allowsAttachments ? (
+              <ControlPill
+                accessibilityLabel="Add image"
+                icon="plus"
+                onPress={() => void handlePickImages()}
+              />
+            ) : null}
             <View className="flex-1" />
             <ControlPill
               accessibilityLabel="Comment"

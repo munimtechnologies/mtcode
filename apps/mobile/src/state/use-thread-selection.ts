@@ -141,7 +141,9 @@ function useResolvedThreadSelection(params: ThreadSelectionRouteParams | undefin
   const selectedThread = useMemo(
     () =>
       selectedThreadShell ??
-      (selectedThreadRef !== null && selectedThreadDetail !== null
+      (selectedThreadRef !== null &&
+      selectedThreadDetail !== null &&
+      selectedThreadDetail.backing?.kind !== "external"
         ? threadDetailToShell(selectedThreadRef.environmentId, selectedThreadDetail)
         : pendingCreation !== null
           ? pendingThreadCreationShell(pendingCreation.message)

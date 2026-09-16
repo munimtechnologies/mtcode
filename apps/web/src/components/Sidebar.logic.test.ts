@@ -22,6 +22,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  partitionPiExternalProjectsForSidebar,
   resolveProjectStatusIndicator,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
@@ -300,14 +301,40 @@ describe("buildBulkTitleRegenerationContextMenuItem", () => {
 describe("buildMultiSelectThreadContextMenuItems", () => {
   it("offers bulk archive with the selected count", () => {
     expect(
-      buildMultiSelectThreadContextMenuItems({ count: 3, hasRunningThread: false }),
+      buildMultiSelectThreadContextMenuItems({
+        count: 3,
+        hasRunningThread: false,
+        canArchiveSelection: true,
+        canDeleteSelection: true,
+      }),
     ).toContainEqual({ id: "archive", label: "Archive (3)", disabled: false });
   });
 
   it("disables bulk archive when a selected thread is running", () => {
     expect(
-      buildMultiSelectThreadContextMenuItems({ count: 2, hasRunningThread: true }),
+      buildMultiSelectThreadContextMenuItems({
+        count: 2,
+        hasRunningThread: true,
+        canArchiveSelection: true,
+        canDeleteSelection: true,
+      }),
     ).toContainEqual({ id: "archive", label: "Archive (2)", disabled: true });
+  });
+
+  it("disables unsupported bulk mutations for external selections", () => {
+    const items = buildMultiSelectThreadContextMenuItems({
+      count: 2,
+      hasRunningThread: false,
+      canArchiveSelection: false,
+      canDeleteSelection: false,
+    });
+    expect(items).toContainEqual({ id: "archive", label: "Archive (2)", disabled: true });
+    expect(items).toContainEqual({
+      id: "delete",
+      label: "Delete (2)",
+      destructive: true,
+      disabled: true,
+    });
   });
 });
 
@@ -2768,6 +2795,58 @@ describe("sortScopedProjectsForSidebar", () => {
       "Visible project",
       "Archived-only project",
     ]);
+  });
+});
+
+describe("partitionPiExternalProjectsForSidebar", () => {
+  const project = (projectKey: string, id: string) => ({
+    projectKey,
+    memberProjects: [{ environmentId: "local", id }],
+  });
+
+  it("keeps manual and prominent external projects in the main list", () => {
+    const manual = project("manual", "project-1");
+    const active = project("active", "external:pi-project:active");
+
+    expect(
+      partitionPiExternalProjectsForSidebar({
+        projects: [manual, active],
+        prominentProjectKeys: new Set(["local:external:pi-project:active"]),
+        settledProjectKeys: new Set(),
+      }),
+    ).toEqual({
+      visibleProjects: [manual, active],
+      settledProjects: [],
+    });
+  });
+
+  it("moves settled-only external projects to history and omits archived-only projects", () => {
+    const settled = project("settled", "external:pi-project:settled");
+    const archived = project("archived", "external:pi-project:archived");
+
+    expect(
+      partitionPiExternalProjectsForSidebar({
+        projects: [settled, archived],
+        prominentProjectKeys: new Set(),
+        settledProjectKeys: new Set(["local:external:pi-project:settled"]),
+      }),
+    ).toEqual({
+      visibleProjects: [],
+      settledProjects: [settled],
+    });
+  });
+
+  it("keeps the selected external project visible regardless of lifecycle", () => {
+    const selected = project("selected", "external:pi-project:selected");
+
+    expect(
+      partitionPiExternalProjectsForSidebar({
+        projects: [selected],
+        prominentProjectKeys: new Set(),
+        settledProjectKeys: new Set(["local:external:pi-project:selected"]),
+        keepProjectKeys: new Set(["selected"]),
+      }).visibleProjects,
+    ).toEqual([selected]);
   });
 });
 
