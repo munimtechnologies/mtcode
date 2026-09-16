@@ -1021,11 +1021,23 @@ mod tests {
         assert_eq!(pid, 42);
     }
 
+    /// A link row is just content on the page; it must never stand in for the
+    /// page URL, or a privacy filter keyed on the current site could be dodged
+    /// by a link to somewhere else. The frame title wins.
     #[test]
-    fn window_title_skips_app_header_and_prefers_url() {
+    fn window_title_skips_app_header_and_ignores_link_rows() {
         let outline = "Firefox\n[e1] frame  Example - Mozilla Firefox\n[e2] link  https://blocked.example/path";
         let title = window_title_from_outline(outline, "Firefox").expect("title");
-        assert!(title.contains("https://blocked.example/path"));
+        assert_eq!(title, "frame  Example - Mozilla Firefox");
+        assert!(!title.contains("blocked.example"));
+    }
+
+    /// The document row carries the page's real URL, so it beats the frame title.
+    #[test]
+    fn window_title_prefers_document_url_over_frame_title() {
+        let outline = "Firefox\n[e1] frame  Example - Mozilla Firefox\n[e2] document  https://site.example/path";
+        let title = window_title_from_outline(outline, "Firefox").expect("title");
+        assert_eq!(title, "https://site.example/path");
     }
 
     #[test]
