@@ -47,6 +47,8 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import { expandHomePathWith } from "../pathExpansion.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -798,6 +800,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const path = yield* Path.Path;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
   const hostPlatform = yield* HostProcessPlatform;
   const sshAskpassDirectory = yield* Effect.cached(
@@ -3455,7 +3458,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     // the copy step and the returned path always point at the real location.
     const worktreePath = path.resolve(
       input.cwd,
-      input.path ?? path.join(worktreesDir, repoName, sanitizedBranch),
+      input.path ??
+        path.join(
+          expandHomePathWith(
+            (yield* serverSettings.getSettings.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new GitCommandError({
+                    operation: "GitVcsDriver.createWorktree",
+                    command: "git",
+                    cwd: input.cwd,
+                    detail: "Failed to read server settings.",
+                    cause,
+                  }),
+              ),
+            )).worktreeBaseDirectory || worktreesDir,
+            path,
+          ),
+          repoName,
+          sanitizedBranch,
+        ),
     );
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]

@@ -24,6 +24,8 @@ import { GitCommandError, type ReviewDiffFileContentsInput } from "@t3tools/cont
 import { SshPasswordPrompt } from "@t3tools/ssh/auth";
 import { ServerConfig } from "../config.ts";
 import { gitCommandDuration } from "../observability/Metrics.ts";
+import { expandHomePath } from "../pathExpansion.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import {
   makeGitVcsDriverCore,
   parseGitCheckoutProgressLine,
@@ -34,8 +36,9 @@ import * as GitVcsDriver from "./GitVcsDriver.ts";
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
 });
+const CoreDepsLayer = Layer.mergeAll(ServerConfigLayer, ServerSettings.layerTest());
 const TestLayer = GitVcsDriver.layer.pipe(
-  Layer.provide(ServerConfigLayer),
+  Layer.provide(CoreDepsLayer),
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -325,7 +328,7 @@ it.effect("uses stable diagnostics for every parsed non-repository command", () 
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
   );
   const layer = GitVcsDriver.layer.pipe(
-    Layer.provide(ServerConfigLayer),
+    Layer.provide(CoreDepsLayer),
     Layer.provideMerge(nodeServicesLayer),
   );
 
@@ -500,7 +503,7 @@ it.effect("coalesces concurrent ref pages into one repository snapshot", () =>
         2,
       );
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("retries an in-flight ref snapshot invalidated by a mutation", () =>
@@ -559,7 +562,7 @@ it.effect("retries an in-flight ref snapshot invalidated by a mutation", () =>
       assert.isTrue(refs.refs.some((ref) => ref.name === "feature/during-refresh"));
       assert.equal(yield* Ref.get(refScans), 2);
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("invalidates a ref snapshot when a mutation fails after changing Git", () =>
@@ -591,7 +594,7 @@ it.effect("invalidates a ref snapshot when a mutation fails after changing Git",
       const refs = yield* driver.listRefs({ cwd });
       assert.isTrue(refs.refs.some((ref) => ref.name === "feature/partial-failure"));
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("fails a ref snapshot when for-each-ref exits unsuccessfully", () =>
@@ -627,7 +630,7 @@ it.effect("fails a ref snapshot when for-each-ref exits unsuccessfully", () =>
       });
       assert.equal(yield* Ref.get(snapshotAttempts), 1);
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("marks the current branch when worktree metadata is unavailable", () =>
@@ -662,7 +665,7 @@ it.effect("marks the current branch when worktree metadata is unavailable", () =
       assert.isTrue(refs.isRepo);
       assert.isTrue(refs.refs.find((ref) => ref.name === initialBranch)?.current);
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("ignores worktree metadata for directories that no longer exist", () =>
@@ -698,7 +701,7 @@ it.effect("ignores worktree metadata for directories that no longer exist", () =
 
       assert.equal(refs.refs.find((ref) => ref.name === "stale-worktree")?.worktreePath, null);
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect("refreshes the current branch after an external checkout", () =>
@@ -812,7 +815,70 @@ it.effect("backs off failed upstream refreshes across linked worktrees", () =>
       yield* driver.statusDetailsRemote(cwd);
       assert.equal(yield* Ref.get(fetchAttempts), 3);
     }),
-  ).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+);
+
+it.effect(
+  "applies current worktree defaults to new worktrees while preserving explicit and existing paths",
+  () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir();
+      const { initialBranch } = yield* initRepoWithCommit(cwd);
+      const create = (newRefName: string, target: string | null = null) =>
+        driver.createWorktree({ cwd, refName: initialBranch, newRefName, path: target });
+      const fallback = yield* create("feature/default");
+      assert.equal(
+        fallback.worktree.path,
+        path.join(config.worktreesDir, path.basename(cwd), "feature-default"),
+      );
+
+      const customRoot = yield* makeTmpDir("git-custom-worktrees-");
+      yield* settings.updateSettings({ worktreeBaseDirectory: customRoot });
+      const custom = yield* create("feature/custom");
+      assert.equal(
+        custom.worktree.path,
+        path.join(customRoot, path.basename(cwd), "feature-custom"),
+      );
+      assert.isTrue(yield* fs.exists(custom.worktree.path));
+
+      const otherRoot = yield* makeTmpDir("git-other-worktrees-");
+      const homeRelative = "~/" + path.relative(expandHomePath("~"), otherRoot);
+      yield* settings.updateSettings({ worktreeBaseDirectory: homeRelative });
+      const changed = yield* create("feature/changed");
+      assert.equal(
+        changed.worktree.path,
+        path.join(otherRoot, path.basename(cwd), "feature-changed"),
+      );
+      assert.equal(
+        yield* git(custom.worktree.path, ["branch", "--show-current"]),
+        "feature/custom",
+      );
+
+      const explicitPath = path.join(customRoot, "explicit");
+      const explicit = yield* create("feature/explicit", explicitPath);
+      assert.equal(explicit.worktree.path, explicitPath);
+
+      yield* settings.updateSettings({ worktreeBaseDirectory: "" });
+      const reset = yield* create("feature/reset");
+      assert.equal(
+        reset.worktree.path,
+        path.join(config.worktreesDir, path.basename(cwd), "feature-reset"),
+      );
+      yield* driver.removeWorktree({ cwd, path: custom.worktree.path, force: true });
+      assert.isFalse(yield* fs.exists(custom.worktree.path));
+    }).pipe(
+      Effect.provide(
+        GitVcsDriver.layer.pipe(
+          Layer.provideMerge(CoreDepsLayer),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
 );
 
 it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
@@ -1135,7 +1201,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         });
         const driver = yield* makeGitVcsDriverCore().pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, failingLsFilesSpawner),
-          Effect.provide(ServerConfigLayer),
+          Effect.provide(CoreDepsLayer),
         );
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd).pipe(
@@ -2109,7 +2175,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         );
         const driver = yield* makeGitVcsDriverCore().pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, delayedRemovalSpawner),
-          Effect.provide(ServerConfigLayer),
+          Effect.provide(CoreDepsLayer),
         );
         const cwd = yield* makeTmpDir();
         const { initialBranch } = yield* initRepoWithCommit(cwd);
@@ -2864,7 +2930,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         );
         const driver = yield* makeGitVcsDriverCore().pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, delayedPushSpawner),
-          Effect.provide(ServerConfigLayer),
+          Effect.provide(CoreDepsLayer),
         );
         const cwd = yield* makeTmpDir();
         const remote = yield* makeTmpDir("git-remote-");

@@ -72,6 +72,10 @@ import {
 } from "./settingsLayout";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
+import {
+  EnvironmentDirectoryDisclosure,
+  EnvironmentDirectoryRows,
+} from "./EnvironmentDirectorySettings";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import {
   EnvironmentRow,
@@ -1791,11 +1795,14 @@ function SavedBackendListRow({
         </Tooltip>
       }
       below={
-        serverUpdateState.status !== "idle" ? (
-          <div className="mt-1 max-w-md">
-            <ServerUpdateProgress state={serverUpdateState} />
-          </div>
-        ) : null
+        <>
+          {serverUpdateState.status !== "idle" ? (
+            <div className="mt-1 max-w-md">
+              <ServerUpdateProgress state={serverUpdateState} />
+            </div>
+          ) : null}
+          <EnvironmentDirectoryDisclosure environment={environment} />
+        </>
       }
     >
       {showUpdateAction ? (
@@ -3549,6 +3556,15 @@ export function ConnectionsSettings() {
     />
   );
 
+  const directoriesSection = primaryEnvironment ? (
+    <SettingsSection {...searchableSetting("environment-directories")}>
+      <EnvironmentDirectoryRows
+        key={primaryEnvironment.environmentId}
+        environment={primaryEnvironment}
+      />
+    </SettingsSection>
+  ) : null;
+
   const primarySettings = (
     <>
       <ConnectAccountsSection />
@@ -3670,6 +3686,7 @@ export function ConnectionsSettings() {
               </>
             ) : null}
           </SettingsSection>
+          {directoriesSection}
 
           {isLocalBackendRemotelyReachable ? (
             <FoldedSettingsSection
@@ -3973,28 +3990,31 @@ export function ConnectionsSettings() {
           </Dialog>
         </>
       ) : (
-        <SettingsSection {...searchableSetting("connections-environment")}>
-          {primaryEnvironment && primaryEnvironmentId ? (
+        <>
+          <SettingsSection {...searchableSetting("connections-environment")}>
+            {primaryEnvironment && primaryEnvironmentId ? (
+              <SettingsRow
+                title="Environment name"
+                description="Shown to clients connected to this environment. Clear the name to use the machine name."
+                control={
+                  <EnvironmentLabelControl
+                    environmentId={primaryEnvironmentId}
+                    label={primaryEnvironment.label}
+                    environmentLabels={environmentLabels}
+                    canRename={canRenamePrimary}
+                    showValue
+                  />
+                }
+              />
+            ) : null}
             <SettingsRow
-              title="Environment name"
-              description="Shown to clients connected to this environment. Clear the name to use the machine name."
-              control={
-                <EnvironmentLabelControl
-                  environmentId={primaryEnvironmentId}
-                  label={primaryEnvironment.label}
-                  environmentLabels={environmentLabels}
-                  canRename={canRenamePrimary}
-                  showValue
-                />
-              }
+              title="Administrative access"
+              description="Pairing links and client-session management require the access:write scope for this backend."
             />
-          ) : null}
-          <SettingsRow
-            title="Administrative access"
-            description="Pairing links and client-session management require the access:write scope for this backend."
-          />
-          <CloudLinkRow canManageRelay={canManageRelay} />
-        </SettingsSection>
+            <CloudLinkRow canManageRelay={canManageRelay} />
+          </SettingsSection>
+          {directoriesSection}
+        </>
       )}
     </>
   );

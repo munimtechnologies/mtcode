@@ -6,11 +6,8 @@ import {
   type ServerConfig,
 } from "@t3tools/contracts";
 
-import { isElectron } from "../../env";
-import { usePrimarySessionState } from "../../environments/primary";
+import { useEnvironmentOperateAccess } from "../../hooks/useEnvironmentOperateAccess";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
-import { usePrimaryEnvironmentId } from "../../state/environments";
-import { useEnvironmentSessionState } from "../../state/session";
 import { ENVIRONMENT_MACHINE_KIND_LABELS, EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   MenuItem,
@@ -21,10 +18,6 @@ import {
   MenuSubPopup,
   MenuSubTrigger,
 } from "../ui/menu";
-import {
-  resolvePrimaryOperateAccess,
-  resolveRemoteOperateAccess,
-} from "./ProviderSettingsPanel.logic";
 
 /**
  * Why the picker is inert, in the order the user can do something about it.
@@ -44,31 +37,6 @@ export function resolveEnvironmentIconPickerLock(input: {
     return "Your session on this environment cannot change its settings.";
   }
   return null;
-}
-
-// Same split the provider settings use: the desktop app owns its primary
-// server outright, a browser session on the primary checks its cookie
-// session's scopes, and a remote checks the scopes its own server reports.
-function useEnvironmentOperateAccess(environmentId: EnvironmentId) {
-  const isPrimary = usePrimaryEnvironmentId() === environmentId;
-  const primarySession = usePrimarySessionState();
-  const remoteSession = useEnvironmentSessionState(environmentId);
-  if (isPrimary) {
-    return isElectron
-      ? "granted"
-      : resolvePrimaryOperateAccess({
-          isPrimary: true,
-          hasDesktopBridge: false,
-          session: primarySession.data,
-          isPending: primarySession.isPending,
-          hasError: primarySession.error !== null,
-        });
-  }
-  return resolveRemoteOperateAccess({
-    session: remoteSession.data,
-    isPending: remoteSession.isPending,
-    hasError: remoteSession.hasError,
-  });
 }
 
 /**
