@@ -73,6 +73,8 @@ import Migration0053 from "./Migrations/050_ProjectionThreadPullRequests.ts";
 import Migration0054 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 // Upstream 052; renumbered to the next free fork id.
 import Migration0055 from "./Migrations/052_ProjectionThreadTitleState.ts";
+// Upstream 053 (PR #11846); file renumbered to 055 and registered as the next free fork id.
+import Migration0056 from "./Migrations/055_ProjectionThreadsAutoSettleDisabledAt.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -140,6 +142,7 @@ const migrationEntries = [
   [53, "ProjectionThreadPullRequests", Migration0053],
   [54, "ProjectionThreadMessageContext", Migration0054],
   [55, "ProjectionThreadTitleState", Migration0055],
+  [56, "ProjectionThreadsAutoSettleDisabledAt", Migration0056],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

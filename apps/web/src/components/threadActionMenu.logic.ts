@@ -13,6 +13,7 @@ export type ThreadActionMenuId =
   | "unpin"
   | "settle"
   | "unsettle"
+  | "auto-settle"
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
@@ -30,6 +31,8 @@ export interface ThreadActionMenuState {
   readonly branch: string | null;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
+  /** False while the user has turned automatic settlement off for this thread. */
+  readonly autoSettleEnabled: boolean;
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
@@ -37,6 +40,8 @@ export interface ThreadActionMenuState {
   readonly isRunning: boolean;
   readonly supports: {
     readonly settlement: boolean;
+    /** Server understands thread.auto-settle.set. */
+    readonly autoSettleOptOut: boolean;
     readonly snooze: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
@@ -78,6 +83,12 @@ export function buildThreadActionMenuItems(
             ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
             : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
         ]
+      : []),
+    // A check item: the state is visible without opening anything, and one
+    // click flips it. Off keeps long-running threads out of the settled shelf
+    // no matter how quiet they get or what happens to their pull request.
+    ...(state.supports.autoSettleOptOut
+      ? [{ id: "auto-settle" as const, label: "Auto-settle", checked: state.autoSettleEnabled }]
       : []),
     ...(state.supports.snooze
       ? [

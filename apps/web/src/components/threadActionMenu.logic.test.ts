@@ -6,11 +6,18 @@ const baseState: ThreadActionMenuState = {
   branch: null,
   isPinned: false,
   isSettled: false,
+  autoSettleEnabled: true,
   isSnoozed: false,
   canSnoozeNow: true,
   isRegeneratingTitle: false,
   isRunning: false,
-  supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true },
+  supports: {
+    settlement: true,
+    autoSettleOptOut: true,
+    snooze: true,
+    pinning: true,
+    titleRegeneration: true,
+  },
   snoozePresets: [
     { id: "hour", label: "In 1 hour", whenLabel: "3:00 PM", snoozedUntil: "2026-08-07T15:00:00Z" },
   ],
@@ -31,7 +38,13 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          autoSettleOptOut: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+        },
       }),
     ).toEqual(["rename", "mark-unread", "copy", "project-settings", "archive", "delete"]);
   });
@@ -60,6 +73,30 @@ describe("buildThreadActionMenuItems", () => {
       expect.arrayContaining(["unpin", "unsettle", "unsnooze"]),
     );
     expect(ids(baseState)).toEqual(expect.arrayContaining(["pin", "settle", "snooze"]));
+  });
+
+  it("renders auto-settle as a check item that mirrors the thread state", () => {
+    const on = buildThreadActionMenuItems(baseState).find((item) => item.id === "auto-settle");
+    expect(on).toMatchObject({ label: "Auto-settle", checked: true });
+    const off = buildThreadActionMenuItems({ ...baseState, autoSettleEnabled: false }).find(
+      (item) => item.id === "auto-settle",
+    );
+    expect(off).toMatchObject({ checked: false });
+    expect(
+      ids({ ...baseState, supports: { ...baseState.supports, autoSettleOptOut: false } }),
+    ).not.toContain("auto-settle");
+  });
+
+  it("shows auto-settle as a check item that mirrors the thread state", () => {
+    const on = buildThreadActionMenuItems(baseState).find((item) => item.id === "auto-settle");
+    expect(on).toMatchObject({ label: "Auto-settle", checked: true });
+    const off = buildThreadActionMenuItems({ ...baseState, autoSettleEnabled: false }).find(
+      (item) => item.id === "auto-settle",
+    );
+    expect(off?.checked).toBe(false);
+    expect(
+      ids({ ...baseState, supports: { ...baseState.supports, autoSettleOptOut: false } }),
+    ).not.toContain("auto-settle");
   });
 
   it("disables snooze when the thread cannot snooze, keeping presets visible", () => {
@@ -95,7 +132,13 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          autoSettleOptOut: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+        },
       }),
     ).toContain("archive");
   });
