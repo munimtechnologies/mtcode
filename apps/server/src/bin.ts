@@ -64,6 +64,7 @@ const openProjectViaDesktopOrLiveServer = Effect.fn("openProjectViaDesktopOrLive
     return false;
   },
 );
+import { runSupervisorDaemon } from "./piNative/SupervisorDaemon.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -89,6 +90,11 @@ const connectUnavailableCommand = Command.make("connect", {
       }),
     ),
   ),
+);
+
+export const piSupervisorCommand = Command.make("pi-supervisor").pipe(
+  Command.unlisted,
+  Command.withHandler(() => Effect.promise(runSupervisorDaemon)),
 );
 
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
@@ -127,6 +133,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       sshHelperCommand,
       themeCommand,
       triageCommand,
+      piSupervisorCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
   );

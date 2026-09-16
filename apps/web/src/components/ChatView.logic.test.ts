@@ -1,5 +1,6 @@
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  CommandId,
   CheckpointRef,
   EnvironmentId,
   EventId,
@@ -43,6 +44,7 @@ import {
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveChatIsWorking,
+  createTakeoverRetryIdentity,
   deriveComposerSendState,
   deriveLockedProvider,
   dismissBranchMismatchForSession,
@@ -53,6 +55,9 @@ import {
   hasServerAcknowledgedLocalDispatch,
   shouldRefocusComposerOnWindowFocus,
   isBranchMismatchDismissedForSession,
+  isPiNativeCommandRejected,
+  isTakeoverDeliveryIndeterminate,
+  matchTakeoverRetryIdentity,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   recallCheckoutIsRepo,
@@ -62,11 +67,14 @@ import {
   restorePlanFollowUpComposer,
   resolveComposerProviderSelection,
   resolveDraftPromotionNavigationTarget,
+  resolveExternalResumeForSend,
+  isQueuedSendBlocked,
   findRecordedWorktreeSetup,
   resolveVisibleWorktreeSetup,
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
+  rotateTakeoverRetryCommandId,
   resolveSendEnvMode,
   replaceEditableUserText,
   threadShellHasStarted,
@@ -98,6 +106,40 @@ import {
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
 } from "./ChatView.logic";
+
+describe("automatic queued send readiness", () => {
+  const readyExternalThread = {
+    activeEnvironmentUnavailable: false,
+    clientSettingsHydrated: true,
+    isRevertingCheckpoint: false,
+    threadDetailLoading: false,
+    needsLoadBalancing: false,
+    externalBacking: true,
+    configuredProviderAvailable: false,
+  };
+
+  it("allows an external Pi thread without a configured provider", () => {
+    expect(isQueuedSendBlocked(readyExternalThread)).toBe(false);
+  });
+
+  it("waits for a configured provider on a managed thread", () => {
+    const managedThread = { ...readyExternalThread, externalBacking: false };
+    expect(isQueuedSendBlocked(managedThread)).toBe(true);
+    expect(isQueuedSendBlocked({ ...managedThread, configuredProviderAvailable: true })).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    { activeEnvironmentUnavailable: true },
+    { clientSettingsHydrated: false },
+    { isRevertingCheckpoint: true },
+    { threadDetailLoading: true },
+    { needsLoadBalancing: true },
+  ])("holds an external thread while a readiness gate is active: %j", (gate) => {
+    expect(isQueuedSendBlocked({ ...readyExternalThread, ...gate })).toBe(true);
+  });
+});
 
 describe("agent browser close confirmation", () => {
   const surfaces = [
@@ -729,6 +771,113 @@ describe("shoulderTabReserve", () => {
     expect(shoulderTabReserve(overlay)).toBe(28);
     elements.set(".chat-composer-tasks-tab", elementAt(100));
     expect(shoulderTabReserve(overlay)).toBe(0);
+describe("takeover retry identity", () => {
+  const identity = createTakeoverRetryIdentity({
+    threadKey: "environment-local:thread-1",
+    outgoingText: "continue the migration",
+    commandId: CommandId.make("command-1"),
+    messageId: MessageId.make("message-1"),
+    createdAt: now,
+  });
+
+  it("reuses the complete identity for the same thread and outgoing text", () => {
+    expect(
+      matchTakeoverRetryIdentity(identity, {
+        threadKey: identity.threadKey,
+        outgoingText: identity.outgoingText,
+      }),
+    ).toBe(identity);
+  });
+
+  it("invalidates the identity when the outgoing text or thread changes", () => {
+    expect(
+      matchTakeoverRetryIdentity(identity, {
+        threadKey: identity.threadKey,
+        outgoingText: "continue the edited migration",
+      }),
+    ).toBeNull();
+    expect(
+      matchTakeoverRetryIdentity(identity, {
+        threadKey: "environment-local:thread-2",
+        outgoingText: identity.outgoingText,
+      }),
+    ).toBeNull();
+  });
+
+  it("retains the takeover marker with the retry command and message ids", () => {
+    expect(identity).toMatchObject({
+      commandId: "command-1",
+      messageId: "message-1",
+      createdAt: now,
+      externalResume: "takeover",
+    });
+  });
+
+  it("rotates only the command id after terminal command rejection", () => {
+    const rotated = rotateTakeoverRetryCommandId(identity, CommandId.make("command-2"));
+
+    expect(rotated).toEqual({ ...identity, commandId: "command-2" });
+    expect(rotated.messageId).toBe(identity.messageId);
+    expect(rotated.createdAt).toBe(identity.createdAt);
+    expect(rotated.outgoingText).toBe(identity.outgoingText);
+    expect(rotated.externalResume).toBe("takeover");
+  });
+
+  it("classifies only takeover indeterminate delivery as unresolved", () => {
+    expect(isTakeoverDeliveryIndeterminate(identity, { deliveryStatus: "indeterminate" })).toBe(
+      true,
+    );
+    expect(isTakeoverDeliveryIndeterminate(identity, { deliveryStatus: "completed" })).toBe(false);
+    expect(isTakeoverDeliveryIndeterminate(null, { deliveryStatus: "indeterminate" })).toBe(false);
+  });
+
+  it("recognizes definitive Pi command rejection without matching generic coded errors", () => {
+    expect(isPiNativeCommandRejected({ _tag: "PiNativeError", code: "command_rejected" })).toBe(
+      true,
+    );
+    expect(isPiNativeCommandRejected({ code: "command_rejected" })).toBe(false);
+    expect(isPiNativeCommandRejected({ _tag: "PiNativeError", code: "upgrade_required" })).toBe(
+      false,
+    );
+  });
+});
+
+describe("external Pi thread takeover", () => {
+  it.each([
+    undefined,
+    { kind: "external", control: "live" },
+    { kind: "external", control: "readOnly" },
+  ])("sends without confirmation when the backing is %j", async (backing) => {
+    const confirm = vi.fn(async () => false);
+
+    await expect(resolveExternalResumeForSend(backing, confirm)).resolves.toEqual({
+      proceed: true,
+    });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("cancels before takeover when the user declines", async () => {
+    const confirm = vi.fn(async () => false);
+
+    await expect(
+      resolveExternalResumeForSend({ kind: "external", control: "resumable" }, confirm),
+    ).resolves.toEqual({ proceed: false });
+    expect(confirm).toHaveBeenCalledWith(
+      [
+        "Resume on this host?",
+        "T3 will start a new Pi writer on this environment's host using this transcript copy.",
+        "This session may still be running on another host or in another terminal. T3 cannot detect those writers. Continue only after checking that it is safe to resume here.",
+      ].join("\n\n"),
+      { variant: "destructive" },
+    );
+  });
+
+  it("marks a confirmed takeover on the outgoing command", async () => {
+    const confirm = vi.fn(async () => true);
+
+    await expect(
+      resolveExternalResumeForSend({ kind: "external", control: "resumable" }, confirm),
+    ).resolves.toEqual({ proceed: true, externalResume: "takeover" });
   });
 });
 

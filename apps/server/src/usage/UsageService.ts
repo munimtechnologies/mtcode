@@ -1,14 +1,24 @@
 /**
  * UsageService - scans provider transcripts and returns priced usage buckets.
  *
+<<<<<<< ours
  * Claude, Codex, Grok, and OpenCode are scanned from on-disk session data.
  * Cursor has no local token ledger, so usage comes from the dashboard CSV
  * export when Cursor desktop is signed in on this machine.
+||||||| base
+ * The scan reads the provider CLIs' own session files (Claude Code, Codex, and
+ * Grok Build) rather than T3 Code's orchestration projections, so usage covers
+ * turns driven outside T3 Code too. This is the approach `ccusage` takes.
+=======
+ * The scan reads the provider CLIs' own session files (Claude Code, Codex,
+ * Grok Build, and Pi) rather than T3 Code's orchestration projections, so usage
+ * covers turns driven outside T3 Code too. This is the approach `ccusage` takes.
+>>>>>>> theirs
  *
  * Transcripts are append-only, so parsed records are memoised per file by
  * `(size, mtime)`. A cold 30-day scan of ~1.4 GB lands around 2-3 seconds; warm
- * scans only reparse files that changed, and a file that merely grew resumes
- * from its cached parse position so only the appended bytes are read.
+ * scans only reparse files that changed. Providers with persisted reducer state
+ * resume grown files from their cached parse position; Pi safely cold-parses growth.
  *
  * @module UsageService
  */
@@ -43,6 +53,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
+import { defaultPiSessionsRoot } from "../piNative/PiSessionsRoot.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { hasEnabledCursorInstance } from "./cursorAppData.ts";
@@ -427,6 +438,16 @@ export const make = Effect.gen(function* () {
       resolvedHomePath: openCodeResolvedHomePath,
     });
 
+    for (const directory of [
+      defaultPiSessionsRoot({ environment: hostEnvironment }),
+      path.join(config.stateDir, "providers", "pi"),
+    ]) {
+      const dir = yield* fileSystem.realPath(directory).pipe(Effect.orElseSucceed(() => directory));
+      const key = `pi\0${dir}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dirs.push({ provider: "pi", dir });
+    }
     return dirs;
   });
 
@@ -465,10 +486,11 @@ export const make = Effect.gen(function* () {
   /**
    * Parses one transcript, reusing the cached result when it is unchanged.
    *
-   * A file that only grew re-parses from the cached position, so an actively
-   * written multi-hundred-megabyte rollout costs its appended bytes per scan
-   * rather than a full re-read. The reader verifies the position's guard bytes
-   * and silently restarts from byte 0 when they no longer match.
+   * A file that only grew re-parses from the cached position when its parser
+   * supports resume, so an actively written multi-hundred-megabyte rollout costs
+   * its appended bytes per scan rather than a full re-read. The reader verifies
+   * the position's guard bytes and silently restarts from byte 0 when unsupported
+   * or when they no longer match.
    */
   const readFileRecords = (
     filePath: string,
@@ -682,6 +704,7 @@ export const make = Effect.gen(function* () {
 
     const sources: UsageSource[] = [];
     const livePaths = new Set<string>();
+    const attributedTranscriptPaths = new Set<string>();
     const walkedRoots: string[] = [];
 
     for (const source of scannedDirs) {
@@ -765,6 +788,11 @@ export const make = Effect.gen(function* () {
       const sessionIds = new Set<string>();
 
       for (const file of source.files) {
+        // Explicit provider homes can overlap a T3-managed root. The first
+        // source keeps its identity; later roots skip files already attributed.
+        const attributionKey = `${provider}\u0000${file.path}`;
+        if (attributedTranscriptPaths.has(attributionKey)) continue;
+        attributedTranscriptPaths.add(attributionKey);
         livePaths.add(file.path);
         if (file.records.length === 0) {
           skippedFiles += 1;
@@ -774,7 +802,7 @@ export const make = Effect.gen(function* () {
         for (const record of file.records) {
           // Only sessions that contributed in-window count: the mtime slack
           // admits boundary files whose records fall outside the range.
-          if (aggregator.add(record) && record.sessionId.length > 0) {
+          if (aggregator.add(record, dir) && record.sessionId.length > 0) {
             sessionIds.add(record.sessionId);
           }
         }

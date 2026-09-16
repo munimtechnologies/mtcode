@@ -182,6 +182,8 @@ describe("ProviderCommandReactor", () => {
     readonly titleRegenerationBeforeStart?: "one" | "two";
     readonly queuedTurnHandoffBeforeStart?: boolean;
     readonly extraRegistryProviders?: ReadonlyArray<Record<string, unknown>>;
+    readonly pendingTurnBeforeStart?: boolean;
+    readonly pendingTurnModelSelection?: ModelSelection;
     readonly serverActivation?: Effect.Effect<void>;
     readonly beforeReadySessionDispatch?: () => Effect.Effect<void>;
     readonly beforeTurnStartDispatch?: () => Effect.Effect<void>;
@@ -624,6 +626,41 @@ describe("ProviderCommandReactor", () => {
           interactionMode: "default",
           queuedAt,
           createdAt: "2026-08-16T10:00:01.000Z",
+    if (input?.pendingTurnBeforeStart === true) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.make("cmd-plan-mode-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          interactionMode: "plan",
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-before-reactor-start"),
+            role: "user",
+            text: "resume after restart",
+            attachments: [],
+          },
+          modelSelection: input.pendingTurnModelSelection ?? modelSelection,
+          titleSeed: "Thread",
+          interactionMode: "plan",
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.make("cmd-default-mode-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          createdAt: now,
         }),
       );
     }
@@ -928,6 +965,9 @@ describe("ProviderCommandReactor", () => {
       },
       runtimeMode: "approval-required",
     });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      operationId: CommandId.make("cmd-turn-start-1"),
+    });
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
@@ -1028,6 +1068,44 @@ describe("ProviderCommandReactor", () => {
         "Correction to my previous request. Treat the following as the complete replacement for that request:\n\nCorrected wording",
     });
     expect(harness.generateThreadTitle.mock.calls.length).toBe(titleGenerationCount);
+  it("replays a pending turn with its stable operation identity", async () => {
+    const harness = await createHarness({ pendingTurnBeforeStart: true });
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.drain();
+
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      operationId: CommandId.make("cmd-turn-start-before-reactor-start"),
+      input: "resume after restart",
+      interactionMode: "plan",
+    });
+  });
+
+  it("replays fenced managed Pi admission without opening a replacement session", async () => {
+    const piModelSelection = {
+      instanceId: ProviderInstanceId.make("pi"),
+      model: "openai/gpt-5",
+    };
+    const harness = await createHarness({
+      threadModelSelection: piModelSelection,
+      pendingTurnBeforeStart: true,
+      pendingTurnModelSelection: piModelSelection,
+    });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.drain();
+
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      operationId: CommandId.make("cmd-turn-start-before-reactor-start"),
+      input: "resume after restart",
+      modelSelection: piModelSelection,
+      interactionMode: "plan",
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).not.toHaveProperty("admissionMode");
   });
 
   effectIt.effect("projects inline context before sending the provider turn", () =>

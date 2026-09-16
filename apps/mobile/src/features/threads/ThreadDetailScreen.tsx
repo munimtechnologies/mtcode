@@ -21,6 +21,7 @@ import type {
   EnvironmentId,
   MessageId,
   ModelSelection,
+  OrchestrationThread,
   OrchestrationThreadShell,
   ProviderApprovalDecision,
   ProviderInteractionMode,
@@ -123,7 +124,7 @@ import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 
 export interface ThreadDetailScreenProps {
-  readonly selectedThread: OrchestrationThreadShell;
+  readonly selectedThread: OrchestrationThread | OrchestrationThreadShell;
   readonly contentPresentation: ThreadContentPresentation;
   readonly screenTone: StatusTone;
   readonly connectionError: string | null;
@@ -166,6 +167,8 @@ export interface ThreadDetailScreenProps {
   readonly threadCwd: string | null;
   readonly selectedThreadQueueCount: number;
   readonly editableMessageId: MessageId | null;
+  readonly selectedThreadIndeterminateQueueCount: number;
+  readonly selectedThreadTakeoverConfirmationQueueCount: number;
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
   readonly serverConfig: T3ServerConfig | null;
@@ -180,6 +183,7 @@ export interface ThreadDetailScreenProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+<<<<<<< ours
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onCancelQueuedMessage: (messageId: MessageId) => void;
   readonly onCorrectMessage: (input: {
@@ -187,6 +191,14 @@ export interface ThreadDetailScreenProps {
     readonly sourceText: string;
     readonly replacementText: string;
   }) => Promise<string | null>;
+||||||| base
+  readonly onSendMessage: () => Promise<MessageId | null>;
+=======
+  readonly onStopSession: () => void;
+  readonly onDiscardIndeterminateMessages: () => Promise<void>;
+  readonly onReviewQueuedExternalResumeMessages: () => Promise<void>;
+  readonly onSendMessage: (behavior?: "steer" | "followUp") => Promise<MessageId | null>;
+>>>>>>> theirs
   readonly onReconnectEnvironment: () => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
@@ -575,7 +587,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
         ((entry.message.attachments?.length ?? 0) > 0 ||
           entry.message.text.trim().toLowerCase() !== "/compact"),
     ) ||
-    (Boolean(props.loadEarlier) && props.selectedThread.latestUserMessageAt !== null);
+    (Boolean(props.loadEarlier) &&
+      "latestUserMessageAt" in props.selectedThread &&
+      props.selectedThread.latestUserMessageAt !== null);
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME;
   const composerOverlapHeight = composerChrome + composerBottomInset;
   // While a user-input request is pending, the questionnaire owns the
@@ -913,40 +927,43 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     selectedThreadKey,
   ]);
 
-  const handleSendMessage = useCallback(async () => {
-    const targetThreadKey = selectedThreadKey;
-    const hasUserMessage = selectedThreadFeed.some(
-      (entry) => entry.type === "message" && entry.message.role === "user",
-    );
-    const messageId = await props.onSendMessage();
-    if (messageId === null || selectedThreadKeyRef.current !== targetThreadKey) {
+  const handleSendMessage = useCallback(
+    async (behavior?: "steer" | "followUp") => {
+      const targetThreadKey = selectedThreadKey;
+      const hasUserMessage = selectedThreadFeed.some(
+        (entry) => entry.type === "message" && entry.message.role === "user",
+      );
+      const messageId = await props.onSendMessage(behavior);
+      if (messageId === null || selectedThreadKeyRef.current !== targetThreadKey) {
+        return messageId;
+      }
+
+      // A sent message makes the snapshot stale; a refused send leaves it in place.
+      clearUsageLimitsFor(targetThreadKey);
+
+      setSubmittedMessageId(messageId);
+      setAnchorMessageId(
+        resolveThreadFeedSubmissionAnchor({
+          currentAnchorMessageId: anchorMessageId,
+          submittedMessageId: messageId,
+          hasStartedTurn: props.selectedThread.latestTurn !== null,
+          hasUserMessage,
+          queuedMessageCount: props.selectedThreadQueueCount,
+        }),
+      );
+      composerEditorRef.current?.blur();
       return messageId;
-    }
-
-    // A sent message makes the snapshot stale; a refused send leaves it in place.
-    clearUsageLimitsFor(targetThreadKey);
-
-    setSubmittedMessageId(messageId);
-    setAnchorMessageId(
-      resolveThreadFeedSubmissionAnchor({
-        currentAnchorMessageId: anchorMessageId,
-        submittedMessageId: messageId,
-        hasStartedTurn: props.selectedThread.latestTurn !== null,
-        hasUserMessage,
-        queuedMessageCount: props.selectedThreadQueueCount,
-      }),
-    );
-    composerEditorRef.current?.blur();
-    return messageId;
-  }, [
-    anchorMessageId,
-    clearUsageLimitsFor,
-    props.onSendMessage,
-    props.selectedThread.latestTurn,
-    props.selectedThreadQueueCount,
-    selectedThreadFeed,
-    selectedThreadKey,
-  ]);
+    },
+    [
+      anchorMessageId,
+      clearUsageLimitsFor,
+      props.onSendMessage,
+      props.selectedThread.latestTurn,
+      props.selectedThreadQueueCount,
+      selectedThreadFeed,
+      selectedThreadKey,
+    ],
+  );
 
   const handleEditPendingMessage = useCallback(async (message: QueuedThreadMessage) => {
     try {
@@ -1285,6 +1302,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     hasCompactableConversation={hasCompactableConversation && !props.isCompacting}
                     serverConfig={props.serverConfig}
                     queueCount={props.selectedThreadQueueCount}
+                    indeterminateQueueCount={props.selectedThreadIndeterminateQueueCount}
+                    takeoverConfirmationQueueCount={
+                      props.selectedThreadTakeoverConfirmationQueueCount
+                    }
                     environmentId={props.environmentId}
                     projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
                     // Follow-ups typed during setup wait in the draft: queueing
@@ -1301,6 +1322,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onNativePasteText={props.onNativePasteText}
                     onRemoveDraftImage={props.onRemoveDraftImage}
                     onStopThread={props.onStopThread}
+                    onStopSession={props.onStopSession}
+                    onDiscardIndeterminateMessages={props.onDiscardIndeterminateMessages}
+                    onReviewQueuedExternalResumeMessages={
+                      props.onReviewQueuedExternalResumeMessages
+                    }
                     onSendMessage={handleSendMessage}
                     onShowUsageLimits={showUsageLimits}
                     onUpdateModelSelection={props.onUpdateThreadModelSelection}

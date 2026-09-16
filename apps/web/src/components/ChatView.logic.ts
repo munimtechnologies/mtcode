@@ -3,6 +3,7 @@ import {
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
   type ChatFileAttachment,
+  type CommandId,
   type EnvironmentId,
   isProviderDriverKind,
   ProjectId,
@@ -42,7 +43,11 @@ import {
   type ThreadShell,
   type TurnDiffSummary,
 } from "../types";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import {
+  type ComposerImageAttachment,
+  type DraftThreadState,
+  type TakeoverRetryIdentity,
+} from "../composerDraftStore";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -93,6 +98,22 @@ export function shoulderTabReserve(overlay: HTMLElement): number {
   return Math.max(
     0,
     Math.round(surface.getBoundingClientRect().top - tab.getBoundingClientRect().top),
+export function isQueuedSendBlocked(input: {
+  activeEnvironmentUnavailable: boolean;
+  clientSettingsHydrated: boolean;
+  isRevertingCheckpoint: boolean;
+  threadDetailLoading: boolean;
+  needsLoadBalancing: boolean;
+  externalBacking: boolean;
+  configuredProviderAvailable: boolean;
+}): boolean {
+  return (
+    input.activeEnvironmentUnavailable ||
+    !input.clientSettingsHydrated ||
+    input.isRevertingCheckpoint ||
+    input.threadDetailLoading ||
+    input.needsLoadBalancing ||
+    (!input.externalBacking && !input.configuredProviderAvailable)
   );
 }
 
@@ -945,6 +966,67 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     });
     reader.readAsDataURL(file);
   });
+}
+
+export function createTakeoverRetryIdentity(
+  input: Omit<TakeoverRetryIdentity, "externalResume">,
+): TakeoverRetryIdentity {
+  return { ...input, externalResume: "takeover" };
+}
+
+export function matchTakeoverRetryIdentity(
+  retained: TakeoverRetryIdentity | null,
+  payload: Pick<TakeoverRetryIdentity, "threadKey" | "outgoingText">,
+): TakeoverRetryIdentity | null {
+  return retained?.threadKey === payload.threadKey && retained.outgoingText === payload.outgoingText
+    ? retained
+    : null;
+}
+
+export function rotateTakeoverRetryCommandId(
+  identity: TakeoverRetryIdentity,
+  commandId: CommandId,
+): TakeoverRetryIdentity {
+  return { ...identity, commandId };
+}
+
+export function isTakeoverDeliveryIndeterminate(
+  identity: TakeoverRetryIdentity | null | undefined,
+  result: { readonly deliveryStatus?: "completed" | "indeterminate" | undefined },
+): boolean {
+  return identity !== null && identity !== undefined && result.deliveryStatus === "indeterminate";
+}
+
+export function isPiNativeCommandRejected(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const candidate = error as { readonly _tag?: unknown; readonly code?: unknown };
+  return candidate._tag === "PiNativeError" && candidate.code === "command_rejected";
+}
+
+export type ExternalResumeSendDecision =
+  | { proceed: false }
+  | { proceed: true; externalResume?: "takeover" };
+
+export async function resolveExternalResumeForSend(
+  backing: { readonly kind: string; readonly control: string } | undefined,
+  confirm: (message: string, options: { variant: "destructive" }) => Promise<boolean>,
+): Promise<ExternalResumeSendDecision> {
+  if (backing?.kind !== "external" || backing.control !== "resumable") {
+    return { proceed: true };
+  }
+
+  const confirmed = await confirm(
+    [
+      "Resume on this host?",
+      "T3 will start a new Pi writer on this environment's host using this transcript copy.",
+      "This session may still be running on another host or in another terminal. T3 cannot detect those writers. Continue only after checking that it is safe to resume here.",
+    ].join("\n\n"),
+    { variant: "destructive" },
+  );
+
+  return confirmed ? { proceed: true, externalResume: "takeover" } : { proceed: false };
 }
 
 export function resolveSendEnvMode(input: {
