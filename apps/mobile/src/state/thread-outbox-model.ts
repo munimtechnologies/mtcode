@@ -4,7 +4,6 @@ import {
   fileAttachmentTooLargeMessage,
 } from "@t3tools/client-runtime/state/attachments";
 import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
-import { threadAllows } from "@t3tools/client-runtime/state/threads";
 import {
   CommandId,
   EnvironmentId,
@@ -22,8 +21,6 @@ import {
   type ProviderInteractionMode as ProviderInteractionModeType,
   type RuntimeMode as RuntimeModeType,
   type ThreadTurnDeliveryMode as ThreadTurnDeliveryModeType,
-  type OrchestrationThread,
-  type OrchestrationThreadShell,
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -33,7 +30,8 @@ import type { DraftComposerAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { resolveProviderInteractionMode } from "../features/threads/legacy-plan-mode";
 
-const THREAD_OUTBOX_SCHEMA_VERSION = 8;
+// Keep current writes until a compatible native baseline includes the v4 reader.
+const THREAD_OUTBOX_SCHEMA_VERSION = 3;
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000;
 
 const QueuedThreadCreationSchema = Schema.Struct({
@@ -49,7 +47,7 @@ const QueuedThreadCreationSchema = Schema.Struct({
 });
 
 export const QueuedThreadMessageSchema = Schema.Struct({
-  schemaVersion: Schema.Literals([1, 2, 3, 4, 5, 6, 7, THREAD_OUTBOX_SCHEMA_VERSION]),
+  schemaVersion: Schema.Literals([1, 2, THREAD_OUTBOX_SCHEMA_VERSION, 4]),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   messageId: MessageId,
@@ -61,10 +59,6 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
   deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
-  streamingBehavior: Schema.optional(Schema.Literals(["steer", "followUp"])),
-  externalResume: Schema.optional(Schema.Literals(["needsConfirmation", "takeover"])),
-  deliveryStatus: Schema.optional(Schema.Literal("indeterminate")),
-  awaitThreadVisibility: Schema.optional(Schema.Boolean),
   // Present when the queued item creates a brand-new thread (pending task)
   // instead of appending a turn to an existing one.
   creation: Schema.optional(QueuedThreadCreationSchema),
@@ -98,10 +92,6 @@ export interface QueuedThreadMessage {
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
   readonly deliveryMode?: ThreadTurnDeliveryModeType;
-  readonly streamingBehavior?: "steer" | "followUp";
-  readonly externalResume?: "needsConfirmation" | "takeover";
-  readonly deliveryStatus?: "indeterminate";
-  readonly awaitThreadVisibility?: boolean;
   readonly creation?: QueuedThreadCreation;
   readonly attachGoal?: string;
   readonly createdAt: string;
@@ -111,90 +101,6 @@ export interface ThreadSettingsSnapshot {
   readonly modelSelection: ModelSelectionType;
   readonly runtimeMode: RuntimeModeType;
   readonly interactionMode: ProviderInteractionModeType;
-}
-export type QueuedExternalResumeDrainAction = "mark-needs-confirmation" | "send" | "wait";
-
-export function resolveQueuedExternalResumeDrainAction(
-  message: Pick<QueuedThreadMessage, "externalResume">,
-  backingControl: "live" | "readOnly" | "resumable" | undefined,
-): QueuedExternalResumeDrainAction {
-  if (backingControl !== "resumable" || message.externalResume === "takeover") {
-    return "send";
-  }
-  return message.externalResume === "needsConfirmation" ? "wait" : "mark-needs-confirmation";
-}
-
-export function renewQueuedExternalResumeTakeover(
-  message: QueuedThreadMessage,
-  commandId: CommandId,
-): QueuedThreadMessage {
-  return { ...message, commandId, externalResume: "takeover" };
-}
-
-/** Local confirmation state must never cross the wire. */
-export function queuedExternalResumeForWire(
-  message: Pick<QueuedThreadMessage, "externalResume">,
-): "takeover" | undefined {
-  return message.externalResume === "takeover" ? "takeover" : undefined;
-}
-
-export function queuedMessageRequiresExplicitDiscard(
-  message: Pick<QueuedThreadMessage, "deliveryStatus">,
-): boolean {
-  return message.deliveryStatus === "indeterminate";
-}
-
-export type ThreadOutboxDeliverySuccessAction = "mark-indeterminate" | "remove";
-
-export function resolveThreadOutboxDeliverySuccessAction(
-  deliveryStatus: "completed" | "indeterminate" | undefined,
-): ThreadOutboxDeliverySuccessAction {
-  return deliveryStatus === "indeterminate" ? "mark-indeterminate" : "remove";
-}
-
-export function threadComposerQueueCount(input: {
-  readonly localCount: number;
-  readonly detailIntentCount?: number;
-  readonly detailOmittedCount?: number;
-  readonly shellIntentCount?: number;
-  readonly hasDetail: boolean;
-}): number {
-  return (
-    input.localCount +
-    (input.hasDetail
-      ? (input.detailIntentCount ?? 0) + (input.detailOmittedCount ?? 0)
-      : (input.shellIntentCount ?? 0))
-  );
-}
-export function waitsForQueuedThreadVisibility(
-  message: Pick<QueuedThreadMessage, "awaitThreadVisibility">,
-  threadExists: boolean,
-): boolean {
-  return message.awaitThreadVisibility === true && !threadExists;
-}
-export const newTaskTargetRequiresProvider = (target: "t3" | "pi"): boolean => target === "t3";
-export function threadComposerAllowsSend(
-  thread: OrchestrationThread | OrchestrationThreadShell,
-  hasContent: boolean,
-  behavior?: "steer" | "followUp",
-): boolean {
-  return (
-    hasContent &&
-    threadAllows(thread, "send") &&
-    (behavior === undefined || threadAllows(thread, behavior))
-  );
-}
-export function queuedMessageBlockedByCapabilities(
-  message: Pick<QueuedThreadMessage, "attachments" | "streamingBehavior">,
-  thread: OrchestrationThread | OrchestrationThreadShell,
-): boolean {
-  return (
-    !threadAllows(thread, "send") ||
-    (message.attachments.length > 0 && !threadAllows(thread, "attachments")) ||
-    (thread.session?.status === "running" &&
-      message.streamingBehavior !== undefined &&
-      !threadAllows(thread, message.streamingBehavior))
-  );
 }
 
 export function resolveQueuedThreadSettings(
@@ -213,25 +119,6 @@ export function resolveQueuedThreadSettings(
       provider,
       message.interactionMode ?? thread.interactionMode,
     ),
-  };
-}
-
-export function resolveCapabilityAllowedQueuedThreadSettings(
-  message: QueuedThreadMessage,
-  thread: OrchestrationThread | OrchestrationThreadShell,
-  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "showInteractionModeToggle">> = [],
-): ThreadSettingsSnapshot {
-  const queued = resolveQueuedThreadSettings(message, thread, providers);
-  return {
-    modelSelection: threadAllows(thread, "changeModel")
-      ? queued.modelSelection
-      : thread.modelSelection,
-    runtimeMode: threadAllows(thread, "changeRuntimeMode")
-      ? queued.runtimeMode
-      : thread.runtimeMode,
-    interactionMode: threadAllows(thread, "changeInteractionMode")
-      ? queued.interactionMode
-      : thread.interactionMode,
   };
 }
 
@@ -292,7 +179,6 @@ export function resolveThreadOutboxDeliveryAction(input: {
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
   readonly threadBusy: boolean;
-  readonly isExternalPiThread?: boolean;
 }): ThreadOutboxDeliveryAction {
   if (input.isCreation) {
     // A pending task creates its thread on delivery. If the thread already
@@ -306,9 +192,6 @@ export function resolveThreadOutboxDeliveryAction(input: {
     return input.environmentConnected && input.shellStatus === "live" ? "send" : "wait";
   }
   if (!input.threadExists) {
-    if (input.isExternalPiThread === true) {
-      return "wait";
-    }
     return input.shellStatus === "live" ? "remove" : "wait";
   }
   return input.environmentConnected ? "send" : "wait";
@@ -406,56 +289,18 @@ export function shouldRetryThreadOutboxDelivery(error: unknown): boolean {
   return isTransportConnectionErrorMessage(errorMessage(error));
 }
 
-<<<<<<< ours
 export type ThreadOutboxCommandStage = "settings-sync" | "start-turn" | "goal-attach";
 export type ThreadOutboxFailureAction = "retry" | "restore";
-||||||| base
-export type ThreadOutboxCommandStage = "settings-sync" | "start-turn";
-export type ThreadOutboxFailureAction = "retry" | "restore";
-=======
-export type ThreadOutboxCommandStage = "settings-sync" | "start-turn";
-export type ThreadOutboxFailureAction = "discard" | "needs-confirmation" | "restore" | "retry";
->>>>>>> theirs
 
 export function resolveThreadOutboxFailureAction(input: {
   readonly stage: ThreadOutboxCommandStage;
   readonly error: unknown;
   readonly interrupted: boolean;
-  readonly externalResume?: QueuedThreadMessage["externalResume"];
 }): ThreadOutboxFailureAction {
-  const code =
-    typeof input.error === "object" &&
-    input.error !== null &&
-    "code" in input.error &&
-    typeof input.error.code === "string"
-      ? input.error.code
-      : undefined;
-  if (input.stage === "settings-sync") {
-    return "retry";
-  }
-  if (code === "takeover_confirmation_required") {
-    return "needs-confirmation";
-  }
-  if (code === "command_rejected") {
-    return input.externalResume === "takeover" ? "needs-confirmation" : "discard";
-  }
-  if (code === "read_only" && input.externalResume !== undefined) {
-    return "needs-confirmation";
-  }
   if (
-<<<<<<< ours
     input.stage === "settings-sync" ||
     input.stage === "goal-attach" ||
-||||||| base
-    input.stage === "settings-sync" ||
-=======
->>>>>>> theirs
     input.interrupted ||
-    code === "runtime_starting" ||
-    code === "supervisor_upgrade_required" ||
-    code === "streaming_behavior_required" ||
-    code === "read_only" ||
-    code === "supervisor" ||
     shouldRetryThreadOutboxDelivery(input.error)
   ) {
     return "retry";

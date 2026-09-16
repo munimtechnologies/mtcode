@@ -48,22 +48,13 @@ describe("buildPeriodColumns", () => {
       "2026-08-01",
       {
         day: "2026-08-01",
-<<<<<<< ours
         costUsd: 40,
         totalTokens: 400,
-||||||| base
-        costUsd: 30,
-        totalTokens: 300,
-=======
-        costUsd: 35,
-        totalTokens: 350,
->>>>>>> theirs
         byProvider: new Map([
           ["codex" as const, { costUsd: 10, totalTokens: 100 }],
           ["claude" as const, { costUsd: 20, totalTokens: 200 }],
           ["grok" as const, { costUsd: 7, totalTokens: 70 }],
           ["opencode" as const, { costUsd: 3, totalTokens: 30 }],
-          ["pi" as const, { costUsd: 5, totalTokens: 50 }],
         ]),
       },
     ],
@@ -72,37 +63,22 @@ describe("buildPeriodColumns", () => {
       "2026-08-03",
       {
         day: "2026-08-03",
-        costUsd: 10,
-        totalTokens: 100,
-        byProvider: new Map([
-          ["claude" as const, { costUsd: 5, totalTokens: 50 }],
-          ["pi" as const, { costUsd: 5, totalTokens: 50 }],
-        ]),
+        costUsd: 5,
+        totalTokens: 50,
+        byProvider: new Map([["claude" as const, { costUsd: 5, totalTokens: 50 }]]),
       },
     ],
   ]);
 
   it("plots each day on its own", () => {
     expect(buildPeriodColumns(days, byDay, "cost").map((column) => column.total)).toEqual([
-<<<<<<< ours
       40, 0, 5,
-||||||| base
-      30, 0, 5,
-=======
-      35, 0, 10,
->>>>>>> theirs
     ]);
   });
 
   it("reads the requested metric", () => {
     expect(buildPeriodColumns(days, byDay, "tokens").map((column) => column.total)).toEqual([
-<<<<<<< ours
       400, 0, 50,
-||||||| base
-      300, 0, 50,
-=======
-      350, 0, 100,
->>>>>>> theirs
     ]);
   });
 
@@ -117,7 +93,6 @@ describe("buildPeriodColumns", () => {
       { provider: "cursor", value: 0 },
       { provider: "grok", value: 7 },
       { provider: "opencode", value: 3 },
-      { provider: "pi", value: 5 },
     ]);
   });
 
@@ -135,9 +110,8 @@ describe("providersWithUsage", () => {
       providersWithUsage([
         { provider: "codex", costUsd: 0, totalTokens: 0 },
         { provider: "claude", costUsd: 0, totalTokens: 200 },
-        { provider: "pi", costUsd: 4, totalTokens: 100 },
       ]),
-    ).toEqual(["claude", "pi"]);
+    ).toEqual(["claude"]);
   });
 });
 

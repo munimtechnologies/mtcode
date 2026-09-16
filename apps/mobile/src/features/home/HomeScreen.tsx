@@ -862,7 +862,7 @@ export function HomeScreen(props: HomeScreenProps) {
           )}
           providerInstance={resolveThreadProviderInstance(serverConfigs, thread)}
           environmentLabel={
-            thread.backing || Object.keys(props.savedConnectionsById).length > 1
+            Object.keys(props.savedConnectionsById).length > 1
               ? (props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
               : null
           }

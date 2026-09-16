@@ -78,15 +78,6 @@ vi.mock("../lib/attachmentUpload", () => ({
   prepareTurnAttachments: harness.prepareTurnAttachments,
 }));
 
-vi.mock("../connection/catalog", async () => {
-  const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
-  return {
-    environmentCatalog: {
-      stateAtom: Atom.family(() => Atom.make(AsyncResult.success({ phase: "connected" }))),
-    },
-  };
-});
-
 vi.mock("./entities", () => ({
   useProjects: () => [],
   useServerConfigs: () => new Map(),
@@ -96,15 +87,6 @@ vi.mock("./entities", () => ({
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/unstable/reactivity");
   return { serverEnvironment: { configValueAtom: Atom.family(() => Atom.make(null)) } };
-});
-
-vi.mock("./shell", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
-  return {
-    environmentShell: {
-      stateValueAtom: Atom.family(() => Atom.make({ status: "live" })),
-    },
-  };
 });
 
 vi.mock("./threads", () => ({

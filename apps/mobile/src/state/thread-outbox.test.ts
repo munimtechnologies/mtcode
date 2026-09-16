@@ -81,23 +81,12 @@ import {
   groupQueuedThreadMessages,
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
-  queuedExternalResumeForWire,
-  queuedMessageRequiresExplicitDiscard,
-  renewQueuedExternalResumeTakeover,
-  resolveCapabilityAllowedQueuedThreadSettings,
-  resolveQueuedExternalResumeDrainAction,
   resolveThreadOutboxDeliveryAction,
-  resolveThreadOutboxDeliverySuccessAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
   resolveQueuedThreadSettings,
   shouldRetryThreadOutboxDelivery,
   threadOutboxRetryDelayMs,
-  waitsForQueuedThreadVisibility,
-  newTaskTargetRequiresProvider,
-  queuedMessageBlockedByCapabilities,
-  threadComposerAllowsSend,
-  threadComposerQueueCount,
   type QueuedThreadMessage,
 } from "./thread-outbox-model";
 import { createThreadOutboxManager, ThreadOutboxManagerError } from "./thread-outbox-manager";
@@ -126,123 +115,6 @@ function queuedMessage(input: {
 }
 
 describe("thread outbox", () => {
-  it("includes omitted remote intents in the detail queue count", () => {
-    expect(
-      threadComposerQueueCount({
-        localCount: 1,
-        hasDetail: true,
-        detailIntentCount: 2,
-        detailOmittedCount: 3,
-        shellIntentCount: 99,
-      }),
-    ).toBe(6);
-  });
-
-  it("retains a native first prompt until its new thread shell is visible", () => {
-    expect(waitsForQueuedThreadVisibility({ awaitThreadVisibility: true }, false)).toBe(true);
-    expect(waitsForQueuedThreadVisibility({ awaitThreadVisibility: true }, true)).toBe(false);
-  });
-
-  it("does not require an internal provider for the native Pi target", () => {
-    expect(newTaskTargetRequiresProvider("pi")).toBe(false);
-    expect(newTaskTargetRequiresProvider("t3")).toBe(true);
-  });
-
-  it("rejects editor submission for read-only external sessions", () => {
-    const thread = {
-      backing: {
-        kind: "external",
-        source: "pi",
-        sourceKey: "opaque",
-        control: "readOnly",
-        capabilities: {
-          send: false,
-          attachments: false,
-          streamingBehaviors: [],
-          interrupt: false,
-          stop: false,
-          rename: false,
-          archive: false,
-          settle: true,
-          unsettle: true,
-          delete: false,
-          changeModel: false,
-          changeRuntimeMode: false,
-          changeInteractionMode: false,
-          checkpoints: false,
-        },
-      },
-    } as never;
-    expect(threadComposerAllowsSend(thread, true)).toBe(false);
-    expect(queuedMessageBlockedByCapabilities({ attachments: [] }, thread)).toBe(true);
-  });
-
-  it("requires foreground confirmation only while an external Pi thread is resumable", () => {
-    expect(resolveQueuedExternalResumeDrainAction({}, "resumable")).toBe("mark-needs-confirmation");
-    expect(
-      resolveQueuedExternalResumeDrainAction({ externalResume: "needsConfirmation" }, "resumable"),
-    ).toBe("wait");
-    expect(
-      resolveQueuedExternalResumeDrainAction({ externalResume: "takeover" }, "resumable"),
-    ).toBe("send");
-    expect(
-      resolveQueuedExternalResumeDrainAction({ externalResume: "needsConfirmation" }, "live"),
-    ).toBe("send");
-    expect(queuedExternalResumeForWire({ externalResume: "needsConfirmation" })).toBeUndefined();
-    expect(queuedExternalResumeForWire({ externalResume: "takeover" })).toBe("takeover");
-  });
-
-  it("blocks indeterminate successes instead of removing or retrying them", () => {
-    expect(resolveThreadOutboxDeliverySuccessAction("indeterminate")).toBe("mark-indeterminate");
-    expect(queuedMessageRequiresExplicitDiscard({ deliveryStatus: "indeterminate" })).toBe(true);
-    expect(resolveThreadOutboxDeliverySuccessAction("completed")).toBe("remove");
-    expect(resolveThreadOutboxDeliverySuccessAction(undefined)).toBe("remove");
-  });
-
-  it("defers queued actions until current external capabilities allow them", () => {
-    const thread = {
-      session: { status: "idle" },
-      backing: {
-        kind: "external",
-        source: "pi",
-        sourceKey: "opaque",
-        control: "live",
-        capabilities: {
-          send: true,
-          attachments: false,
-          streamingBehaviors: [],
-          interrupt: false,
-          stop: true,
-          rename: false,
-          archive: false,
-          settle: true,
-          unsettle: true,
-          delete: false,
-          changeModel: false,
-          changeRuntimeMode: false,
-          changeInteractionMode: false,
-          checkpoints: false,
-        },
-      },
-    };
-
-    expect(
-      queuedMessageBlockedByCapabilities(
-        { attachments: [], streamingBehavior: "followUp" },
-        thread as never,
-      ),
-    ).toBe(false);
-    expect(
-      queuedMessageBlockedByCapabilities({ attachments: [{} as never] }, thread as never),
-    ).toBe(true);
-    expect(
-      queuedMessageBlockedByCapabilities({ attachments: [], streamingBehavior: "followUp" }, {
-        ...thread,
-        session: { status: "running" },
-      } as never),
-    ).toBe(true);
-  });
-
   it("retains structured context through a persisted offline queue round trip", () => {
     const message: QueuedThreadMessage = {
       ...queuedMessage({ messageId: "context-message", createdAt: "2026-09-06T12:00:00.000Z" }),
@@ -538,7 +410,7 @@ describe("thread outbox", () => {
     expect(decodeQueuedThreadMessage({ ...message, schemaVersion: 4 })).toEqual(message);
   });
 
-  it("round-trips queued local state and decodes pre-state v7 messages", () => {
+  it("persists the exact selector snapshot while remaining compatible with v1 messages", () => {
     const legacyMessage = queuedMessage({
       messageId: "message-1",
       createdAt: "2026-06-08T10:00:01.000Z",
@@ -553,35 +425,11 @@ describe("thread outbox", () => {
       runtimeMode: "approval-required",
       interactionMode: "plan",
       deliveryMode: "after-current",
-      streamingBehavior: "followUp",
-      externalResume: "takeover",
-      deliveryStatus: "indeterminate",
     } satisfies QueuedThreadMessage;
 
-    expect(encodeQueuedThreadMessage(selectedMessage)).toMatchObject({
-      schemaVersion: 8,
-      externalResume: "takeover",
-    });
     expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(selectedMessage))).toEqual(
       selectedMessage,
     );
-    expect(
-      decodeQueuedThreadMessage({
-        schemaVersion: 7,
-        ...legacyMessage,
-      }),
-    ).toEqual(legacyMessage);
-    expect(
-      decodeQueuedThreadMessage(
-        encodeQueuedThreadMessage({
-          ...legacyMessage,
-          externalResume: "needsConfirmation",
-        }),
-      ),
-    ).toEqual({
-      ...legacyMessage,
-      externalResume: "needsConfirmation",
-    });
     expect(
       resolveQueuedThreadSettings(legacyMessage, {
         modelSelection: selectedMessage.modelSelection,
@@ -592,57 +440,6 @@ describe("thread outbox", () => {
       modelSelection: selectedMessage.modelSelection,
       runtimeMode: selectedMessage.runtimeMode,
       interactionMode: selectedMessage.interactionMode,
-    });
-  });
-
-  it("keeps current settings when external Pi capabilities disallow queued selectors", () => {
-    const message = {
-      ...queuedMessage({
-        messageId: "message-1",
-        createdAt: "2026-06-08T10:00:01.000Z",
-      }),
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("pi"),
-        model: "queued-model",
-      },
-      runtimeMode: "approval-required",
-      interactionMode: "plan",
-    } satisfies QueuedThreadMessage;
-    const thread = {
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("pi"),
-        model: "current-model",
-      },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      backing: {
-        kind: "external",
-        source: "pi",
-        sourceKey: "opaque",
-        control: "resumable",
-        capabilities: {
-          send: true,
-          attachments: false,
-          streamingBehaviors: [],
-          interrupt: false,
-          stop: false,
-          rename: false,
-          archive: false,
-          settle: true,
-          unsettle: true,
-          delete: false,
-          changeModel: false,
-          changeRuntimeMode: false,
-          changeInteractionMode: false,
-          checkpoints: false,
-        },
-      },
-    };
-
-    expect(resolveCapabilityAllowedQueuedThreadSettings(message, thread as never)).toEqual({
-      modelSelection: thread.modelSelection,
-      runtimeMode: thread.runtimeMode,
-      interactionMode: thread.interactionMode,
     });
   });
 
@@ -722,122 +519,6 @@ describe("thread outbox", () => {
     expect([1, 2, 3, 4, 5, 6].map(threadOutboxRetryDelayMs)).toEqual([
       1_000, 2_000, 4_000, 8_000, 16_000, 16_000,
     ]);
-  });
-
-  it("turns a server-side takeover race into local confirmation state", () => {
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "takeover_confirmation_required" },
-        interrupted: false,
-      }),
-    ).toBe("needs-confirmation");
-  });
-
-  it("returns a rejected confirmed takeover to review without retrying other rejections", () => {
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "command_rejected" },
-        interrupted: false,
-        externalResume: "takeover",
-      }),
-    ).toBe("needs-confirmation");
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "command_rejected" },
-        interrupted: false,
-      }),
-    ).toBe("discard");
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "settings-sync",
-        error: { code: "command_rejected" },
-        interrupted: false,
-      }),
-    ).toBe("retry");
-  });
-
-  it("renews only the command id when a queued takeover is reconfirmed", () => {
-    const base = queuedMessage({
-      messageId: "message-1",
-      createdAt: "2026-06-08T10:00:01.000Z",
-    });
-    const message = { ...base, attachments: [{} as never] };
-    const renewed = renewQueuedExternalResumeTakeover(
-      { ...message, externalResume: "needsConfirmation" },
-      CommandId.make("fresh-command"),
-    );
-
-    expect(renewed).toEqual({
-      ...message,
-      commandId: CommandId.make("fresh-command"),
-      externalResume: "takeover",
-    });
-    expect(renewed.messageId).toBe(message.messageId);
-    expect(renewed.text).toBe(message.text);
-    expect(renewed.attachments).toBe(message.attachments);
-  });
-
-  it("returns external Pi read-only races to confirmation while preserving legacy retries", () => {
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "read_only" },
-        interrupted: false,
-        externalResume: "takeover",
-      }),
-    ).toBe("needs-confirmation");
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "read_only" },
-        interrupted: false,
-        externalResume: "needsConfirmation",
-      }),
-    ).toBe("needs-confirmation");
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "read_only" },
-        interrupted: false,
-      }),
-    ).toBe("retry");
-  });
-
-  it("retains a queued command while the Pi supervisor requires an upgrade", () => {
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "supervisor_upgrade_required" },
-        interrupted: false,
-      }),
-    ).toBe("retry");
-  });
-
-  it("retains prompts rejected by temporary external runtime state", () => {
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "runtime_starting" },
-        interrupted: false,
-      }),
-    ).toBe("retry");
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "streaming_behavior_required" },
-        interrupted: false,
-      }),
-    ).toBe("retry");
-    expect(
-      resolveThreadOutboxFailureAction({
-        stage: "start-turn",
-        error: { code: "supervisor" },
-        interrupted: false,
-      }),
-    ).toBe("retry");
   });
 
   it("serializes mutations even when an earlier mutation is slower", async () => {
@@ -1065,47 +746,6 @@ describe("thread outbox", () => {
     registry.dispose();
   });
 
-  it("keeps an immediate indeterminate block when its durable update fails", async () => {
-    const registry = AtomRegistry.make();
-    let failWrite = false;
-    const manager = createThreadOutboxManager({
-      registry,
-      storage: {
-        load: async () => ({ messages: [], errors: [] }),
-        write: async () => {
-          if (failWrite) {
-            throw new Error("disk full");
-          }
-        },
-        remove: async () => undefined,
-      },
-    });
-    const message = queuedMessage({
-      messageId: "message-1",
-      createdAt: "2026-06-08T10:00:01.000Z",
-    });
-    const indeterminateMessage = {
-      ...message,
-      deliveryStatus: "indeterminate" as const,
-    };
-
-    await manager.enqueue(message);
-    registry.set(manager.queuedMessagesByThreadKeyAtom, {
-      "environment-1:thread-1": [indeterminateMessage],
-    });
-    failWrite = true;
-
-    await expect(manager.update(indeterminateMessage)).rejects.toBeInstanceOf(
-      ThreadOutboxManagerError,
-    );
-    expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({
-      "environment-1:thread-1": [indeterminateMessage],
-    });
-    expect(indeterminateMessage.commandId).toBe(message.commandId);
-    expect(indeterminateMessage.text).toBe(message.text);
-    registry.dispose();
-  });
-
   it("drops the disk entry when a failed enqueue leaves no queued message behind", async () => {
     const registry = AtomRegistry.make();
     const removed: string[] = [];
@@ -1232,25 +872,6 @@ describe("thread outbox", () => {
     expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({});
     expect(stored.size).toBe(0);
     registry.dispose();
-  });
-
-  it("never automatically removes a missing external Pi message", () => {
-    const base = {
-      isCreation: false,
-      threadExists: false,
-      shellStatus: "live" as const,
-      environmentConnected: true,
-      threadBusy: false,
-      isExternalPiThread: true,
-    };
-
-    expect(resolveThreadOutboxDeliveryAction(base)).toBe("wait");
-    expect(
-      resolveThreadOutboxDeliveryAction({
-        ...base,
-        shellStatus: "synchronizing",
-      }),
-    ).toBe("wait");
   });
 
   it("rejects a stale revision before its payload reaches durable storage", async () => {
@@ -1833,7 +1454,7 @@ describe("thread outbox", () => {
     expect(isQueuedThreadCreationSendable(base)).toBe(false);
   });
 
-  it("retries transport failures but restores deterministic command failures", () => {
+  it("retries transport failures but drops deterministic command failures", () => {
     expect(shouldRetryThreadOutboxDelivery(new Error("Socket is not connected"))).toBe(true);
     expect(
       shouldRetryThreadOutboxDelivery({

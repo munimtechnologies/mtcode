@@ -9734,22 +9734,8 @@ export default function ChatView(props: ChatViewProps) {
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
-<<<<<<< ours
-      if (!activeThread) return;
-      const entry = pickerProviders.find((snapshot) => snapshot.instanceId === instanceId);
-||||||| base
-      if (!activeThread) return;
-      // Look up the configured instance so model normalization and custom
-      // model lookup stay scoped to that exact instance. Unknown instance ids
-      // are rejected by returning early; the server remains authoritative too.
-      const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
-=======
       if (!activeThread || !threadAllows(activeThread, "changeModel")) return;
-      // Look up the configured instance so model normalization and custom
-      // model lookup stay scoped to that exact instance. Unknown instance ids
-      // are rejected by returning early; the server remains authoritative too.
-      const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
->>>>>>> theirs
+      const entry = pickerProviders.find((snapshot) => snapshot.instanceId === instanceId);
       const resolvedDriverKind = entry?.driver ?? null;
       const resolvedModel = resolveAppModelSelectionForInstance(
         instanceId,

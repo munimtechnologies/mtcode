@@ -327,49 +327,12 @@ export interface ComposerDraft {
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: ProviderInteractionMode;
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection;
-  readonly nativePiStartIdentity?: NativePiStartIdentity;
   /**
    * Set on new-task drafts only. The project is stored here rather than in
    * the key so a project can hold any number of drafts and a draft can be
    * retargeted to another project without changing identity.
    */
   readonly project?: ComposerDraftProject;
-}
-
-export interface NativePiStartIdentity {
-  readonly createCommandId: string;
-  readonly commandId: string;
-  readonly messageId: string;
-  readonly createdAt: string;
-  readonly payloadFingerprint?: string;
-}
-
-export function nativePiStartPayloadFingerprint(input: {
-  readonly environmentId: EnvironmentId;
-  readonly cwd: string;
-  readonly text: string;
-  readonly context?: OrchestrationMessageContext;
-  readonly modelSelection: ModelSelection | null;
-  readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
-}): string {
-  return JSON.stringify({
-    target: "pi",
-    environmentId: input.environmentId,
-    cwd: input.cwd,
-    text: input.text,
-    context: input.context,
-    modelSelection: input.modelSelection,
-    runtimeMode: input.runtimeMode,
-    interactionMode: input.interactionMode,
-  });
-}
-
-export function reusableNativePiStartIdentity(
-  identity: NativePiStartIdentity | undefined,
-  payloadFingerprint: string,
-): NativePiStartIdentity | undefined {
-  return identity?.payloadFingerprint === payloadFingerprint ? identity : undefined;
 }
 
 export interface ComposerDraftProject {
@@ -426,15 +389,6 @@ const ComposerDraftSchema = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeModeSchema),
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
-  nativePiStartIdentity: Schema.optional(
-    Schema.Struct({
-      createCommandId: Schema.String,
-      commandId: Schema.String,
-      messageId: Schema.String,
-      createdAt: Schema.String,
-      payloadFingerprint: Schema.optional(Schema.String),
-    }),
-  ),
   project: Schema.optional(ComposerDraftProjectSchema),
 });
 
@@ -589,8 +543,7 @@ function isEmptyDraft(draft: ComposerDraft): boolean {
     draft.modelSelection === undefined &&
     draft.runtimeMode === undefined &&
     draft.interactionMode === undefined &&
-    draft.workspaceSelection === undefined &&
-    draft.nativePiStartIdentity === undefined
+    draft.workspaceSelection === undefined
   );
 }
 
@@ -1048,17 +1001,10 @@ export function ensureComposerDraftsLoaded(): void {
     appAtomRegistry.set(composerCloudDraftsAtom, persisted.cloudDrafts);
     if (Object.keys(persisted.drafts).length > 0) {
       const current = appAtomRegistry.get(composerDraftsAtom);
-      const merged = { ...persisted.drafts };
-      for (const [draftKey, currentDraft] of Object.entries(current)) {
-        const persistedDraft = persisted.drafts[draftKey];
-        merged[draftKey] = {
-          ...persistedDraft,
-          ...currentDraft,
-          nativePiStartIdentity:
-            currentDraft.nativePiStartIdentity ?? persistedDraft?.nativePiStartIdentity,
-        };
-      }
-      appAtomRegistry.set(composerDraftsAtom, merged);
+      appAtomRegistry.set(composerDraftsAtom, {
+        ...persisted.drafts,
+        ...current,
+      });
     }
     if (
       persisted.stickyModelSelection !== null &&
@@ -1520,29 +1466,6 @@ export function updateComposerDraftSettings(
   });
 }
 
-export async function persistComposerDraftNativePiStartIdentity(
-  draftKey: string,
-  identity: NativePiStartIdentity,
-): Promise<void> {
-  await waitForComposerDraftsLoaded();
-  const current = appAtomRegistry.get(composerDraftsAtom);
-  const next = {
-    ...current,
-    [draftKey]: {
-      ...normalizeDraft(current[draftKey]),
-      nativePiStartIdentity: identity,
-    },
-  };
-  appAtomRegistry.set(composerDraftsAtom, next);
-  if (persistTimer !== null) {
-    clearTimeout(persistTimer);
-    persistTimer = null;
-  }
-  await persistenceQueue.run(() =>
-    writePersistedComposerState(next, appAtomRegistry.get(stickyComposerModelSelectionAtom)),
-  );
-}
-
 export function clearComposerDraftContentState(
   current: Record<string, ComposerDraft>,
   draftKey: string,
@@ -1560,7 +1483,6 @@ export function clearComposerDraftContentState(
   // draft leaves the store rather than lingering as a blank row.
   const {
     importedShareIds: _importedShareIds,
-    nativePiStartIdentity: _nativePiStartIdentity,
     context: _context,
     modelSelection,
     workspaceSelection,

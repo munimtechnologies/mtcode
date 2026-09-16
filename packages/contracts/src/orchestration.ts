@@ -2088,7 +2088,6 @@ export const ThreadMessageCorrectedPayload = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
-export const MANAGED_TURN_ADMISSION_PROTOCOL = "managed-admission-v1" as const;
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2101,7 +2100,6 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  admissionProtocol: Schema.optional(Schema.Literal(MANAGED_TURN_ADMISSION_PROTOCOL)),
   createdAt: IsoDateTime,
 });
 

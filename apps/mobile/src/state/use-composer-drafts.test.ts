@@ -174,11 +174,9 @@ import {
   flushComposerDrafts,
   getComposerDraftSnapshot,
   mergeComposerDraftContentState,
-  nativePiStartPayloadFingerprint,
   migrateLegacyNewTaskDraft,
   releaseUnusedComposerAttachmentFiles,
   removeComposerDraftsForEnvironment,
-  reusableNativePiStartIdentity,
   replaceComposerDraftAttachments,
   resetComposerDraftsLoadState,
   retainComposerAttachmentFileForPreview,
@@ -1736,94 +1734,6 @@ describe("mobile composer drafts", () => {
         },
       }),
     ).toThrow();
-  });
-
-  it("persists native Pi command identity and clears it with sent content", () => {
-    const draftKey = "new-task:draft-1";
-    const nativePiStartIdentity = {
-      createCommandId: "pi-create:message-1",
-      commandId: "command-1",
-      messageId: "message-1",
-      createdAt: "2026-07-30T00:00:00.000Z",
-      payloadFingerprint: "fingerprint-1",
-    };
-    const decoded = decodePersistedComposerState({
-      schemaVersion: 1,
-      drafts: {
-        [draftKey]: {
-          ...DRAFT,
-          nativePiStartIdentity,
-          project: {
-            environmentId: "environment-1",
-            projectId: "project-1",
-            createdAt: "2026-07-30T00:00:00.000Z",
-          },
-        },
-      },
-    }).drafts;
-
-    expect(decoded[draftKey]?.nativePiStartIdentity).toEqual(nativePiStartIdentity);
-    expect(clearComposerDraftContentState(decoded, draftKey)).toEqual({});
-  });
-
-  it("reuses native Pi command identity only for the same payload", () => {
-    const payload = {
-      environmentId: EnvironmentId.make("environment-1"),
-      cwd: "/workspace",
-      text: "original prompt",
-      modelSelection: null,
-      runtimeMode: "full-access" as const,
-      interactionMode: "default" as const,
-    };
-    const payloadFingerprint = nativePiStartPayloadFingerprint(payload);
-    const identity = {
-      createCommandId: "pi-create:message-1",
-      commandId: "command-1",
-      messageId: "message-1",
-      createdAt: "2026-07-30T00:00:00.000Z",
-      payloadFingerprint,
-    };
-
-    expect(reusableNativePiStartIdentity(identity, payloadFingerprint)).toBe(identity);
-    expect(
-      reusableNativePiStartIdentity(
-        identity,
-        nativePiStartPayloadFingerprint({
-          ...payload,
-          context: {
-            version: 1,
-            records: [
-              {
-                version: 1,
-                kind: "terminal",
-                contextId: ComposerContextId.make("native-pi-context"),
-                label: "Build",
-                terminalId: "main",
-                terminalLabel: "Terminal",
-                lineStart: 1,
-                lineEnd: 1,
-                text: "Build failed",
-              },
-            ],
-          },
-        }),
-      ),
-    ).toBeUndefined();
-    expect(
-      reusableNativePiStartIdentity(
-        identity,
-        nativePiStartPayloadFingerprint({ ...payload, text: "edited prompt" }),
-      ),
-    ).toBeUndefined();
-    expect(
-      reusableNativePiStartIdentity(
-        identity,
-        nativePiStartPayloadFingerprint({
-          ...payload,
-          environmentId: EnvironmentId.make("environment-2"),
-        }),
-      ),
-    ).toBeUndefined();
   });
 
   it("keeps share-import receipts on otherwise contentless new-task drafts", () => {

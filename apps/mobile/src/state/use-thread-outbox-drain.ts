@@ -18,7 +18,6 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 
-import { environmentCatalog } from "../connection/catalog";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
 import { serializeComposerMessageForServer, uploadedComposerContext } from "../lib/composerContext";
@@ -40,8 +39,6 @@ import {
 import { serverEnvironment } from "./server";
 import {
   confirmThreadOutboxMessageQueued,
-  markThreadOutboxMessageIndeterminateInMemory,
-  markThreadOutboxMessageNeedsConfirmationInMemory,
   threadOutboxManager,
   threadOutboxRevision,
   updateThreadOutboxMessage,
@@ -50,13 +47,7 @@ import { removeThreadOutboxMessage } from "./thread-outbox-removal";
 import {
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
-  queuedExternalResumeForWire,
-  queuedMessageBlockedByCapabilities,
-  queuedMessageRequiresExplicitDiscard,
-  resolveCapabilityAllowedQueuedThreadSettings,
-  resolveQueuedExternalResumeDrainAction,
   resolveThreadOutboxDeliveryAction,
-  resolveThreadOutboxDeliverySuccessAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
   resolveQueuedThreadSettings,
@@ -66,7 +57,6 @@ import {
   type QueuedThreadMessage,
   type ThreadOutboxCommandStage,
 } from "./thread-outbox-model";
-import { environmentShell } from "./shell";
 import { environmentThreadShells, threadEnvironment } from "./threads";
 import {
   appendComposerDraftAttachments,
@@ -130,25 +120,6 @@ function settingsCommandId(message: QueuedThreadMessage, setting: string): Comma
 function queuedAttachGoalObjective(message: QueuedThreadMessage): string | null {
   const objective = message.attachGoal?.trim();
   return objective !== undefined && objective.length > 0 ? objective : null;
-async function markQueuedMessageNeedsTakeoverConfirmation(
-  message: QueuedThreadMessage,
-  expectedRevision = threadOutboxRevision(message.messageId),
-): Promise<void> {
-  const needsConfirmationMessage = {
-    ...message,
-    externalResume: "needsConfirmation" as const,
-  };
-  markThreadOutboxMessageNeedsConfirmationInMemory(message);
-  try {
-    await updateThreadOutboxMessage(needsConfirmationMessage, expectedRevision);
-  } catch (error) {
-    console.warn("[thread-outbox] failed to persist takeover confirmation requirement", {
-      environmentId: message.environmentId,
-      threadId: message.threadId,
-      messageId: message.messageId,
-      error,
-    });
-  }
 }
 
 /**
@@ -698,10 +669,7 @@ export function useThreadOutboxDrain(): void {
     const reportFailure = (
       commandResult: AtomCommandResult<unknown, unknown>,
       stage: ThreadOutboxCommandStage,
-    ): {
-      readonly action: ReturnType<typeof resolveThreadOutboxFailureAction>;
-      readonly message: string;
-    } | null => {
+    ): { readonly action: "retry" | "restore"; readonly message: string } | null => {
       if (!AsyncResult.isFailure(commandResult)) {
         return null;
       }
@@ -710,7 +678,6 @@ export function useThreadOutboxDrain(): void {
         stage,
         error,
         interrupted: Cause.hasInterruptsOnly(commandResult.cause),
-        externalResume: queuedMessage.externalResume,
       });
       console.warn("[thread-outbox] queued message delivery failed", {
         environmentId: queuedMessage.environmentId,
@@ -781,11 +748,7 @@ export function useThreadOutboxDrain(): void {
         serverEnvironment.configValueAtom(queuedMessage.environmentId),
       );
       if (!serverConfig) return false;
-      const settings = resolveCapabilityAllowedQueuedThreadSettings(
-        queuedMessage,
-        thread,
-        serverConfig.providers,
-      );
+      const settings = resolveQueuedThreadSettings(queuedMessage, thread, serverConfig.providers);
       if (isModelSelectionUnavailable(serverConfig, settings.modelSelection)) {
         return restoreQueuedMessage(
           queuedMessage,
@@ -889,12 +852,11 @@ export function useThreadOutboxDrain(): void {
           "Antigravity model unavailable. Set it up on web or desktop, or choose another model.",
         );
       }
-      const sendSettings = resolveCapabilityAllowedQueuedThreadSettings(
+      const sendSettings = resolveQueuedThreadSettings(
         queuedMessage,
-        thread,
+        settings,
         currentConfig.providers,
       );
-      const externalResume = queuedExternalResumeForWire(persistedMessage);
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
@@ -918,7 +880,6 @@ export function useThreadOutboxDrain(): void {
           runtimeMode: sendSettings.runtimeMode,
           interactionMode: sendSettings.interactionMode,
           deliveryMode: queuedMessage.deliveryMode,
-          ...(externalResume === undefined ? {} : { externalResume }),
           createdAt: queuedMessage.createdAt,
         },
       });
@@ -932,34 +893,6 @@ export function useThreadOutboxDrain(): void {
       const attached = await attachQueuedGoal(queuedMessage, reportFailure);
       if (!attached) {
         return false;
-      if (failure?.action === "needs-confirmation") {
-        await markQueuedMessageNeedsTakeoverConfirmation(persistedMessage, deliveryRevision);
-        return true;
-      }
-      if (failure?.action === "discard") {
-        return removeThreadOutboxMessage(persistedMessage, deliveryRevision);
-      }
-      if (
-        AsyncResult.isSuccess(deliveryResult) &&
-        resolveThreadOutboxDeliverySuccessAction(deliveryResult.value.deliveryStatus) ===
-          "mark-indeterminate"
-      ) {
-        const indeterminateMessage = {
-          ...persistedMessage,
-          deliveryStatus: "indeterminate" as const,
-        };
-        markThreadOutboxMessageIndeterminateInMemory(persistedMessage);
-        try {
-          await updateThreadOutboxMessage(indeterminateMessage, deliveryRevision);
-        } catch (error) {
-          console.warn("[thread-outbox] failed to persist indeterminate delivery", {
-            environmentId: persistedMessage.environmentId,
-            threadId: persistedMessage.threadId,
-            messageId: persistedMessage.messageId,
-            error,
-          });
-        }
-        return true;
       }
       acknowledgedExistingThreadMessageIdsRef.current.add(persistedMessage.messageId);
       const delivered =
@@ -1103,34 +1036,6 @@ export function useThreadOutboxDrain(): void {
       const attached = await attachQueuedGoal(queuedMessage, reportFailure);
       if (!attached) {
         return false;
-      if (failure?.action === "needs-confirmation") {
-        await markQueuedMessageNeedsTakeoverConfirmation(persistedMessage, deliveryRevision);
-        return true;
-      }
-      if (failure?.action === "discard") {
-        return removeThreadOutboxMessage(persistedMessage, deliveryRevision);
-      }
-      if (
-        AsyncResult.isSuccess(deliveryResult) &&
-        resolveThreadOutboxDeliverySuccessAction(deliveryResult.value.deliveryStatus) ===
-          "mark-indeterminate"
-      ) {
-        const indeterminateMessage = {
-          ...persistedMessage,
-          deliveryStatus: "indeterminate" as const,
-        };
-        markThreadOutboxMessageIndeterminateInMemory(persistedMessage);
-        try {
-          await updateThreadOutboxMessage(indeterminateMessage, deliveryRevision);
-        } catch (error) {
-          console.warn("[thread-outbox] failed to persist indeterminate delivery", {
-            environmentId: persistedMessage.environmentId,
-            threadId: persistedMessage.threadId,
-            messageId: persistedMessage.messageId,
-            error,
-          });
-        }
-        return true;
       }
       // Recorded before the queue entry goes so the thread screen never sees a
       // gap between the queued creation and the server's shell.
@@ -1197,9 +1102,6 @@ export function useThreadOutboxDrain(): void {
       if (!nextQueuedMessage) {
         continue;
       }
-      if (queuedMessageRequiresExplicitDiscard(nextQueuedMessage)) {
-        continue;
-      }
       if (
         nextQueuedMessage.creation === undefined &&
         acknowledgedExistingThreadMessageIdsRef.current.has(nextQueuedMessage.messageId)
@@ -1251,26 +1153,6 @@ export function useThreadOutboxDrain(): void {
       }
 
       const creation = nextQueuedMessage.creation;
-      if (
-        creation === undefined &&
-        thread !== undefined &&
-        queuedMessageBlockedByCapabilities(nextQueuedMessage, thread)
-      ) {
-        continue;
-      }
-      if (creation === undefined && thread !== undefined) {
-        const externalResumeAction = resolveQueuedExternalResumeDrainAction(
-          nextQueuedMessage,
-          thread.backing?.kind === "external" ? thread.backing.control : undefined,
-        );
-        if (externalResumeAction === "wait") {
-          continue;
-        }
-        if (externalResumeAction === "mark-needs-confirmation") {
-          void markQueuedMessageNeedsTakeoverConfirmation(nextQueuedMessage);
-          continue;
-        }
-      }
       const environment = connectedEnvironments.find(
         (candidate) => candidate.environmentId === nextQueuedMessage.environmentId,
       );
@@ -1281,7 +1163,6 @@ export function useThreadOutboxDrain(): void {
         shellStatus,
         environmentConnected: environment?.connectionState === "connected",
         threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
-        isExternalPiThread: nextQueuedMessage.threadId.startsWith("external:pi:"),
       });
       // The delivery action resolves first; capability checks apply only to
       // a message that will send. Checking earlier would restore a
@@ -1353,7 +1234,7 @@ export function useThreadOutboxDrain(): void {
       beginDispatchingQueuedMessage(nextQueuedMessage.messageId);
       const removeQueuedMessage = (warning: string) =>
         removeThreadOutboxMessage(nextQueuedMessage).then(
-          (removed) => removed,
+          () => true,
           (error) => {
             console.warn(warning, {
               environmentId: nextQueuedMessage.environmentId,
@@ -1379,62 +1260,42 @@ export function useThreadOutboxDrain(): void {
         if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[nextQueuedMessage.messageId]) {
           return true;
         }
-        const currentThread = appAtomRegistry.get(
-          environmentThreadShells.threadShellAtom({
-            environmentId: nextQueuedMessage.environmentId,
-            threadId: nextQueuedMessage.threadId,
-          }),
-        );
-        const currentShellStatus = appAtomRegistry.get(
-          environmentShell.stateValueAtom(nextQueuedMessage.environmentId),
-        ).status;
-        const currentConnection = appAtomRegistry.get(
-          environmentCatalog.stateAtom(nextQueuedMessage.environmentId),
-        );
-        const currentDeliveryAction = resolveThreadOutboxDeliveryAction({
-          isCreation: creation !== undefined,
-          threadExists: currentThread !== null,
-          shellStatus: currentShellStatus,
-          environmentConnected:
-            AsyncResult.isSuccess(currentConnection) &&
-            currentConnection.value.phase === "connected",
-          threadBusy:
-            currentThread?.session?.status === "running" ||
-            currentThread?.session?.status === "starting",
-          isExternalPiThread: nextQueuedMessage.threadId.startsWith("external:pi:"),
-        });
-        if (currentDeliveryAction === "wait") {
-          return true;
-        }
-        if (
-          creation === undefined &&
-          currentThread !== null &&
-          queuedMessageBlockedByCapabilities(nextQueuedMessage, currentThread)
-        ) {
-          return true;
-        }
-        if (creation === undefined) {
-          const currentExternalResumeAction = resolveQueuedExternalResumeDrainAction(
+        // The shell state is equally stale. Re-run the same delivery policy
+        // against the live thread snapshot so a vanished thread or newly
+        // created target defers, while busy existing threads can still steer.
+        if (deliveryAction === "send") {
+          const liveThread = findThread(
+            appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
             nextQueuedMessage,
-            currentThread?.backing?.kind === "external" ? currentThread.backing.control : undefined,
           );
-          if (currentExternalResumeAction === "wait") {
+          const liveThreadBusy =
+            liveThread?.session?.status === "running" || liveThread?.session?.status === "starting";
+          const liveDeliveryAction = resolveThreadOutboxDeliveryAction({
+            isCreation: creation !== undefined,
+            threadExists: liveThread !== undefined,
+            shellStatus,
+            environmentConnected: environment?.connectionState === "connected",
+            threadBusy: liveThreadBusy,
+          });
+          if (liveDeliveryAction !== "send") {
             return true;
           }
-          if (currentExternalResumeAction === "mark-needs-confirmation") {
-            return markQueuedMessageNeedsTakeoverConfirmation(nextQueuedMessage).then(() => true);
-          }
         }
-        return currentDeliveryAction === "remove"
+        return deliveryAction === "remove"
           ? creation !== undefined
-            ? recoverEditedCreationAfterDelivery(nextQueuedMessage)
+            ? // A creation entry that survived its delivery cleanup either
+              // holds edits (recover them) or the delivered payload (a
+              // recovered duplicate the user can delete). Restart loses any
+              // in-memory distinction, and losing edits is the worse failure,
+              // so recovery is unconditional here.
+              recoverEditedCreationAfterDelivery(nextQueuedMessage)
             : removeQueuedMessage("[thread-outbox] failed to remove message for a missing thread")
           : creation !== undefined
             ? creationProjectCwd !== null
               ? sendQueuedCreation(nextQueuedMessage, creation, creationProjectCwd)
               : removeQueuedMessage("[thread-outbox] dropped pending task for a missing project")
-            : currentThread !== null
-              ? sendQueuedMessage(nextQueuedMessage, currentThread)
+            : thread !== undefined
+              ? sendQueuedMessage(nextQueuedMessage, thread)
               : Promise.resolve(false);
       });
       void delivery

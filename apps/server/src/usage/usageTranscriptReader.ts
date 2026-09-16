@@ -22,15 +22,12 @@ import * as NodePath from "node:path";
 
 import {
   initialCodexScanState,
-  initialPiScanState,
   mightCarryUsage,
   parseClaudeLine,
   parseCodexLine,
   parseGrokLine,
-  parsePiLine,
   type CodexScanState,
   type TranscriptProviderKind,
-  type PiScanState,
   type UsageRecord,
 } from "./usageTranscripts.ts";
 
@@ -201,10 +198,8 @@ async function guardMatches(
  * re-parsed from the start and `resumed` reports `false`.
  *
  * Codex carries the active model on `turn_context` lines that hold no usage of
- * their own, while Pi carries session and model state on separate records. Those
- * lines still have to pass through their reducers to keep attribution correct.
- * Pi files currently restart from byte zero when they grow because v3 cache
- * positions persist Codex reducer state only.
+ * their own, so those still have to pass through the reducer to keep model
+ * attribution correct.
  */
 export async function readTranscriptRecords(
   filePath: string,
@@ -222,12 +217,10 @@ export async function readTranscriptRecords(
 
   try {
     let codexState = initialCodexScanState();
-    const piState = initialPiScanState();
     let resumed = false;
     let start = 0;
     if (
       resumeFrom !== undefined &&
-      provider !== "pi" &&
       resumeFrom.resumeOffset > 0 &&
       (provider !== "codex" || resumeFrom.codexState !== null) &&
       (await guardMatches(handle, resumeFrom))
@@ -237,12 +230,7 @@ export async function readTranscriptRecords(
       resumed = true;
     }
 
-    const parseLine = (
-      line: string,
-      codexState: CodexScanState,
-      piState: PiScanState,
-      out: UsageRecord[],
-    ): void => {
+    const parseLine = (line: string, state: CodexScanState, out: UsageRecord[]): void => {
       if (provider === "codex") {
         if (
           !mightCarryUsage(line, provider) &&
@@ -251,21 +239,7 @@ export async function readTranscriptRecords(
         ) {
           return;
         }
-        const record = parseCodexLine(line, codexState);
-        if (record !== null) out.push(record);
-        return;
-      }
-      if (provider === "pi") {
-        if (
-          !mightCarryUsage(line, provider) &&
-          !line.includes('"type":"session"') &&
-          !line.includes('"type": "session"') &&
-          !line.includes('"type":"model_change"') &&
-          !line.includes('"type": "model_change"')
-        ) {
-          return;
-        }
-        const record = parsePiLine(line, piState);
+        const record = parseCodexLine(line, state);
         if (record !== null) out.push(record);
         return;
       }
@@ -321,7 +295,6 @@ export async function readTranscriptRecords(
           }
         }
         if (newlineIndex === -1) break;
-<<<<<<< ours
         if (!discarding && pendingBytes > 0) {
           const lineBuffer =
             pendingChunks.length === 1 ? pendingChunks[0]! : Buffer.concat(pendingChunks);
@@ -332,18 +305,6 @@ export async function readTranscriptRecords(
         discarding = false;
         cursor = newlineIndex + 1;
         resumeOffset = chunkStartOffset + cursor;
-||||||| base
-        parseLine(toLineString(buffer.subarray(lineStart, newlineIndex)), codexState, records);
-        lineStart = newlineIndex + 1;
-=======
-        parseLine(
-          toLineString(buffer.subarray(lineStart, newlineIndex)),
-          codexState,
-          piState,
-          records,
-        );
-        lineStart = newlineIndex + 1;
->>>>>>> theirs
       }
       chunkStartOffset += chunk.length;
     }
@@ -354,15 +315,7 @@ export async function readTranscriptRecords(
     const tailRecords: UsageRecord[] = [];
     if (!discarding && pendingBytes > 0) {
       const pending = pendingChunks.length === 1 ? pendingChunks[0]! : Buffer.concat(pendingChunks);
-<<<<<<< ours
       parseLine(toLineString(pending), { ...codexState }, tailRecords);
-||||||| base
-      if (pending.length > 0) parseLine(toLineString(pending), { ...codexState }, tailRecords);
-=======
-      if (pending.length > 0) {
-        parseLine(toLineString(pending), { ...codexState }, { ...piState }, tailRecords);
-      }
->>>>>>> theirs
     }
 
     const guardLength = Math.min(GUARD_LENGTH, resumeOffset);

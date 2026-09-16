@@ -913,7 +913,7 @@ function ThreadNavigationSidebarPane(
               projectTitle={projectTitleByProjectKey.get(scopeKey)}
               providerInstance={resolveThreadProviderInstance(serverConfigs, thread)}
               environmentLabel={
-                thread.backing || Object.keys(savedConnectionsById).length > 1
+                Object.keys(savedConnectionsById).length > 1
                   ? (savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
                   : null
               }

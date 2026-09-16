@@ -3,7 +3,6 @@
  *
  * Claude, Codex, Grok, and OpenCode are scanned from on-disk session data
  * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`,
-<<<<<<< ours
  * `~/.grok/sessions/**\/updates.jsonl`, and OpenCode SQLite databases) so usage
  * stays complete even for turns never driven through T3 Code. This mirrors the
  * approach `ccusage` takes.
@@ -11,20 +10,9 @@
  * Cursor has no local token ledger in its transcripts; environments instead
  * export usage from Cursor's dashboard CSV API when Cursor desktop is signed
  * in on that machine.
-||||||| base
- * `~/.grok/sessions/**\/updates.jsonl`) rather than relying on T3 Code's own
- * orchestration projections, so usage stays complete even for turns that were
- * never driven through T3 Code. This mirrors the approach `ccusage` takes.
-=======
- * `~/.grok/sessions/**\/updates.jsonl`, `~/.pi/agent/sessions/**\/*.jsonl`)
- * rather than relying on T3 Code's own
- * orchestration projections, so usage stays complete even for turns that were
- * never driven through T3 Code. This mirrors the approach `ccusage` takes.
->>>>>>> theirs
  *
- * Environments return pre-aggregated
- * `(sourcePath, day, hourStart?, provider, model)` buckets. Raw transcript
- * records never cross the wire.
+ * Environments return pre-aggregated `(day, hourStart?, provider, model)`
+ * buckets. Raw transcript records never cross the wire.
  *
  * @module usage
  */
@@ -42,23 +30,12 @@ export const USAGE_CONTRACT_VERSION = 6 as const;
 /**
  * Oldest {@link UsageSummary} version a current client will still merge.
  *
-<<<<<<< ours
  * v5 adds `grok` and v6 adds `cursor`/`opencode` to {@link UsageProviderKind};
  * v4 Claude/Codex buckets remain valid, so mixed-version environments keep
  * those totals instead of treating every older server as stale.
-||||||| base
- * v5 only adds `grok` to {@link UsageProviderKind}; v4 Claude/Codex buckets
- * remain valid, so mixed-version environments keep those totals instead of
- * treating every older server as stale.
-=======
- * v4 contains Claude/Codex buckets without source attribution. The two v5
- * lineages add either Grok or source-attributed Pi usage. Current clients can
- * merge all of them while reserving v6 for the combined provider domain.
->>>>>>> theirs
  */
 export const USAGE_MERGE_COMPATIBLE_SINCE = 4 as const;
 
-<<<<<<< ours
 /**
  * Contract version currently shipped by https://app.t3.codes (pingdotgg/t3code
  * main). Personal / ahead servers project down to this shape when the client
@@ -71,11 +48,6 @@ export const HOSTED_USAGE_CONTRACT_VERSION = 4 as const;
 export const HOSTED_USAGE_PROVIDER_KINDS = ["claude", "codex"] as const;
 
 export const UsageProviderKind = Schema.Literals(["claude", "codex", "cursor", "grok", "opencode"]);
-||||||| base
-export const UsageProviderKind = Schema.Literals(["claude", "codex", "grok"]);
-=======
-export const UsageProviderKind = Schema.Literals(["claude", "codex", "grok", "pi"]);
->>>>>>> theirs
 export type UsageProviderKind = typeof UsageProviderKind.Type;
 
 /**
@@ -123,8 +95,8 @@ export const UsageTokenTotals = Schema.Struct({
 export type UsageTokenTotals = typeof UsageTokenTotals.Type;
 
 /**
- * One `(sourcePath, day, hourStart?, provider, model)` cell. `hourStart` is the
- * UTC start instant of a rolling bucket and is present only for hourly requests.
+ * One `(day, hourStart?, provider, model)` cell. `hourStart` is the UTC start
+ * instant of a rolling bucket and is present only for hourly requests.
  *
  * `costUsd` is the raw API-equivalent cost of these tokens. It is not money
  * spent: subscription plans bill separately. `unpricedRecords` counts records
@@ -132,11 +104,6 @@ export type UsageTokenTotals = typeof UsageTokenTotals.Type;
  * to `costUsd`.
  */
 export const UsageBucket = Schema.Struct({
-  /**
-   * Transcript root that contributed this bucket. Current servers always send
-   * it; optional decoding keeps v4 and both v5 lineages mergeable.
-   */
-  sourcePath: Schema.optional(TrimmedNonEmptyString),
   day: UsageDay,
   hourStart: Schema.optional(TrimmedNonEmptyString),
   provider: UsageProviderKind,
@@ -150,7 +117,7 @@ export const UsageBucket = Schema.Struct({
    */
   cacheSavingsUsd: Schema.Number,
   costSource: UsageCostSource,
-  /** Distinct billable provider records, after de-duplication. */
+  /** Distinct assistant responses, after de-duplication. */
   records: NonNegativeInt,
   unpricedRecords: NonNegativeInt,
   /** Distinct transcript sessions that contributed to this cell. */

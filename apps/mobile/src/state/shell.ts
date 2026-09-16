@@ -5,7 +5,6 @@ import {
   createShellEnvironmentAtoms,
   type EnvironmentShellState,
 } from "@t3tools/client-runtime/state/shell";
-import { createPiExternalThreadAtoms } from "@t3tools/client-runtime/state/pi-native";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -16,15 +15,7 @@ import { connectionAtomRuntime } from "../connection/runtime";
 
 export const shellEnvironment = createShellEnvironmentAtoms(connectionAtomRuntime);
 export const environmentShell = createEnvironmentShellAtoms(connectionAtomRuntime);
-export const piExternalEnvironment = createPiExternalThreadAtoms(connectionAtomRuntime);
-export const environmentSnapshotAtom = createEnvironmentSnapshotAtom(
-  environmentShell.stateAtom,
-  (environmentId) =>
-    piExternalEnvironment.catalog({
-      environmentId,
-      input: undefined,
-    }),
-);
+export const environmentSnapshotAtom = createEnvironmentSnapshotAtom(environmentShell.stateAtom);
 export const environmentShellSummaryAtom = createEnvironmentShellSummaryAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   shellStateValueAtom: environmentShell.stateValueAtom,

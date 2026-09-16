@@ -8,16 +8,12 @@
  */
 import {
   CheckpointRef,
-  CommandId,
   IsoDateTime,
-  MANAGED_TURN_ADMISSION_PROTOCOL,
   MessageId,
-  ModelSelection,
   NonNegativeInt,
   OrchestrationProposedPlanId,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
-  ProviderInteractionMode,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -76,11 +72,6 @@ export type ProjectionTurnById = typeof ProjectionTurnById.Type;
 export const ProjectionPendingTurnStart = Schema.Struct({
   threadId: ThreadId,
   messageId: Schema.NullOr(MessageId),
-  operationId: Schema.NullOr(CommandId),
-  modelSelection: Schema.NullOr(ModelSelection),
-  titleSeed: Schema.NullOr(Schema.String),
-  interactionMode: Schema.NullOr(ProviderInteractionMode),
-  admissionProtocol: Schema.NullOr(Schema.Literal(MANAGED_TURN_ADMISSION_PROTOCOL)),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   requestedAt: IsoDateTime,
@@ -136,15 +127,6 @@ export interface ProjectionTurnRepositoryShape {
   readonly getPendingTurnStartByThreadId: (
     input: GetProjectionPendingTurnStartInput,
   ) => Effect.Effect<Option.Option<ProjectionPendingTurnStart>, ProjectionRepositoryError>;
-
-  /**
-   * Lists pending turn starts across threads so reactors can recover durable
-   * provider work that was accepted before process startup.
-   */
-  readonly listPendingTurnStarts: () => Effect.Effect<
-    ReadonlyArray<ProjectionPendingTurnStart>,
-    ProjectionRepositoryError
-  >;
 
   /**
    * Deletes only pending-start placeholder rows (`turnId = null`) for a thread and leaves concrete turn rows untouched.

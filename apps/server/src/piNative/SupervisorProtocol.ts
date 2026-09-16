@@ -7,10 +7,9 @@ import type {
   PiNativeSessionKey,
   PiThreadLifecycleData,
 } from "@t3tools/contracts";
-import { MANAGED_TURN_ADMISSION_PROTOCOL } from "@t3tools/contracts";
 
 export const SUPERVISOR_PROTOCOL = "t3-control-v2";
-export const MANAGED_ADMISSION_PROTOCOL = MANAGED_TURN_ADMISSION_PROTOCOL;
+export const MANAGED_ADMISSION_PROTOCOL = "managed-admission-v1" as const;
 export const GUARDED_RESUME_CAPABILITY = "guarded-resume-v1";
 export const SUPERVISOR_MAX_LINE_BYTES = 112 * 1024 * 1024;
 export const SUPERVISOR_MAX_STREAM_ITEM_BYTES = 32 * 1024 * 1024;

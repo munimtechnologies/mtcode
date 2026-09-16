@@ -313,6 +313,7 @@ import {
   VoiceWebSearchInput,
   VoiceWebSearchResult,
 } from "./voice.ts";
+import {
   PiExternalCatalogStreamItem,
   PiExternalCatalogSubscribeInput,
   PiExternalCreateSessionInput,

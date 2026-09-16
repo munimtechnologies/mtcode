@@ -40,16 +40,8 @@ export type BuiltInDriversEnv =
   | CodexDriverEnv
   | CursorDriverEnv
   | GrokDriverEnv
-<<<<<<< ours
-  | OpenCodeDriverEnv;
-||||||| base
   | OpenCodeDriverEnv
-  | AntigravityDriverEnv;
-=======
-  | OpenCodeDriverEnv
-  | AntigravityDriverEnv
   | PiDriverEnv;
->>>>>>> theirs
 
 /**
  * Ordered list of built-in drivers. Order matters only for tie-breaking in

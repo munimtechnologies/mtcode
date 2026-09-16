@@ -61,16 +61,8 @@ const setup = Effect.gen(function* () {
   // `/private/var/...`. The scan resolves real paths, so an uncanonicalised
   // fixture root makes every path assertion compare the two spellings.
   const home = yield* Effect.promise(() =>
-<<<<<<< ours
     NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "usage-service-test-")).then((dir) =>
       NodeFSP.realpath(dir),
-||||||| base
-    NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "usage-service-test-")),
-=======
-    // Transcript roots are canonicalized by the service, including macOS /var.
-    NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "usage-service-test-")).then((directory) =>
-      NodeFSP.realpath(directory),
->>>>>>> theirs
     ),
   );
   yield* Effect.addFinalizer(() =>
@@ -123,7 +115,6 @@ const serviceLayers = (input: {
         // depended on whether the developer happened to use OpenCode.
         XDG_DATA_HOME: NodePath.join(input.home, "xdg"),
         ...input.environment,
-        T3_PI_SESSIONS_ROOT: NodePath.join(input.home, "pi"),
       }),
     ),
   );

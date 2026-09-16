@@ -1,7 +1,6 @@
 import {
   buildThreadMessageCorrectionProviderText,
   EventId,
-  MANAGED_TURN_ADMISSION_PROTOCOL,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
   MessageId,
@@ -2266,7 +2265,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
-          admissionProtocol: MANAGED_TURN_ADMISSION_PROTOCOL,
           createdAt: command.createdAt,
         },
       };

@@ -42,38 +42,6 @@ export function updateThreadOutboxMessage(
   return threadOutboxManager.update(message, expectedRevision);
 }
 
-function updateThreadOutboxMessageInMemory(
-  message: QueuedThreadMessage,
-  update: (entry: QueuedThreadMessage) => QueuedThreadMessage,
-): void {
-  const queues = appAtomRegistry.get(threadOutboxManager.queuedMessagesByThreadKeyAtom);
-  appAtomRegistry.set(
-    threadOutboxManager.queuedMessagesByThreadKeyAtom,
-    Object.fromEntries(
-      Object.entries(queues).map(([key, entries]) => [
-        key,
-        entries.map((entry) => (entry.messageId === message.messageId ? update(entry) : entry)),
-      ]),
-    ),
-  );
-}
-
-export function markThreadOutboxMessageIndeterminateInMemory(message: QueuedThreadMessage): void {
-  updateThreadOutboxMessageInMemory(message, (entry) => ({
-    ...entry,
-    deliveryStatus: "indeterminate",
-  }));
-}
-
-export function markThreadOutboxMessageNeedsConfirmationInMemory(
-  message: QueuedThreadMessage,
-): void {
-  updateThreadOutboxMessageInMemory(message, (entry) => ({
-    ...entry,
-    externalResume: "needsConfirmation",
-  }));
-}
-
 /** Snapshot of a queued message's write revision, for update's CAS. */
 export function threadOutboxRevision(messageId: QueuedThreadMessage["messageId"]): number {
   return threadOutboxManager.revisionOf(messageId);

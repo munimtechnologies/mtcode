@@ -13,7 +13,6 @@ import {
   getThreadMessageCorrectionEligibility,
   MessageId,
   ThreadId,
-  threadEnvironmentAttribution,
   type ProjectScript,
 } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
@@ -21,7 +20,6 @@ import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
-import { threadAllows } from "@t3tools/client-runtime/state/threads";
 import {
   projectScriptCwd,
   projectScriptRuntimeEnv,
@@ -292,7 +290,6 @@ function ThreadRouteContent(
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
-  const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, "thread stop");
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -362,7 +359,6 @@ function ThreadRouteContent(
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeConnectionError = routeEnvironmentRuntime?.connectionError ?? null;
-<<<<<<< ours
   const selectedThreadWithDraftSettings = useMemo(
     () =>
       selectedThread
@@ -476,47 +472,12 @@ function ThreadRouteContent(
       updateThreadMetadata,
     ],
   );
-||||||| base
-  const selectedThreadWithDraftSettings = useMemo(
-    () =>
-      selectedThread
-        ? {
-            ...selectedThread,
-            modelSelection: composer.modelSelection ?? selectedThread.modelSelection,
-            runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
-            interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
-          }
-        : null,
-    [composer.interactionMode, composer.modelSelection, composer.runtimeMode, selectedThread],
-  );
-=======
-  const selectedThreadWithDraftSettings = useMemo(() => {
-    const authoritativeThread = composer.selectedThread ?? selectedThread;
-    return authoritativeThread
-      ? {
-          ...authoritativeThread,
-          modelSelection: composer.modelSelection ?? authoritativeThread.modelSelection,
-          runtimeMode: composer.runtimeMode ?? authoritativeThread.runtimeMode,
-          interactionMode: composer.interactionMode ?? authoritativeThread.interactionMode,
-        }
-      : null;
-  }, [
-    composer.interactionMode,
-    composer.modelSelection,
-    composer.runtimeMode,
-    composer.selectedThread,
-    selectedThread,
-  ]);
->>>>>>> theirs
 
   /* ─── Native header theming ──────────────────────────────────────── */
   const usesNativeHeaderGlass = NATIVE_LIQUID_GLASS_SUPPORTED;
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
-    threadEnvironmentAttribution(
-      selectedThread?.backing,
-      selectedEnvironmentConnection?.environmentLabel ?? null,
-    ),
+    selectedEnvironmentConnection?.environmentLabel ?? null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -697,7 +658,6 @@ function ThreadRouteContent(
   const handleStopThread = useCallback(() => {
     if (
       !selectedThread ||
-      !threadAllows(selectedThread, "interrupt") ||
       (selectedThread.session?.status !== "running" &&
         selectedThread.session?.status !== "starting")
     ) {
@@ -713,13 +673,6 @@ function ThreadRouteContent(
       },
     });
   }, [interruptThreadTurn, selectedThread]);
-  const handleStopSession = useCallback(() => {
-    if (!selectedThread || !threadAllows(selectedThread, "stop")) return;
-    return stopThreadSession({
-      environmentId: selectedThread.environmentId,
-      input: { threadId: selectedThread.id },
-    });
-  }, [selectedThread, stopThreadSession]);
 
   const handleCancelQueuedMessage = useCallback(
     (messageId: MessageId) => {
@@ -1121,10 +1074,6 @@ function ThreadRouteContent(
           threadCwd={selectedThreadCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
           editableMessageId={editableMessageId}
-          selectedThreadIndeterminateQueueCount={composer.selectedThreadIndeterminateQueueCount}
-          selectedThreadTakeoverConfirmationQueueCount={
-            composer.selectedThreadTakeoverConfirmationQueueCount
-          }
           queuedMessages={composer.selectedThreadQueuedMessages}
           dispatchingMessageId={composer.dispatchingQueuedMessageId}
           layoutVariant={layout.variant}
@@ -1138,9 +1087,6 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
-          onStopSession={handleStopSession}
-          onDiscardIndeterminateMessages={composer.onDiscardIndeterminateMessages}
-          onReviewQueuedExternalResumeMessages={composer.onReviewQueuedExternalResumeMessages}
           onSendMessage={composer.onSendMessage}
           onCancelQueuedMessage={handleCancelQueuedMessage}
           onCorrectMessage={handleCorrectMessage}
