@@ -239,6 +239,7 @@ export const make = Effect.gen(function* () {
     },
     capabilities: {
       repositoryIdentity: true,
+      projectTransfer: true,
       connectionProbe: true,
       attachmentUploads: true,
       questionAttachments: true,

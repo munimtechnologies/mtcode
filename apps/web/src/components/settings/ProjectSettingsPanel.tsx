@@ -1,3 +1,4 @@
+import { ProjectTransferDialog } from "./ProjectTransferDialog";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
@@ -133,24 +134,29 @@ export function ProjectSettingsPanel({
       </div>
     );
   }
-  if (members.length === 0)
-    return (
-      <p className="p-8 text-sm text-muted-foreground">
-        This checkout is no longer available in the selected project and environment.
-      </p>
-    );
-  const scopedGroup = {
-    ...selected,
-    memberProjects: members,
-    environmentId: members[0]!.environmentId,
-    id: members[0]!.id,
-  };
+  const scopedGroup =
+    members.length > 0
+      ? {
+          ...selected,
+          memberProjects: members,
+          environmentId: members[0]!.environmentId,
+          id: members[0]!.id,
+        }
+      : null;
   return (
-    <ProjectDetail
-      key={`${selected.projectKey}:${environmentId ?? "all"}:${checkoutKey ?? "all"}`}
-      group={scopedGroup}
-      hasOtherMembers={members.length < selected.memberProjects.length}
-    />
+    <SettingsPageContainer className="gap-6">
+      <ProjectTransferDialog
+        sources={selected.memberProjects}
+        destinationId={members.length === 0 ? (environmentId ?? undefined) : undefined}
+      />
+      {scopedGroup ? (
+        <ProjectDetail
+          key={`${selected.projectKey}:${environmentId ?? "all"}:${checkoutKey ?? "all"}`}
+          group={scopedGroup}
+          hasOtherMembers={members.length < selected.memberProjects.length}
+        />
+      ) : null}
+    </SettingsPageContainer>
   );
 }
 
@@ -405,7 +411,7 @@ function ProjectDetail({
 
   return (
     <>
-      <SettingsPageContainer className="gap-6">
+      <>
         <SettingsSection id="project-overview" title="Project" hideTitle>
           <SettingsRow
             title="Name"
@@ -514,7 +520,7 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
-      </SettingsPageContainer>
+      </>
 
       <ProjectFaviconPickerDialog
         key={`${representative.environmentId}:${representative.workspaceRoot}:${faviconPickerOpen}`}
