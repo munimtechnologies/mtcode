@@ -859,6 +859,24 @@ it.effect("decodes thread.goal.set as a client command", () =>
   }),
 );
 
+it.effect("decodes thread.turn.continue as a client command", () =>
+  Effect.gen(function* () {
+    const command = {
+      type: "thread.turn.continue",
+      commandId: "cmd-turn-continue",
+      threadId: "thread-1",
+      interruptedTurnId: "turn-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const parsed = yield* decodeClientOrchestrationCommand(command);
+    assert.strictEqual(parsed.type, "thread.turn.continue");
+    assert.strictEqual(
+      (yield* decodeOrchestrationCommand(command)).type,
+      "thread.turn.continue",
+    );
+  }),
+);
+
 it.effect("decodes thread.goal.continue as an internal command, not a client RPC", () =>
   Effect.gen(function* () {
     const command = {
