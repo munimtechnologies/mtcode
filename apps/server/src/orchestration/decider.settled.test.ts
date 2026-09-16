@@ -120,6 +120,34 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
     }),
   );
 
+  it.effect("rejects automatic settle of a sidebar-pinned thread but allows manual settle", () =>
+    Effect.gen(function* () {
+      const autoCommand = {
+        type: "thread.auto-settle" as const,
+        commandId: CommandId.make("cmd-auto-settle-pinned"),
+        threadId: ThreadId.make("thread-1"),
+        snapshotSequence: 0,
+        settledAt: SETTLED_AT,
+      };
+      const pinned = yield* decideOrchestrationCommand({
+        command: autoCommand,
+        readModel: makeReadModel(null, null, null, [], [], { pinnedAt: NOW }),
+      }).pipe(Effect.flip);
+      expect(pinned._tag).toBe("OrchestrationCommandInvariantError");
+
+      const manual = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.settle" as const,
+          commandId: CommandId.make("cmd-settle-pinned"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel(null, null, null, [], [], { pinnedAt: NOW }),
+      });
+      const events = Array.isArray(manual) ? manual : [manual];
+      expect(events.map((event) => event.type)).toEqual(["thread.settled", "thread.unpinned"]);
+    }),
+  );
+
   it.effect("settles awake threads without a redundant wake and re-emits idempotently", () =>
     Effect.gen(function* () {
       const event = yield* decideOrchestrationCommand({

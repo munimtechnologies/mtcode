@@ -124,6 +124,10 @@ export function resolveAutoSettlementAt(input: {
 export function isAutoSettlementCandidate(thread: OrchestrationThreadShell, now: string): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
   if (thread.autoSettleDisabledAt != null) return false;
+  // A sidebar pin is an explicit keep-active signal: pinned threads never
+  // auto-settle (inactivity or merged/closed PR). Manual settle still works
+  // and clears the pin.
+  if (thread.pinnedAt != null) return false;
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
   if (thread.session?.status === "starting" || thread.session?.status === "running") return false;
   if (thread.backgroundLiveness != null) return false;

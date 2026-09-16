@@ -652,6 +652,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           }),
         );
       }
+      // A sidebar pin keeps the thread active: stale auto-settle commands
+      // must not settle (and unpin) a thread the user pinned after the sweep
+      // snapshot. Manual settle still succeeds and clears the pin below.
+      if (command.type === "thread.auto-settle" && thread.pinnedAt != null) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `thread ${command.threadId} is pinned and must stay active`,
+          }),
+        );
+      }
       // The server owns settle eligibility. A stale command must not settle
       // a thread whose session is coming alive or working.
       if (thread.session?.status === "starting" || thread.session?.status === "running") {

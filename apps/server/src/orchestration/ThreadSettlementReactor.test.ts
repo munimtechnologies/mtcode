@@ -587,6 +587,10 @@ describe("ThreadSettlementReactor", () => {
             branch: "skip-snoozed",
             snoozedUntil: "2026-08-29T00:00:00.000Z",
           }),
+          makeThread("pinned", {
+            branch: "skip-pinned",
+            pinnedAt: "2026-08-20T00:00:00.000Z",
+          }),
         ];
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot(
