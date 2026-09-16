@@ -1681,6 +1681,47 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
           });
           return;
+        case "thread.branch-requested": {
+          const [messages, turns] = yield* Effect.all([
+            projectionThreadMessageRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            }),
+            projectionTurnRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            }),
+          ]);
+          const turnsById = new Map(
+            turns.flatMap((turn) => (turn.turnId === null ? [] : [[turn.turnId, turn] as const])),
+          );
+          let pendingUserMessage: (typeof messages)[number] | null = null;
+
+          for (const message of messages) {
+            if (message.role === "user") {
+              pendingUserMessage = message;
+              continue;
+            }
+            if (
+              message.role !== "assistant" ||
+              message.turnId === null ||
+              pendingUserMessage === null
+            ) {
+              continue;
+            }
+            const turn = turnsById.get(message.turnId);
+            if (turn === undefined) {
+              continue;
+            }
+            yield* projectionTurnRepository.upsertByTurnId({
+              ...turn,
+              turnId: message.turnId,
+              pendingMessageId: pendingUserMessage.messageId,
+              requestedAt: pendingUserMessage.createdAt,
+              startedAt: pendingUserMessage.createdAt,
+            });
+            pendingUserMessage = null;
+          }
+          return;
+        }
 
         case "thread.turn-start-requested": {
           const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({

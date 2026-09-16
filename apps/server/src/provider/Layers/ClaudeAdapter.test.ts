@@ -21,6 +21,7 @@ import {
   ProviderRuntimeEvent,
   type RuntimeMode,
   ThreadId,
+  TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -707,6 +708,10 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
+      assert.deepEqual(createInput?.options.additionalDirectories, [
+        "/tmp/claude-adapter-test",
+        "/tmp/userdata/attachments",
+      ]);
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
     }).pipe(
@@ -7998,6 +8003,55 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(createInput?.options.resume, "550e8400-e29b-41d4-a716-446655440000");
       assert.equal(createInput?.options.sessionId, undefined);
       assert.equal(createInput?.options.resumeSessionAt, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("forks Claude with native transcript history and a fresh session id", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const sourceSessionId = "550e8400-e29b-41d4-a716-446655440000";
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: {
+          resume: sourceSessionId,
+          resumeSessionAt: "assistant-with-tool-results",
+          turnCount: 4,
+          resumePoints: [
+            { turnId: "turn-before-tools", resumeSessionAt: "assistant-before-tools" },
+            { turnId: "turn-with-tools", resumeSessionAt: "assistant-with-tool-results" },
+          ],
+        },
+        runtimeMode: "full-access",
+      });
+
+      const fork = yield* adapter.forkThread!(RESUME_THREAD_ID, TurnId.make("turn-with-tools"));
+      const destination = yield* adapter.startSession({
+        threadId: ThreadId.make("claude-fork-destination"),
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: fork.resumeCursor,
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.resume, sourceSessionId);
+      assert.equal(createInput?.options.forkSession, true);
+      assert.equal(createInput?.options.resumeSessionAt, "assistant-with-tool-results");
+      assert.match(createInput?.options.sessionId ?? "", /^[0-9a-f-]{36}$/u);
+      assert.notEqual(createInput?.options.sessionId, sourceSessionId);
+      assert.equal(
+        (destination.resumeCursor as { resume?: string }).resume,
+        createInput?.options.sessionId,
+      );
+      assert.equal(
+        (destination.resumeCursor as { resumeSessionAt?: string }).resumeSessionAt,
+        "assistant-with-tool-results",
+      );
+      assert.equal((destination.resumeCursor as { forkSession?: boolean }).forkSession, undefined);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

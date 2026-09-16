@@ -1495,6 +1495,7 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const branchThread = useAtomCommand(threadEnvironment.branch, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -9858,6 +9859,50 @@ export default function ChatView(props: ChatViewProps) {
     consumePendingFileDrop,
     pendingSidebarFileDrops,
   ]);
+  const [isForkingThread, setIsForkingThread] = useState(false);
+  const canForkThread =
+    isServerThread &&
+    (activeProviderStatus?.driver === "claudeAgent" || activeProviderStatus?.driver === "codex");
+  const onForkAssistantMessage = useCallback(
+    async (sourceMessageId: MessageId) => {
+      if (!activeThread || !isServerThread || isForkingThread || !canForkThread) {
+        return;
+      }
+
+      const nextThreadId = newThreadId();
+      setIsForkingThread(true);
+      const branchResult = await branchThread({
+        environmentId: activeThread.environmentId,
+        input: {
+          sourceThreadId: activeThread.id,
+          sourceMessageId,
+          threadId: nextThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      if (branchResult._tag === "Success") {
+        const destinationRef = scopeThreadRef(activeThread.environmentId, nextThreadId);
+        await waitForStartedServerThread(destinationRef);
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(destinationRef),
+        });
+      } else if (!isAtomCommandInterrupted(branchResult)) {
+        const error = squashAtomCommandFailure(branchResult);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not fork thread",
+            description:
+              error instanceof Error ? error.message : "The provider could not fork this thread.",
+          }),
+        );
+      }
+      setIsForkingThread(false);
+    },
+    [activeThread, branchThread, canForkThread, isForkingThread, isServerThread, navigate],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -10268,6 +10313,9 @@ export default function ChatView(props: ChatViewProps) {
                   setMessageEdit((current) => (current ? { ...current, draft } : current))
                 }
                 onSaveMessageEdit={handleSaveMessageEdit}
+                onForkAssistantMessage={onForkAssistantMessage}
+                canForkThread={!paintOnlyDisplayedTimeline && canForkThread}
+                isForkingThread={isForkingThread}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
                 onFileDownload={

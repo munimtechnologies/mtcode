@@ -16,6 +16,7 @@ import {
 } from "./runtime.ts";
 import {
   type ArchiveThreadInput,
+  type BranchThreadInput,
   type CreateThreadInput,
   type CancelQueuedThreadTurnInput,
   type CorrectThreadMessageInput,
@@ -48,6 +49,7 @@ import {
   type UpdateThreadMetadataInput,
   archiveThread,
   correctThreadMessage,
+  branchThread,
   createThread,
   cancelQueuedThreadTurn,
   deleteThread,
@@ -82,6 +84,7 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
   ArchiveThreadInput,
+  BranchThreadInput,
   CreateThreadInput,
   CancelQueuedThreadTurnInput,
   CorrectThreadMessageInput,
@@ -128,6 +131,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:create",
       execute: (input: CreateThreadInput) => createThread(input),
+      scheduler,
+      concurrency,
+    }),
+    branch: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:branch",
+      execute: (input: BranchThreadInput) => branchThread(input),
       scheduler,
       concurrency,
     }),

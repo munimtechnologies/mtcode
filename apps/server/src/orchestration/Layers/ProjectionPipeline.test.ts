@@ -4657,6 +4657,115 @@ it.layer(makeProjectionPipelinePrefixedTestLayer("t3-import-turn-anchor-test-"))
           WHERE thread_id = ${threadId}
         `;
         assert.deepEqual(threadRows, [{ latestTurnId: "turn-import-anchor" }]);
+it.layer(makeProjectionPipelinePrefixedTestLayer("t3-branch-turn-anchor-test-"))(
+  "OrchestrationProjectionPipeline branch turn anchors",
+  (it) => {
+    it.effect("links copied user messages to their provider turns", () =>
+      Effect.gen(function* () {
+        const eventStore = yield* OrchestrationEventStore;
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-branch-anchor");
+        const sourceThreadId = ThreadId.make("thread-branch-source");
+        const firstTurnId = TurnId.make("turn-branch-1");
+        const secondTurnId = TurnId.make("turn-branch-2");
+
+        const appendMessage = (
+          sequence: number,
+          role: "user" | "assistant",
+          messageId: string,
+          turnId: TurnId | null,
+          occurredAt: string,
+        ) =>
+          eventStore.append({
+            type: "thread.message-sent",
+            eventId: EventId.make(`evt-branch-anchor-${sequence}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt,
+            commandId: CommandId.make(`cmd-branch-anchor-${sequence}`),
+            causationEventId: null,
+            correlationId: CorrelationId.make(`cmd-branch-anchor-${sequence}`),
+            metadata: {},
+            payload: {
+              threadId,
+              messageId: MessageId.make(messageId),
+              role,
+              text: messageId,
+              turnId,
+              streaming: false,
+              createdAt: occurredAt,
+              updatedAt: occurredAt,
+            },
+          });
+
+        yield* appendMessage(1, "user", "user-branch-1", null, "2026-08-15T00:00:00.001Z");
+        yield* appendMessage(
+          2,
+          "assistant",
+          "assistant-branch-1",
+          firstTurnId,
+          "2026-08-15T00:00:00.002Z",
+        );
+        yield* appendMessage(3, "user", "user-branch-2", null, "2026-08-15T00:00:00.003Z");
+        yield* appendMessage(
+          4,
+          "assistant",
+          "assistant-branch-2",
+          secondTurnId,
+          "2026-08-15T00:00:00.004Z",
+        );
+        yield* eventStore.append({
+          type: "thread.branch-requested",
+          eventId: EventId.make("evt-branch-anchor-5"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-08-15T00:00:00.005Z",
+          commandId: CommandId.make("cmd-branch-anchor-5"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-branch-anchor-5"),
+          metadata: {},
+          payload: {
+            threadId,
+            sourceThreadId,
+            throughTurnId: secondTurnId,
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.6-luna",
+            },
+            runtimeMode: "full-access",
+            cwd: "/tmp/project",
+            createdAt: "2026-08-15T00:00:00.005Z",
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const turnRows = yield* sql<{
+          readonly turnId: string;
+          readonly pendingMessageId: string | null;
+          readonly requestedAt: string;
+        }>`
+          SELECT
+            turn_id AS "turnId",
+            pending_message_id AS "pendingMessageId",
+            requested_at AS "requestedAt"
+          FROM projection_turns
+          WHERE thread_id = ${threadId}
+          ORDER BY requested_at ASC
+        `;
+        assert.deepEqual(turnRows, [
+          {
+            turnId: "turn-branch-1",
+            pendingMessageId: "user-branch-1",
+            requestedAt: "2026-08-15T00:00:00.001Z",
+          },
+          {
+            turnId: "turn-branch-2",
+            pendingMessageId: "user-branch-2",
+            requestedAt: "2026-08-15T00:00:00.003Z",
+          },
+        ]);
       }),
     );
   },

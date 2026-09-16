@@ -25,6 +25,7 @@ import type {
   ProviderUploadFeedbackResult,
   MessageId,
   ThreadId,
+  TurnId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -127,6 +128,20 @@ export interface ProviderServiceShape {
   readonly uploadFeedback: (
     input: ProviderUploadFeedbackInput,
   ) => Effect.Effect<ProviderUploadFeedbackResult, ProviderServiceError>;
+   * Create provider-native continuation state for a new thread. The caller
+   * passes the returned cursor to startSession for the destination thread.
+   */
+  readonly forkConversation: (input: {
+    readonly threadId: ThreadId;
+    readonly throughTurnId?: TurnId;
+    readonly expectedProviderInstanceId?: ProviderInstanceId;
+  }) => Effect.Effect<
+    {
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly resumeCursor: unknown;
+    },
+    ProviderServiceError
+  >;
 
   /**
    * Canonical provider runtime event stream.

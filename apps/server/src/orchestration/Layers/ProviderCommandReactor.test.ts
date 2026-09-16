@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 
 import {
   ModelSelection,
+  OrchestrationEvent,
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderDriverKind,
@@ -68,6 +69,7 @@ import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import {
   providerErrorLabelFromInstanceHint,
+  isProviderIntentEvent,
   ProviderCommandReactorLive,
 } from "./ProviderCommandReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -120,6 +122,15 @@ async function waitFor(
 }
 
 describe("ProviderCommandReactor", () => {
+  it("subscribes to branch requests", () => {
+    expect(
+      isProviderIntentEvent({
+        type: "thread.branch-requested",
+        payload: {},
+      } as OrchestrationEvent),
+    ).toBe(true);
+  });
+
   let runtime: ManagedRuntime.ManagedRuntime<
     | OrchestrationEngineService
     | ProviderCommandReactor
@@ -403,6 +414,7 @@ describe("ProviderCommandReactor", () => {
       },
       rollbackConversation: () => unsupported(),
       uploadFeedback: () => unsupported(),
+      forkConversation: () => unsupported(),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
       },

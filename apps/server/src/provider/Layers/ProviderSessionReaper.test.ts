@@ -220,6 +220,7 @@ describe("ProviderSessionReaper", () => {
       },
       rollbackConversation: () => unsupported(),
       uploadFeedback: () => unsupported(),
+      forkConversation: () => unsupported(),
       streamEvents: Stream.empty,
     };
 

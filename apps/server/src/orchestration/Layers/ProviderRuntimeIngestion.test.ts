@@ -148,6 +148,7 @@ function createProviderServiceHarness() {
     },
     rollbackConversation: () => unsupported(),
     uploadFeedback: () => unsupported(),
+    forkConversation: () => unsupported(),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub).pipe(
         Stream.flatMap(({ events, enqueued }) =>

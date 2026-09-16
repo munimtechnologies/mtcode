@@ -51,6 +51,7 @@ const EMPTY_QUEUED_MESSAGES: ReadonlyArray<QueuedComposerMessage> = [];
 const NOOP_QUEUED_MESSAGE_ACTION = (_id: string) => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const NOOP_FORK_ASSISTANT_MESSAGE = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { splitInlineVisualizations } from "@t3tools/shared/inlineVisualization";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
@@ -117,6 +118,7 @@ import {
   EyeIcon,
   GitPullRequestIcon,
   GlobeIcon,
+  GitBranchIcon,
   HammerIcon,
   MessageCircleIcon,
   Minimize2Icon,
@@ -286,6 +288,10 @@ interface TimelineRowSharedState {
   onMessageEditDraftChange: (draft: string) => void;
   onSaveMessageEdit: (draft: string) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
+  onRevertUserMessage: (messageId: MessageId) => void;
+  onForkAssistantMessage: (messageId: MessageId) => void;
+  canForkThread: boolean;
+  isForkingThread: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
@@ -440,6 +446,11 @@ interface MessagesTimelineProps {
   onMessageEditDraftChange?: (draft: string) => void;
   onSaveMessageEdit?: (draft: string) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  revertTurnCountByUserMessageId: Map<MessageId, number>;
+  onRevertUserMessage: (messageId: MessageId) => void;
+  onForkAssistantMessage?: (messageId: MessageId) => void;
+  canForkThread?: boolean;
+  isForkingThread?: boolean;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen?: (attachment: ChatFileAttachment) => void;
@@ -517,6 +528,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onMessageEditDraftChange = () => {},
   onSaveMessageEdit = () => {},
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
+  revertTurnCountByUserMessageId,
+  onRevertUserMessage,
+  onForkAssistantMessage = NOOP_FORK_ASSISTANT_MESSAGE,
+  canForkThread = false,
+  isForkingThread = false,
   isRevertingCheckpoint,
   onImageExpand,
   onFileOpen = NOOP_OPEN_ATTACHMENT,
@@ -977,6 +993,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onMessageEditDraftChange,
       onSaveMessageEdit,
       onUseArtifactTemplate,
+      onRevertUserMessage,
+      onForkAssistantMessage,
+      canForkThread,
+      isForkingThread,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -1019,6 +1039,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onMessageEditDraftChange,
       onSaveMessageEdit,
       onUseArtifactTemplate,
+      onRevertUserMessage,
+      onForkAssistantMessage,
+      canForkThread,
+      isForkingThread,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -2365,6 +2389,25 @@ function AssistantMessageMeta({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
+      {ctx.canForkThread && !message.streaming && message.turnId !== null ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={ctx.isForkingThread}
+                onClick={() => ctx.onForkAssistantMessage(message.id)}
+                aria-label="Fork from this response"
+              />
+            }
+          >
+            <GitBranchIcon className="size-3" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Fork from this response</TooltipPopup>
+        </Tooltip>
+      ) : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
