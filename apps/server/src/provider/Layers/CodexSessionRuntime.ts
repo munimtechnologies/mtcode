@@ -36,6 +36,10 @@ import * as NodeOS from "node:os";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
+import {
+  registerProcessOrigin,
+  unregisterProcessOrigin,
+} from "../../diagnostics/ProcessOrigins.ts";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
@@ -1523,6 +1527,17 @@ export const makeCodexSessionRuntime = (
             }),
         ),
       );
+
+    // T3 Neo Processes dialog: this app-server and everything it spawns belong to the thread.
+    registerProcessOrigin(child.pid, {
+      kind: "provider",
+      provider: "codex",
+      ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
+      threadId: options.threadId,
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => unregisterProcessOrigin(child.pid))).pipe(
+      Effect.provideService(Scope.Scope, runtimeScope),
+    );
 
     const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
       Layer.build,

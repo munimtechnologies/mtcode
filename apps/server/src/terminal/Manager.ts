@@ -41,6 +41,7 @@ import {
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import { registerProcessOrigin, unregisterProcessOrigin } from "../diagnostics/ProcessOrigins.ts";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -2035,6 +2036,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const process = session.process;
         cleanupProcessHandles(session);
         session.process = null;
+        if (session.pid !== null) unregisterProcessOrigin(session.pid);
         session.pid = null;
         session.hasRunningSubprocess = false;
         session.childCommandLabel = null;
@@ -2107,6 +2109,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     yield* modifyManagerState((state) => {
       cleanupProcessHandles(session);
       session.process = null;
+      if (session.pid !== null) unregisterProcessOrigin(session.pid);
       session.pid = null;
       session.hasRunningSubprocess = false;
       session.childCommandLabel = null;
@@ -2248,6 +2251,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             yield* modifyManagerState((state) => {
               session.process = ptyProcess;
               session.pid = processPid;
+              registerProcessOrigin(processPid, { kind: "terminal", threadId: session.threadId });
               session.status = "running";
               session.unsubscribeData = unsubscribeData;
               session.unsubscribeExit = unsubscribeExit;
@@ -2280,6 +2284,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       yield* modifyManagerState((state) => {
         cleanupProcessHandles(session);
         session.status = "error";
+        if (session.pid !== null) unregisterProcessOrigin(session.pid);
         session.pid = null;
         session.process = null;
         session.hasRunningSubprocess = false;

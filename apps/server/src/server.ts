@@ -230,10 +230,18 @@ const AccountLimitsLayerLive = AccountLimitsService.layer.pipe(
   Layer.provide(FetchHttpClient.layer),
 );
 
+const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
+
 const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   HostResources.layer,
   ResourceTelemetryLayerLive,
-  ProcessDiagnostics.layer.pipe(Layer.provide(ResourceTelemetryLayerLive)),
+  // The Processes dialog also lists dev servers by their ports, so it shares
+  // the preview's port scanner and runs `ps`/`lsof` for the ones off the tree.
+  ProcessDiagnostics.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(ResourceTelemetryLayerLive, PortScannerLayerLive, ProcessRunner.layer),
+    ),
+  ),
   ProcessResourceMonitor.layer.pipe(Layer.provide(ResourceTelemetryLayerLive)),
 );
 
@@ -431,8 +439,6 @@ const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointDiffQuery.layer),
   Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
-
-const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
 const TerminalLayerLive = TerminalManager.layer.pipe(
   Layer.provide(PtyAdapterLive),

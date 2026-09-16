@@ -467,6 +467,21 @@ export type ServerTraceDiagnosticsResult = typeof ServerTraceDiagnosticsResult.T
 export const ServerProcessSignal = Schema.Literals(["SIGINT", "SIGKILL"]);
 export type ServerProcessSignal = typeof ServerProcessSignal.Type;
 
+/**
+ * Who started a process: a provider session (with the thread it works for
+ * when known), a thread's terminal, or nobody the server still knows: a
+ * `listener` is a dev server found by the port it listens on after its
+ * parent shell exited, attributed by its working directory. Absent for the
+ * server's own helpers.
+ */
+export const ServerProcessOrigin = Schema.Struct({
+  kind: Schema.Literals(["provider", "terminal", "listener"]),
+  provider: Schema.optional(TrimmedNonEmptyString),
+  providerInstanceId: Schema.optional(TrimmedNonEmptyString),
+  threadId: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProcessOrigin = typeof ServerProcessOrigin.Type;
+
 export const ServerProcessDiagnosticsEntry = Schema.Struct({
   pid: PositiveInt,
   startTimeMs: NonNegativeInt,
@@ -479,6 +494,10 @@ export const ServerProcessDiagnosticsEntry = Schema.Struct({
   command: TrimmedNonEmptyString,
   depth: NonNegativeInt,
   childPids: Schema.Array(PositiveInt),
+  origin: Schema.optional(ServerProcessOrigin),
+  /** Listeners only: the lowest port they serve and where they run. */
+  port: Schema.optional(PositiveInt),
+  cwd: Schema.optional(TrimmedNonEmptyString),
 });
 export type ServerProcessDiagnosticsEntry = typeof ServerProcessDiagnosticsEntry.Type;
 
