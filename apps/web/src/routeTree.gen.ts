@@ -36,7 +36,6 @@ import { Route as SettingsArchivedRouteImport } from './routes/settings.archived
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as DevGoalChipsRouteImport } from './routes/dev.goal-chips'
-import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as SettingsPluginsPluginIdRouteImport } from './routes/settings.plugins_.$pluginId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
@@ -177,11 +176,6 @@ const DevGoalChipsRoute = DevGoalChipsRouteImport.update({
   path: '/dev/goal-chips',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ConnectCallbackRoute = ConnectCallbackRouteImport.update({
-  id: '/connect_/callback',
-  path: '/connect/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   id: '/pull-requests',
   path: '/pull-requests',
@@ -213,7 +207,6 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
-  '/connect/callback': typeof ConnectCallbackRoute
   '/dev/goal-chips': typeof DevGoalChipsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -245,7 +238,6 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
-  '/connect/callback': typeof ConnectCallbackRoute
   '/dev/goal-chips': typeof DevGoalChipsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -280,7 +272,6 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
-  '/connect_/callback': typeof ConnectCallbackRoute
   '/dev/goal-chips': typeof DevGoalChipsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -316,7 +307,6 @@ export interface FileRouteTypes {
     | '/usage'
     | '/welcome'
     | '/pull-requests'
-    | '/connect/callback'
     | '/dev/goal-chips'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -348,7 +338,6 @@ export interface FileRouteTypes {
     | '/usage'
     | '/welcome'
     | '/pull-requests'
-    | '/connect/callback'
     | '/dev/goal-chips'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -382,7 +371,6 @@ export interface FileRouteTypes {
     | '/usage'
     | '/welcome'
     | '/_chat/pull-requests'
-    | '/connect_/callback'
     | '/dev/goal-chips'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -416,7 +404,6 @@ export interface RootRouteChildren {
   StatusRoute: typeof StatusRoute
   UsageRoute: typeof UsageRoute
   WelcomeRoute: typeof WelcomeRoute
-  ConnectCallbackRoute: typeof ConnectCallbackRoute
   DevGoalChipsRoute: typeof DevGoalChipsRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
 }
@@ -612,13 +599,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevGoalChipsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/connect_/callback': {
-      id: '/connect_/callback'
-      path: '/connect/callback'
-      fullPath: '/connect/callback'
-      preLoaderRoute: typeof ConnectCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_chat/pull-requests': {
       id: '/_chat/pull-requests'
       path: '/pull-requests'
@@ -720,7 +700,6 @@ const rootRouteChildren: RootRouteChildren = {
   StatusRoute: StatusRoute,
   UsageRoute: UsageRoute,
   WelcomeRoute: WelcomeRoute,
-  ConnectCallbackRoute: ConnectCallbackRoute,
   DevGoalChipsRoute: DevGoalChipsRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
 }

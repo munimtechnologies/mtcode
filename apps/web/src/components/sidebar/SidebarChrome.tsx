@@ -96,11 +96,12 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <span className="inline-flex min-w-0 items-baseline gap-1">
+      {/* Center the visible capitals, without the font's ascender/descender space. */}
+      <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
         <BrandWordmark />
         <span
           className={cn(
-            "truncate text-sm font-medium tracking-tight",
+            "truncate [text-box:trim-both_cap_alphabetic]",
             onBackdrop ? "text-white/70" : "text-muted-foreground",
           )}
         >
@@ -127,20 +128,17 @@ function BrandWordmark() {
       </span>
     );
   }
-  return <T3Wordmark aria-label="T3" className="h-2.5 w-auto shrink-0" />;
+  return <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />;
 }
 
 // The brand row is baseline-aligned, which rests an inline SVG's bottom edge on
-// the text baseline. The mark is 12px and the `text-sm` label's caps are 10px,
-// so left alone the whole difference piles up above the label. Dropping it 2px
-// puts the top of the mark on the cap line; the mark is also top-heavy (its ink
-// centroid sits 45% down rather than 50%), so centring the box alone still
-// reads high. Keep the height, move the mark.
+// the text baseline, so sizing the mark to `1cap` puts its top on the label's
+// cap line with no vertical nudge.
 function MTWordmark() {
   return (
     <svg
       aria-label="MT"
-      className="h-3 w-auto shrink-0 translate-y-[2px]"
+      className="h-[1cap] w-auto shrink-0"
       viewBox="0 0 725 657"
       xmlns="http://www.w3.org/2000/svg"
     >
