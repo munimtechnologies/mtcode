@@ -11,13 +11,15 @@ import {
   hasExplicitComposerModelSelection,
   isComputerHomeWorkspace,
 } from "~/lib/chatThreadActions";
+import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import { selectProjectGroupingSettings } from "~/logicalProject";
+import { resolveDefaultProviderModelSelection } from "~/providerInstances";
 import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
   projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
-import { useProjects, useThreadShells } from "~/state/entities";
+import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -47,6 +49,7 @@ export function DraftHeroHeadline({
 }: DraftHeroHeadlineProps) {
   const projects = useProjects();
   const threads = useThreadShells();
+  const serverConfigs = useServerConfigs();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -57,6 +60,7 @@ export function DraftHeroHeadline({
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
 
   const environmentLabelById = useMemo(
@@ -197,21 +201,35 @@ export function DraftHeroHeadline({
               entry.group.projectKey,
               scopeProjectRef(project.environmentId, project.id),
               draftId,
+              currentDraft?.runtimeMode == null
+                ? undefined
+                : { runtimeMode: currentDraft.runtimeMode },
             );
+            const targetServerConfig = serverConfigs.get(project.environmentId);
+            const projectSettings = targetServerConfig
+              ? resolveProjectSettings(targetServerConfig.settings, project.id, project).settings
+              : undefined;
+            const defaultModelSelection = projectSettings
+              ? projectSettings.defaultModelSelection
+              : project.defaultModelSelection;
             if (!hasExplicitComposerModelSelection(currentDraft)) {
               applyStickyState(draftId);
-              const environmentSettings = environments.find(
-                (environment) => environment.environmentId === project.environmentId,
-              )?.serverConfig?.settings;
-              const defaultModelSelection = environmentSettings
-                ? resolveProjectSettings(environmentSettings, project.id, project).settings
-                    .defaultModelSelection
-                : project.defaultModelSelection;
               if (defaultModelSelection) {
                 setModelSelection(draftId, defaultModelSelection, {
                   replaceOptions: true,
                 });
               }
+            }
+            if (currentDraft?.runtimeMode == null) {
+              setDraftThreadContext(draftId, {
+                runtimeMode: resolveNewThreadRuntimeMode(
+                  projectSettings,
+                  getComposerDraft(draftId)?.activeProvider ??
+                    defaultModelSelection?.instanceId ??
+                    resolveDefaultProviderModelSelection(targetServerConfig?.providers ?? [], null)
+                      ?.instanceId,
+                ),
+              });
             }
           }}
         >
