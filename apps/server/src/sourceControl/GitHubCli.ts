@@ -323,6 +323,7 @@ export class GitHubCli extends Context.Service<
       readonly headSelector: string;
       readonly title: string;
       readonly bodyFile: string;
+      readonly draft?: boolean;
     }) => Effect.Effect<void, GitHubCliError>;
 
     readonly getDefaultBranch: (input: {
@@ -627,6 +628,7 @@ export const make = Effect.gen(function* () {
         args: [
           "pr",
           "create",
+          ...(input.draft ? ["--draft"] : []),
           "--base",
           input.baseBranch,
           "--head",

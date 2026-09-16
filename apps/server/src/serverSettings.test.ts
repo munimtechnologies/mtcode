@@ -37,6 +37,7 @@ const decodePersistedWorktreeBaseDirectory = Schema.decodeUnknownEffect(
     Schema.Struct({ worktreeBaseDirectory: Schema.optionalKey(Schema.String) }),
   ),
 );
+const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
@@ -189,6 +190,22 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           options: [{ id: "reasoningEffort", value: "low" }],
         });
       }),
+  );
+
+  it.effect("persists enabling and disabling draft GitHub pull requests", () =>
+    Effect.gen(function* () {
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      assert.isFalse((yield* settings.getSettings).createGitHubPullRequestsAsDraft);
+      for (const enabled of [true, false]) {
+        yield* settings.updateSettings({ createGitHubPullRequestsAsDraft: enabled });
+        const raw = yield* fs.readFileString(config.settingsPath);
+        const saved = yield* decodeServerSettingsJson(raw);
+        assert.equal(saved.createGitHubPullRequestsAsDraft, enabled);
+        assert.equal((yield* settings.getSettings).createGitHubPullRequestsAsDraft, enabled);
+      }
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
   it.effect("deep merges nested settings updates without dropping siblings", () =>

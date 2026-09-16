@@ -971,6 +971,17 @@ describe("ServerSettings environment icon", () => {
   });
 });
 
+describe("ServerSettings draft pull requests", () => {
+  it("keeps ready-for-review creation as the default", () => {
+    expect(decodeServerSettings({}).createGitHubPullRequestsAsDraft).toBe(false);
+  });
+  it.each([false, true])("round-trips the draft preference %s", (enabled) => {
+    const patch = decodeServerSettingsPatch({ createGitHubPullRequestsAsDraft: enabled });
+    const settings = decodeServerSettings(patch);
+    expect(encodeServerSettings(settings).createGitHubPullRequestsAsDraft).toBe(enabled);
+  });
+});
+
 const decodeDeviceHostSettings = Schema.decodeSync(ServerSettings);
 
 it("validates remote device hosts and rejects ambiguous host ids", () => {

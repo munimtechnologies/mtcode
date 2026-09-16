@@ -640,6 +640,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "create-github-pull-requests-as-draft",
+    title: "Create GitHub pull requests as drafts",
+    to: "/settings/source-control",
+    searchTerms: ["pr review ready draft default"],
+    primaryOnly: true,
+  },
+  {
     id: "source-control-writing-style",
     title: "Source control writing style",
     to: "/settings/source-control",

@@ -104,14 +104,14 @@ describe("splitSharedServerPatch", () => {
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
       newWorktreesStartFromOrigin: true,
-      addProjectBaseDirectory: "/workspace/repos",
-      worktreeBaseDirectory: "/workspace/worktrees",
+      createGitHubPullRequestsAsDraft: false,
     });
     expect(sharedPatch).toEqual({
       sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
       newWorktreesStartFromOrigin: true,
+      createGitHubPullRequestsAsDraft: false,
     });
     expect(localPatch).toEqual({
       enableAgentBrowserAccess: false,
@@ -128,6 +128,7 @@ describe("pickSharedServerSettings", () => {
       Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, restartCapabilities)).sort(),
     ).toEqual([
       "continueThreadsAfterServerUpdate",
+      "createGitHubPullRequestsAsDraft",
       "newWorktreesStartFromOrigin",
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
