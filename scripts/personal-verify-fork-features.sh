@@ -152,6 +152,13 @@ require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* installDownloadedUpd
 require apps/desktop/src/updates/DesktopRemoteUpdates.ts 'ready-to-install' "remote update publishes ready-to-install"
 require scripts/build-desktop-artifact.ts "VC.Runtimes.x86.x64.Spectre" "Windows build preflight probes the real VS 2022 Spectre component id (upstream's VC.Tools.*.Spectre does not exist)"
 
+# --- MT wordmark alignment (brand tuning, do NOT adopt upstream's sizing) ---
+# The MT mark is hand-tuned: 12px tall and nudged down 2px, because the glyph is
+# top-heavy (ink centroid at 45%) so cap-height box sizing reads high. The
+# 2026-09-15 sync replaced it with upstream's `h-[1cap]` and shrank the mark.
+# Upstream's T3Wordmark keeps 1cap; only MTWordmark is exempt.
+require apps/web/src/components/sidebar/SidebarChrome.tsx 'h-3 w-auto shrink-0 translate-y-\[2px\]' "MT wordmark keeps its hand-tuned 12px height and 2px nudge"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2
