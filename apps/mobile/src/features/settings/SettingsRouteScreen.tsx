@@ -28,6 +28,11 @@ import {
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
+  getSelfHostedNotificationStatus,
+  requestSelfHostedNotificationPermission,
+  subscribeSelfHostedNotificationStatus,
+} from "../agent-awareness/selfHostedNotifications";
+import {
   getAgentAwarenessRegistrationStatus,
   refreshAgentAwarenessRegistration,
   subscribeAgentAwarenessRegistrationStatus,
@@ -122,6 +127,31 @@ function LocalSettingsRouteScreen() {
   const insets = useSafeAreaInsets();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const environmentCount = Object.keys(savedConnectionsById).length;
+  const notificationStatus = useSyncExternalStore(
+    subscribeSelfHostedNotificationStatus,
+    getSelfHostedNotificationStatus,
+    () => "checking" as const,
+  );
+
+  const handleNotificationsChange = useCallback((enabled: boolean) => {
+    if (enabled) {
+      void requestSelfHostedNotificationPermission().catch((error: unknown) => {
+        Alert.alert(
+          "Notifications unavailable",
+          error instanceof Error ? error.message : "Could not enable notifications.",
+        );
+      });
+      return;
+    }
+    Alert.alert(
+      "Disable notifications",
+      "Open Android settings to disable notifications for T3 Code.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Open Settings", onPress: () => void Linking.openSettings() },
+      ],
+    );
+  }, []);
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -141,6 +171,15 @@ function LocalSettingsRouteScreen() {
             value={`${environmentCount}`}
             target="SettingsEnvironments"
           />
+          {Platform.OS === "android" ? (
+            <SettingsSwitchRow
+              icon="bell.badge"
+              label="Device Notifications"
+              disabled={notificationStatus === "checking" || notificationStatus === "unsupported"}
+              value={notificationStatus === "enabled"}
+              onValueChange={handleNotificationsChange}
+            />
+          ) : null}
         </SettingsSection>
 
         <GeneralSettingsSection />
