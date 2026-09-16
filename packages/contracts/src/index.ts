@@ -32,6 +32,7 @@ export * from "./sourceControl.ts";
 export * from "./projectClone.ts";
 export * from "./pullRequest.ts";
 export * from "./orchestration.ts";
+export * from "./threadMetadataMcp.ts";
 export * from "./messageCorrection.ts";
 export * from "./t3ProjectFile.ts";
 export * from "./editor.ts";

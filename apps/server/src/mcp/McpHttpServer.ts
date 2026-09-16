@@ -38,6 +38,9 @@ import { ComputerToolkit } from "./toolkits/computers/tools.ts";
 import { DEFAULT_APP_DISPLAY_NAME } from "../appDisplayName.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
+import { ThreadMetadataToolkitHandlersLive } from "./toolkits/threadMetadata/handlers.ts";
+import { ThreadMetadataToolkit } from "./toolkits/threadMetadata/tools.ts";
+import * as ThreadMetadataMcp from "./ThreadMetadataMcpService.ts";
 import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import {
@@ -629,6 +632,11 @@ export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequest
   Layer.provide(PullRequestsToolkitHandlersLive),
 );
 
+export const ThreadMetadataToolkitRegistrationLive = McpServer.toolkit(ThreadMetadataToolkit).pipe(
+  Layer.provide(ThreadMetadataToolkitHandlersLive),
+  Layer.provide(ThreadMetadataMcp.layer),
+);
+
 const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
   Layer.provide(WorktreeToolkitHandlersLive),
 );
@@ -660,5 +668,6 @@ export const layer = Layer.mergeAll(
   ComputerToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
   WorktreeToolkitRegistrationLive,
+  ThreadMetadataToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

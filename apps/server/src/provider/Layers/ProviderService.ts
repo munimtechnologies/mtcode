@@ -913,6 +913,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     // another thread is always available, so its read-only tool always is too.
     const capabilities = new Set<McpInvocationContext.McpCapability>([
       "pull-requests",
+      "thread-metadata",
       "thread-reference",
       "worktree",
     ]);
