@@ -1,3 +1,6 @@
+import { makeAgentHistoryClient } from "./agentHistoryClient.ts";
+import { withCodexAppServerClient } from "./CodexProvider.ts";
+import { readCodexAgentHistory } from "./codexAgentHistory.ts";
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -2444,6 +2447,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
   const recoveryTokens = new Map<ThreadId, symbol>();
 
+  /** Reuse one read-only app-server per workspace across short history refreshes. */
+  const withHistoryClient = yield* makeAgentHistoryClient((cwd) =>
+    withCodexAppServerClient({
+      binaryPath: codexConfig.binaryPath,
+      homePath: codexConfig.homePath,
+      launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
+      environment: options?.environment,
+      cwd,
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)),
+  );
+
   const startSessionInternal: (
     input: Parameters<CodexAdapterShape["startSession"]>[0],
     internalOptions?: {
@@ -3077,6 +3091,41 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   });
 
+  /** Read saved descendants through the shared read-only transport without resuming a coding session. */
+  const getAgentHistory: CodexAdapterShape["getAgentHistory"] = Effect.fn("getAgentHistory")(
+    function* (input) {
+      if (!isCodexResumeCursorSchema(input.resumeCursor)) {
+        return {
+          status: "unavailable",
+          entries: [],
+          nextOffset: null,
+          message: "No saved Codex session is available for this thread.",
+        };
+      }
+      const parentThreadId = input.resumeCursor.threadId;
+      return yield* withHistoryClient(input.cwd ?? process.cwd(), ({ client }) =>
+        readCodexAgentHistory({
+          parentThreadId,
+          agentId: input.agentId,
+          offset: input.offset,
+          view: input.view,
+          readThread: (threadId, includeTurns) =>
+            client.request("thread/read", { threadId, includeTurns }),
+        }),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "thread/read",
+              detail: "Could not read saved agent history.",
+              cause,
+            }),
+        ),
+      );
+    },
+  );
+
   const readThread: CodexAdapterShape["readThread"] = (threadId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.readThread),
@@ -3233,6 +3282,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     compaction: { type: "native", start: compactThread },
     interruptTurn,
     readThread,
+    getAgentHistory,
     rollbackThread,
     uploadFeedback,
     respondToRequest,
