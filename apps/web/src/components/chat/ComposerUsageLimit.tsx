@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { HourglassIcon, TimerResetIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 import { UsageLimitCountdown } from "./UsageLimitCountdown";
 
@@ -51,14 +52,44 @@ function UsageLimitAutoResumeAction(input: {
   );
 }
 
+/**
+ * The one-tap "Snooze until <reset + 1 min>" offer that shares the card with
+ * auto-resume. Snoozing is visibility-only (the thread parks out of the inbox
+ * and wakes with the existing banner); the button is disabled, not hidden,
+ * while the thread is temporarily unsnoozable so the wake time still reads.
+ */
+export interface UsageLimitSnoozeAction {
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly onSnooze: () => void;
+}
+
+function UsageLimitSnoozeButton({ snooze }: { readonly snooze: UsageLimitSnoozeAction }) {
+  const button = (
+    <Button size="xs" variant="ghost" disabled={snooze.disabled} onClick={snooze.onSnooze}>
+      {snooze.label}
+    </Button>
+  );
+  if (!snooze.disabled) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex">{button}</span>} />
+      <TooltipPopup side="top">Snoozing is unavailable while work is pending</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export function usageLimitBannerItem(input: {
   readonly threadId: string;
   readonly resetsAt: string;
   readonly autoResumeArmed: boolean;
   readonly onArmAutoResume: () => void;
   readonly onCancelAutoResume: () => void;
+  /** Null when snoozing is unsupported, the thread is already snoozed, or the window passed. */
+  readonly snooze?: UsageLimitSnoozeAction | null;
 }): ComposerBannerStackItem {
-  const { threadId, resetsAt, autoResumeArmed, onArmAutoResume, onCancelAutoResume } = input;
+  const { threadId, resetsAt, autoResumeArmed, onArmAutoResume, onCancelAutoResume, snooze } =
+    input;
   return {
     id: `thread-usage-limit:${threadId}`,
     variant: "warning",
@@ -76,12 +107,15 @@ export function usageLimitBannerItem(input: {
       ? "This thread restarts on its own when the window resets."
       : "Tokens return when the window resets. You can also keep working on another plan.",
     actions: (
-      <UsageLimitAutoResumeAction
-        resetsAt={resetsAt}
-        autoResumeArmed={autoResumeArmed}
-        onArmAutoResume={onArmAutoResume}
-        onCancelAutoResume={onCancelAutoResume}
-      />
+      <span className="flex flex-wrap items-center gap-1">
+        <UsageLimitAutoResumeAction
+          resetsAt={resetsAt}
+          autoResumeArmed={autoResumeArmed}
+          onArmAutoResume={onArmAutoResume}
+          onCancelAutoResume={onCancelAutoResume}
+        />
+        {snooze ? <UsageLimitSnoozeButton snooze={snooze} /> : null}
+      </span>
     ),
   };
 }

@@ -59,6 +59,16 @@ On web and desktop, use Settings → Providers → **Models** to add an unlisted
 name and options. Only options supported by the provider integration affect turns. Antigravity
 uses its account catalog and does not support custom models.
 
+## Usage limit snooze
+
+On web and desktop, when Claude or Codex reports that you have hit a usage limit, the composer
+card that counts down to the reset also offers to snooze the thread until a minute after the
+limit resets. Snoozing only hides the thread from your active list until then — nothing resumes
+on its own unless you also turn on auto-resume from the same card — and you can wake the thread
+at any time. Snoozing is unavailable while the thread is waiting on you or has a message no turn
+has picked up yet, but the countdown still shows. The same option also appears first in the
+thread's snooze menu while the limit is in force.
+
 ## Model defaults
 
 T3 Code remembers your provider, model, and model options for new threads. A

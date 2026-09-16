@@ -19,6 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   canSnooze,
   effectiveSnoozed,
+  threadUsageLimitResetsAt,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
@@ -205,6 +206,7 @@ import {
 } from "./ThreadStatusIndicators";
 import {
   resolveSnoozePresets,
+  snoozePresetExpired,
   snoozeWakeDescription,
   snoozeWakeLabel,
   type SnoozePreset,
@@ -444,13 +446,14 @@ function SnoozePopoverButton(props: {
   onOpenChange: (open: boolean) => void;
   onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   timestampFormat: TimestampFormat;
+  limitsResetAt: string | null;
 }) {
-  const { open, onOpenChange, onSnooze, timestampFormat } = props;
+  const { open, onOpenChange, onSnooze, timestampFormat, limitsResetAt } = props;
   // Presets resolve at open time so "In 1 hour" is relative to the click,
   // not to when the row mounted.
   const presets = useMemo(
-    () => (open ? resolveSnoozePresets(new Date(), timestampFormat) : []),
-    [open, timestampFormat],
+    () => (open ? resolveSnoozePresets(new Date(), timestampFormat, { limitsResetAt }) : []),
+    [open, timestampFormat, limitsResetAt],
   );
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -482,6 +485,7 @@ function SnoozePopoverButton(props: {
             onClick={(event) => {
               event.stopPropagation();
               onOpenChange(false);
+              if (snoozePresetExpired(preset)) return;
               onSnooze(preset);
             }}
             className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
@@ -1891,6 +1895,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           onOpenChange={setSnoozeMenuOpen}
                           onSnooze={handleSnoozePreset}
                           timestampFormat={props.timestampFormat}
+                          limitsResetAt={threadUsageLimitResetsAt(thread)}
                         />
                       ) : null}
                       {props.settlementSupported ? (
@@ -4047,7 +4052,12 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
-        const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+        // The server's own usage-limit classification on the session leads the
+        // menu with "Until limits reset" while the thread is parked on one.
+        const menuLimitsResetAt = threadUsageLimitResetsAt(thread);
+        const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat, {
+          limitsResetAt: menuLimitsResetAt,
+        });
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -4076,7 +4086,7 @@ export default function Sidebar() {
             clicked.value === "snooze:custom"
               ? await requestCustomSnooze()
               : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
-          if (preset) attemptSnooze(threadRef, preset);
+          if (preset && !snoozePresetExpired(preset)) attemptSnooze(threadRef, preset);
           return;
         }
         switch (clicked.value) {
