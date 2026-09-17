@@ -1,0 +1,907 @@
+import {
+  PiNativeRuntimeId,
+  PiNativeSessionKey,
+  ProjectId,
+  ThreadId,
+  threadEnvironmentAttribution,
+} from "@t3tools/contracts";
+import { it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { describe, expect } from "vite-plus/test";
+
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import type { PiSessionCatalogRecord } from "./SessionCatalog.ts";
+import {
+  isPiSubagentLiveEvent,
+  projectPiActiveBranch,
+  projectPiBacking,
+  projectPiLiveEvent,
+  projectPiThread,
+  projectPiThreadOverlay,
+} from "./PiSessionProjection.ts";
+
+const record: PiSessionCatalogRecord = {
+  sourceKey: PiNativeSessionKey.make("opaque-source"),
+  threadId: ThreadId.make("external:pi:session-1"),
+  canonicalFile: "/private/session.jsonl",
+  sessionId: "session-1",
+  cwd: "/workspace",
+  title: "native session",
+  createdAt: "2026-07-30T00:00:00.000Z",
+  updatedAt: "2026-07-30T00:01:00.000Z",
+  fileSize: 1,
+  fileMtimeMs: 1,
+  historyTruncation: {
+    truncated: false,
+    omittedEntryCount: 0,
+  },
+};
+
+const entries = [
+  {
+    type: "message",
+    id: "user-1",
+    parentId: null,
+    timestamp: "2026-07-30T00:00:01.000Z",
+    message: {
+      role: "user",
+      content: [
+        { type: "text", text: "first" },
+        { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      ],
+    },
+  },
+  {
+    type: "message",
+    id: "abandoned",
+    parentId: "user-1",
+    timestamp: "2026-07-30T00:00:02.000Z",
+    message: { role: "assistant", content: [{ type: "text", text: "abandoned answer" }] },
+  },
+  {
+    type: "message",
+    id: "user-2",
+    parentId: "user-1",
+    timestamp: "2026-07-30T00:00:03.000Z",
+    message: { role: "user", content: [{ type: "text", text: "active branch" }] },
+  },
+  {
+    type: "message",
+    id: "assistant-2",
+    parentId: "user-2",
+    timestamp: "2026-07-30T00:00:04.000Z",
+    message: {
+      role: "assistant",
+      provider: "openai",
+      model: "gpt-5",
+      content: [
+        { type: "text", text: "active answer" },
+        { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
+      ],
+    },
+  },
+  {
+    type: "message",
+    id: "tool-result",
+    parentId: "assistant-2",
+    timestamp: "2026-07-30T00:00:05.000Z",
+    message: {
+      role: "toolResult",
+      toolCallId: "tool-1",
+      toolName: "read",
+      content: [{ type: "text", text: "contents" }],
+      isError: false,
+    },
+  },
+] as const;
+
+describe("PiSessionProjection", () => {
+  it("attributes only connected runtimes as live, never inferring origin from a copy", () => {
+    for (const status of [undefined, "starting", "exited", "idle", "streaming"] as const) {
+      const runtime =
+        status === undefined
+          ? undefined
+          : {
+              runtimeId: PiNativeRuntimeId.make("runtime-attribution"),
+              writerKind: "tuiBridge" as const,
+              status,
+              sequence: 1,
+            };
+      const backing = projectPiBacking(record, runtime, true);
+      const connected = status === "idle" || status === "streaming";
+      expect(backing.runtimePresence).toBe(connected ? "connected" : "unknown");
+      expect(threadEnvironmentAttribution(backing, "mbp")).toBe(
+        connected ? "live on mbp" : "copy on mbp · runtime unknown",
+      );
+    }
+    const { runtimePresence: _, ...legacyBacking } = projectPiBacking(record, undefined, true);
+    expect(threadEnvironmentAttribution(legacyBacking, "mbp")).toBe(
+      "copy on mbp · runtime unknown",
+    );
+    expect(threadEnvironmentAttribution(undefined, "mbp")).toBe("mbp");
+  });
+  const recap = {
+    type: "custom",
+    id: "recap-1",
+    parentId: "tool-result",
+    timestamp: "2026-07-30T00:02:05.000Z",
+    customType: "@bds_pi/session-recap",
+    data: {
+      version: 1,
+      throughLeafId: "assistant-2",
+      text: "read README.md; no changes.",
+      idleMs: 120_000,
+    },
+  };
+
+  it("projects Pi-owned recaps as standalone activities, never conversation messages", () => {
+    const before = projectPiThread({ record, entries, projectId: ProjectId.make("project-1") });
+    const after = projectPiThread({
+      record,
+      entries: [...entries, recap],
+      projectId: ProjectId.make("project-1"),
+    });
+    expect(after.thread.messages).toEqual(before.thread.messages);
+    expect(after.thread.latestTurn).toEqual(before.thread.latestTurn);
+    expect(after.thread.activities.at(-1)).toEqual({
+      id: "session-1:recap-1",
+      kind: "session.recap",
+      tone: "info",
+      summary: "Session recap · 2m idle",
+      payload: { detail: recap.data.text, throughLeafId: "assistant-2", idleMs: 120_000 },
+      turnId: null,
+      createdAt: recap.timestamp,
+    });
+  });
+
+  it("keeps earlier branch recaps as history but excludes abandoned-branch recaps", () => {
+    const next = { ...entries[2], id: "next-user", parentId: recap.id };
+    const project = (history: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
+      projectPiThread({ record, entries: history, projectId: ProjectId.make("project-1") }).thread;
+    expect(
+      project([...entries, recap, next]).activities.filter((a) => a.kind === "session.recap"),
+    ).toHaveLength(1);
+    expect(project([...entries, recap, { ...next, parentId: "user-1" }]).activities).toEqual([]);
+    expect(project([{ ...recap, parentId: "truncated-parent" }]).activities).toHaveLength(1);
+  });
+
+  it.each([
+    undefined,
+    {},
+    { ...recap.data, version: 2 },
+    { ...recap.data, throughLeafId: undefined },
+    { ...recap.data, throughLeafId: "" },
+    { ...recap.data, text: " \n " },
+    { ...recap.data, text: 3 },
+    { ...recap.data, idleMs: 999 },
+    { ...recap.data, idleMs: 1000.5 },
+    { ...recap.data, title: 3 },
+  ])("ignores malformed or unsupported recap data: %j", (data) => {
+    const thread = projectPiThread({
+      record,
+      entries: [...entries, { ...recap, data }],
+      projectId: ProjectId.make("project-1"),
+    }).thread;
+    expect(thread.activities.some((a) => a.kind === "session.recap")).toBe(false);
+    expect(thread.messages).toHaveLength(3);
+  });
+
+  it("ignores other custom namespaces and does not reinterpret custom messages as recaps", () => {
+    for (const entry of [
+      { ...recap, customType: "other" },
+      { ...recap, type: "custom_message" },
+    ]) {
+      expect(
+        projectPiThread({
+          record,
+          entries: [...entries, entry],
+          projectId: ProjectId.make("project-1"),
+        }).thread.activities,
+      ).toHaveLength(1);
+    }
+  });
+
+  it("follows only the active parent chain", () => {
+    expect(projectPiActiveBranch(entries).entries.map((entry) => entry.id)).toEqual([
+      "user-1",
+      "user-2",
+      "assistant-2",
+      "tool-result",
+    ]);
+  });
+
+  it("projects normal messages, tool activity, and authoritative capabilities", () => {
+    const snapshot = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+      catalogResumeSupported: true,
+    });
+
+    expect(snapshot.thread.messages.map((message) => message.text)).toEqual([
+      "first",
+      "active branch",
+      "active answer",
+    ]);
+    expect(snapshot.thread.activities).toHaveLength(1);
+    expect(snapshot.thread.messages[0]?.attachments).toBeUndefined();
+    expect(snapshot.thread.activities[0]?.kind).toBe("item.completed");
+    expect(snapshot.thread.backing).toEqual(projectPiBacking(record, undefined, true));
+    expect(snapshot.thread.backing?.control).toBe("resumable");
+    expect(snapshot.thread.backing?.capabilities.send).toBe(true);
+    expect(snapshot.thread.backing?.capabilities.attachments).toBe(false);
+    expect(snapshot.thread.backing?.capabilities.interrupt).toBe(false);
+    expect(snapshot.thread.backing?.capabilities.stop).toBe(false);
+    expect(snapshot.thread.backing?.capabilities.rename).toBe(false);
+    expect(snapshot.thread.backing?.capabilities.settle).toBe(true);
+    expect(snapshot.thread.backing?.capabilities.unsettle).toBe(true);
+    expect(snapshot.thread.historyTruncation?.truncated).toBe(false);
+  });
+
+  it("fails catalog-only control closed without guarded-resume capability", () => {
+    expect(projectPiBacking(record, undefined)).toMatchObject({
+      control: "readOnly",
+      capabilities: { send: false },
+    });
+    expect(projectPiBacking(record, undefined, true)).toMatchObject({
+      control: "resumable",
+      capabilities: { send: true },
+    });
+  });
+
+  it("preserves Pi tool arguments and presentation in completed history", () => {
+    const toolEntries = [
+      {
+        type: "message",
+        id: "user",
+        parentId: null,
+        timestamp: "2026-07-30T00:00:01.000Z",
+        message: { role: "user", content: "inspect files" },
+      },
+      {
+        type: "message",
+        id: "assistant",
+        parentId: "user",
+        timestamp: "2026-07-30T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "bash", name: "bash", arguments: { cmd: "git status" } },
+            {
+              type: "toolCall",
+              id: "grep",
+              name: "grep",
+              arguments: { pattern: "needle", glob: "**/*.ts" },
+            },
+            {
+              type: "toolCall",
+              id: "find",
+              name: "find",
+              arguments: { filePattern: "*.md" },
+            },
+            {
+              type: "toolCall",
+              id: "write",
+              name: "write",
+              arguments: { path: "notes.md", content: "hello" },
+            },
+            {
+              type: "toolCall",
+              id: "edit",
+              name: "edit",
+              arguments: { file_path: "src/app.ts", oldText: "old", newText: "new" },
+            },
+          ],
+        },
+      },
+      ...["bash", "grep", "find", "write", "edit"].map((toolName, index) => ({
+        type: "message",
+        id: `${toolName}-result`,
+        parentId:
+          index === 0 ? "assistant" : `${["bash", "grep", "find", "write"][index - 1]}-result`,
+        timestamp: `2026-07-30T00:00:0${index + 3}.000Z`,
+        message: {
+          role: "toolResult",
+          toolCallId: toolName,
+          toolName,
+          content: [{ type: "text", text: "  completed  " }],
+          details: { truncation: null },
+          isError: false,
+        },
+      })),
+    ];
+
+    const snapshot = projectPiThread({
+      record,
+      entries: toolEntries,
+      projectId: ProjectId.make("project-1"),
+    });
+    const activities = new Map(
+      snapshot.thread.activities.map(
+        (activity) => [String(activity.id), activity.payload] as const,
+      ),
+    );
+
+    expect(activities.get("session-1:tool:bash")).toMatchObject({
+      itemType: "command_execution",
+      status: "completed",
+      data: {
+        command: "git status",
+        rawInput: { cmd: "git status" },
+        rawOutput: { content: "completed", truncation: null },
+      },
+    });
+    expect(activities.get("session-1:tool:grep")).toMatchObject({
+      detail: "/needle/ in **/*.ts",
+      data: { rawInput: { pattern: "needle", glob: "**/*.ts" } },
+    });
+    expect(activities.get("session-1:tool:find")).toMatchObject({
+      detail: "*.md in .",
+      data: { rawInput: { filePattern: "*.md" } },
+    });
+    expect(activities.get("session-1:tool:write")).toMatchObject({
+      itemType: "file_change",
+      data: { item: { changes: [{ path: "notes.md" }] } },
+    });
+    expect(activities.get("session-1:tool:edit")).toMatchObject({
+      itemType: "file_change",
+      data: { item: { changes: [{ path: "src/app.ts" }] } },
+    });
+  });
+
+  it("projects historical Pi sub-agents into native task activities", () => {
+    const subagentEntries = [
+      {
+        type: "message",
+        id: "user",
+        parentId: null,
+        timestamp: "2026-07-30T00:00:01.000Z",
+        message: { role: "user", content: "delegate this" },
+      },
+      {
+        type: "message",
+        id: "assistant",
+        parentId: "user",
+        timestamp: "2026-07-30T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "delegate-1",
+              name: "delegate",
+              arguments: { description: "Audit auth" },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "result",
+        parentId: "assistant",
+        timestamp: "2026-07-30T00:00:03.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "delegate-1",
+          toolName: "delegate",
+          content: [{ type: "text", text: "Found the issue" }],
+          details: {
+            agent: "delegate",
+            task: "Audit auth",
+            sessionId: "child-session",
+            output: "Found the issue",
+            lifecycle: { status: "succeeded" },
+            usage: { input: 8, output: 3, cacheRead: 2, cacheWrite: 0 },
+          },
+          isError: false,
+        },
+      },
+    ];
+
+    const snapshot = projectPiThread({
+      record,
+      entries: subagentEntries,
+      projectId: ProjectId.make("project-1"),
+    });
+    expect(snapshot.thread.activities.map((activity) => activity.kind)).toEqual([
+      "item.completed",
+      "task.started",
+      "task.completed",
+    ]);
+    expect(snapshot.thread.activities.at(-1)).toMatchObject({
+      tone: "info",
+      summary: "Sub-agent completed",
+      payload: {
+        taskId: "pi-agent:session-1:delegate-1",
+        status: "completed",
+        taskType: "local_agent",
+        agentKind: "agent",
+        toolUseId: "delegate-1",
+        role: "delegate",
+        summary: "Found the issue",
+        typedUsage: {
+          totalTokens: 13,
+          inputTokens: 8,
+          cachedInputTokens: 2,
+          outputTokens: 3,
+        },
+      },
+    });
+  });
+
+  it("projects live Pi sub-agent progress and cancellation without replacing its tool row", () => {
+    const snapshot = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+    });
+    const events = [
+      {
+        type: "event",
+        sequence: 9,
+        eventId: "runtime:9",
+        event: {
+          type: "tool_execution_start",
+          toolCallId: "delegate-live",
+          toolName: "delegate",
+          args: { description: "Audit live auth" },
+        },
+      },
+      {
+        type: "event",
+        sequence: 10,
+        eventId: "runtime:10",
+        event: {
+          type: "tool_execution_update",
+          toolCallId: "delegate-live",
+          toolName: "delegate",
+          partialResult: {
+            content: [{ type: "text", text: "Inspecting routes" }],
+            details: {
+              agent: "delegate",
+              task: "Audit live auth",
+              sessionId: "live-child",
+              lifecycle: { status: "cancelled" },
+            },
+          },
+        },
+      },
+      {
+        type: "event",
+        sequence: 11,
+        eventId: "runtime:11",
+        event: {
+          type: "tool_execution_end",
+          toolCallId: "delegate-live",
+          toolName: "delegate",
+          result: {
+            content: [{ type: "text", text: "Cancelled" }],
+          },
+          isError: true,
+        },
+      },
+    ] as const;
+    const projected = projectPiThreadOverlay(snapshot, record, events as never);
+    const liveActivities = projected.thread.activities.filter((activity) =>
+      String(activity.id).includes("delegate-live"),
+    );
+
+    expect(liveActivities.map((activity) => activity.kind)).toEqual([
+      "task.started",
+      "task.progress",
+      "item.completed",
+      "task.completed",
+    ]);
+    expect(liveActivities.at(-1)).toMatchObject({
+      tone: "info",
+      summary: "Sub-agent stopped",
+      payload: {
+        taskId: "pi-agent:session-1:delegate-live",
+        status: "stopped",
+        toolUseId: "delegate-live",
+      },
+    });
+    expect(isPiSubagentLiveEvent(events[1]?.event)).toBe(true);
+    expect(isPiSubagentLiveEvent(events[2]?.event)).toBe(false);
+  });
+
+  it("projects a persisted external lifecycle override", () => {
+    const settled = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+      lifecycle: {
+        override: "settled",
+        updatedAt: "2026-07-30T00:02:00.000Z",
+      },
+    });
+    const active = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+      lifecycle: {
+        override: "active",
+        updatedAt: "2026-07-30T00:03:00.000Z",
+      },
+    });
+
+    expect(settled.thread.settledOverride).toBe("settled");
+    expect(settled.thread.settledAt).toBe("2026-07-30T00:02:00.000Z");
+    expect(active.thread.settledOverride).toBe("active");
+    expect(active.thread.settledAt).toBeNull();
+  });
+
+  it("retains catalog activity for inactivity-based settlement", () => {
+    const snapshot = projectPiThread({
+      record: {
+        ...record,
+        lastActivityAt: "2026-07-20T00:00:00.000Z",
+      },
+      entries: [],
+      projectId: ProjectId.make("project-1"),
+    });
+
+    expect(snapshot.thread.latestTurn?.requestedAt).toBe("2026-07-20T00:00:00.000Z");
+    expect(snapshot.thread.settledOverride).toBeNull();
+  });
+
+  it("uses catalog model metadata when shell projection omits history", () => {
+    const snapshot = projectPiThread({
+      record: {
+        ...record,
+        model: "openai-codex/gpt-5.6-sol",
+      },
+      entries: [],
+      projectId: ProjectId.make("project-1"),
+    });
+
+    expect(snapshot.thread.modelSelection.model).toBe("openai-codex/gpt-5.6-sol");
+  });
+
+  it("does not advertise images without an external asset resolver", () => {
+    const runtime = {
+      runtimeId: PiNativeRuntimeId.make("runtime-1"),
+      writerKind: "rpc",
+      status: "idle",
+      sequence: 1,
+    } as const;
+    expect(projectPiBacking(record, runtime).capabilities.attachments).toBe(false);
+    expect(
+      projectPiBacking(record, {
+        ...runtime,
+        writerKind: "tuiBridge",
+      }).capabilities.attachments,
+    ).toBe(false);
+  });
+
+  it("marks reconnect history when the bounded live overlay omitted events", () => {
+    const snapshot = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+    });
+    const projected = projectPiThreadOverlay(snapshot, record, [], record.updatedAt, 2);
+
+    expect(projected.thread.historyTruncation).toMatchObject({
+      truncated: true,
+      omittedEntryCount: 2,
+    });
+  });
+
+  it("projects queued steering and follow-up intent outside timeline history", () => {
+    const snapshot = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+    });
+    const projected = projectPiThreadOverlay(snapshot, record, [
+      {
+        type: "event",
+        sequence: 8,
+        event: {
+          type: "event",
+          event: "queue_update",
+          data: {
+            steering: ["adjust this"],
+            followUp: ["then test"],
+            omittedSteering: 1,
+            omittedFollowUp: 0,
+          },
+        },
+      } as never,
+    ]);
+
+    expect(projected.thread.pendingComposerIntents).toEqual([
+      { behavior: "steer", text: "adjust this" },
+      { behavior: "followUp", text: "then test" },
+    ]);
+    expect(projected.thread.pendingComposerIntentOmittedCount).toBe(1);
+    expect(projected.thread.messages.map((message) => message.text)).not.toContain("adjust this");
+  });
+
+  it("does not associate an earlier assistant with a later user turn", () => {
+    const snapshot = projectPiThread({
+      record,
+      entries: entries.slice(0, 3),
+      projectId: ProjectId.make("project-1"),
+    });
+
+    expect(snapshot.thread.latestTurn?.assistantMessageId).toBeNull();
+  });
+
+  it("projects live text prompts without unsupported attachment metadata", () => {
+    const event = projectPiLiveEvent({
+      record,
+      runtime: {
+        runtimeId: PiNativeRuntimeId.make("runtime-1"),
+        writerKind: "rpc",
+        status: "streaming",
+        sequence: 9,
+      },
+      item: {
+        type: "event",
+        runtimeId: PiNativeRuntimeId.make("runtime-1"),
+        sequence: 9,
+        eventId: "runtime:9" as never,
+        event: {
+          type: "message_start",
+          messageId: "client-message",
+          message: { role: "user", content: [{ type: "text", text: "new prompt" }] },
+        },
+      },
+      activeTurnId: null,
+      occurredAt: record.updatedAt,
+    });
+
+    if (event?.type !== "thread.message-sent") {
+      throw new Error("expected projected user message");
+    }
+    expect(event.payload.messageId).toBe("client-message");
+    expect(event.payload).not.toHaveProperty("attachments");
+  });
+
+  it("keeps a delivered user prompt visible during streaming before jsonl settles", () => {
+    const snapshot = projectPiThread({
+      record,
+      entries,
+      projectId: ProjectId.make("project-1"),
+      runtime: {
+        runtimeId: PiNativeRuntimeId.make("runtime-1"),
+        writerKind: "rpc",
+        status: "streaming",
+        sequence: 8,
+      },
+    });
+    const projected = projectPiThreadOverlay(snapshot, record, [
+      {
+        type: "event",
+        sequence: 9,
+        eventId: "runtime:9",
+        event: {
+          type: "message_start",
+          messageId: "client-message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "new prompt" }],
+          },
+        },
+      } as never,
+      {
+        type: "event",
+        sequence: 10,
+        eventId: "runtime:10",
+        event: {
+          type: "message_update",
+          update: {
+            partial: {
+              content: [{ type: "text", text: "streaming answer" }],
+            },
+          },
+        },
+      } as never,
+    ]);
+
+    expect(projected.thread.messages.findLast((message) => message.role === "user")?.text).toBe(
+      "new prompt",
+    );
+    expect(projected.thread.messages.at(-1)?.turnId).toBe(projected.thread.latestTurn?.turnId);
+    expect(projected.thread.latestTurn?.state).toBe("running");
+    expect(projected.thread.session?.activeTurnId).toBe(projected.thread.latestTurn?.turnId);
+  });
+
+  it("reconciles a retained live prompt with its persisted jsonl message", () => {
+    const persistedEntries = [
+      ...entries,
+      {
+        type: "custom",
+        customType: "t3.message-id.v1",
+        data: { version: 1, messageId: "client-message" },
+        id: "message-id",
+        parentId: "tool-result",
+        timestamp: "2026-07-30T00:00:05.500Z",
+      },
+      {
+        type: "custom",
+        customType: "other-extension",
+        data: { value: true },
+        id: "intervening-custom",
+        parentId: "message-id",
+        timestamp: "2026-07-30T00:00:05.750Z",
+      },
+      {
+        type: "message",
+        id: "user-3",
+        parentId: "intervening-custom",
+        timestamp: "2026-07-30T00:00:06.000Z",
+        message: { role: "user", content: [{ type: "text", text: "same prompt" }] },
+      },
+    ];
+    const snapshot = projectPiThread({
+      record,
+      entries: persistedEntries,
+      projectId: ProjectId.make("project-1"),
+      runtime: {
+        runtimeId: PiNativeRuntimeId.make("runtime-1"),
+        writerKind: "rpc",
+        status: "streaming",
+        sequence: 9,
+      },
+    });
+    const projected = projectPiThreadOverlay(snapshot, record, [
+      {
+        type: "event",
+        sequence: 9,
+        eventId: "runtime:9",
+        event: {
+          type: "message_start",
+          messageId: "client-message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "same prompt" }],
+          },
+        },
+      } as never,
+    ]);
+
+    expect(
+      projected.thread.messages.filter((message) => message.text === "same prompt"),
+    ).toHaveLength(1);
+    expect(projected.thread.messages.find((message) => message.text === "same prompt")?.id).toBe(
+      "client-message",
+    );
+    expect(projected.thread.latestTurn?.turnId).toBe(snapshot.thread.latestTurn?.turnId);
+  });
+
+  it("keeps correlated live and persisted prompts merged after assistant output", () => {
+    const persistedEntries = [
+      ...entries,
+      {
+        type: "custom",
+        customType: "t3.message-id.v1",
+        data: { version: 1, messageId: "client-message" },
+        id: "message-id",
+        parentId: "tool-result",
+        timestamp: "2026-07-30T00:00:05.500Z",
+      },
+      {
+        type: "message",
+        id: "user-3",
+        parentId: "message-id",
+        timestamp: "2026-07-30T00:00:06.000Z",
+        message: { role: "user", content: [{ type: "text", text: "same prompt" }] },
+      },
+      {
+        type: "message",
+        id: "assistant-3",
+        parentId: "user-3",
+        timestamp: "2026-07-30T00:00:07.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "working" }] },
+      },
+    ];
+    const snapshot = projectPiThread({
+      record,
+      entries: persistedEntries,
+      projectId: ProjectId.make("project-1"),
+      runtime: {
+        runtimeId: PiNativeRuntimeId.make("runtime-1"),
+        writerKind: "rpc",
+        status: "streaming",
+        sequence: 9,
+      },
+    });
+    const projected = projectPiThreadOverlay(snapshot, record, [
+      {
+        type: "event",
+        sequence: 9,
+        eventId: "runtime:9",
+        event: {
+          type: "message_start",
+          messageId: "client-message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "same prompt" }],
+          },
+        },
+      } as never,
+    ]);
+
+    expect(projected.thread.messages.filter((message) => message.text === "same prompt")).toEqual([
+      expect.objectContaining({
+        id: "client-message",
+        turnId: snapshot.thread.latestTurn?.turnId,
+      }),
+    ]);
+  });
+
+  it("keeps a correlated repeated prompt separate from an assistant-less turn", () => {
+    const persistedEntries = [
+      ...entries,
+      {
+        type: "message",
+        id: "user-3",
+        parentId: "tool-result",
+        timestamp: "2026-07-30T00:00:06.000Z",
+        message: { role: "user", content: [{ type: "text", text: "same prompt" }] },
+      },
+    ];
+    const snapshot = projectPiThread({
+      record,
+      entries: persistedEntries,
+      projectId: ProjectId.make("project-1"),
+      runtime: {
+        runtimeId: PiNativeRuntimeId.make("runtime-1"),
+        writerKind: "rpc",
+        status: "streaming",
+        sequence: 9,
+      },
+    });
+    const projected = projectPiThreadOverlay(snapshot, record, [
+      {
+        type: "event",
+        sequence: 9,
+        eventId: "runtime:9",
+        event: {
+          type: "message_start",
+          messageId: "client-message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "same prompt" }],
+          },
+        },
+      } as never,
+    ]);
+
+    expect(
+      projected.thread.messages.filter((message) => message.text === "same prompt"),
+    ).toHaveLength(2);
+    expect(projected.thread.messages.at(-1)?.id).toBe("client-message");
+  });
+});
+
+it.layer(SqlitePersistenceMemory)("Pi external history ownership", (it) => {
+  it.effect("projects history without creating orchestration sqlite rows", () =>
+    Effect.gen(function* () {
+      projectPiThread({
+        record,
+        entries,
+        projectId: ProjectId.make("project-1"),
+      });
+      const sql = yield* SqlClient.SqlClient;
+      const [counts] = yield* sql<{
+        readonly threads: number;
+        readonly messages: number;
+        readonly activities: number;
+        readonly events: number;
+      }>`
+        SELECT
+          (SELECT COUNT(*) FROM projection_threads) AS threads,
+          (SELECT COUNT(*) FROM projection_thread_messages) AS messages,
+          (SELECT COUNT(*) FROM projection_thread_activities) AS activities,
+          (SELECT COUNT(*) FROM orchestration_events) AS events
+      `;
+
+      expect(counts).toEqual({ threads: 0, messages: 0, activities: 0, events: 0 });
+    }),
+  );
+});

@@ -983,6 +983,7 @@ export function deriveMessagesTimelineRows(input: {
       entry.kind !== "work" ||
       entry.entry.questionAnswer !== undefined ||
       entry.entry.sourceActivityKind === "context-compaction" ||
+      entry.entry.sourceActivityKind === "session.recap" ||
       entry.entry.tone === "error"
     ) {
       break;
@@ -1174,6 +1175,7 @@ export function deriveMessagesTimelineRows(input: {
       }
       if (
         timelineEntry.entry.agentSpawn !== undefined ||
+        timelineEntry.entry.sourceActivityKind === "session.recap" ||
         timelineEntry.entry.questionAnswer !== undefined ||
         timelineEntry.entry.tone === "error" ||
         inlineImagePath !== null
@@ -1203,6 +1205,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.entry.agentSpawn !== undefined ||
           nextEntry.entry.questionAnswer !== undefined ||
           nextEntry.entry.sourceActivityKind === "context-compaction" ||
+          nextEntry.entry.sourceActivityKind === "session.recap" ||
           nextEntry.entry.tone === "error" ||
           workEntryShowsInlineImage(nextEntry.entry) ||
           activeWorkEntryIds.has(nextEntry.id) ||

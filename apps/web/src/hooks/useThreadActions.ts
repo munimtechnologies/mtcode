@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import { threadAllows } from "@t3tools/client-runtime/state/threads";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
@@ -51,6 +52,32 @@ export class ThreadArchiveBlockedError extends Schema.TaggedError<ThreadArchiveB
   override get message(): string {
     return "Cannot archive a running thread.";
   }
+}
+
+export class ThreadCapabilityBlockedError extends Schema.TaggedError<ThreadCapabilityBlockedError>()(
+  "ThreadCapabilityBlockedError",
+  {
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+  },
+) {
+  override get message(): string {
+    return "This action is controlled by the thread's backing source.";
+  }
+}
+
+function capabilityFailure(thread: {
+  readonly environmentId: EnvironmentId;
+  readonly id: ThreadId;
+}) {
+  return AsyncResult.failure(
+    Cause.fail(
+      new ThreadCapabilityBlockedError({
+        environmentId: thread.environmentId,
+        threadId: thread.id,
+      }),
+    ),
+  );
 }
 
 export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadSettlementUnsupportedError>()(
@@ -267,6 +294,7 @@ export function useThreadActions() {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
+      if (!threadAllows(thread, "archive")) return capabilityFailure(thread);
       if (thread.session?.status === "running" && thread.session.activeTurnId != null) {
         return AsyncResult.failure(
           Cause.fail(
@@ -340,6 +368,7 @@ export function useThreadActions() {
         return result;
       }
       const { thread, threadRef } = resolved;
+      if (!threadAllows(thread, "delete")) return capabilityFailure(thread);
       const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
         const shell = readThreadShell(ref);
         return shell === null ? [] : [shell];
@@ -525,6 +554,9 @@ export function useThreadActions() {
         );
       }
       const resolved = resolveThreadTarget(target);
+      if (resolved && !threadAllows(resolved.thread, "settle")) {
+        return capabilityFailure(resolved.thread);
+      }
       const wokeAt = resolved
         ? threadWokeAt(resolved.thread, { now: new Date().toISOString() })
         : null;
@@ -544,6 +576,10 @@ export function useThreadActions() {
 
   const unsettleThread = useCallback(
     async (target: ScopedThreadRef) => {
+      const resolved = resolveThreadTarget(target);
+      if (resolved && !threadAllows(resolved.thread, "unsettle")) {
+        return capabilityFailure(resolved.thread);
+      }
       if (!readEnvironmentSupportsSettlement(target.environmentId)) {
         return AsyncResult.failure(
           Cause.fail(
@@ -561,7 +597,7 @@ export function useThreadActions() {
         input: { threadId: target.threadId, reason: "user" },
       });
     },
-    [unsettleThreadMutation],
+    [resolveThreadTarget, unsettleThreadMutation],
   );
 
   /** Turns automatic settlement (inactivity, merged PR) on or off for one thread. */
@@ -723,6 +759,9 @@ export function useThreadActions() {
         resolved &&
         !canSnooze(resolved.thread, { now: new Date().toISOString() })
       ) {
+      if (resolved && !threadAllows(resolved.thread, "lifecycle")) {
+        return capabilityFailure(resolved.thread);
+      }
         return AsyncResult.failure(
           Cause.fail(
             new ThreadSnoozeBlockedError({
@@ -742,6 +781,10 @@ export function useThreadActions() {
 
   const unsnoozeThread = useCallback(
     async (target: ScopedThreadRef) => {
+      const resolved = resolveThreadTarget(target);
+      if (resolved && !threadAllows(resolved.thread, "lifecycle")) {
+        return capabilityFailure(resolved.thread);
+      }
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
         return AsyncResult.failure(
           Cause.fail(
@@ -757,7 +800,7 @@ export function useThreadActions() {
         input: { threadId: target.threadId, reason: "user" },
       });
     },
-    [unsnoozeThreadMutation],
+    [resolveThreadTarget, unsnoozeThreadMutation],
   );
 
   const confirmAndDeleteThread = useCallback(

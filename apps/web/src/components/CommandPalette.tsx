@@ -28,6 +28,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   type DesktopWslState,
+  CommandId,
   type EnvironmentId,
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
@@ -86,6 +87,7 @@ import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
+import { piExternalEnvironment } from "../state/shell";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { pullRequestEnvironment } from "../state/pullRequests";
@@ -134,6 +136,7 @@ import {
   isMacPlatform,
   isWindowsPlatform,
   newProjectId,
+  randomUUID,
 } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { SshPasswordRequestDialog, useSshPasswordRequest } from "./SshPasswordRequestDialog";
@@ -187,7 +190,11 @@ import {
   ThreadCommandSubtitle,
 } from "./ThreadCommandSubtitle";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
-import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
+import {
+  environmentServerConfigsAtom,
+  primaryServerKeybindingsAtom,
+  primaryServerProvidersAtom,
+} from "../state/server";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
@@ -196,6 +203,31 @@ import { Kbd, KbdGroup } from "./ui/kbd";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
+
+const NATIVE_PI_CREATE_COMMAND_PREFIX = "t3-native-pi-create:";
+function nativePiCreateCommandId(projectKey: string): CommandId | null {
+  const key = `${NATIVE_PI_CREATE_COMMAND_PREFIX}${projectKey}`;
+  try {
+    const existing = window.sessionStorage.getItem(key);
+    if (existing !== null) return CommandId.make(existing);
+    const created = randomUUID();
+    window.sessionStorage.setItem(key, created);
+    return CommandId.make(created);
+  } catch {
+    return null;
+  }
+}
+
+function clearNativePiCreateCommandId(projectKey: string, commandId: CommandId): boolean {
+  const key = `${NATIVE_PI_CREATE_COMMAND_PREFIX}${projectKey}`;
+  try {
+    if (window.sessionStorage.getItem(key) !== commandId) return false;
+    window.sessionStorage.removeItem(key);
+    return window.sessionStorage.getItem(key) === null;
+  } catch {
+    return false;
+  }
+}
 import type { ChatComposerHandle } from "./chat/ChatComposer";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -667,6 +699,9 @@ function OpenCommandPaletteDialog(props: {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
+  const createNativePiSession = useAtomCommand(piExternalEnvironment.createSession, {
+    reportFailure: false,
+  });
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
@@ -689,6 +724,7 @@ function OpenCommandPaletteDialog(props: {
   const startComputerThread = useStartComputerThread();
   const { runGoalAction, showGoalStatus } = useThreadGoalActions();
   const projects = useProjects();
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const referenceThreadRef =
     pathname === "/pull-requests"
       ? environments.some(
@@ -1722,6 +1758,17 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  const nativePiProjectRef = activeThread
+    ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
+    : defaultProjectRef;
+  const nativePiProject =
+    nativePiProjectRef === null
+      ? undefined
+      : projects.find(
+          (project) =>
+            project.environmentId === nativePiProjectRef.environmentId &&
+            project.id === nativePiProjectRef.projectId,
+        );
 
   actionItems.push({
     kind: "action",
@@ -1787,6 +1834,66 @@ function OpenCommandPaletteDialog(props: {
         keepOpen: true,
         run: async () => {
           openOverlayMode("import");
+        },
+      });
+    }
+    if (
+      nativePiProject &&
+      serverConfigs.get(nativePiProject.environmentId)?.environment.capabilities
+        .piExternalThreads === true
+    ) {
+      actionItems.push({
+        kind: "action",
+        value: "action:new-native-pi-session",
+        searchTerms: ["new native pi session", "pi", "external thread"],
+        title: `New native Pi session in ${nativePiProject.title}`,
+        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          const projectKey = `${nativePiProject.environmentId}:${nativePiProject.id}:${nativePiProject.workspaceRoot}`;
+          const commandId = nativePiCreateCommandId(projectKey);
+          if (commandId === null) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Could not save native Pi task",
+                description:
+                  "Browser storage is unavailable. Native Pi cannot start safely until storage is restored.",
+              }),
+            );
+            return;
+          }
+          const result = await createNativePiSession({
+            environmentId: nativePiProject.environmentId,
+            input: { cwd: nativePiProject.workspaceRoot, commandId },
+          });
+          if (result._tag === "Failure") {
+            const cause = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Could not create native Pi session",
+                description:
+                  cause instanceof Error ? cause.message : "An unexpected error occurred.",
+              }),
+            );
+            return;
+          }
+          if (!clearNativePiCreateCommandId(projectKey, commandId)) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "warning",
+                title: "Native Pi started, but storage cleanup failed",
+                description:
+                  "Restore browser storage before starting another native Pi session in this project.",
+              }),
+            );
+          }
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(nativePiProject.environmentId, result.value.threadId),
+            ),
+          });
         },
       });
     }

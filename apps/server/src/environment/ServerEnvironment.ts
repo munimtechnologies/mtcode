@@ -258,6 +258,7 @@ export const make = Effect.gen(function* () {
       usagePriceOverrides: true,
       threadPinning: true,
       threadPinReorder: true,
+      piExternalThreads: true,
       threadActiveReorder: true,
       threadAutoSettleOptOut: true,
       threadVisitedTracking: true,

@@ -1,0 +1,162 @@
+import type {
+  ClientOrchestrationCommand,
+  DispatchResult,
+  OrchestrationSubscribeThreadInput,
+  OrchestrationThreadDetailWindow,
+  OrchestrationThreadDetailSnapshot,
+  OrchestrationThreadStreamItem,
+  ThreadId,
+} from "@t3tools/contracts";
+import {
+  OrchestrationDispatchCommandError,
+  OrchestrationGetSnapshotError,
+} from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
+
+import {
+  type PiExternalThreadSource,
+  isPiExternalThreadId,
+} from "../../piNative/PiExternalThreadSource.ts";
+import { projectActivityEvent, projectThreadDetailSnapshot } from "../ActivityPayloadProjection.ts";
+import { makeLiveStreamBudget, type RetainedLiveItem } from "../LiveStreamBudget.ts";
+import type { ProjectionSnapshotQuery } from "./ProjectionSnapshotQuery.ts";
+
+type ExternalSource = Option.Option<PiExternalThreadSource["Service"]>;
+
+const missingExternalSource = () =>
+  new OrchestrationGetSnapshotError({
+    message: "External pi threads are unavailable",
+  });
+
+export function getClientThreadDetailSnapshot(
+  threadId: ThreadId,
+  external: ExternalSource,
+  internal: ProjectionSnapshotQuery["Service"],
+  window?: OrchestrationThreadDetailWindow,
+): Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, OrchestrationGetSnapshotError> {
+  if (isPiExternalThreadId(threadId)) {
+    return Option.match(external, {
+      onNone: () => Effect.fail(missingExternalSource()),
+      onSome: (source) =>
+        source.threadSnapshot(threadId).pipe(
+          Effect.map(projectThreadDetailSnapshot),
+          Effect.map(Option.some),
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationGetSnapshotError({
+                message: `Failed to load external thread ${threadId}`,
+                code: cause.code,
+                cause,
+              }),
+          ),
+        ),
+    });
+  }
+  return internal.getThreadDetailSnapshot(threadId, window).pipe(
+    Effect.map(Option.map(projectThreadDetailSnapshot)),
+    Effect.mapError(
+      (cause) =>
+        new OrchestrationGetSnapshotError({
+          message: `Failed to load thread ${threadId}`,
+          cause,
+        }),
+    ),
+  );
+}
+
+export function getExternalThreadSubscription(
+  input: OrchestrationSubscribeThreadInput,
+  external: ExternalSource,
+): Stream.Stream<OrchestrationThreadStreamItem, OrchestrationGetSnapshotError> | null {
+  if (!isPiExternalThreadId(input.threadId)) return null;
+  return Option.match(external, {
+    onNone: () => Stream.fail(missingExternalSource()),
+    onSome: (source) =>
+      source.subscribeThread(input).pipe(
+        Stream.map((item) => {
+          if (item.kind === "snapshot") {
+            return {
+              ...item,
+              snapshot: projectThreadDetailSnapshot(item.snapshot),
+            };
+          }
+          if (item.kind === "event") {
+            return {
+              ...item,
+              event: projectActivityEvent(item.event),
+            };
+          }
+          return item;
+        }),
+        Stream.mapError(
+          (cause) =>
+            new OrchestrationGetSnapshotError({
+              message: `Failed to subscribe to external thread ${input.threadId}`,
+              cause,
+            }),
+        ),
+      ),
+  });
+}
+
+export const makeBoundedExternalThreadSubscription = Effect.fn(
+  "ClientThreadRouter.makeBoundedExternalThreadSubscription",
+)(function* (
+  source: Stream.Stream<OrchestrationThreadStreamItem, OrchestrationGetSnapshotError>,
+  limits?: {
+    readonly maxItems?: number;
+    readonly maxSerializedBytes?: number;
+  },
+) {
+  const budget = yield* makeLiveStreamBudget(limits);
+  const output = yield* Queue.unbounded<
+    RetainedLiveItem<OrchestrationThreadStreamItem>,
+    OrchestrationGetSnapshotError | Cause.Done<void>
+  >();
+  yield* Effect.addFinalizer(() => Queue.shutdown(output));
+  yield* source.pipe(
+    Stream.runForEach((item) =>
+      budget.retain(item).pipe(
+        Effect.flatMap((retained) => Queue.offer(output, retained)),
+        Effect.uninterruptible,
+      ),
+    ),
+    Effect.raceFirst(budget.failed),
+    Effect.matchCauseEffect({
+      onFailure: (cause) => Queue.failCause(output, cause),
+      onSuccess: () => Queue.end(output),
+    }),
+    Effect.forkScoped({ startImmediately: true }),
+  );
+  return budget.deliver(Stream.fromQueue(output));
+});
+
+export function getExternalThreadDispatch(
+  command: ClientOrchestrationCommand,
+  external: ExternalSource,
+): Effect.Effect<DispatchResult, OrchestrationDispatchCommandError> | null {
+  if (!("threadId" in command) || !isPiExternalThreadId(command.threadId)) return null;
+  return Option.match(external, {
+    onNone: () =>
+      Effect.fail(
+        new OrchestrationDispatchCommandError({
+          message: "External pi threads are unavailable",
+        }),
+      ),
+    onSome: (source) =>
+      source.dispatch(command).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message: "Failed to dispatch external pi command",
+              code: cause.code,
+              cause,
+            }),
+        ),
+      ),
+  });
+}

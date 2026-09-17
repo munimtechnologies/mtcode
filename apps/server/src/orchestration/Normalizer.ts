@@ -137,6 +137,14 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     ) {
       return canonicalCommand as OrchestrationCommand;
     }
+    if (
+      canonicalCommand.type === "thread.turn.start" &&
+      canonicalCommand.streamingBehavior !== undefined
+    ) {
+      return yield* new OrchestrationDispatchCommandError({
+        message: "Streaming behavior is unsupported for internal threads.",
+      });
+    }
 
     const attachments =
       canonicalCommand.type === "thread.turn.start"

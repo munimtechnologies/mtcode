@@ -635,6 +635,58 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const ExternalThreadCapabilities = Schema.Struct({
+  send: Schema.Boolean,
+  attachments: Schema.Boolean,
+  streamingBehaviors: Schema.Array(Schema.Literals(["steer", "followUp"])),
+  interrupt: Schema.Boolean,
+  stop: Schema.Boolean,
+  rename: Schema.Boolean,
+  archive: Schema.Boolean,
+  settle: Schema.optional(Schema.Boolean),
+  unsettle: Schema.optional(Schema.Boolean),
+  delete: Schema.Boolean,
+  changeModel: Schema.Boolean,
+  changeRuntimeMode: Schema.Boolean,
+  changeInteractionMode: Schema.Boolean,
+  checkpoints: Schema.Boolean,
+});
+export type ExternalThreadCapabilities = typeof ExternalThreadCapabilities.Type;
+
+export const ExternalThreadBacking = Schema.Struct({
+  kind: Schema.Literal("external"),
+  source: Schema.Literal("pi"),
+  sourceKey: TrimmedNonEmptyString,
+  control: Schema.Literals(["live", "resumable", "readOnly"]),
+  runtimePresence: Schema.optional(Schema.Literals(["connected", "unknown"])),
+  capabilities: ExternalThreadCapabilities,
+});
+export type ExternalThreadBacking = typeof ExternalThreadBacking.Type;
+
+/** A catalog location is not evidence of where a session originated or still runs. */
+export function threadEnvironmentAttribution(
+  backing: ExternalThreadBacking | undefined,
+  environmentLabel: string | null,
+): string | null {
+  if (backing === undefined) return environmentLabel;
+  const host = environmentLabel ?? "this host";
+  return backing.runtimePresence === "connected"
+    ? `live on ${host}`
+    : `copy on ${host} · runtime unknown`;
+}
+
+export const ExternalThreadHistoryTruncation = Schema.Struct({
+  truncated: Schema.Boolean,
+  omittedEntryCount: Schema.optional(NonNegativeInt),
+  missingParentId: Schema.optional(TrimmedNonEmptyString),
+});
+export type ExternalThreadHistoryTruncation = typeof ExternalThreadHistoryTruncation.Type;
+export const ExternalThreadPendingComposerIntent = Schema.Struct({
+  behavior: Schema.Literals(["steer", "followUp"]),
+  text: Schema.String,
+});
+export type ExternalThreadPendingComposerIntent = typeof ExternalThreadPendingComposerIntent.Type;
+
 // Version changes even when a manual rename keeps the same text.
 export const ThreadTitleState = Schema.Struct({
   source: Schema.Literals(["manual", "generated"]),
@@ -832,6 +884,10 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  backing: Schema.optional(ExternalThreadBacking),
+  historyTruncation: Schema.optional(ExternalThreadHistoryTruncation),
+  pendingComposerIntents: Schema.optional(Schema.Array(ExternalThreadPendingComposerIntent)),
+  pendingComposerIntentOmittedCount: Schema.optional(NonNegativeInt),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -929,6 +985,8 @@ export const OrchestrationThreadShell = Schema.Struct({
       }),
     ),
   ),
+  backing: Schema.optional(ExternalThreadBacking),
+  pendingComposerIntentCount: Schema.optional(NonNegativeInt),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -936,6 +994,8 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  externalOmittedProjectCount: Schema.optional(NonNegativeInt),
+  externalOmittedThreadCount: Schema.optional(NonNegativeInt),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -1103,10 +1163,14 @@ const ProjectDeleteCommand = Schema.Struct({
   force: Schema.optional(Schema.Boolean),
 });
 
+const InternalThreadId = ThreadId.pipe(
+  Schema.refine((threadId): threadId is ThreadId => !threadId.startsWith("external:pi:")),
+);
+
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
-  threadId: ThreadId,
+  threadId: InternalThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
@@ -1432,6 +1496,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   // Server-authored only: ClientThreadTurnStartCommand intentionally omits
   // this field so clients and providers cannot forge another thread's identity.
   sourceThreadMessage: Schema.optional(SourceThreadMessageReference),
+  streamingBehavior: Schema.optional(Schema.Literals(["steer", "followUp"])),
   createdAt: IsoDateTime,
 });
 
@@ -1473,6 +1538,8 @@ export const ThreadMessageCorrectCommand = Schema.Struct({
   expectedText: Schema.String,
   replacementText: Schema.String,
   modelSelection: Schema.optional(ModelSelection),
+  streamingBehavior: Schema.optional(Schema.Literals(["steer", "followUp"])),
+  externalResume: Schema.optional(Schema.Literal("takeover")),
   createdAt: IsoDateTime,
 });
 
@@ -2640,6 +2707,7 @@ export type ProjectionPendingApprovalDecision = typeof ProjectionPendingApproval
 
 export const DispatchResult = Schema.Struct({
   sequence: NonNegativeInt,
+  deliveryStatus: Schema.optional(Schema.Literals(["completed", "indeterminate"])),
 });
 export type DispatchResult = typeof DispatchResult.Type;
 
@@ -2879,6 +2947,7 @@ export class OrchestrationGetSnapshotError extends Schema.TaggedError<Orchestrat
   "OrchestrationGetSnapshotError",
   {
     message: TrimmedNonEmptyString,
+    code: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
@@ -2887,6 +2956,7 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedError<Orches
   "OrchestrationDispatchCommandError",
   {
     message: TrimmedNonEmptyString,
+    code: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
     bootstrapThreadDisposition: Schema.optional(Schema.Literal("deleted")),
   },

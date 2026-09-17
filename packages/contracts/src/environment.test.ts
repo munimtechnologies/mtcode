@@ -61,6 +61,13 @@ describe("ExecutionEnvironmentDescriptor", () => {
         homeDirectory: "/Users/me",
       }).homeDirectory,
     ).toBe("/Users/me");
+  it("preserves the native Pi external-thread capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, piExternalThreads: true },
+      }).capabilities.piExternalThreads,
+    ).toBe(true);
   });
 
   it("treats a missing attachment upload capability as unsupported", () => {

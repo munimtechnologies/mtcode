@@ -320,6 +320,13 @@ import {
   VoiceWebSearchInput,
   VoiceWebSearchResult,
 } from "./voice.ts";
+import {
+  PiExternalCatalogStreamItem,
+  PiExternalCatalogSubscribeInput,
+  PiExternalCreateSessionInput,
+  PiExternalCreateSessionResult,
+  PiNativeError,
+} from "./piNative.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -504,6 +511,10 @@ export const WS_METHODS = {
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
   subscribeProjectClones: "subscribeProjectClones",
+
+  // External-backed pi threads
+  piExternalSubscribeCatalog: "piExternal.subscribeCatalog",
+  piExternalCreateSession: "piExternal.createSession",
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
@@ -1672,6 +1683,18 @@ const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   stream: true,
 });
 
+export const WsPiExternalCreateSessionRpc = Rpc.make(WS_METHODS.piExternalCreateSession, {
+  payload: PiExternalCreateSessionInput,
+  success: PiExternalCreateSessionResult,
+  error: Schema.Union([PiNativeError, EnvironmentAuthorizationError]),
+});
+export const WsPiExternalSubscribeCatalogRpc = Rpc.make(WS_METHODS.piExternalSubscribeCatalog, {
+  payload: PiExternalCatalogSubscribeInput,
+  success: PiExternalCatalogStreamItem,
+  error: Schema.Union([PiNativeError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 const WsSubscribeBackgroundPolicyRpc = Rpc.make(WS_METHODS.subscribeBackgroundPolicy, {
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
@@ -1687,6 +1710,8 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
 });
 
 export const WsRpcGroup = RpcGroup.make(
+  WsPiExternalCreateSessionRpc,
+  WsPiExternalSubscribeCatalogRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

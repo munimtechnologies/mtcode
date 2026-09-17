@@ -10,6 +10,7 @@ import * as CliError from "effect/unstable/cli/CliError";
 
 import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
+import { runSupervisorDaemon } from "./piNative/SupervisorDaemon.ts";
 import { authCommand } from "./cli/auth.ts";
 import { appCommand } from "./cli/app.ts";
 import { connectCommand } from "./cli/connect.ts";
@@ -91,6 +92,11 @@ const connectUnavailableCommand = Command.make("connect", {
   ),
 );
 
+export const piSupervisorCommand = Command.make("pi-supervisor").pipe(
+  Command.unlisted,
+  Command.withHandler(() => Effect.promise(runSupervisorDaemon)),
+);
+
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
   Command.make("t3", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription(
@@ -127,6 +133,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       sshHelperCommand,
       themeCommand,
       triageCommand,
+      piSupervisorCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
   );

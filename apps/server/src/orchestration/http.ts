@@ -7,7 +7,6 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
-import { projectThreadDetailSnapshot } from "./ActivityPayloadProjection.ts";
 import { cleanupFailedUploadedAttachments, normalizeDispatchCommand } from "./Normalizer.ts";
 import {
   annotateEnvironmentRequest,
@@ -19,6 +18,23 @@ import {
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+import {
+  getClientThreadDetailSnapshot,
+  getExternalThreadDispatch,
+} from "./Services/ClientThreadRouter.ts";
+import { PiExternalThreadSource } from "../piNative/PiExternalThreadSource.ts";
+
+const externalInvalidRequestCodes = new Set([
+  "attachments_unsupported",
+  "command_rejected",
+  "interrupt_unsupported",
+  "invalid_attachment",
+  "read_only",
+  "runtime_starting",
+  "stop_unsupported",
+  "streaming_behavior_required",
+  "unsupported_external_mutation",
+]);
 
 export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
@@ -26,6 +42,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
+    const piExternalSource = yield* Effect.serviceOption(PiExternalThreadSource);
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
 
     return handlers
@@ -67,27 +84,27 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.threadSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          const snapshot = yield* projectionSnapshotQuery
-            .getThreadDetailSnapshot(
-              args.params.threadId,
-              args.payload.turnLimit === undefined
-                ? undefined
-                : {
-                    turnLimit: args.payload.turnLimit,
-                    ...(args.payload.beforeCursor !== undefined
-                      ? { beforeCursor: args.payload.beforeCursor }
-                      : {}),
-                  },
-            )
-            .pipe(
-              Effect.catch((cause) =>
-                failEnvironmentInternal("orchestration_thread_snapshot_failed", cause),
-              ),
-            );
+          const snapshot = yield* getClientThreadDetailSnapshot(
+            args.params.threadId,
+            piExternalSource,
+            projectionSnapshotQuery,
+            args.payload.turnLimit === undefined
+              ? undefined
+              : {
+                  turnLimit: args.payload.turnLimit,
+                  ...(args.payload.beforeCursor !== undefined
+                    ? { beforeCursor: args.payload.beforeCursor }
+                    : {}),
+                },
+          ).pipe(
+            Effect.catch((cause) =>
+              failEnvironmentInternal("orchestration_thread_snapshot_failed", cause),
+            ),
+          );
           if (Option.isNone(snapshot)) {
             return yield* failEnvironmentNotFound("thread_not_found");
           }
-          return projectThreadDetailSnapshot(snapshot.value);
+          return snapshot.value;
         }),
       )
       .handle(
@@ -95,6 +112,22 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.dispatch")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          const externalDispatch = getExternalThreadDispatch(args.payload, piExternalSource);
+          if (externalDispatch !== null) {
+            return yield* externalDispatch.pipe(
+              Effect.catch((cause) =>
+                Effect.gen(function* () {
+                  if (cause.code === "thread_not_found") {
+                    return yield* failEnvironmentNotFound("thread_not_found");
+                  }
+                  if (externalInvalidRequestCodes.has(cause.code ?? "")) {
+                    return yield* failEnvironmentInvalidRequest("invalid_command");
+                  }
+                  return yield* failEnvironmentInternal("orchestration_dispatch_failed", cause);
+                }),
+              ),
+            );
+          }
           yield* ProjectCloneTracker.rejectCommandsDuringClone(
             projectCloneTracker,
             args.payload,

@@ -1,6 +1,7 @@
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import { threadEnvironmentAttribution } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
@@ -257,7 +258,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import { getProviderModelCapabilities } from "../providerModels";
@@ -306,10 +307,12 @@ import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
   finalizePromotedDraftThreadByRef,
+  flushComposerDraftStorage,
   markPromotedDraftThreadByRef,
   restoreFailedBackgroundDraftThread,
   useComposerDraftStore,
   DraftId,
+  type TakeoverRetryIdentity,
 } from "../composerDraftStore";
 import {
   latestTurnUsage as latestTurnUsageFrom,
@@ -359,6 +362,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import {
   requestOlderThreadTurns,
+  threadAllows,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
@@ -440,6 +444,7 @@ import {
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveChatIsWorking,
+  createTakeoverRetryIdentity,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
   hasEnvironmentReconnectWarningGraceElapsed,
@@ -447,6 +452,10 @@ import {
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
+  isPiNativeCommandRejected,
+  isQueuedSendBlocked,
+  isTakeoverDeliveryIndeterminate,
+  matchTakeoverRetryIdentity,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldShowBranchMismatchBanner,
@@ -473,6 +482,7 @@ import {
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   resolveDraftHeroState,
+  resolveExternalResumeForSend,
   findRecordedWorktreeSetup,
   resolveVisibleWorktreeSetup,
   restorePlanFollowUpComposer,
@@ -486,6 +496,7 @@ import {
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  rotateTakeoverRetryCommandId,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   replaceEditableUserText,
@@ -559,6 +570,8 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const PI_TAKEOVER_DELIVERY_UNKNOWN_ERROR =
+  "Pi delivery is unknown. Inspect the thread history before changing or retrying this message.";
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1552,6 +1565,9 @@ export default function ChatView(props: ChatViewProps) {
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
+  const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, {
+    reportFailure: false,
+  });
   const respondToThreadApproval = useAtomCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -1662,6 +1678,9 @@ export default function ChatView(props: ChatViewProps) {
     return draft ? composerDraftHasUserContent({ ...draft, prompt: "" }) : false;
   });
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerDraftTakeoverRetryIdentity = useComposerDraftStore(
+    (store) => store.setTakeoverRetryIdentity,
+  );
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
   const setComposerDraftTerminalContexts = useComposerDraftStore(
@@ -1868,7 +1887,10 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const externalTakeoverConfirmationInFlightRef = useRef(false);
+  const takeoverRetryIdentityRef = useRef<TakeoverRetryIdentity | null>(null);
   const environmentUnavailableSendToastSlotRef = useRef(0);
+
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
@@ -4290,6 +4312,23 @@ export default function ChatView(props: ChatViewProps) {
         .getState()
         .drain(scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))),
     );
+    if (!threadAllows(activeThread, "interrupt")) {
+      if (!threadAllows(activeThread, "stop")) return;
+      const result = await stopThreadSession({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to stop the native Pi runtime.",
+        );
+      } else if (result._tag === "Success" && result.value.deliveryStatus === "indeterminate") {
+        setThreadError(activeThread.id, "Pi runtime stop outcome is unknown.");
+      }
+      return;
+    }
     const result = await interruptThreadTurn({
       environmentId: activeThread.environmentId,
       input,
@@ -4301,9 +4340,11 @@ export default function ChatView(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
     }
-  }, [interruptThreadTurn]);
+  }, [interruptThreadTurn, stopThreadSession]);
   const canInterruptRunningThread =
-    buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
+    buildRunningThreadTurnInterruptInput(activeThread, phase) !== null &&
+    activeThread !== undefined &&
+    (threadAllows(activeThread, "interrupt") || threadAllows(activeThread, "stop"));
   // One-tap Continue after Stop. A Continuation Turn, not a "Continue" user
   // message (docs/adr/0005): nothing is typed into the composer or the timeline.
   const onContinueInterruptedTurn = useCallback(async () => {
@@ -4807,6 +4848,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const handleRuntimeModeChange = useCallback(
     (mode: RuntimeMode) => {
+      if (activeThread && !threadAllows(activeThread, "changeRuntimeMode")) return;
       if (mode === composerRuntimeMode) return;
       setComposerDraftRuntimeMode(composerDraftTarget, mode);
       if (isLocalDraftThread) {
@@ -4816,6 +4858,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     [
       isLocalDraftThread,
+      activeThread,
       composerRuntimeMode,
       scheduleComposerFocus,
       composerDraftTarget,
@@ -4826,6 +4869,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
+      if (activeThread && !threadAllows(activeThread, "changeInteractionMode")) return;
       if (mode === "plan" && !interactionModeEnabled) return;
       if (mode === interactionMode) return;
       setComposerDraftInteractionMode(composerDraftTarget, mode);
@@ -4836,6 +4880,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     [
       interactionMode,
+      activeThread,
       interactionModeEnabled,
       isLocalDraftThread,
       scheduleComposerFocus,
@@ -7636,7 +7681,13 @@ export default function ChatView(props: ChatViewProps) {
   const onRevertToTurnCount = useCallback(
     async (turnCount: number, messageId: MessageId, restoreFiles?: boolean) => {
       const localApi = readLocalApi();
-      if (!localApi || !activeThread || isRevertingCheckpoint) return;
+      if (
+        !localApi ||
+        !activeThread ||
+        !threadAllows(activeThread, "checkpoints") ||
+        isRevertingCheckpoint
+      )
+        return;
       const message = activeThread.messages.find((message) => message.id === messageId);
       if (!message || message.role !== "user") return;
 
@@ -7953,6 +8004,7 @@ export default function ChatView(props: ChatViewProps) {
     };
     if (
       !activeThread ||
+      !threadAllows(activeThread, "send") ||
       isSendBusy ||
       isConnecting ||
       isRevertingCheckpoint ||
@@ -7990,6 +8042,56 @@ export default function ChatView(props: ChatViewProps) {
       });
       return;
     }
+    const confirmExternalResumeForSend = () =>
+      resolveExternalResumeForSend(activeThread.backing, async (message, options) => {
+        if (externalTakeoverConfirmationInFlightRef.current) {
+          return false;
+        }
+        externalTakeoverConfirmationInFlightRef.current = true;
+        try {
+          return (await readLocalApi()?.dialogs.confirm(message, options)) ?? false;
+        } finally {
+          externalTakeoverConfirmationInFlightRef.current = false;
+        }
+      });
+    const prepareTakeoverRetryForSend = async (outgoingText: string) => {
+      const threadKey = scopedThreadKey(
+        scopeThreadRef(activeThread.environmentId, activeThread.id),
+      );
+      const persistedIdentity =
+        useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)
+          ?.takeoverRetryIdentity ?? null;
+      takeoverRetryIdentityRef.current = persistedIdentity;
+      const retainedIdentity = matchTakeoverRetryIdentity(persistedIdentity, {
+        threadKey,
+        outgoingText,
+      });
+      if (retainedIdentity) {
+        return { proceed: true as const, identity: retainedIdentity };
+      }
+
+      takeoverRetryIdentityRef.current = null;
+      setComposerDraftTakeoverRetryIdentity(composerDraftTarget, null);
+      const externalResumeDecision = await confirmExternalResumeForSend();
+      if (!externalResumeDecision.proceed) {
+        return { proceed: false as const };
+      }
+      if (!externalResumeDecision.externalResume) {
+        return { proceed: true as const, identity: null };
+      }
+
+      const identity = createTakeoverRetryIdentity({
+        threadKey,
+        outgoingText,
+        commandId: newCommandId(),
+        messageId: newMessageId(),
+        createdAt: new Date().toISOString(),
+      });
+      takeoverRetryIdentityRef.current = identity;
+      setComposerDraftTakeoverRetryIdentity(composerDraftTarget, identity);
+      flushComposerDraftStorage();
+      return { proceed: true as const, identity };
+    };
     if (activePendingProgress) {
       // A queued message waits until the question is answered; it must not
       // be submitted as the answer.
@@ -8265,6 +8367,10 @@ export default function ChatView(props: ChatViewProps) {
       if (composerRef.current?.validateProviderInput(outgoingFollowUpText) === false) {
         return;
       }
+      const takeoverRetry = await prepareTakeoverRetryForSend(outgoingFollowUpText);
+      if (!takeoverRetry.proceed) {
+        return;
+      }
       // The composer is cleared before the send resolves, so hold everything it carried: a
       // transient failure must give the prose and its context back, as the ordinary send does.
       // Snapshot exactly what was sent, copied, so later mutations cannot alias the backup.
@@ -8277,12 +8383,14 @@ export default function ChatView(props: ChatViewProps) {
       composerRef.current?.resetCursorState();
       const followUpSent = await onSubmitPlanFollowUp({
         text: followUp.text,
+        outgoingMessageText: outgoingFollowUpText,
         context: buildMessageContext({
           terminalContexts: sendableComposerTerminalContexts,
           reviewComments: composerReviewComments,
           previewAnnotations: composerPreviewAnnotations,
         }),
         interactionMode: followUp.interactionMode,
+        ...(takeoverRetry.identity ? { takeoverRetryIdentity: takeoverRetry.identity } : {}),
       });
       if (!followUpSent) {
         promptRef.current = followUpPromptSnapshot;
@@ -8467,6 +8575,11 @@ export default function ChatView(props: ChatViewProps) {
       };
     };
 
+    const takeoverRetry = await prepareTakeoverRetryForSend(outgoingMessageText);
+    if (!takeoverRetry.proceed) {
+      return;
+    }
+    const takeoverRetryIdentity = takeoverRetry.identity;
     sendInFlightRef.current = true;
     // Every early return above leaves a queued message in the queue for a
     // later retry. From here on a failure hands it back to the composer.
@@ -8582,8 +8695,8 @@ export default function ChatView(props: ChatViewProps) {
       submissionIntent: resolvedSubmissionIntent,
     });
 
-    const messageIdForSend = newMessageId();
-    const messageCreatedAt = new Date().toISOString();
+    const messageIdForSend = takeoverRetryIdentity?.messageId ?? newMessageId();
+    const messageCreatedAt = takeoverRetryIdentity?.createdAt ?? new Date().toISOString();
     const turnAttachmentsPromise = Promise.all(
       composerAttachmentsSnapshot.map(async (attachment) => {
         if (turnUsesAttachmentUploads) {
@@ -8715,7 +8828,7 @@ export default function ChatView(props: ChatViewProps) {
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
     // Auto-title from first message
-    if (isFirstMessage && isServerThread) {
+    if (isFirstMessage && isServerThread && threadAllows(activeThread, "rename")) {
       const titleResult = await updateThreadMetadata({
         environmentId,
         input: {
@@ -8728,7 +8841,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
 
-    if (failure === null && isServerThread) {
+    if (failure === null && isServerThread && activeThread.backing === undefined) {
       const settingsResult = await persistThreadSettingsForNextTurn({
         threadId: threadIdForSend,
         createdAt: messageCreatedAt,
@@ -8757,6 +8870,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     let turnStartSucceeded = false;
+    let takeoverDeliveryIndeterminate = false;
     let backgroundDraftOpened = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
       const bootstrap =
@@ -8836,7 +8950,18 @@ export default function ChatView(props: ChatViewProps) {
           titleSeed: title,
           runtimeMode,
           interactionMode: sendInteractionMode,
+          ...(takeoverRetryIdentity
+            ? {
+                commandId: takeoverRetryIdentity.commandId,
+                externalResume: takeoverRetryIdentity.externalResume,
+              }
+            : {}),
           ...(bootstrap ? { bootstrap } : {}),
+          ...(phase === "running" && threadAllows(activeThread, "steer")
+            ? { streamingBehavior: "steer" as const }
+            : phase === "running" && threadAllows(activeThread, "followUp")
+              ? { streamingBehavior: "followUp" as const }
+              : {}),
           createdAt: messageCreatedAt,
         },
       });
@@ -8866,8 +8991,27 @@ export default function ChatView(props: ChatViewProps) {
       }
       const startResult = await startPromise;
       if (startResult._tag === "Failure") {
+        if (
+          takeoverRetryIdentity &&
+          takeoverRetryIdentityRef.current === takeoverRetryIdentity &&
+          isPiNativeCommandRejected(squashAtomCommandFailure(startResult))
+        ) {
+          const rotatedIdentity = rotateTakeoverRetryCommandId(
+            takeoverRetryIdentity,
+            newCommandId(),
+          );
+          takeoverRetryIdentityRef.current = rotatedIdentity;
+          setComposerDraftTakeoverRetryIdentity(composerDraftTarget, rotatedIdentity);
+          flushComposerDraftStorage();
+        }
         failure = startResult;
+      } else if (isTakeoverDeliveryIndeterminate(takeoverRetryIdentity, startResult.value)) {
+        takeoverDeliveryIndeterminate = true;
       } else {
+        if (takeoverRetryIdentityRef.current === takeoverRetryIdentity) {
+          takeoverRetryIdentityRef.current = null;
+          setComposerDraftTakeoverRetryIdentity(composerDraftTarget, null);
+        }
         turnStartSucceeded = true;
         // The turn is under way and will spend quota, so that thread's limits
         // snapshot is stale. Uploads may have outlasted a navigation, so only
@@ -8924,12 +9068,20 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
 
-    if (failure !== null) {
+    if (failure !== null || takeoverDeliveryIndeterminate) {
+      if (takeoverDeliveryIndeterminate && !queuedMessage) {
+        setOptimisticUserMessages((existing) => {
+          for (const message of existing) {
+            if (message.id === messageIdForSend) revokeUserMessagePreviewUrls(message);
+          }
+          return existing.filter((message) => message.id !== messageIdForSend);
+        });
+      }
       if (resolvedSubmissionIntent === "background" && draftId && draftThread) {
         restoreFailedBackgroundDraftThread(
           draftId,
           draftThread,
-          wasBootstrapThreadDeleted(squashAtomCommandFailure(failure))
+          failure !== null && wasBootstrapThreadDeleted(squashAtomCommandFailure(failure))
             ? newThreadId()
             : threadIdForSend,
         );
@@ -8991,7 +9143,9 @@ export default function ChatView(props: ChatViewProps) {
           detectTrigger: true,
         });
       }
-      if (!isAtomCommandInterrupted(failure)) {
+      if (takeoverDeliveryIndeterminate) {
+        setThreadError(threadIdForSend, PI_TAKEOVER_DELIVERY_UNKNOWN_ERROR);
+      } else if (failure !== null && !isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         if (
           resolvedSubmissionIntent !== "background" &&
@@ -9062,13 +9216,15 @@ export default function ChatView(props: ChatViewProps) {
   // hydrated, checkpoint rewinding, messages loading, machine not chosen) and
   // leaves the message queued. Re-run when any of them clear so a due message
   // does not wait for an unrelated phase change.
-  const queueSendGate =
-    activeEnvironmentUnavailable ||
-    !clientSettingsHydrated ||
-    isRevertingCheckpoint ||
-    threadDetailLoading ||
-    needsLoadBalancing ||
-    activeProviderStatus === null;
+  const queueSendGate = isQueuedSendBlocked({
+    activeEnvironmentUnavailable,
+    clientSettingsHydrated,
+    isRevertingCheckpoint,
+    threadDetailLoading,
+    needsLoadBalancing,
+    externalBacking: activeThread?.backing !== undefined,
+    configuredProviderAvailable: activeProviderStatus !== null,
+  });
   useEffect(() => {
     if (!nextQueuedMessage || isSendBusy || queueBlockedByPendingRequest || queueSendGate) return;
     if (sendInFlightRef.current) return;
@@ -9372,12 +9528,16 @@ export default function ChatView(props: ChatViewProps) {
   const onSubmitPlanFollowUp = useCallback(
     async ({
       text,
+      outgoingMessageText,
       context,
       interactionMode: nextInteractionMode,
+      takeoverRetryIdentity,
     }: {
       text: string;
+      outgoingMessageText: string;
       context?: ReturnType<typeof buildMessageContext>;
       interactionMode: "default" | "plan";
+      takeoverRetryIdentity?: TakeoverRetryIdentity;
       // Whether the message actually went out. A `false` return tells the caller to put the
       // composer back, because it cleared it before awaiting this.
     }): Promise<boolean> => {
@@ -9400,24 +9560,11 @@ export default function ChatView(props: ChatViewProps) {
       if (!sendCtx?.providerAvailable || !sendCtx.interactionModeEnabled) {
         return false;
       }
-      const {
-        selectedProvider: ctxSelectedProvider,
-        selectedModel: ctxSelectedModel,
-        selectedProviderModels: ctxSelectedProviderModels,
-        selectedPromptEffort: ctxSelectedPromptEffort,
-        selectedModelSelection: ctxSelectedModelSelection,
-      } = sendCtx;
+      const { selectedModelSelection: ctxSelectedModelSelection } = sendCtx;
 
       const threadIdForSend = activeThread.id;
-      const messageIdForSend = newMessageId();
-      const messageCreatedAt = new Date().toISOString();
-      const outgoingMessageText = formatOutgoingPrompt({
-        provider: ctxSelectedProvider,
-        model: ctxSelectedModel,
-        models: ctxSelectedProviderModels,
-        effort: ctxSelectedPromptEffort,
-        text: trimmed,
-      });
+      const messageIdForSend = takeoverRetryIdentity?.messageId ?? newMessageId();
+      const messageCreatedAt = takeoverRetryIdentity?.createdAt ?? new Date().toISOString();
 
       sendInFlightRef.current = true;
       beginLocalDispatch({ preparingWorktree: false });
@@ -9451,6 +9598,7 @@ export default function ChatView(props: ChatViewProps) {
       });
       let failure: AtomCommandResult<unknown, unknown> | null =
         settingsResult._tag === "Failure" ? settingsResult : null;
+      let takeoverDeliveryIndeterminate = false;
 
       if (failure === null) {
         // Keep the mode toggle and plan-follow-up banner in sync immediately
@@ -9482,6 +9630,12 @@ export default function ChatView(props: ChatViewProps) {
             titleSeed: activeThread.title,
             runtimeMode,
             interactionMode: nextInteractionMode,
+            ...(takeoverRetryIdentity
+              ? {
+                  commandId: takeoverRetryIdentity.commandId,
+                  externalResume: takeoverRetryIdentity.externalResume,
+                }
+              : {}),
             ...(nextInteractionMode === "default" && activeProposedPlan
               ? {
                   sourceProposedPlan: {
@@ -9493,11 +9647,32 @@ export default function ChatView(props: ChatViewProps) {
             createdAt: messageCreatedAt,
           },
         });
-        failure = startResult._tag === "Failure" ? startResult : null;
+        if (startResult._tag === "Failure") {
+          if (
+            takeoverRetryIdentity &&
+            takeoverRetryIdentityRef.current === takeoverRetryIdentity &&
+            isPiNativeCommandRejected(squashAtomCommandFailure(startResult))
+          ) {
+            const rotatedIdentity = rotateTakeoverRetryCommandId(
+              takeoverRetryIdentity,
+              newCommandId(),
+            );
+            takeoverRetryIdentityRef.current = rotatedIdentity;
+            setComposerDraftTakeoverRetryIdentity(composerDraftTarget, rotatedIdentity);
+            flushComposerDraftStorage();
+          }
+          failure = startResult;
+        } else if (isTakeoverDeliveryIndeterminate(takeoverRetryIdentity, startResult.value)) {
+          takeoverDeliveryIndeterminate = true;
+        } else if (takeoverRetryIdentityRef.current === takeoverRetryIdentity) {
+          takeoverRetryIdentityRef.current = null;
+          setComposerDraftTakeoverRetryIdentity(composerDraftTarget, null);
+        }
       }
 
-      if (failure === null) {
+      if (failure === null && !takeoverDeliveryIndeterminate) {
         clearUsageLimitsFor(routeThreadKey);
+
         acknowledgeActiveThreadWoke();
         sendInFlightRef.current = false;
         return true;
@@ -9506,7 +9681,9 @@ export default function ChatView(props: ChatViewProps) {
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => message.id !== messageIdForSend),
       );
-      if (!isAtomCommandInterrupted(failure)) {
+      if (takeoverDeliveryIndeterminate) {
+        setThreadError(threadIdForSend, PI_TAKEOVER_DELIVERY_UNKNOWN_ERROR);
+      } else if (failure !== null && !isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         setThreadError(
           threadIdForSend,
@@ -9522,6 +9699,7 @@ export default function ChatView(props: ChatViewProps) {
       activeProposedPlan,
       acknowledgeActiveThreadWoke,
       beginLocalDispatch,
+      composerDraftTarget,
       isConnecting,
       isSendBusy,
       isServerThread,
@@ -9531,6 +9709,8 @@ export default function ChatView(props: ChatViewProps) {
       runtimeMode,
       scrollToEnd,
       setComposerDraftInteractionMode,
+      setComposerDraftPrompt,
+      setComposerDraftTakeoverRetryIdentity,
       setThreadError,
       startThreadTurn,
       environmentId,
@@ -9899,6 +10079,8 @@ export default function ChatView(props: ChatViewProps) {
       }
       if (isServerThread && activeServerThread && threadHasStarted(activeServerThread)) {
         return null;
+      if (!threadAllows(activeThread, "changeModel")) {
+        return "This thread's backing source controls its model.";
       }
       const reason = getStartedThreadModelChangeBlockReason({
         providers: pickerProviders,
@@ -9914,7 +10096,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
-      if (!activeThread) return;
+      if (!activeThread || !threadAllows(activeThread, "changeModel")) return;
       const entry = pickerProviders.find((snapshot) => snapshot.instanceId === instanceId);
       const resolvedDriverKind = entry?.driver ?? null;
       const resolvedModel = resolveAppModelSelectionForInstance(
@@ -10581,6 +10763,17 @@ export default function ChatView(props: ChatViewProps) {
             onDeleteProjectScript={deleteProjectScript}
           />
         </WorkspacePageHeader>
+
+        {activeThreadMetadata?.backing ? (
+          <div className="border-b px-4 py-1 text-xs text-muted-foreground">
+            {threadEnvironmentAttribution(
+              activeThreadMetadata.backing,
+              environmentById.get(activeThread.environmentId)?.label ??
+                serverConfig?.environment.label ??
+                null,
+            )}
+          </div>
+        ) : null}
 
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">

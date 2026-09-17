@@ -98,7 +98,6 @@ import {
   composerFloatingLayerProps,
   useComposerMenuProps,
   isInsideCollapsedComposerControls,
-  isInsideComposerFloatingLayer,
   isInsideRestingComposerControlScope,
 } from "./composerEventScope";
 import {
@@ -989,6 +988,12 @@ import { useVoiceSession } from "../voice/VoiceSession";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import { threadAllows } from "@t3tools/client-runtime/state/threads";
+
+export const composerProviderUnavailable = (input: {
+  readonly externalBacking: boolean;
+  readonly configuredProviderAvailable: boolean;
+}): boolean => !input.externalBacking && !input.configuredProviderAvailable;
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
 
@@ -1048,6 +1053,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null) {
 }
 
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+  allowChangeRuntimeMode: boolean;
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
@@ -1114,52 +1120,56 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
   return (
     <>
-      <ComposerControlSeparator size={size} />
+      {props.allowChangeRuntimeMode ? (
+        <>
+          <ComposerControlSeparator size={size} />
 
-      <Tooltip>
-        <Select
-          open={open}
-          onOpenChange={setOpen}
-          value={props.runtimeMode}
-          onValueChange={(value) => props.onRuntimeModeChange(value!)}
-        >
-          <TooltipTrigger
-            render={
-              <ComposerSelectControl
-                data-composer-shortcut="composer.mode"
-                size={size}
-                className={size === "xs" ? undefined : "font-medium"}
-                aria-label="Runtime mode"
-              />
-            }
-          >
-            <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
-            <SelectValue>{runtimeModeOption.label}</SelectValue>
-          </TooltipTrigger>
-          <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {runtimeModeOptions.map((mode) => {
-              const option = runtimeModeConfig[mode];
-              const OptionIcon = option.icon;
-              return (
-                <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                        {option.label}
-                      </span>
-                      <span className="text-muted-foreground text-xs leading-4">
-                        {option.description}
-                      </span>
-                    </div>
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectPopup>
-        </Select>
-        <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
-      </Tooltip>
+          <Tooltip>
+            <Select
+              open={open}
+              onOpenChange={setOpen}
+              value={props.runtimeMode}
+              onValueChange={(value) => props.onRuntimeModeChange(value!)}
+            >
+              <TooltipTrigger
+                render={
+                  <ComposerSelectControl
+                    data-composer-shortcut="composer.mode"
+                    size={size}
+                    className={size === "xs" ? undefined : "font-medium"}
+                    aria-label="Runtime mode"
+                  />
+                }
+              >
+                <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
+                <SelectValue>{runtimeModeOption.label}</SelectValue>
+              </TooltipTrigger>
+              <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+                {runtimeModeOptions.map((mode) => {
+                  const option = runtimeModeConfig[mode];
+                  const OptionIcon = option.icon;
+                  return (
+                    <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="grid min-w-0 flex-1 gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                            <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            {option.label}
+                          </span>
+                          <span className="text-muted-foreground text-xs leading-4">
+                            {option.description}
+                          </span>
+                        </div>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectPopup>
+            </Select>
+            <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
+          </Tooltip>
+        </>
+      ) : null}
 
       {interactionModeToggle}
       <ComposerUsageBadge usage={props.latestTurnUsage} planLabel={props.usagePlanLabel} />
@@ -1599,6 +1609,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
 
+  const canChangeModel = activeThread ? threadAllows(activeThread, "changeModel") : true;
+  const canChangeRuntimeMode = activeThread
+    ? threadAllows(activeThread, "changeRuntimeMode")
+    : true;
+  const canChangeInteractionMode = activeThread
+    ? threadAllows(activeThread, "changeInteractionMode")
+    : true;
   const activeTasksProgress = props.threadSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = props.threadSyncPhase === null ? props.activeTaskSteps : null; // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -1916,21 +1933,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const selectedInstanceId =
     selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
-  const noProviderAvailable = selectedProviderEntry === undefined;
-  // Before the catalog arrives, every thread resolves to "no provider". Send
-  // stays blocked either way; only the chrome waits, keeping the picker with
-  // the thread's own selection instead of swapping in the setup button and
-  // back once the catalog lands.
+  const configuredProviderUnavailable = selectedProviderEntry === undefined;
+  const noProviderAvailable = composerProviderUnavailable({
+    externalBacking: activeThread?.backing !== undefined,
+    configuredProviderAvailable: !configuredProviderUnavailable,
+  });
+  // Before the catalog arrives, every local thread resolves to "no provider".
+  // External-backed threads remain sendable through their backing source.
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
-  const providerSetupInstanceId = noProviderAvailable
+  const providerSetupInstanceId = configuredProviderUnavailable
     ? (unavailableProviderInstanceId ??
       (lockedProvider === null
         ? providerInstanceEntries.find((entry) => hasProviderSetup(entry.snapshot))?.instanceId
         : undefined))
     : undefined;
+  const resolvedCompactDisabled = compactDisabled || configuredProviderUnavailable;
   const resolvedCompactDisabledReason =
-    compactDisabledReason ?? (noProviderAvailable ? "Compacting is unavailable right now" : null);
+    compactDisabledReason ??
+    (configuredProviderUnavailable ? "Compacting is unavailable right now" : null);
   // The driver kind follows the instance that will actually run the turn,
   // which can differ from the persisted selection when that selection is
   // disabled.
@@ -3728,6 +3749,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (item.type === "slash-command") {
         if (item.command === "model") {
+          if (!canChangeModel) return;
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
             focusEditorAfterReplace: false,
@@ -3756,7 +3778,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        if (!planModeUiEnabled) return;
+        if (!planModeUiEnabled || !canChangeInteractionMode) return;
         void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -3847,6 +3869,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       addComposerDraftReviewComment,
       applyPromptReplacement,
+      canChangeInteractionMode,
+      canChangeModel,
       composerDraftTarget,
       handleInteractionModeChange,
       planModeUiEnabled,
@@ -4029,7 +4053,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [isMobileViewport, routeKind, submitComposer]);
   const compactThreadContext = useCallback(() => {
     if (
-      compactDisabled ||
+      resolvedCompactDisabled ||
       noProviderAvailable ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
@@ -4044,7 +4068,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activePendingApproval,
     activeThreadId,
-    compactDisabled,
+    resolvedCompactDisabled,
+
     isConnecting,
     isSendBusy,
     noProviderAvailable,
@@ -4162,7 +4187,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
-      if (!planModeUiEnabled) return false;
+      if (!planModeUiEnabled || !canChangeInteractionMode) return false;
       toggleInteractionMode();
       return true;
     }
@@ -5103,7 +5128,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       id: "mode",
       content: (
         <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
+          allowChangeRuntimeMode={canChangeRuntimeMode}
+          showInteractionModeToggle={planModeUiEnabled && canChangeInteractionMode}
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
           size={composerControlsInStrip ? "xs" : "sm"}
@@ -5193,14 +5219,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       />
 
       {composerControlsCompact ? (
-        <CompactComposerControlsMenu
-          interactionMode={interactionMode}
-          runtimeMode={runtimeMode}
-          showInteractionModeToggle={planModeUiEnabled}
-          traitsMenuContent={providerTraitsMenuContent}
-          onToggleInteractionMode={toggleInteractionMode}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
+        canChangeRuntimeMode ? (
+          <CompactComposerControlsMenu
+            interactionMode={interactionMode}
+            runtimeMode={runtimeMode}
+            showRuntimeMode={canChangeRuntimeMode}
+            showInteractionModeToggle={planModeUiEnabled && canChangeInteractionMode}
+            traitsMenuContent={providerTraitsMenuContent}
+            onToggleInteractionMode={toggleInteractionMode}
+            onRuntimeModeChange={handleRuntimeModeChange}
+          />
+        ) : null
       ) : (
         <>
           {restingBlockDefs.map((def, index) => {
@@ -5233,20 +5262,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 hiddenRestingBlockIds.length === 0 && "pointer-events-none invisible absolute",
               )}
             >
-              <CompactComposerControlsMenu
-                interactionMode={interactionMode}
-                runtimeMode={runtimeMode}
-                size="xs"
-                hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-                showInteractionModeToggle={
-                  planModeUiEnabled && hiddenRestingBlockIds.includes("mode")
-                }
-                traitsMenuContent={
-                  hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
-                }
-                onToggleInteractionMode={toggleInteractionMode}
-                onRuntimeModeChange={handleRuntimeModeChange}
-              />
+              {canChangeRuntimeMode ? (
+                <CompactComposerControlsMenu
+                  interactionMode={interactionMode}
+                  runtimeMode={runtimeMode}
+                  showRuntimeMode={canChangeRuntimeMode}
+                  size="xs"
+                  hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
+                  showInteractionModeToggle={
+                    planModeUiEnabled &&
+                    canChangeInteractionMode &&
+                    hiddenRestingBlockIds.includes("mode")
+                  }
+                  traitsMenuContent={
+                    hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
+                  }
+                  onToggleInteractionMode={toggleInteractionMode}
+                  onRuntimeModeChange={handleRuntimeModeChange}
+                />
+              ) : null}
             </div>
           ) : null}
         </>
@@ -5386,6 +5420,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
   ): Promise<boolean> => {
     if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return false;
+    if (activeThread && !threadAllows(activeThread, "attachments")) {
+      toastManager.add({
+        type: "error",
+        title: "File attachments are unavailable for this native Pi writer.",
+      });
+      return false;
+    }
     if (
       pendingUserInputs.length > 0 &&
       (!supportsQuestionAttachments ||
@@ -5921,6 +5962,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Imperative handle
   // ------------------------------------------------------------------
   const openModelPicker = useCallback(() => {
+    if (!canChangeModel) return;
     if (composerControlsHidden) {
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -5930,7 +5972,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsComposerFocused(true);
     }
     setIsComposerModelPickerOpen(true);
-  }, [composerControlsHidden, setIsComposerFocused, setIsComposerScrollCollapsed]);
+  }, [canChangeModel, composerControlsHidden, setIsComposerFocused, setIsComposerScrollCollapsed]);
 
   useImperativeHandle(
     composerRef,
@@ -5994,7 +6036,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
         ),
       openModelPicker,
+
       toggleModelPicker: () => {
+        if (!canChangeModel) return;
         if (isComposerModelPickerOpen) {
           setIsComposerModelPickerOpen(false);
         } else {
@@ -6109,6 +6153,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       activeThread,
       addComposerAttachments,
+      canChangeModel,
       foldPastedText,
       composerDraftTarget,
       composerCursor,
@@ -7225,7 +7270,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onContinueInterruptedTurn={handleContinueInterruptedTurnPrimaryAction}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                       compactDisabled={
-                        compactDisabled || noProviderAvailable || isSendBusy || isConnecting
+                        resolvedCompactDisabled || noProviderAvailable || isSendBusy || isConnecting
                       }
                       compactDisabledReason={resolvedCompactDisabledReason}
                       {...(compactCommandAvailable

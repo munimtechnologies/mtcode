@@ -48,6 +48,7 @@ export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./browserProfile.ts";
 export * from "./browserImport.ts";
+export * from "./piNative.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
 export * from "./accountLimits.ts";

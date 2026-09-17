@@ -81,6 +81,8 @@ import Migration0057 from "./Migrations/055_ProjectionThreadsAutoSettleDisabledA
 import Migration0058 from "./Migrations/056_ProjectionThreadsLastVisitedAt.ts";
 // Fork migration for self-hosted push device registrations (ochen1 port).
 import Migration0059 from "./Migrations/069_SelfHostedPushDevices.ts";
+// Fork migration for native Pi lifecycle overrides (bdsqqq port).
+import Migration0060 from "./Migrations/071_PiExternalLifecycleOverrides.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -152,6 +154,7 @@ const migrationEntries = [
   [57, "ProjectionThreadsAutoSettleDisabledAt", Migration0057],
   [58, "ProjectionThreadsLastVisitedAt", Migration0058],
   [59, "SelfHostedPushDevices", Migration0059],
+  [60, "PiExternalLifecycleOverrides", Migration0060],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -398,7 +398,57 @@ type LogicalSidebarProject = SidebarProject & {
   }[];
 };
 
+type SidebarProjectGroup = {
+  projectKey: string;
+  memberProjects: readonly {
+    environmentId: string;
+    id: string;
+  }[];
+};
+
 export type ThreadTraversalDirection = "previous" | "next";
+
+const PI_EXTERNAL_PROJECT_PREFIX = "external:pi-project:";
+
+/**
+ * Pi session workspaces are synthesized from history, so they should follow
+ * the thread lifecycle instead of behaving like user-created projects.
+ * Mixed/manual groups stay visible because hiding durable projects would turn
+ * a derived presentation rule into an implicit project lifecycle.
+ */
+export function partitionPiExternalProjectsForSidebar<TProject extends SidebarProjectGroup>(input: {
+  projects: readonly TProject[];
+  prominentProjectKeys: ReadonlySet<string>;
+  settledProjectKeys: ReadonlySet<string>;
+  keepProjectKeys?: ReadonlySet<string>;
+}): {
+  visibleProjects: TProject[];
+  settledProjects: TProject[];
+} {
+  const visibleProjects: TProject[] = [];
+  const settledProjects: TProject[] = [];
+
+  for (const project of input.projects) {
+    const isExternalPiProject = project.memberProjects.every((member) =>
+      member.id.startsWith(PI_EXTERNAL_PROJECT_PREFIX),
+    );
+    if (!isExternalPiProject || input.keepProjectKeys?.has(project.projectKey)) {
+      visibleProjects.push(project);
+      continue;
+    }
+
+    const memberKeys = project.memberProjects.map(
+      (member) => `${member.environmentId}:${member.id}`,
+    );
+    if (memberKeys.some((key) => input.prominentProjectKeys.has(key))) {
+      visibleProjects.push(project);
+    } else if (memberKeys.some((key) => input.settledProjectKeys.has(key))) {
+      settledProjects.push(project);
+    }
+  }
+
+  return { visibleProjects, settledProjects };
+}
 
 /**
  * Shared-worktree checks must exclude only successful deletions, never the
@@ -467,15 +517,22 @@ export async function archiveSelectedThreadEntries<
 export function buildMultiSelectThreadContextMenuItems(input: {
   count: number;
   hasRunningThread: boolean;
+  canArchiveSelection: boolean;
+  canDeleteSelection: boolean;
 }): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
   return [
     { id: "mark-unread", label: `Mark unread (${input.count})` },
     {
       id: "archive",
       label: `Archive (${input.count})`,
-      disabled: input.hasRunningThread,
+      disabled: input.hasRunningThread || !input.canArchiveSelection,
     },
-    { id: "delete", label: `Delete (${input.count})`, destructive: true },
+    {
+      id: "delete",
+      label: `Delete (${input.count})`,
+      destructive: true,
+      disabled: !input.canDeleteSelection,
+    },
   ];
 }
 

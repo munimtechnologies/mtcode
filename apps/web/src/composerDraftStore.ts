@@ -1,10 +1,12 @@
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
+  CommandId,
   ElementContextDetails,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   EnvironmentId,
+  MessageId,
   ModelSelection,
   ProjectId,
   ProviderInstanceId,
@@ -109,6 +111,10 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
   COMPOSER_PERSIST_DEBOUNCE_MS,
 );
 
+export function flushComposerDraftStorage(): void {
+  composerDebouncedStorage.flush();
+}
+
 const composerPersistStorage: PersistStorage<ComposerPersistState> = {
   getItem: (name) => {
     // The base storage is localStorage (or in-memory), which is synchronous.
@@ -126,10 +132,22 @@ const composerPersistStorage: PersistStorage<ComposerPersistState> = {
 
 // Flush pending composer draft writes before page unload to prevent data loss.
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
-  window.addEventListener("beforeunload", () => {
-    composerDebouncedStorage.flush();
-  });
+  window.addEventListener("beforeunload", flushComposerDraftStorage);
 }
+
+/**
+ * keeps an ambiguous Pi takeover addressable by the supervisor ledger across remounts and reloads.
+ */
+export const TakeoverRetryIdentitySchema = Schema.Struct({
+  commandId: CommandId,
+  messageId: MessageId,
+  createdAt: Schema.String,
+  threadKey: Schema.String,
+  outgoingText: Schema.String,
+  externalResume: Schema.Literal("takeover"),
+});
+export type TakeoverRetryIdentity = typeof TakeoverRetryIdentitySchema.Type;
+const isTakeoverRetryIdentity = Schema.is(TakeoverRetryIdentitySchema);
 
 export const PersistedComposerImageAttachment = Schema.Struct({
   id: Schema.String,
@@ -252,6 +270,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  takeoverRetryIdentity: Schema.optionalKey(TakeoverRetryIdentitySchema),
 });
 type PersistedComposerThreadDraftState = typeof PersistedComposerThreadDraftState.Type;
 
@@ -403,6 +422,7 @@ export interface ComposerThreadDraftState {
   modelSelectionExplicit?: boolean;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
+  takeoverRetryIdentity: TakeoverRetryIdentity | null;
 }
 
 /**
@@ -571,6 +591,10 @@ interface ComposerDraftStoreState {
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
+  setTakeoverRetryIdentity: (
+    threadRef: ComposerThreadTarget,
+    identity: TakeoverRetryIdentity | null,
+  ) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
   setModelSelection: (
     threadRef: ComposerThreadTarget,
@@ -789,6 +813,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   activeProvider: null,
   runtimeMode: null,
   interactionMode: null,
+  takeoverRetryIdentity: null,
 });
 
 /**
@@ -811,6 +836,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     activeProvider: null,
     runtimeMode: null,
     interactionMode: null,
+    takeoverRetryIdentity: null,
   };
 }
 
@@ -904,7 +930,8 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
-    draft.interactionMode === null
+    draft.interactionMode === null &&
+    draft.takeoverRetryIdentity === null
   );
 }
 
@@ -1927,6 +1954,9 @@ function normalizePersistedDraftsByThreadId(
       draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
         ? draftCandidate.interactionMode
         : null;
+    const takeoverRetryIdentity = isTakeoverRetryIdentity(draftCandidate.takeoverRetryIdentity)
+      ? { ...draftCandidate.takeoverRetryIdentity }
+      : null;
     const contextIds = new Map<string, string>();
     for (const [kind, entries] of [
       ["image", attachments],
@@ -2019,10 +2049,10 @@ function normalizePersistedDraftsByThreadId(
       terminalContexts.length === 0 &&
       previewAnnotations.length === 0 &&
       reviewComments.length === 0 &&
-      previewAnnotations.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
-      !interactionMode
+      !interactionMode &&
+      takeoverRetryIdentity === null
     ) {
       continue;
     }
@@ -2055,6 +2085,7 @@ function normalizePersistedDraftsByThreadId(
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(interactionMode ? { interactionMode } : {}),
+      ...(takeoverRetryIdentity ? { takeoverRetryIdentity } : {}),
     };
   }
 
@@ -2155,7 +2186,8 @@ export function partializeComposerDraftStoreState(
       draft.reviewComments.length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
-      draft.interactionMode === null
+      draft.interactionMode === null &&
+      draft.takeoverRetryIdentity === null
     ) {
       continue;
     }
@@ -2219,6 +2251,9 @@ export function partializeComposerDraftStoreState(
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
+      ...(draft.takeoverRetryIdentity
+        ? { takeoverRetryIdentity: { ...draft.takeoverRetryIdentity } }
+        : {}),
     };
     persistedDraftsByThreadKey[threadKey] = persistedDraft;
   }
@@ -2241,6 +2276,33 @@ export function partializeComposerDraftStoreState(
     ),
     stickyActiveProvider: state.stickyActiveProvider,
   };
+}
+
+/**
+ * Zustand passes `partialize` output directly to `merge` in callers that
+ * exercise the persist contract without a storage round-trip. Deferred writes
+ * normally materialize this wrapper in `composerDebouncedStorage`, so merge
+ * must accept both forms without giving up deferred serialization.
+ */
+function materializeComposerPersistState(persistedState: unknown): unknown {
+  if (
+    persistedState === null ||
+    typeof persistedState !== "object" ||
+    !("capturedState" in persistedState)
+  ) {
+    return persistedState;
+  }
+  const capturedState = persistedState.capturedState;
+  if (
+    capturedState === null ||
+    typeof capturedState !== "object" ||
+    !("draftsByThreadKey" in capturedState) ||
+    !("draftThreadsByThreadKey" in capturedState) ||
+    !("logicalProjectDraftThreadKeyByLogicalProjectKey" in capturedState)
+  ) {
+    return persistedState;
+  }
+  return partializeComposerDraftStoreState(capturedState as ComposerDraftStoreState);
 }
 
 function normalizeCurrentPersistedComposerDraftStoreState(
@@ -2485,6 +2547,9 @@ function toHydratedThreadDraft(
     ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
+    takeoverRetryIdentity: persistedDraft.takeoverRetryIdentity
+      ? { ...persistedDraft.takeoverRetryIdentity }
+      : null,
   };
 }
 
@@ -3014,6 +3079,33 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...existing,
               prompt,
+            };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        setTakeoverRetryIdentity: (threadRef, identity) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey];
+            if (!existing && identity === null) {
+              return state;
+            }
+            const base = existing ?? createEmptyThreadDraft();
+            if (Equal.equals(base.takeoverRetryIdentity, identity)) {
+              return state;
+            }
+            const nextDraft: ComposerThreadDraftState = {
+              ...base,
+              takeoverRetryIdentity: identity ? { ...identity } : null,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
@@ -4080,8 +4172,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
       // Defer the draft walk and serialization until the storage write flushes.
       partialize: (state): ComposerPersistState => ({ capturedState: state }),
       merge: (persistedState, currentState) => {
-        const normalizedPersisted =
-          normalizeCurrentPersistedComposerDraftStoreState(persistedState);
+        const normalizedPersisted = normalizeCurrentPersistedComposerDraftStoreState(
+          materializeComposerPersistState(persistedState),
+        );
         const draftsByThreadKey = Object.fromEntries(
           Object.entries(normalizedPersisted.draftsByThreadKey).map(([threadKey, draft]) => [
             threadKey,
