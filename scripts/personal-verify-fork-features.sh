@@ -176,6 +176,14 @@ require scripts/build-desktop-artifact.ts "VC.Runtimes.x86.x64.Spectre" "Windows
 # Upstream's T3Wordmark keeps 1cap; only MTWordmark is exempt.
 require apps/web/src/components/sidebar/SidebarChrome.tsx 'h-3 w-auto shrink-0 translate-y-\[2px\]' "MT wordmark keeps its hand-tuned 12px height and 2px nudge"
 
+# --- Plugin marketplace (2026-09-16, a3455de80b / 06fffa29e3) ---
+# Codex plugins are read through the app-server with lenient decoders; the
+# CLI-only path silently dropped every Codex plugin once codex 0.154 emitted
+# path-less remote records. The palette action and harness tabs are fork-only UI.
+require apps/server/src/plugins/CodexPluginMarketplace.ts "decodeCodexRuntimeCatalog" "Codex app-server catalog decoding in the plugin marketplace"
+require apps/web/src/components/CommandPalette.tsx 'title: "Browse plugins"' "Browse plugins command-palette action"
+require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx 'aria-label="Harness"' "harness tabs on the plugin marketplace page"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2
