@@ -341,6 +341,12 @@ interface ClaudeTurnState {
   rejectedRateLimitTypes: Set<string>;
   latestAssistantRateLimited: boolean;
   /**
+   * Set when the user pressed Stop. A stopped turn ends because of the user,
+   * whatever limit telemetry arrived while it ran, so it never reports a
+   * usage-limit failure (which would mark the thread limited).
+   */
+  interruptRequested: boolean;
+  /**
    * Credible reset time (epoch ms) per blocked window type. Reported on
    * turn.completed as the max across the windows still rejected at that
    * moment — a turn parked on two windows can only resume once the later one
@@ -356,6 +362,19 @@ interface ClaudeTurnState {
  * when the turn ended. A window that recovered earlier must not extend the
  * wait past the windows that actually parked the turn.
  */
+/**
+ * The usage-limit classification a turn ends with, if any: a window still
+ * rejected (or an assistant message the API refused as rate limited) when the
+ * turn stopped. A user interrupt is never a usage-limit stop.
+ */
+function usageLimitFailureFor(
+  turn: ClaudeTurnState | undefined,
+): { readonly reason: "usage_limit"; readonly resetsAtMs: number | undefined } | undefined {
+  if (!turn || turn.interruptRequested) return undefined;
+  if (turn.rejectedRateLimitTypes.size === 0 && !turn.latestAssistantRateLimited) return undefined;
+  return { reason: "usage_limit", resetsAtMs: maxUsageLimitResetMs(turn) };
+}
+
 function maxUsageLimitResetMs(turn: {
   readonly rejectedRateLimitTypes: ReadonlySet<string>;
   readonly usageLimitResetsAtMsByType: ReadonlyMap<string, number>;
@@ -3914,6 +3933,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         authenticationFailureMessage: undefined,
         rejectedRateLimitTypes: new Set(),
         latestAssistantRateLimited: false,
+        interruptRequested: false,
         usageLimitResetsAtMsByType: new Map(),
         emittedThinkingText: false,
         thinkingSnapshotIds: new Set(),
@@ -4017,13 +4037,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const turn = context.turnState;
-    const usageLimitFailure =
-      turn && (turn.rejectedRateLimitTypes.size > 0 || turn.latestAssistantRateLimited)
-        ? {
-            reason: "usage_limit" as const,
-            resetsAtMs: maxUsageLimitResetMs(turn),
-          }
-        : undefined;
+    const usageLimitFailure = usageLimitFailureFor(turn);
     const failureHint =
       turn?.authenticationFailureMessage ??
       (usageLimitFailure
@@ -4035,7 +4049,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
     }
 
-    yield* completeTurn(context, status, errorMessage, message, usageLimitFailure);
+    // Only a failed turn is classified: an interrupted or completed result
+    // carrying the limit reason would still read as a limit stop downstream.
+    yield* completeTurn(
+      context,
+      status,
+      errorMessage,
+      message,
+      status === "failed" ? usageLimitFailure : undefined,
+    );
   });
 
   /**
@@ -4885,14 +4907,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // way; classify it as the failure it parked on so ingestion persists
       // the window and the resume sweep can fire, instead of clearing the
       // classification as an interruption would.
-      const usageLimitFailure =
-        context.turnState.rejectedRateLimitTypes.size > 0 ||
-        context.turnState.latestAssistantRateLimited
-          ? {
-              reason: "usage_limit" as const,
-              resetsAtMs: maxUsageLimitResetMs(context.turnState),
-            }
-          : undefined;
+      const usageLimitFailure = usageLimitFailureFor(context.turnState);
       yield* completeTurn(
         context,
         usageLimitFailure !== undefined ? "failed" : "interrupted",
@@ -6161,6 +6176,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         authenticationFailureMessage: undefined,
         rejectedRateLimitTypes: new Set(),
         latestAssistantRateLimited: false,
+        interruptRequested: false,
         usageLimitResetsAtMsByType: new Map(),
         emittedThinkingText: false,
         thinkingSnapshotIds: new Set(),
@@ -6243,6 +6259,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, _turnId) {
       const context = yield* requireSession(threadId);
+      // Mark before anything can end the turn: every completion path below
+      // (the aborted result, a clean stream end, the forced stop) must read
+      // this as the user's stop, not as whatever limit telemetry arrived.
+      if (context.turnState) {
+        context.turnState.interruptRequested = true;
+      }
       // Stop-everything semantics: users reach for Stop precisely when a
       // fleet ran away. interrupt() alone only ends the parent turn —
       // background subagents/shells keep running and keep burning tokens.

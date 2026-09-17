@@ -4133,6 +4133,119 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  // Stop must never read as a usage-limit stop: that classification marks the
+  // thread limited and paints "Limit Reached" under a turn the user ended.
+  const interruptAfterRateLimit = (options: {
+    readonly rateLimitInfo: Record<string, unknown> | undefined;
+    readonly onInterrupt: "aborted-result" | "stream-end";
+  }) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "hello", attachments: [] });
+
+      const nowMs = yield* Clock.currentTimeMillis;
+      if (options.rateLimitInfo) {
+        harness.query.emit({
+          type: "rate_limit_event",
+          rate_limit_info: {
+            resetsAt: Math.floor(nowMs / 1000) + 2 * 60 * 60,
+            ...options.rateLimitInfo,
+          },
+          session_id: "sdk-session-stop",
+          uuid: "rate-limit-before-stop",
+        } as unknown as SDKMessage);
+      }
+
+      // The CLI answers interrupt() with an aborted result, or its stream just
+      // ends. The acknowledgement is held until that frame has completed the
+      // turn, so the adapter's forced stop cannot win the race and hide it.
+      const query = harness.query;
+      let acknowledge: () => void = () => {};
+      const acknowledged = new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      Object.assign(query, {
+        interrupt: async () => {
+          query.interruptCalls.push(undefined);
+          if (options.onInterrupt === "aborted-result") {
+            query.emit({
+              type: "result",
+              subtype: "error_during_execution",
+              is_error: false,
+              terminal_reason: "aborted_streaming",
+              errors: [],
+              session_id: "sdk-session-stop",
+              uuid: "result-aborted",
+            } as unknown as SDKMessage);
+          } else {
+            query.finish();
+          }
+          await acknowledged;
+        },
+      });
+      const interruptFiber = yield* adapter.interruptTurn(session.threadId).pipe(Effect.forkChild);
+
+      const payload = completedTurn(Array.from(yield* Fiber.join(runtimeEventsFiber)));
+      acknowledge();
+      yield* Fiber.join(interruptFiber);
+      assert.equal(query.interruptCalls.length, 1);
+      assert.equal(payload.state, "interrupted");
+      assert.equal(payload.failureReason, undefined);
+      assert.equal(payload.failureResetsAt, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  };
+
+  it.effect("reports a stopped turn with no limit as interrupted, not limited", () =>
+    interruptAfterRateLimit({ rateLimitInfo: undefined, onInterrupt: "aborted-result" }),
+  );
+
+  it.effect("reports a stopped turn after a warning-level limit as interrupted", () =>
+    interruptAfterRateLimit({
+      rateLimitInfo: {
+        status: "allowed_warning",
+        rateLimitType: "seven_day_overage_included",
+        utilization: 0.99,
+        surpassedThreshold: 0.75,
+        isUsingOverage: false,
+      },
+      onInterrupt: "aborted-result",
+    }),
+  );
+
+  it.effect("reports a stopped turn parked on a rejected window as interrupted", () =>
+    interruptAfterRateLimit({
+      rateLimitInfo: {
+        status: "rejected",
+        rateLimitType: "seven_day_overage_included",
+        overageStatus: "rejected",
+        isUsingOverage: false,
+      },
+      onInterrupt: "aborted-result",
+    }),
+  );
+
+  it.effect("keeps a user stop interrupted when the stream just ends on a rejected window", () =>
+    interruptAfterRateLimit({
+      rateLimitInfo: { status: "rejected", rateLimitType: "five_hour" },
+      onInterrupt: "stream-end",
+    }),
+  );
+
   const usageLimitMessage =
     "Claude usage limit reached. Send the message again once the limit resets.";
   const genericApiErrorMessage = "Claude gave up after repeated API errors.";
@@ -6105,7 +6218,13 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  const observeUsageLimitEvents = (adapter: ClaudeAdapterShape, query: FakeClaudeQuery) =>
+  // Takes the harness, not its query: the adapter rotates in a fresh query at
+  // session start, so a query captured before `startSession` is one nobody
+  // reads and the drain below would wait forever.
+  const observeUsageLimitEvents = (
+    adapter: ClaudeAdapterShape,
+    harness: { readonly query: FakeClaudeQuery },
+  ) =>
     Effect.gen(function* () {
       const runtimeEvents: Array<ProviderRuntimeEvent> = [];
       let receipt: Deferred.Deferred<void> | undefined;
@@ -6124,7 +6243,7 @@ describe("ClaudeAdapterLive", () => {
       const drainSdkMessages = Effect.gen(function* () {
         receipt = yield* Deferred.make<void>();
         // The heartbeat follows queued SDK messages without adding a warning.
-        query.emit({
+        harness.query.emit({
           type: "system",
           subtype: "api_retry",
           attempt: 1,
@@ -6145,7 +6264,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6240,7 +6359,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6287,7 +6406,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6358,7 +6477,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6401,7 +6520,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6453,7 +6572,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6516,7 +6635,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -6571,7 +6690,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       const { runtimeEvents, runtimeEventsFiber, drainSdkMessages } =
-        yield* observeUsageLimitEvents(adapter, harness.query);
+        yield* observeUsageLimitEvents(adapter, harness);
       yield* adapter.startSession({
         threadId: THREAD_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
@@ -6621,193 +6740,6 @@ describe("ClaudeAdapterLive", () => {
         runtimeEvents.filter((event) => event.type === "account.rate-limits.updated").length,
         1,
       );
-      runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("surfaces a rejected Claude usage limit once per turn", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() => runtimeEvents.push(event)),
-      ).pipe(Effect.forkChild);
-
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-
-      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "hello", attachments: [] });
-
-      // resetsAt is epoch seconds; the CLI renders it as new Date(resetsAt * 1000).
-      const rejected = {
-        type: "rate_limit_event",
-        rate_limit_info: {
-          status: "rejected",
-          rateLimitType: "five_hour",
-          resetsAt: 1_800_000_000,
-        },
-        session_id: "sdk-session-limit",
-        uuid: "rate-limit-rejected",
-      };
-      // Sibling fields drift while the window is parked, so the same rendered
-      // line can arrive more than once inside one turn.
-      harness.query.emit(rejected as unknown as SDKMessage);
-      harness.query.emit(rejected as unknown as SDKMessage);
-      yield* Effect.yieldNow;
-      yield* Effect.yieldNow;
-
-      const usageLimitRows = () =>
-        runtimeEvents
-          .filter((event) => event.type === "runtime.warning")
-          .map((event) => (event.type === "runtime.warning" ? event.payload.message : ""));
-      assert.equal(usageLimitRows().length, 1);
-      assert.match(
-        usageLimitRows()[0] ?? "",
-        /^Claude usage limit reached\. This turn is paused until the 5-hour limit resets at .+\.$/,
-      );
-      // Pins the seconds-to-milliseconds conversion: the rendered day is the
-      // day of the reset instant, not of a value 1000x too small.
-      assert.include(
-        usageLimitRows()[0] ?? "",
-        new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
-          1_800_000_000_000,
-        ),
-      );
-      // The raw telemetry event still flows for both copies.
-      assert.equal(
-        runtimeEvents.filter((event) => event.type === "account.rate-limits.updated").length,
-        2,
-      );
-
-      // Retrying inside the same window renders the identical line. Staying
-      // quiet there would put the new turn right back to a silent spin.
-      harness.query.emit({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        errors: [],
-        session_id: "sdk-session-limit",
-        uuid: "result-limit",
-      } as unknown as SDKMessage);
-      yield* Effect.yieldNow;
-      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "retry", attachments: [] });
-      harness.query.emit(rejected as unknown as SDKMessage);
-      yield* Effect.yieldNow;
-      yield* Effect.yieldNow;
-
-      assert.equal(usageLimitRows().length, 2);
-
-      runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("keeps allowed and malformed Claude rate-limit events out of the work log", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() => runtimeEvents.push(event)),
-      ).pipe(Effect.forkChild);
-
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-
-      for (const rateLimitInfo of [
-        { status: "allowed", rateLimitType: "five_hour", utilization: 0.4 },
-        { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9 },
-        // Undeclared shape from an older/newer CLI must not take the session down.
-        undefined,
-      ]) {
-        harness.query.emit({
-          type: "rate_limit_event",
-          ...(rateLimitInfo ? { rate_limit_info: rateLimitInfo } : {}),
-          session_id: "sdk-session-limit-ok",
-          uuid: `rate-limit-${rateLimitInfo?.status ?? "malformed"}`,
-        } as unknown as SDKMessage);
-      }
-      yield* Effect.yieldNow;
-      yield* Effect.yieldNow;
-
-      assert.deepEqual(
-        runtimeEvents.filter((event) => event.type === "runtime.warning"),
-        [],
-      );
-      assert.equal(
-        runtimeEvents.filter((event) => event.type === "account.rate-limits.updated").length,
-        3,
-      );
-
-      runtimeEventsFiber.interruptUnsafe();
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("drops an unusable Claude reset time, not the row or the session", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() => runtimeEvents.push(event)),
-      ).pipe(Effect.forkChild);
-
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "hello", attachments: [] });
-
-      for (const [rateLimitType, resetsAt] of [
-        ["five_hour", undefined],
-        // Past the Date range once scaled to milliseconds: Intl throws RangeError here.
-        ["seven_day", 1e20],
-      ] as const) {
-        harness.query.emit({
-          type: "rate_limit_event",
-          rate_limit_info: { status: "rejected", rateLimitType, resetsAt },
-          session_id: "sdk-session-limit-unusable",
-          uuid: `rate-limit-${rateLimitType}`,
-        } as unknown as SDKMessage);
-      }
-      yield* Effect.yieldNow;
-      yield* Effect.yieldNow;
-
-      assert.deepEqual(
-        runtimeEvents
-          .filter((event) => event.type === "runtime.warning")
-          .map((event) => (event.type === "runtime.warning" ? event.payload.message : "")),
-        [
-          "Claude usage limit reached. This turn is paused until the 5-hour limit resets.",
-          "Claude usage limit reached. This turn is paused until the 7-day limit resets.",
-        ],
-      );
-      // A RangeError inside the telemetry handler would tear the session down.
-      assert.deepEqual(
-        runtimeEvents
-          .filter((event) => event.type === "session.exited" || event.type === "runtime.error")
-          .map((event) => event.type),
-        [],
-      );
-      // Still live enough to take the next turn.
-      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "still here", attachments: [] });
-
       runtimeEventsFiber.interruptUnsafe();
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

@@ -14,7 +14,12 @@ import * as DateTime from "effect/DateTime";
 
 export const TURN_USAGE_ACTIVITY_KIND = "provider.turn.usage";
 
-/** "limited": the plan refused the turn without billing overage (window rejected, or Cursor's upgrade notice). */
+/**
+ * "limited": the plan refused the turn without billing overage. Only a turn
+ * that actually ended on the limit is limited; a saturated window that did not
+ * stop the turn (a model-scoped bucket for another model, or a turn the user
+ * interrupted) never is.
+ */
 export type TurnUsageBilling = "included" | "warning" | "overage" | "limited" | "unknown";
 
 export interface RateLimitWindow {
@@ -167,12 +172,28 @@ function tokenCount(
   return total;
 }
 
+/** How the turn ended, as `turn.completed` reports it. */
+export interface TurnUsageOutcome {
+  readonly state: "completed" | "failed" | "interrupted" | "cancelled";
+  /** "usage_limit" when the adapter classified the failure as a limit stop. */
+  readonly failureReason?: "usage_limit" | undefined;
+}
+
+function isExhausted(usedPercent: number): boolean {
+  return usedPercent >= 100;
+}
+
 export function buildTurnUsagePayload(input: {
   readonly provider?: string | null;
   readonly usage: unknown;
   readonly totalCostUsd: number | undefined;
   readonly before: RateLimitSnapshot | null;
   readonly after: RateLimitSnapshot | null;
+  /**
+   * How the turn ended. Without it (older callers) a rejected snapshot still
+   * reads as a limit stop; with it, only a failed turn can be limited.
+   */
+  readonly outcome?: TurnUsageOutcome;
 }): TurnUsageActivityPayload | null {
   const usage = asRecord(input.usage);
   const inputTokens = tokenCount(usage, [
@@ -188,20 +209,50 @@ export function buildTurnUsagePayload(input: {
       ? input.totalCostUsd
       : null;
   const after = input.after;
+  const outcome = input.outcome;
+  const beforeUsedPercent = (label: string): number | null => {
+    if (!input.before) return null;
+    const window = input.before.windows.find((candidate) => candidate.label === label);
+    if (window) return window.usedPercent;
+    return input.before.windowLabel === label ? input.before.usedPercent : null;
+  };
+  // A limit stop needs the turn to have ended on it. An interrupted, cancelled
+  // or completed turn ran (or was stopped by the user) whatever the account
+  // snapshot says; only a failed turn can have been refused.
+  const stoppedByLimit =
+    outcome === undefined
+      ? after?.status === "rejected"
+      : outcome.failureReason === "usage_limit" ||
+        (outcome.state === "failed" && after?.status === "rejected");
+  // The headline window. A window that was already exhausted before the turn
+  // (or with no baseline to say otherwise) and still let the turn run was not
+  // binding it — typically a model-scoped weekly bucket for a different model
+  // — so it must not headline the badge of a turn it did not stop.
+  const headline: { readonly label: string; readonly usedPercent: number } | null = (() => {
+    if (!after) return null;
+    const tightest = { label: after.windowLabel, usedPercent: after.usedPercent };
+    if (stoppedByLimit) return tightest;
+    const windows = after.windows.length > 0 ? after.windows : [tightest];
+    const binding = windows.filter((window) => {
+      if (!isExhausted(window.usedPercent)) return true;
+      const before = beforeUsedPercent(window.label);
+      return before !== null && !isExhausted(before);
+    });
+    const pick = binding.length > 0 ? binding : windows;
+    return pick.reduce((tightest, window) =>
+      window.usedPercent > tightest.usedPercent ? window : tightest,
+    );
+  })();
   // Diff the headline window against the same window before the turn, even
   // when the provider flagged a different window back then.
-  const beforeWindow =
-    after && input.before
-      ? (input.before.windows.find((window) => window.label === after.windowLabel) ??
-        (input.before.windowLabel === after.windowLabel ? input.before : null))
-      : null;
+  const beforeWindowPercent = headline ? beforeUsedPercent(headline.label) : null;
   // Without a baseline (the first turn since the server saw this account) a
   // window still under 1% after the turn bounds the turn's share all the same.
   const windowDeltaPercent =
-    after && beforeWindow
-      ? Math.max(0, after.usedPercent - beforeWindow.usedPercent)
-      : after && after.usedPercent < 1
-        ? after.usedPercent
+    headline && beforeWindowPercent !== null
+      ? Math.max(0, headline.usedPercent - beforeWindowPercent)
+      : headline && headline.usedPercent < 1
+        ? headline.usedPercent
         : null;
   // A turn the provider said nothing about stays silent: a badge with no
   // numbers behind it would only restate the plan name.
@@ -211,22 +262,20 @@ export function buildTurnUsagePayload(input: {
   const billing: TurnUsageBilling = after
     ? after.overage
       ? "overage"
-      : after.status === "rejected"
+      : stoppedByLimit
         ? "limited"
-        : after.status === "warning"
+        : headline && headline.usedPercent >= 80
           ? "warning"
           : "included"
-    : totalCostUsd !== null
-      ? "unknown"
-      : "unknown";
+    : "unknown";
   return {
     provider: input.provider ?? null,
     inputTokens,
     outputTokens,
     totalCostUsd,
     windowDeltaPercent,
-    windowUsedPercent: after?.usedPercent ?? null,
-    windowLabel: after?.windowLabel ?? null,
+    windowUsedPercent: headline?.usedPercent ?? null,
+    windowLabel: headline?.label ?? null,
     windows: after?.windows ?? [],
     billing,
   };

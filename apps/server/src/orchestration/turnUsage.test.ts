@@ -329,3 +329,191 @@ describe("plan limits without usage numbers", () => {
     );
   });
 });
+
+describe("limit badge follows how the turn ended", () => {
+  const tokens = {
+    usage: { input_tokens: 1_141_811, output_tokens: 968 },
+    totalCostUsd: undefined,
+  };
+  // The shape that painted "Limit Reached" under every stopped Opus turn: the
+  // Fable-only weekly bucket was spent, the account's own windows were not.
+  const fableSpent = {
+    usedPercent: 100,
+    windowLabel: "Weekly · Fable",
+    status: "rejected",
+    overage: false,
+    windows: [
+      { id: "seven_day_fable", label: "Weekly · Fable", usedPercent: 100 },
+      { id: "seven_day", label: "Weekly", usedPercent: 64 },
+      { id: "five_hour", label: "Session", usedPercent: 41 },
+    ],
+  } as const;
+
+  it("never marks an interrupted turn limited when no limit was reported", () => {
+    const allowed = {
+      usedPercent: 12,
+      windowLabel: "Session",
+      status: "allowed",
+      overage: false,
+      windows: [{ id: "five_hour", label: "Session", usedPercent: 12 }],
+    } as const;
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        ...tokens,
+        before: allowed,
+        after: allowed,
+        outcome: { state: "interrupted" },
+      }),
+    ).toMatchObject({ billing: "included", windowLabel: "Session", windowUsedPercent: 12 });
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        ...tokens,
+        before: null,
+        after: null,
+        outcome: { state: "interrupted" },
+      })?.billing,
+    ).toBe("unknown");
+  });
+
+  it("keeps an interrupted turn after a warning-level window a warning", () => {
+    const warning = {
+      usedPercent: 99,
+      windowLabel: "Weekly · Fable",
+      status: "warning",
+      overage: false,
+      windows: [
+        { id: "seven_day_fable", label: "Weekly · Fable", usedPercent: 99 },
+        { id: "seven_day", label: "Weekly", usedPercent: 64 },
+      ],
+    } as const;
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        ...tokens,
+        before: warning,
+        after: warning,
+        outcome: { state: "interrupted" },
+      }),
+    ).toMatchObject({ billing: "warning", windowLabel: "Weekly · Fable", windowUsedPercent: 99 });
+  });
+
+  it("does not let an exhausted bucket that did not stop the turn read as Limit Reached", () => {
+    for (const state of ["interrupted", "completed", "cancelled"] as const) {
+      expect(
+        buildTurnUsagePayload({
+          provider: "claudeAgent",
+          ...tokens,
+          before: fableSpent,
+          after: fableSpent,
+          outcome: { state },
+        }),
+      ).toMatchObject({
+        billing: "included",
+        // The headline moves to the tightest window still binding the turn.
+        windowLabel: "Weekly",
+        windowUsedPercent: 64,
+        windowDeltaPercent: 0,
+      });
+    }
+    // Without a baseline an already-spent bucket is still not binding.
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        ...tokens,
+        before: null,
+        after: fableSpent,
+        outcome: { state: "interrupted" },
+      }),
+    ).toMatchObject({ billing: "included", windowLabel: "Weekly" });
+    // An interrupt while the session window itself reads rejected is still the user's stop.
+    const sessionSpent = {
+      usedPercent: 100,
+      windowLabel: "Session",
+      status: "rejected",
+      overage: false,
+      windows: [{ id: "five_hour", label: "Session", usedPercent: 100 }],
+    } as const;
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        ...tokens,
+        before: sessionSpent,
+        after: sessionSpent,
+        outcome: { state: "interrupted" },
+      })?.billing,
+    ).not.toBe("limited");
+  });
+
+  it("headlines a window this turn filled even though the turn completed", () => {
+    const before = {
+      usedPercent: 97,
+      windowLabel: "Session",
+      status: "warning",
+      overage: false,
+      windows: [{ id: "five_hour", label: "Session", usedPercent: 97 }],
+    } as const;
+    const after = {
+      ...before,
+      usedPercent: 100,
+      status: "rejected",
+      windows: [{ id: "five_hour", label: "Session", usedPercent: 100 }],
+    } as const;
+    expect(
+      buildTurnUsagePayload({
+        provider: "codex",
+        ...tokens,
+        before,
+        after,
+        outcome: { state: "completed" },
+      }),
+    ).toMatchObject({ billing: "warning", windowLabel: "Session", windowDeltaPercent: 3 });
+  });
+
+  it("still marks a turn the limit genuinely stopped as limited", () => {
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        usage: undefined,
+        totalCostUsd: undefined,
+        before: fableSpent,
+        after: fableSpent,
+        outcome: { state: "failed", failureReason: "usage_limit" },
+      }),
+    ).toMatchObject({ billing: "limited", windowLabel: "Weekly · Fable", windowUsedPercent: 100 });
+    // A provider that does not classify its failures: a failed turn on a rejected window.
+    expect(
+      buildTurnUsagePayload({
+        provider: "cursor",
+        usage: undefined,
+        totalCostUsd: undefined,
+        before: null,
+        after: {
+          usedPercent: 100,
+          windowLabel: "Plan Limit",
+          status: "rejected",
+          overage: false,
+          windows: [{ label: "Plan Limit", usedPercent: 100 }],
+        },
+        outcome: { state: "failed" },
+      })?.billing,
+    ).toBe("limited");
+    // A failure for another reason, with every window open, is not a limit stop.
+    expect(
+      buildTurnUsagePayload({
+        provider: "claudeAgent",
+        ...tokens,
+        before: null,
+        after: {
+          usedPercent: 40,
+          windowLabel: "Session",
+          status: "allowed",
+          overage: false,
+          windows: [{ label: "Session", usedPercent: 40 }],
+        },
+        outcome: { state: "failed" },
+      })?.billing,
+    ).toBe("included");
+  });
+});

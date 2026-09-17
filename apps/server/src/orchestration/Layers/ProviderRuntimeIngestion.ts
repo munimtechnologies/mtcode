@@ -2747,6 +2747,13 @@ const make = Effect.gen(function* () {
           totalCostUsd: event.payload.totalCostUsd,
           before,
           after: latestRateLimits.get(rateLimitKey) ?? null,
+          // The account snapshot alone cannot say a turn was refused: a
+          // saturated window can belong to another model, and a stopped turn
+          // was stopped by the user. The badge follows how the turn ended.
+          outcome: {
+            state: event.payload.state,
+            failureReason: event.payload.failureReason,
+          },
         });
         if (usagePayload) {
           usageActivity = turnUsageActivity({
