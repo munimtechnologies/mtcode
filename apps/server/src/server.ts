@@ -575,8 +575,9 @@ const RuntimeDomainDependenciesLive = ReactorLayerLive.pipe(
   // must receive it explicitly or the backend dies with
   // "Service not found: t3/terminal/PtyAdapter" and the app never opens.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive.pipe(Layer.provide(PtyAdapterLive))),
-  Layer.provideMerge(AntigravityInstallation.layer),
-  Layer.provideMerge(MonitorSession.layer),
+  // Merged with the Antigravity installation watcher rather than added beside it: this pipe is
+  // at the composition limit (20 steps), and neither layer depends on the other.
+  Layer.provideMerge(Layer.mergeAll(AntigravityInstallation.layer, MonitorSession.layer)),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

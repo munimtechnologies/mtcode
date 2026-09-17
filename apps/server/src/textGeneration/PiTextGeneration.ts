@@ -24,6 +24,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildPullRequestRankingPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
@@ -31,6 +32,7 @@ import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  clampPullRequestRankings,
 } from "./TextGenerationUtils.ts";
 
 const DETERMINISTIC_ARGS = ["--no-session", "--offline"] as const;
@@ -71,7 +73,8 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "rankPullRequests";
     cwd: string;
     prompt: string;
     outputSchema: S;
@@ -277,10 +280,34 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
       modelSelection: input.modelSelection,
     }).pipe(Effect.map((value) => ({ title: sanitizeThreadTitle(value.title) })));
   };
+  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] = (
+    input,
+  ) => {
+    const built = buildPullRequestRankingPrompt({
+      repository: input.repository,
+      intoRepository: input.intoRepository,
+      candidates: input.candidates,
+    });
+    return runJson({
+      operation: "rankPullRequests",
+      cwd: input.cwd,
+      prompt: built.prompt,
+      outputSchema: built.outputSchema,
+      modelSelection: input.modelSelection,
+    }).pipe(
+      Effect.map(
+        (value) =>
+          ({
+            rankings: clampPullRequestRankings(value.rankings),
+          }) satisfies TextGeneration.PullRequestRankingResult,
+      ),
+    );
+  };
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    rankPullRequests,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

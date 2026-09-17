@@ -16,6 +16,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as CodexTextGeneration from "../src/textGeneration/CodexTextGeneration.ts";
+import { ServerSettingsService } from "../src/serverSettings.ts";
 import { threadTitleEvaluationCases } from "./threadTitleEvaluationCases.ts";
 import {
   formatThreadTitleContext,
@@ -165,7 +166,10 @@ await Effect.runPromise(
         ),
       ).pipe(
         Layer.provideMerge(
-          ServerConfig.layerTest(process.cwd(), { prefix: "t3-title-evaluation-state-" }),
+          Layer.mergeAll(
+            ServerConfig.layerTest(process.cwd(), { prefix: "t3-title-evaluation-state-" }),
+            ServerSettingsService.layerTest(),
+          ),
         ),
         Layer.provideMerge(NodeServices.layer),
       ),

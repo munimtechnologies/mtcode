@@ -10,7 +10,6 @@ import {
   CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
-  EventId,
   MessageId,
   ProjectId,
   ThreadId,

@@ -1572,7 +1572,7 @@ export const makeCodexSessionRuntime = (
     const backgroundTasks = new CodexBackgroundTasks();
     const monitorCommands = new Map<
       string,
-      { stdout: TextDecoder; stderr: TextDecoder; stopped: boolean }
+      { stdout: InstanceType<typeof TextDecoder>; stderr: InstanceType<typeof TextDecoder>; stopped: boolean }
     >();
     const turnLock = yield* Semaphore.make(1);
     const wakeSignals = yield* Queue.sliding<void>(1);

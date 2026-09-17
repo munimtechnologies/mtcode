@@ -38,7 +38,7 @@ const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
 });
 const CoreDepsLayer = Layer.mergeAll(ServerConfigLayer, ServerSettings.layerTest());
 const TestLayer = GitVcsDriver.layer.pipe(
-  Layer.provide(CoreDepsLayer),
+  Layer.provideMerge(CoreDepsLayer),
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -210,7 +210,7 @@ it.effect("bounds Git bursts across drivers without timing out queued commands",
     );
     assert.equal(duration.count, 16);
     assert.equal(duration.sum, 16_000);
-  }).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  }).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 it.effect.each([{ timeoutMs: null }, { timeoutMs: 30_001 }])(
@@ -261,7 +261,7 @@ it.effect.each([{ timeoutMs: null }, { timeoutMs: 30_001 }])(
       yield* Deferred.succeed(slowGate, undefined);
       assert.equal((yield* Fiber.join(slow)).stdout, "ok");
       assert.equal(active, 0);
-    }).pipe(Effect.provide(ServerConfigLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
+    }).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
 for (const location of ["root", "nested", "worktree"] as const) {

@@ -2589,7 +2589,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(serviceTier ? { serviceTier } : {}),
           ...(mcpSession || desktopMcp
             ? {
-                mcpProviderSessionId: mcpSession.providerSessionId,
+                ...(mcpSession ? { mcpProviderSessionId: mcpSession.providerSessionId } : {}),
                 environment: {
                   ...McpProviderSession.withAgentDeviceEnvironment(
                     options?.environment ?? process.env,

@@ -286,13 +286,6 @@ function makeFakeCodexAdapter(
     }),
   );
 
-  const stopAll = vi.fn(
-    (): Effect.Effect<void, ProviderAdapterError> =>
-      Effect.sync(() => {
-        sessions.clear();
-      }),
-  );
-
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
     provider,
     capabilities: {

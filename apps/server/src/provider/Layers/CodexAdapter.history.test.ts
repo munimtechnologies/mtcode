@@ -9,6 +9,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { ServerConfig } from "../../config.ts";
+import * as MonitorSession from "../../mcp/MonitorSession.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { writeFakeCli } from "../../testUtils/fakeCli.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
 
@@ -66,9 +68,11 @@ it.effect(
       expect(yield* adapter.listSessions()).toEqual([]);
     }).pipe(
       Effect.provide(
-        ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
-          Layer.provideMerge(NodeServices.layer),
-        ),
+        Layer.mergeAll(
+          ServerConfig.layerTest(process.cwd(), process.cwd()),
+          ServerSettingsService.layerTest(),
+          MonitorSession.layer,
+        ).pipe(Layer.provideMerge(NodeServices.layer)),
       ),
     ),
 );

@@ -1191,6 +1191,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const previousLatest = existingRow.value.latestUserMessageAt;
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            // Imported conversations carry turn ids without turn-diff events, so the
+            // message itself advances the thread's latest turn.
+            ...(event.payload.turnId !== null ? { latestTurnId: event.payload.turnId } : {}),
             updatedAt: event.occurredAt,
             latestUserMessageAt:
               event.payload.role === "user" &&
@@ -1217,9 +1220,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            ...(event.type === "thread.message-sent" && event.payload.turnId !== null
-              ? { latestTurnId: event.payload.turnId }
-              : {}),
             updatedAt: event.occurredAt,
           });
           if (shouldRefreshThreadShellSummary(event)) {

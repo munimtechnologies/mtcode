@@ -20,6 +20,7 @@ import * as DeviceService from "../device/DeviceService.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as MonitorSession from "./MonitorSession.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
@@ -836,6 +837,7 @@ it.effect("HTTP tool discovery only advertises monitors to monitoring credential
         Layer.mock(DeviceService.DeviceService)({}),
         Layer.mock(OrchestrationEngineService)({}),
         Layer.mock(ProjectionSnapshotQuery)({}),
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
       ).pipe(
         Layer.provide(
           Layer.succeed(
@@ -843,6 +845,7 @@ it.effect("HTTP tool discovery only advertises monitors to monitoring credential
             ServerEnvironment.ServerEnvironment.of({
               getEnvironmentId: Effect.succeed(environmentId),
               getDescriptor: Effect.die("unused"),
+              setEnvironmentLabel: () => Effect.void,
             }),
           ),
         ),

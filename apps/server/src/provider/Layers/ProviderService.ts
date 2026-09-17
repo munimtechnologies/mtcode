@@ -29,7 +29,7 @@ import {
   ThreadId,
   TurnId,
   type ProjectId,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,

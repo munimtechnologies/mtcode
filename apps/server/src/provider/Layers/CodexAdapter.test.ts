@@ -753,6 +753,7 @@ function makeRecoveryTestLayer(runtimeFactory: ReturnType<typeof makeRuntimeFact
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(MonitorSession.layer),
   );
 }
 

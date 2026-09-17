@@ -109,6 +109,7 @@ export function applyPiExternalAutoSettlement(input: {
     now: input.now,
     autoSettleAfterDays: input.autoSettleAfterDays,
     autoSettleOnMerge: false,
+    autoSettlePinnedThreads: false,
   });
   if (settledAt === null) return input.snapshot;
   return {

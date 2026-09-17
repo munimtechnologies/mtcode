@@ -3549,7 +3549,6 @@ const makeWsRpcLayer = (
                   resource: input.resource,
                 });
               }
-              const path = yield* Path.Path;
               let workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
               if (path.isAbsolute(resource.path)) {
                 const relativePath = path.relative(workspaceRoot, resource.path);

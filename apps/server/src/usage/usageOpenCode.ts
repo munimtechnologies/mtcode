@@ -15,6 +15,19 @@ import type { UsageRecord } from "./usageTranscripts.ts";
 // external without asking its resolver to load a module Node cannot provide.
 const BUN_SQLITE_MODULE_ID: string = "bun:sqlite";
 
+// Structural view of the `bun:sqlite` members `openDatabase` touches. The fork
+// typechecks against Node typings only (`types: ["node"]`), so there is no
+// ambient `bun:sqlite` declaration for `typeof import(...)` to resolve against.
+interface BunSqliteModule {
+  readonly Database: new (
+    path: string,
+    options: { readonly readonly: boolean; readonly create: boolean },
+  ) => {
+    query(sql: string): { all(...parameters: ReadonlyArray<unknown>): ReadonlyArray<unknown> };
+    close(): void;
+  };
+}
+
 const OPEN_CODE_STABLE_DATABASE = "opencode.db";
 const OPEN_CODE_CHANNEL_DATABASE = /^opencode-[a-zA-Z0-9._-]+\.db$/;
 
@@ -239,7 +252,7 @@ export function parseOpenCodeUsageRow(value: unknown): UsageRecord | null {
 
 async function openDatabase(databasePath: string): Promise<SqliteDatabase> {
   if (process.versions.bun !== undefined) {
-    const { Database } = (await import(BUN_SQLITE_MODULE_ID)) as typeof import("bun:sqlite");
+    const { Database } = (await import(BUN_SQLITE_MODULE_ID)) as BunSqliteModule;
     const database = new Database(databasePath, { readonly: true, create: false });
     return {
       statement: (sql) => {

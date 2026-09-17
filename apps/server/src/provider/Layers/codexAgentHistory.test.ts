@@ -206,14 +206,14 @@ describe("saved Codex agent history", () => {
 
   it.effect("does not normalize entries before a requested offset", () =>
     Effect.gen(function* () {
-      const snapshot = thread("child", "parent", 0);
+      const base = thread("child", "parent", 0);
       const argumentsWithThrowingGetter = Object.defineProperty({}, "payload", {
         enumerable: true,
         get() {
           throw new Error("skipped payload was read");
         },
       });
-      snapshot.thread.turns[0]!.items = [
+      const items: V2ThreadReadResponse["thread"]["turns"][number]["items"] = [
         {
           type: "mcpToolCall",
           id: "skipped",
@@ -236,6 +236,10 @@ describe("saved Codex agent history", () => {
           aggregatedOutput: "visible output",
         },
       ];
+      const snapshot: V2ThreadReadResponse = {
+        ...base,
+        thread: { ...base.thread, turns: [{ ...base.thread.turns[0]!, items }] },
+      };
       const result = yield* readCodexAgentHistory({
         parentThreadId: "parent",
         agentId: "child",
