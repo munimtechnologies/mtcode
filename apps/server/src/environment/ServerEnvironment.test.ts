@@ -183,6 +183,7 @@ it.layer(testNodeServices)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.pullRequests).toBe(true);
       expect(second.capabilities.usagePriceOverrides).toBe(true);
       expect(second.capabilities.threadActiveReorder).toBe(true);
+      expect(second.capabilities.threadVisitedTracking).toBe(true);
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
       expect(second.capabilities.threadSnooze).toBe(true);
       expect(second.capabilities.threadGoal).toBe(true);

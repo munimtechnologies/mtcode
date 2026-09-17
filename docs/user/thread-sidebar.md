@@ -32,7 +32,11 @@ files directly; see [Attach files](./composer.md#attach-files).
 On web and desktop, pinning or unpinning a thread keeps the sidebar at your current
 scroll position instead of following the thread to its new place in the list.
 
-Pinning does not prevent automatic settlement. Settling a thread removes its pin.
+Pinning prevents automatic settlement. A pinned thread stays active through
+inactivity and merged/closed pull requests until you unpin it or settle it
+manually. To let pinned threads settle like any other thread, turn on
+**Auto-settle pinned threads** in **Settings → General**. Settling a thread
+removes its pin.
 
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
@@ -83,10 +87,15 @@ sending an answer or restarting the agent.
 
 By default, environments settle inactive threads after three days and settle
 threads whose pull request merged. A closed pull request can also settle an idle
-thread. Work in progress, pending questions or approvals, and live background work
-prevent automatic settlement. An open pull request does not prevent inactivity
+thread. Work in progress, pending questions or approvals, live background work,
+and pinned threads prevent automatic settlement. An open pull request does not prevent inactivity
 settlement, but an old closed or merged pull request does not settle work you
 resumed after it closed.
+
+To keep one thread out of the settled shelf no matter how long it sits idle, open its menu,
+choose **Auto-settle behavior**, and pick **Disabled**. The current option is checked. Pick
+**Enabled** to return to the usual rules. Manual settle, snooze, and archive still work while it
+is disabled.
 
 Change these rules in **Settings → General**. They continue to run when your apps
 are closed. On web and desktop, choose an environment at the top to change only
@@ -95,6 +104,15 @@ Mixed values show where the selected environments disagree. Mobile applies these
 rules to connected environments that support shared settings. Offline environments
 and older servers keep their previous values. Changing a rule does not reopen
 already settled threads.
+
+## Read and unread threads
+
+Open a completed thread to clear its **Done** indicator on every connected device. On web and
+desktop, open the thread's context menu and choose **Mark unread** to bring the indicator back.
+Mobile clears the indicator when you open a thread but does not mark threads unread.
+
+Older servers keep read and unread changes on the current device. Update the server to sync
+them across devices. When you first update, existing threads count as read.
 
 ## Link a pull request
 

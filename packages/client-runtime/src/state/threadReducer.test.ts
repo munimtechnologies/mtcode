@@ -407,6 +407,46 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("thread.auto-settle-set", () => {
+    it("stores and clears autoSettleDisabledAt", () => {
+      const disabledAt = "2026-04-01T05:00:00.000Z";
+      const off = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 7,
+        occurredAt: disabledAt,
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.auto-settle-set",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          autoSettleDisabledAt: disabledAt,
+          updatedAt: disabledAt,
+        },
+      });
+      expect(off.kind).toBe("updated");
+      if (off.kind !== "updated") return;
+      expect(off.thread.autoSettleDisabledAt).toBe(disabledAt);
+
+      const on = applyThreadDetailEvent(off.thread, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-04-01T06:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.auto-settle-set",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          autoSettleDisabledAt: null,
+          updatedAt: "2026-04-01T06:00:00.000Z",
+        },
+      });
+      expect(on.kind).toBe("updated");
+      if (on.kind === "updated") {
+        expect(on.thread.autoSettleDisabledAt).toBeNull();
+      }
+    });
+  });
+
   describe("thread.meta-updated", () => {
     it.each(["f", null] as const)(
       "updates the active key to %s without activity",
@@ -640,6 +680,29 @@ describe("applyThreadDetailEvent", () => {
       if (unlinked.kind !== "updated") throw new Error("expected update");
       expect(unlinked.thread.pullRequests).toEqual([]);
       expect(unlinked.thread.linkedPullRequest).toBeNull();
+    });
+
+    it("patches lastVisitedAt without changing the thread update time", () => {
+      const lastVisitedAt = "2026-04-01T05:00:00.000Z";
+      const result = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 5,
+        occurredAt: lastVisitedAt,
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          lastVisitedAt,
+          updatedAt: baseThread.updatedAt,
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.lastVisitedAt).toBe(lastVisitedAt);
+        expect(result.thread.updatedAt).toBe(baseThread.updatedAt);
+      }
     });
   });
 

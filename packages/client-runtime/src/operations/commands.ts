@@ -37,6 +37,8 @@ export type ArchiveThreadInput = CommandInput<"thread.archive">;
 export type UnarchiveThreadInput = CommandInput<"thread.unarchive">;
 export type SettleThreadInput = CommandInput<"thread.settle">;
 export type UnsettleThreadInput = CommandInput<"thread.unsettle">;
+export type VisitThreadInput = CommandInput<"thread.visit">;
+export type MarkThreadUnreadInput = CommandInput<"thread.mark-unread">;
 export type SnoozeThreadInput = CommandInput<"thread.snooze">;
 export type UnsnoozeThreadInput = CommandInput<"thread.unsnooze">;
 export type SetThreadGoalInput = CommandInput<"thread.goal.set">;
@@ -47,6 +49,7 @@ export type CompleteThreadGoalInput = CommandInput<"thread.goal.complete">;
 export type PinThreadInput = CommandInput<"thread.pin">;
 export type UnpinThreadInput = CommandInput<"thread.unpin">;
 export type ReorderPinnedThreadInput = CommandInput<"thread.pin.reorder">;
+export type SetThreadAutoSettleInput = CommandInput<"thread.auto-settle.set">;
 export type ReorderActiveThreadInput = CommandInput<"thread.active.reorder">;
 export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
 export type LinkThreadPullRequestInput = CommandInput<"thread.pull-request.link">;
@@ -195,6 +198,26 @@ export const unsettleThread: (input: UnsettleThreadInput) => CommandEffect = Eff
   });
 });
 
+export const visitThread: (input: VisitThreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.visitThread",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.visit",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const markThreadUnread: (input: MarkThreadUnreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.markThreadUnread",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.mark-unread",
+    commandId: yield* commandId(input),
+  });
+});
+
 export const snoozeThread: (input: SnoozeThreadInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.snoozeThread",
 )(function* (input) {
@@ -281,6 +304,16 @@ export const unpinThread: (input: UnpinThreadInput) => CommandEffect = Effect.fn
   return yield* dispatch({
     ...input,
     type: "thread.unpin",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const setThreadAutoSettle: (input: SetThreadAutoSettleInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setThreadAutoSettle",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.auto-settle.set",
     commandId: yield* commandId(input),
   });
 });

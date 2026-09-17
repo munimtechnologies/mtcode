@@ -785,6 +785,8 @@ export const OrchestrationThread = Schema.Struct({
   // instead of sinking back to its creation-order slot. Cleared on settle.
   // Optional so payloads from pre-stamp servers still decode.
   unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Optional so payloads and cached snapshots from pre-tracking servers decode.
+  lastVisitedAt: Schema.optional(IsoDateTime),
   // Snooze is an overlay on the active lifecycle, not a fourth destination:
   // a snoozed thread stays "active" in the model and is only suppressed from
   // the inbox until snoozedUntil passes (or the thread raises its hand).
@@ -804,6 +806,10 @@ export const OrchestrationThread = Schema.Struct({
   // threads retain their creation/re-entry order above the arranged run.
   // Optional so payloads from pre-reorder servers still decode.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Set while the user has turned automatic settlement off for this thread.
+  // Survives manual settle, un-settle, and activity: only the user clears it.
+  // Optional so payloads from older servers still decode.
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   // Thread-scoped completion contract. Optional so payloads from pre-Goal
@@ -877,11 +883,13 @@ export const OrchestrationThreadShell = Schema.Struct({
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // See OrchestrationThread.unsettledAt: last re-entry into the active list.
   unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  lastVisitedAt: Schema.optional(IsoDateTime),
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   // Compact Goal summary so the inbox can render without Thread detail.
   // Optional so older clients still decode shells that omit it.
@@ -1151,6 +1159,24 @@ const ThreadUnsettleCommand = Schema.Struct({
   reason: Schema.Literal("user"),
 });
 
+const ThreadVisitCommand = Schema.Struct({
+  type: Schema.Literal("thread.visit"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  /**
+   * Watermark of the thread state the viewer has seen (typically the shell's
+   * updatedAt). The server keeps the maximum of the stored and supplied
+   * values, so replays and out-of-order deliveries cannot move it backwards.
+   */
+  visitedAt: IsoDateTime,
+});
+
+const ThreadMarkUnreadCommand = Schema.Struct({
+  type: Schema.Literal("thread.mark-unread"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 const ThreadSnoozeCommand = Schema.Struct({
   type: Schema.Literal("thread.snooze"),
   commandId: CommandId,
@@ -1269,6 +1295,14 @@ const ThreadPinReorderCommand = Schema.Struct({
   // on other servers) are never touched. Clients compute a key that sorts
   // between the dropped position's neighbors.
   orderKey: TrimmedNonEmptyString,
+});
+
+const ThreadAutoSettleSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-settle.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // false turns automatic settlement off for this thread, true turns it back on.
+  enabled: Schema.Boolean,
 });
 
 const ThreadActiveReorderCommand = Schema.Struct({
@@ -1505,6 +1539,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnarchiveCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadVisitCommand,
+  ThreadMarkUnreadCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadGoalSetCommand,
@@ -1515,6 +1551,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadPinCommand,
   ThreadUnpinCommand,
   ThreadPinReorderCommand,
+  ThreadAutoSettleSetCommand,
   ThreadActiveReorderCommand,
   ThreadMetaUpdateCommand,
   ThreadPullRequestLinkCommand,
@@ -1547,6 +1584,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnarchiveCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadVisitCommand,
+  ThreadMarkUnreadCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadGoalSetCommand,
@@ -1557,6 +1596,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadPinCommand,
   ThreadUnpinCommand,
   ThreadPinReorderCommand,
+  ThreadAutoSettleSetCommand,
   ThreadActiveReorderCommand,
   ThreadMetaUpdateCommand,
   ThreadPullRequestLinkCommand,
@@ -1795,6 +1835,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unpinned",
   "thread.pin-reordered",
   "thread.active-reordered",
+  "thread.auto-settle-set",
   "thread.meta-updated",
   "thread.pull-request-linked",
   "thread.pull-request-unlinked",
@@ -1983,6 +2024,13 @@ export const ThreadActiveReorderedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ThreadAutoSettleSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  // Null re-enables automatic settlement.
+  autoSettleDisabledAt: Schema.NullOr(IsoDateTime),
+  updatedAt: IsoDateTime,
+});
+
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   // Order updates use this existing event so older clients can ignore the
@@ -2004,6 +2052,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   // thread.pull-request-linked still decode and replay into the link table.
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  lastVisitedAt: Schema.optional(IsoDateTime),
   updatedAt: IsoDateTime,
 });
 
@@ -2320,6 +2369,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.active-reordered"),
     payload: ThreadActiveReorderedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.auto-settle-set"),
+    payload: ThreadAutoSettleSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

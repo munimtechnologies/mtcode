@@ -641,7 +641,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (command.type === "thread.auto-settle" && thread.settledOverride !== null) {
+      if (
+        command.type === "thread.auto-settle" &&
+        (thread.settledOverride !== null || thread.autoSettleDisabledAt != null)
+      ) {
         return yield* Effect.fail(
           new OrchestrationCommandInvariantError({
             commandType: command.type,
@@ -649,6 +652,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           }),
         );
       }
+      // The pinned-threads toggle lives in the settlement reactor/policy:
+      // the engine already rejects a stale auto-settle whose snapshot predates
+      // the pin (any event after snapshotSequence fails), so the decider must
+      // not second-guess pins here. Manual settle clears the pin below.
       // The server owns settle eligibility. A stale command must not settle
       // a thread whose session is coming alive or working.
       if (thread.session?.status === "starting" || thread.session?.status === "running") {
@@ -781,6 +788,89 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           reason: command.reason,
           updatedAt: alreadyPinnedActive ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.visit": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const visitedAt = DateTime.make(command.visitedAt);
+      if (Option.isNone(visitedAt)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} visit time ${command.visitedAt} is not a valid timestamp`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      // Clients stamp the thread state they saw (the shell's updatedAt), never
+      // wall clock, so a skewed device clock cannot mark future activity read.
+      const cappedVisitedAt =
+        DateTime.Order(visitedAt.value, DateTime.makeUnsafe(occurredAt)) <= 0
+          ? DateTime.formatIso(visitedAt.value)
+          : occurredAt;
+      // The watermark never moves backward: a stale visit arriving after a
+      // newer one (or after a mark-unread) re-emits the current value.
+      const previousVisitedAt = thread.lastVisitedAt ?? thread.createdAt;
+      const lastVisitedAt = DateTime.make(previousVisitedAt).pipe(
+        Option.filter(
+          (previous) => DateTime.Order(previous, DateTime.makeUnsafe(cappedVisitedAt)) >= 0,
+        ),
+        Option.as(previousVisitedAt),
+        Option.getOrElse(() => cappedVisitedAt),
+      );
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          lastVisitedAt,
+          // updatedAt is echoed, not bumped: reading a thread must not reorder it.
+          updatedAt: thread.updatedAt,
+        },
+      };
+    }
+
+    case "thread.mark-unread": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = yield* nowIso;
+      // Unread means "visited just before the latest completion". With no
+      // completion to sit behind (running turn, never ran) there is nothing
+      // to mark, so the current watermark is kept.
+      const previousVisitedAt = thread.lastVisitedAt ?? thread.createdAt;
+      const latestCompletedAt = thread.latestTurn?.completedAt;
+      const lastVisitedAt =
+        latestCompletedAt == null
+          ? previousVisitedAt
+          : DateTime.make(latestCompletedAt).pipe(
+              Option.map(DateTime.subtractDuration("1 millis")),
+              Option.map(DateTime.formatIso),
+              Option.getOrElse(() => previousVisitedAt),
+            );
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          lastVisitedAt,
+          updatedAt: thread.updatedAt,
         },
       };
     }
@@ -1456,6 +1546,37 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           orderKey: command.orderKey,
           updatedAt: keyUnchanged ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.auto-settle.set": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Idempotent by re-emission (see thread.unpin): setting the current
+      // state again keeps the existing timestamps so duplicates do not churn
+      // ordering. The flag is independent of the settled lifecycle: it only
+      // gates the automatic paths, so it never blocks a manual settle.
+      const currentlyDisabledAt = thread.autoSettleDisabledAt ?? null;
+      const unchanged = command.enabled
+        ? currentlyDisabledAt === null
+        : currentlyDisabledAt !== null;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.auto-settle-set",
+        payload: {
+          threadId: command.threadId,
+          autoSettleDisabledAt: command.enabled ? null : (currentlyDisabledAt ?? occurredAt),
+          updatedAt: unchanged ? thread.updatedAt : occurredAt,
         },
       };
     }

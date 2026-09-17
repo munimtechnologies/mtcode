@@ -134,6 +134,14 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server persists manual Active order through thread.active.reorder.
       Same version-skew contract as threadSettlement. */
   threadActiveReorder: Schema.optionalKey(Schema.Boolean),
+  /** Server understands thread.auto-settle.set (per-thread auto-settle off).
+      Same version-skew contract as threadSettlement. */
+  threadAutoSettleOptOut: Schema.optionalKey(Schema.Boolean),
+  /** Server understands thread.visit / thread.mark-unread commands and
+      projects lastVisitedAt on thread shells. Same version-skew contract as
+      threadSettlement: clients keep their local visited state against
+      servers that lack this. */
+  threadVisitedTracking: Schema.optionalKey(Schema.Boolean),
   /** Server understands regenerateTitle on thread.meta.update. Absent on
       older servers, so clients hide the action instead of sending it. */
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),

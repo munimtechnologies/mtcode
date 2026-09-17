@@ -235,6 +235,19 @@ export function readEnvironmentSupportsGoal(environmentId: EnvironmentId): boole
   );
 }
 
+/** Whether the server tracks thread visits (thread.visit / thread.mark-unread). False on
+    older servers, where clients keep visited state in local storage, and
+    undefined until the environment's config has loaded so callers can wait
+    instead of misfiling a server-bound write locally. */
+export function readEnvironmentSupportsVisitedTracking(
+  environmentId: EnvironmentId,
+): boolean | undefined {
+  const serverConfig = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId);
+  return serverConfig === undefined
+    ? undefined
+    : serverConfig.environment.capabilities.threadVisitedTracking === true;
+}
+
 /** Whether the environment's server understands thread.pin/unpin.
     Same version-skew contract as settlement. */
 export function readEnvironmentSupportsPinning(environmentId: EnvironmentId): boolean {
@@ -259,6 +272,15 @@ export function readEnvironmentSupportsPinReorder(environmentId: EnvironmentId):
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
       .threadPinReorder === true
+  );
+}
+
+/** Whether the environment's server understands thread.auto-settle.set.
+    Same version-skew contract as settlement. */
+export function readEnvironmentSupportsAutoSettleOptOut(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadAutoSettleOptOut === true
   );
 }
 
