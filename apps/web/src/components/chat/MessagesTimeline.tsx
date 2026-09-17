@@ -163,6 +163,8 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { UsageBadge } from "./UsageBadge";
+import type { TurnUsage } from "~/turnUsage";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { inferEntryKindFromPath } from "../../pierre-icons";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -267,6 +269,8 @@ import {
 // components (WorkingTimer, LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
 
+const EMPTY_TURN_USAGE: ReadonlyMap<TurnId, TurnUsage> = new Map();
+
 interface TimelineRowSharedState {
   searchMessageId: MessageId | null;
   citationRequest: AssistantCitationTarget | null;
@@ -307,6 +311,8 @@ interface TimelineRowSharedState {
   agentPanelModel: AgentPanelModel;
   expandedSpawnEntryIds: ReadonlySet<string>;
   onOpenAgents: () => void;
+  turnUsageByTurnId: ReadonlyMap<TurnId, TurnUsage>;
+  turnUsagePlanLabel: string | null;
   onCancelWorktreeSetup: (() => void) | null;
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
@@ -416,6 +422,10 @@ interface MessagesTimelineProps {
   ) => boolean;
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
+  /** Per-turn cost badges under finished assistant replies; empty when none were reported. */
+  turnUsageByTurnId?: ReadonlyMap<TurnId, TurnUsage>;
+  /** Plan or provider name appended to usage badges. */
+  turnUsagePlanLabel?: string | null;
   isWorking: boolean;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
@@ -560,6 +570,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  turnUsageByTurnId = EMPTY_TURN_USAGE,
+  turnUsagePlanLabel = null,
   queuedMessages = EMPTY_QUEUED_MESSAGES,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
@@ -1042,6 +1054,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       agentPanelModel: agentPanelModel ?? EMPTY_AGENT_PANEL_MODEL,
       expandedSpawnEntryIds: paintedExpandedSpawnEntryIds,
       onOpenAgents,
+      turnUsageByTurnId,
+      turnUsagePlanLabel,
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
@@ -1051,6 +1065,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRemoveQueuedMessage,
     }),
     [
+      turnUsageByTurnId,
+      turnUsagePlanLabel,
       readyCitationRequest,
       searchRequest?.messageId,
       listRef,
@@ -2387,6 +2403,16 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
+        {row.message.turnId &&
+        ctx.turnUsageByTurnId.get(row.message.turnId) &&
+        !row.message.streaming ? (
+          <div className="mt-1.5 flex items-center empty:hidden">
+            <UsageBadge
+              usage={ctx.turnUsageByTurnId.get(row.message.turnId)!}
+              planLabel={ctx.turnUsagePlanLabel}
+            />
+          </div>
+        ) : null}
         {row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"

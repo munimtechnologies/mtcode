@@ -263,6 +263,8 @@ import {
   ComposerControlSeparator,
   ComposerSelectControl,
 } from "./ComposerControl";
+import { ComposerUsageBadge } from "./ComposerUsageBadge";
+import type { TurnUsage } from "~/turnUsage";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
 import {
@@ -1053,6 +1055,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   hidden?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
+  latestTurnUsage: TurnUsage | null;
+  usagePlanLabel: string | null;
 }) {
   const size = props.size ?? "sm";
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -1158,6 +1162,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       </Tooltip>
 
       {interactionModeToggle}
+      <ComposerUsageBadge usage={props.latestTurnUsage} planLabel={props.usagePlanLabel} />
     </>
   );
 });
@@ -1330,6 +1335,10 @@ export interface ChatComposerProps {
   phase: SessionPhase;
   isConnecting: boolean;
   isSendBusy: boolean;
+  /** Newest usage report in this thread, for the live usage pill in the footer. */
+  latestTurnUsage?: TurnUsage | null;
+  /** Plan or provider name the usage pill attributes its limits to. */
+  usagePlanLabel?: string | null;
   isRevertingCheckpoint?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
@@ -1488,6 +1497,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase,
     isConnecting,
     isSendBusy,
+    latestTurnUsage = null,
+    usagePlanLabel = null,
     isRevertingCheckpoint = false,
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
@@ -5099,6 +5110,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           hidden={composerControlsHidden || restingHiddenBlockCount > 0}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
+          latestTurnUsage={latestTurnUsage}
+          usagePlanLabel={usagePlanLabel}
         />
       ),
     },
