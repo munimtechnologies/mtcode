@@ -76,6 +76,28 @@ function PluginFallbackIcon({
   );
 }
 
+/**
+ * Chooses the artwork to render: an inline data URL, then the on-disk logo served by the server,
+ * then the source's remote logo URL. The remote URL waits while an on-disk logo is still loading,
+ * and is used when that logo is missing or fails to load. Returns null (letter avatar) only when
+ * every candidate is absent or has failed.
+ */
+export function pluginLogoSource(input: {
+  readonly logoDataUrl: string | null;
+  readonly hasLocalLogo: boolean;
+  readonly localLogoResolved: boolean;
+  readonly localLogoDataUrl: string | null;
+  readonly logoUrl: string | null;
+  readonly failedSources: ReadonlyArray<string>;
+}): string | null {
+  const usable = (value: string | null): value is string =>
+    value !== null && value.trim() !== "" && !input.failedSources.includes(value);
+  if (usable(input.logoDataUrl)) return input.logoDataUrl;
+  if (input.hasLocalLogo && !input.logoDataUrl && !input.localLogoResolved) return null;
+  if (usable(input.localLogoDataUrl)) return input.localLogoDataUrl;
+  return usable(input.logoUrl) ? input.logoUrl : null;
+}
+
 export function PluginLogo({
   plugin,
   size = "default",
@@ -92,9 +114,9 @@ export function PluginLogo({
     readonly pluginId: string;
     readonly dataUrl: string | null;
   } | null>(null);
-  const [failedImage, setFailedImage] = useState<{
+  const [failedImages, setFailedImages] = useState<{
     readonly pluginId: string;
-    readonly source: string;
+    readonly sources: ReadonlyArray<string>;
   } | null>(null);
   useEffect(() => {
     if (!plugin.hasLocalLogo || plugin.logoDataUrl) return;
@@ -107,11 +129,17 @@ export function PluginLogo({
     };
   }, [plugin.hasLocalLogo, plugin.id, plugin.logoDataUrl]);
 
-  const localLogoDataUrl = localLogo?.pluginId === plugin.id ? localLogo.dataUrl : null;
-  const source =
-    plugin.logoDataUrl ?? localLogoDataUrl ?? (plugin.hasLocalLogo ? null : plugin.logoUrl);
-  const showImage =
-    source !== null && (failedImage?.pluginId !== plugin.id || failedImage.source !== source);
+  const localLogoResolved = localLogo?.pluginId === plugin.id;
+  const failedSources = failedImages?.pluginId === plugin.id ? failedImages.sources : [];
+  const source = pluginLogoSource({
+    logoDataUrl: plugin.logoDataUrl,
+    hasLocalLogo: plugin.hasLocalLogo,
+    localLogoResolved,
+    localLogoDataUrl: localLogoResolved ? localLogo.dataUrl : null,
+    logoUrl: plugin.logoUrl,
+    failedSources,
+  });
+  const showImage = source !== null;
   return (
     <div
       aria-label={`${plugin.name} logo`}
@@ -131,7 +159,10 @@ export function PluginLogo({
           className="size-full object-cover"
           referrerPolicy="no-referrer"
           src={source ?? undefined}
-          onError={() => setFailedImage({ pluginId: plugin.id, source })}
+          onError={() => {
+            if (source === null) return;
+            setFailedImages({ pluginId: plugin.id, sources: [...failedSources, source] });
+          }}
         />
       ) : (
         <PluginFallbackIcon name={plugin.name} packageName={plugin.packageName} />

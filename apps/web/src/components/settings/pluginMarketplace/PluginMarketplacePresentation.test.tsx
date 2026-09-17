@@ -9,7 +9,11 @@ import {
   pickDiscoverPlugins,
 } from "~/pluginMarketplace/catalog";
 
-import { HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
+import {
+  HarnessSupportBadges,
+  PluginLogo,
+  pluginLogoSource,
+} from "./PluginMarketplacePresentation";
 
 const plugin: PluginMarketplacePlugin = {
   id: "computer-use@openai-bundled",
@@ -50,6 +54,48 @@ describe("plugin marketplace presentation", () => {
     expect(markup).toContain('role="img"');
     expect(markup).toContain('aria-label="Computer Use logo"');
     expect(markup).toContain('src="data:image/png;base64,aWNvbg=="');
+  });
+
+  it("renders a signed remote Codex logo URL with its query intact", () => {
+    const logoUrl =
+      "https://files.openai.com/content?id=file_00000000888c81f58498ed091b03bc04&cdn=1&cp=pi&sig=2fbc&v=0";
+    const markup = renderToStaticMarkup(
+      <PluginLogo
+        plugin={{ ...plugin, name: "Notion", hasLocalLogo: false, logoDataUrl: null, logoUrl }}
+      />,
+    );
+
+    expect(markup).toContain(`src="${logoUrl.replaceAll("&", "&amp;")}"`);
+  });
+
+  it("falls back from missing or failed artwork to the remote logo, then to letters", () => {
+    const remote = "https://files.openai.com/content?id=file_1&sig=abc";
+    const base = {
+      logoDataUrl: null,
+      hasLocalLogo: true,
+      localLogoResolved: false,
+      localLogoDataUrl: null,
+      logoUrl: remote,
+      failedSources: [],
+    };
+    // Waits for the on-disk logo before showing the remote one.
+    expect(pluginLogoSource(base)).toBeNull();
+    expect(pluginLogoSource({ ...base, localLogoResolved: true, localLogoDataUrl: "data:a" })).toBe(
+      "data:a",
+    );
+    // On-disk logo missing or broken: use the source's remote logo.
+    expect(pluginLogoSource({ ...base, localLogoResolved: true })).toBe(remote);
+    expect(
+      pluginLogoSource({
+        ...base,
+        localLogoResolved: true,
+        localLogoDataUrl: "data:a",
+        failedSources: ["data:a"],
+      }),
+    ).toBe(remote);
+    // Every candidate failed: letter avatar.
+    expect(pluginLogoSource({ ...base, hasLocalLogo: false, failedSources: [remote] })).toBeNull();
+    expect(pluginLogoSource({ ...base, hasLocalLogo: false, logoUrl: "  " })).toBeNull();
   });
 
   it("uses readable fallback logo text in light and dark themes", () => {

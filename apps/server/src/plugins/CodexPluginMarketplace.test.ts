@@ -13,6 +13,8 @@ import {
   decodeCodexRuntimeCatalog,
   makeWithOptions,
   parseCursorMarketplaceHtml,
+  preferredArtworkUrl,
+  sanitizeArtworkUrl,
   type CodexPluginRuntime,
 } from "./CodexPluginMarketplace.ts";
 import type { McpOAuthRuntime } from "./McpOAuthRuntime.ts";
@@ -51,9 +53,44 @@ const makeTestMarketplace = makeWithOptions({
     }),
 }).pipe(Effect.provideService(HttpClient.HttpClient, unusedHttpClient));
 
+// Shapes copied from codex 0.154 `plugin/list` records (signatures shortened).
+const signedFilesLogoUrl =
+  "https://files.openai.com/content?id=file_00000000888c81f58498ed091b03bc04&cdn=1&cp=pi&ma=30326400&ts=0&p=pi&cid=8&sig=2fbc63e8&v=0";
+const signedFilesComposerIconUrl =
+  "https://files.openai.com/content?id=file_0000000035e081f78f1775acc52fc7e9&cdn=1&cp=pi&ma=32227200&ts=0&p=pi&cid=8&sig=70a4ffd5&v=0";
+const chatGptSessionLogoUrl =
+  "https://chatgpt.com/backend-api/estuary/content?id=file_000000000ea071f7824094b7ca68260c&cp=pi&ma=30844800&ts=0&p=pi&cid=8&sig=0655c1c9&v=0";
+
 const testLayer = it.layer(NodeServices.layer);
 
 testLayer("CodexPluginMarketplace", (it) => {
+  it("keeps the signed query string on artwork URLs", () => {
+    assert.strictEqual(sanitizeArtworkUrl(signedFilesLogoUrl), signedFilesLogoUrl);
+    assert.strictEqual(
+      sanitizeArtworkUrl("https://user:secret@cdn.example.com/logo.png?v=2#frag"),
+      "https://cdn.example.com/logo.png?v=2",
+    );
+    assert.isNull(sanitizeArtworkUrl("javascript:alert(1)"));
+    assert.isNull(sanitizeArtworkUrl("/Users/me/.codex/plugins/logo.png"));
+    assert.isNull(sanitizeArtworkUrl("   "));
+  });
+
+  it("prefers anonymously loadable artwork over ChatGPT-session URLs", () => {
+    assert.strictEqual(
+      preferredArtworkUrl([chatGptSessionLogoUrl, signedFilesComposerIconUrl]),
+      signedFilesComposerIconUrl,
+    );
+    assert.strictEqual(
+      preferredArtworkUrl([null, chatGptSessionLogoUrl, undefined]),
+      chatGptSessionLogoUrl,
+    );
+    assert.strictEqual(
+      preferredArtworkUrl([signedFilesLogoUrl, signedFilesComposerIconUrl]),
+      signedFilesLogoUrl,
+    );
+    assert.isNull(preferredArtworkUrl([null, "", "not a url"]));
+  });
+
   it("extracts the published Cursor plugin payload", () => {
     const html = String.raw`<script>self.__next_f.push([1,"x:{\"initialPlugins\":[{\"id\":\"730\",\"name\":\"posthog\"}],\"initialTemplates\":[]}"])</script>`;
 
@@ -1117,9 +1154,27 @@ testLayer("CodexPluginMarketplace", (it) => {
                   developerName: "OpenAI",
                   category: "Communication",
                   capabilities: ["Interactive"],
-                  composerIconUrl: "https://files.openai.com/gmail.png",
+                  composerIconUrl: signedFilesComposerIconUrl,
+                  logo: null,
+                  logoUrl: signedFilesLogoUrl,
                   screenshots: [],
                   screenshotUrls: [],
+                },
+              },
+              {
+                id: "app-6a1e0440ecc081918f60d334729eb03c@openai-curated-remote",
+                remotePluginId: "app-6a1e0440ecc081918f60d334729eb03c",
+                name: "app-6a1e0440ecc081918f60d334729eb03c",
+                source: { type: "remote" },
+                installed: false,
+                enabled: false,
+                availability: "AVAILABLE",
+                interface: {
+                  displayName: "Era Context",
+                  composerIcon: null,
+                  composerIconUrl: signedFilesComposerIconUrl,
+                  logo: null,
+                  logoUrl: chatGptSessionLogoUrl,
                 },
               },
               {
@@ -1222,6 +1277,7 @@ testLayer("CodexPluginMarketplace", (it) => {
       const catalog = yield* marketplace.catalog();
       expect(commands).not.toContainEqual(["codex", "plugin", "list", "--available", "--json"]);
       assert.deepStrictEqual(catalog.plugins.map((plugin) => plugin.id).toSorted(), [
+        "codex:app-6a1e0440ecc081918f60d334729eb03c@openai-curated-remote",
         "codex:build-ios-apps@openai-curated",
         "codex:gmail@openai-curated-remote",
         "codex:locked@openai-curated-remote",
@@ -1232,7 +1288,9 @@ testLayer("CodexPluginMarketplace", (it) => {
       assert.strictEqual(gmail?.category, "Communication");
       assert.strictEqual(gmail?.developer, "OpenAI");
       assert.strictEqual(gmail?.featured, true);
-      assert.strictEqual(gmail?.logoUrl, "https://files.openai.com/gmail.png");
+      assert.strictEqual(gmail?.logoUrl, signedFilesLogoUrl);
+      const era = catalog.plugins.find((plugin) => plugin.name === "Era Context");
+      assert.strictEqual(era?.logoUrl, signedFilesComposerIconUrl);
       assert.strictEqual(gmail?.marketplaceLabel, "Codex official");
       const ios = catalog.plugins.find((plugin) => plugin.packageName === "build-ios-apps");
       assert.strictEqual(ios?.installed, true);

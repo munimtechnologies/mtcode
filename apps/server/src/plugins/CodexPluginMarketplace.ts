@@ -792,6 +792,53 @@ function sanitizeRemoteUrl(value: string | undefined): string | null {
   }
 }
 
+/**
+ * Artwork URLs keep their query string: Codex's remote catalog serves logos as signed links such as
+ * `https://files.openai.com/content?id=file_…&sig=…`, which are meaningless without it. Only
+ * embedded credentials and fragments are dropped, and only http(s) URLs are accepted.
+ */
+export function sanitizeArtworkUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** ChatGPT backend artwork (`chatgpt.com/backend-api/…`) only loads with a signed-in ChatGPT session. */
+function artworkNeedsChatGptSession(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.toLocaleLowerCase() === "chatgpt.com" &&
+      parsed.pathname.startsWith("/backend-api/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Picks the first usable artwork URL in priority order, preferring URLs the renderer can load
+ * anonymously over ChatGPT-session URLs (which are still returned when nothing else exists).
+ */
+export function preferredArtworkUrl(
+  candidates: ReadonlyArray<string | null | undefined>,
+): string | null {
+  const urls = candidates.flatMap((candidate) => {
+    const url = sanitizeArtworkUrl(candidate);
+    return url ? [url] : [];
+  });
+  return urls.find((url) => !artworkNeedsChatGptSession(url)) ?? urls[0] ?? null;
+}
+
 function publicOperationDetail(code: number | null): string {
   return code === null
     ? "The provider did not report an exit status."
@@ -978,10 +1025,15 @@ function codexSourceRecord(
     : remoteTwin?.installed
       ? remoteTwin.id
       : null;
-  const runtimeLogoPath = runtimeInterface?.composerIcon?.trim() || runtimeInterface?.logo?.trim();
-  const externalLogoUrl =
-    sanitizeRemoteUrl(runtimeInterface?.composerIconUrl ?? undefined) ??
-    sanitizeRemoteUrl(runtimeInterface?.logoUrl ?? undefined);
+  // `logo` is the full app tile Codex shows on plugin cards; `composerIcon` is a small composer glyph
+  // (often a 16px SVG), so it is only a fallback.
+  const runtimeLogoPath = runtimeInterface?.logo?.trim() || runtimeInterface?.composerIcon?.trim();
+  const externalLogoUrl = preferredArtworkUrl([
+    entry.interface?.logoUrl,
+    entry.interface?.composerIconUrl,
+    remoteTwin?.interface?.logoUrl,
+    remoteTwin?.interface?.composerIconUrl,
+  ]);
   return {
     pluginId: publicPluginId("codex", entry.id),
     sourcePluginId: entry.id,
@@ -1264,7 +1316,7 @@ function chatGptPublicSourceRecord(plugin: ChatGptPublicPlugin): PluginSourceRec
     fallbackHomepage: plugin.homepage,
     fallbackRepository: null,
     marketplaceUrl: chatGptPublicPluginMarketplaceUrl(plugin),
-    externalLogoUrl: plugin.logoUrl,
+    externalLogoUrl: sanitizeArtworkUrl(plugin.logoUrl),
     directSkills: [],
     directMcpServers: [],
     directApps:
@@ -2693,8 +2745,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 fallbackRepository: sanitizeRemoteUrl(plugin.repositoryUrl),
                 marketplaceUrl: `https://cursor.com/marketplace/${encodeURIComponent(publisherName)}/${encodeURIComponent(plugin.name)}`,
                 externalLogoUrl:
-                  sanitizeRemoteUrl(plugin.logoUrl) ??
-                  sanitizeRemoteUrl(plugin.publisher?.logoUrl) ??
+                  preferredArtworkUrl([plugin.logoUrl, plugin.publisher?.logoUrl]) ??
                   publicFaviconUrl(plugin.publisher?.websiteUrl),
                 directSkills: skills,
                 directMcpServers: mcpServers,
