@@ -26,12 +26,9 @@ export const completionNotificationSnapshot = createEnvironmentQueryAtomFamily(
         if (Option.isNone(prepared)) {
           return Option.none();
         }
-        return yield* loader.load(
-          prepared.value,
-          input.threadId,
-          { turnLimit: 1 },
-          { timeoutMs: 1_000 },
-        );
+        return yield* loader.load(prepared.value, input.threadId, { turnLimit: 1 }, undefined, {
+          timeoutMs: 1_000,
+        });
       }),
   },
 );

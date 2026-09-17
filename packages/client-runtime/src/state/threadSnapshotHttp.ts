@@ -46,6 +46,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
   readonly remoteAuthorization?: Option.Option<RemoteEnvironmentAuthorization["Service"]>;
   readonly timeoutMs?: number;
   readonly window?: ThreadSnapshotWindow;
+  readonly reasoningMessages?: boolean;
 }) {
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
@@ -58,6 +59,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
       client.threadSnapshot({
         params: { threadId: input.threadId },
         payload: {
+          ...(input.reasoningMessages === true ? { reasoningMessages: "true" as const } : {}),
           ...(input.window !== undefined ? { turnLimit: input.window.turnLimit } : {}),
           ...(input.window?.beforeCursor !== undefined
             ? { beforeCursor: input.window.beforeCursor }
@@ -83,6 +85,7 @@ export class ThreadSnapshotLoader extends Context.Service<
       prepared: PreparedConnection,
       threadId: ThreadId,
       window?: ThreadSnapshotWindow,
+      reasoningMessages?: boolean,
       options?: ThreadSnapshotLoadOptions,
     ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>>;
   }
@@ -106,6 +109,7 @@ export const threadSnapshotLoaderLayer: Layer.Layer<
         prepared: PreparedConnection,
         threadId: ThreadId,
         window?: ThreadSnapshotWindow,
+        reasoningMessages?: boolean,
         options?: ThreadSnapshotLoadOptions,
       ) =>
         fetchEnvironmentThreadSnapshot({
@@ -113,6 +117,7 @@ export const threadSnapshotLoaderLayer: Layer.Layer<
           threadId,
           signer,
           remoteAuthorization,
+          ...(reasoningMessages === true ? { reasoningMessages: true } : {}),
           ...(window !== undefined ? { window } : {}),
           ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
         }).pipe(

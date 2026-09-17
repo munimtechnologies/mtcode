@@ -18,7 +18,7 @@ import {
   loadOpenCodeUsageLimits,
   parseOpenCodeAuthFile,
   resolveOpenCodeAuthPath,
-} from "./opencodeUsageLimits.ts";
+} from "./openCodeSubscriptionUsageLimits.ts";
 
 /** `wham/usage` as Codex reads it: primary = 5h, secondary = weekly. */
 const chatGptUsageFixture = {

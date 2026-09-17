@@ -79,8 +79,6 @@ function PullRequestUpstreamCardImpl({
         <PullRequestStateGlyph
           state={entry.state}
           isDraft={entry.isDraft}
-          mergeability={entry.mergeability}
-          baseBranch={entry.baseBranch}
           className="mt-0.5 shrink-0"
         />
         <span className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium">

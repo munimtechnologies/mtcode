@@ -11,7 +11,7 @@ import {
   cursorPlanNameFromUsageSummary,
   cursorUsageSummaryToLimits,
   loadCursorUsageLimits,
-} from "./cursorUsageLimits.ts";
+} from "./cursorDesktopUsageLimits.ts";
 
 const checkedAt = "2026-09-16T10:00:00.000Z";
 

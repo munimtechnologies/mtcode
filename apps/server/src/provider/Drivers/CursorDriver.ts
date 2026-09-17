@@ -26,6 +26,9 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
+import { readCursorUsageLimits } from "../Layers/cursorUsageLimits.ts";
+import { loadCursorUsageLimits } from "../Layers/cursorDesktopUsageLimits.ts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
@@ -35,8 +38,6 @@ import {
 } from "../Layers/CursorProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { loadCursorUsageLimits } from "../Layers/cursorUsageLimits.ts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -137,19 +138,37 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv);
 
       const discoverModels = yield* makeCursorModelDiscovery(effectiveConfig, processEnv);
-      // Cursor's dashboard session lives in the desktop app's state.vscdb under
-      // the host home, not the instance environment.
-      const homeDir = hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim();
-      const probeUsageLimits = loadCursorUsageLimits(homeDir ? { homeDir } : {}).pipe(
-        Effect.provideService(HttpClient.HttpClient, httpClient),
-      );
+      const cursorDesktopHome =
+        hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || undefined;
       const checkProvider = checkCursorProviderStatus(
         effectiveConfig,
         processEnv,
         discoverModels,
-        probeUsageLimits,
       ).pipe(
+        Effect.flatMap((snapshot) =>
+          effectiveConfig.enabled && snapshot.installed && snapshot.auth.status === "authenticated"
+            ? readCursorUsageLimits(effectiveConfig, processEnv).pipe(
+                // The CLI probe cannot read Cursor's default macOS keychain login.
+                // When it reports nothing, fall back to the desktop app's dashboard
+                // session in the host's state.vscdb, unless an explicit API key
+                // names a possibly different account.
+                Effect.flatMap((usageLimits) =>
+                  usageLimits.windows.length > 0 || processEnv.CURSOR_API_KEY?.trim()
+                    ? Effect.succeed(usageLimits)
+                    : loadCursorUsageLimits(
+                        cursorDesktopHome ? { homeDir: cursorDesktopHome } : {},
+                      ).pipe(
+                        Effect.map((desktop) =>
+                          desktop.windows.length > 0 ? desktop : usageLimits,
+                        ),
+                      ),
+                ),
+                Effect.map((usageLimits) => ({ ...snapshot, usageLimits })),
+              )
+            : Effect.succeed(snapshot),
+        ),
         Effect.map(stampIdentity),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),

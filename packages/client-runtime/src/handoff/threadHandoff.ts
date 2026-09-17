@@ -13,7 +13,7 @@ export interface ThreadHandoffInput {
       | undefined;
     readonly messages?:
       | ReadonlyArray<{
-          readonly role: "user" | "assistant" | "system";
+          readonly role: "user" | "assistant" | "system" | "reasoning";
           readonly text: string;
           readonly attachments?:
             | ReadonlyArray<{

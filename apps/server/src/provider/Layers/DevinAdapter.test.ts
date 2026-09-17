@@ -91,12 +91,13 @@ function waitForFileContent(
 }
 
 // `makeResolveEnabledDesktopMcp` reads Computer Use flags from server
-// settings per session; the test settings leave it disabled, so no desktop
-// MCP entry joins the session's `mcpServers`.
+// settings per session. Computer Use is on by default, and a checkout with a
+// locally built desktop MCP binary would add it to `mcpServers`, so the test
+// settings turn it off explicitly.
 const devinAdapterTestLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-devin-adapter-test-",
 }).pipe(
-  Layer.provideMerge(ServerSettings.layerTest()),
+  Layer.provideMerge(ServerSettings.layerTest({ desktopControl: { enabled: false } })),
   Layer.provideMerge(NodeServices.layer),
 );
 

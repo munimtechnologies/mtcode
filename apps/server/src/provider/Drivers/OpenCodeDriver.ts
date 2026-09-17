@@ -27,6 +27,9 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
+import { loadOpenCodeUsageLimits } from "../Layers/openCodeSubscriptionUsageLimits.ts";
+import { makeUsageLimits } from "../providerUsageLimits.ts";
+import { readOpenCodeGoUsageLimits } from "../Layers/openCodeUsageLimits.ts";
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
@@ -35,8 +38,6 @@ import {
 } from "../Layers/OpenCodeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { loadOpenCodeUsageLimits } from "../Layers/opencodeUsageLimits.ts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { OpenCodeRuntime, loadOpenCodeCommands } from "../opencodeRuntime.ts";
 import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import {
@@ -107,7 +108,6 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const openCodeRuntime = yield* OpenCodeRuntime;
       const serverConfig = yield* ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
-      const hostEnvironment = yield* HostProcessEnvironment;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -151,20 +151,39 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       );
 
-      // auth.json lives under the host's data dir; the instance environment
-      // only shapes the spawned CLI.
-      const probeUsageLimits = loadOpenCodeUsageLimits({ environment: hostEnvironment }).pipe(
+      const checkProvider = Effect.all(
+        {
+          provider: checkOpenCodeProviderStatus(effectiveConfig, serverConfig.cwd, processEnv),
+          usageLimits: readOpenCodeGoUsageLimits({
+            enabled: effectiveConfig.enabled,
+            serverUrl: effectiveConfig.serverUrl,
+            environment: processEnv,
+          }),
+        },
+        { concurrency: "unbounded" },
+      ).pipe(
+        Effect.flatMap(({ provider, usageLimits }) =>
+          effectiveConfig.enabled && !effectiveConfig.serverUrl.trim()
+            ? loadOpenCodeUsageLimits({ environment: processEnv }).pipe(
+                Effect.map((subscriptions) => ({
+                  ...provider,
+                  usageLimits:
+                    subscriptions.windows.length > 0
+                      ? makeUsageLimits({
+                          checkedAt: subscriptions.checkedAt,
+                          windows: [...usageLimits.windows, ...subscriptions.windows],
+                        })
+                      : usageLimits.windows.length > 0
+                        ? usageLimits
+                        : subscriptions,
+                })),
+              )
+            : Effect.succeed({ ...provider, usageLimits }),
+        ),
+        Effect.map(stampIdentity),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, pathService),
         Effect.provideService(HttpClient.HttpClient, httpClient),
-      );
-      const checkProvider = checkOpenCodeProviderStatus(
-        effectiveConfig,
-        serverConfig.cwd,
-        processEnv,
-        probeUsageLimits,
-      ).pipe(
-        Effect.map(stampIdentity),
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
         Effect.provideService(OpenCodeRuntime, openCodeRuntime),
       );

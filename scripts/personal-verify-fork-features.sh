@@ -187,8 +187,8 @@ require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx
 # --- Usage limits for every driver (2026-09-16, 20308ea78b) ---
 # Cursor and OpenCode publish subscription windows into upstream's Limits
 # view; the fork-only AccountLimits strip/hover card was removed the same day.
-require apps/server/src/provider/Layers/CursorProvider.ts "cursorUsageLimits" "Cursor usage-limit probe wired into CursorProvider"
-require apps/server/src/provider/Layers/OpenCodeProvider.ts "opencodeUsageLimits" "OpenCode usage-limit probe wired into OpenCodeProvider"
+require apps/server/src/provider/Drivers/CursorDriver.ts "readCursorUsageLimits" "Cursor usage-limit probe wired into CursorProvider"
+require apps/server/src/provider/Drivers/OpenCodeDriver.ts "loadOpenCodeUsageLimits" "OpenCode usage-limit probe wired into OpenCodeProvider"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2

@@ -123,6 +123,13 @@ export function isCommandMissingCause(error: unknown): boolean {
       typeof candidate.method === "string"
     )
       return true;
+    if (
+      "_tag" in candidate &&
+      candidate._tag === "PlatformError" &&
+      "reason" in candidate &&
+      visit(candidate.reason)
+    )
+      return true;
     return "cause" in candidate && visit(candidate.cause);
   };
   return visit(error);

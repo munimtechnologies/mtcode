@@ -2,7 +2,7 @@ name: Download counts
 
 # GitHub reports one cumulative download counter per release asset and no
 # history, so "downloads this month" cannot be read from the API. This job
-# snapshots the running total once a day onto the `badges` branch and serves
+# snapshots the running total once a day under `.github/download-counts` on `main` and serves
 # the 30-day delta between snapshots as a shields.io endpoint.
 on:
   schedule:
@@ -21,13 +21,11 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the badges branch
+      - name: Check out main
         uses: actions/checkout@v5
         with:
-          ref: badges
-          # A first run has no branch yet; the step below creates it orphaned.
+          ref: main
           fetch-depth: 1
-        continue-on-error: true
 
       - name: Snapshot downloads and render the badges
         env:
@@ -36,14 +34,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ ! -d .git ]; then
-            git init -q .
-            git remote add origin "https://github.com/$REPO.git"
-          fi
-          if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
-            git checkout -q --orphan badges
-            git rm -rqf . 2>/dev/null || true
-          fi
+          mkdir -p .github/download-counts
+          cd .github/download-counts
 
           total=$(gh api "repos/$REPO/releases" --paginate \
             --jq '[.[].assets[].download_count] | add // 0')
@@ -101,4 +93,5 @@ jobs:
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -qm "chore: snapshot download counts for $today"
-          git push -q "https://x-access-token:$GH_TOKEN@github.com/$REPO.git" HEAD:badges
+          git pull --rebase origin main
+          git push -q "https://x-access-token:$GH_TOKEN@github.com/$REPO.git" HEAD:main
