@@ -112,7 +112,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
       continue;
     }
     if (segment.type === "skill") {
-      const expandedLength = segment.name.length + 1;
+      const expandedLength = segment.source.length;
       if (remaining <= 1) {
         return expandedCursor + (remaining === 0 ? 0 : expandedLength);
       }
@@ -189,7 +189,7 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
       continue;
     }
     if (segment.type === "skill") {
-      const expandedLength = segment.name.length + 1;
+      const expandedLength = segment.source.length;
       if (remaining === 0) {
         return collapsedCursor;
       }
@@ -269,10 +269,11 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
       rangeEnd: cursor,
     };
   }
-  if (token.startsWith("$")) {
+  const skillPrefix = /^\p{Sc}/u.exec(token);
+  if (skillPrefix) {
     return {
       kind: "skill",
-      query: token.slice(1),
+      query: token.slice(skillPrefix[0].length),
       rangeStart: tokenStart,
       rangeEnd: cursor,
     };

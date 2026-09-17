@@ -332,10 +332,11 @@ export function detectComposerTrigger(
   const tokenStart = tokenIdx + 1;
 
   const token = text.slice(tokenStart, cursor);
-  if (token.startsWith("$")) {
+  const skillPrefix = /^\p{Sc}/u.exec(token);
+  if (skillPrefix) {
     return {
       kind: "skill",
-      query: token.slice(1),
+      query: token.slice(skillPrefix[0].length),
       rangeStart: tokenStart,
       rangeEnd: cursor,
     };

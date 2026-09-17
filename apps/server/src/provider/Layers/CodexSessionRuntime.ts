@@ -824,7 +824,7 @@ export function selectMentionedCodexPlugins<T extends CodexPluginMentionCandidat
   plugins: ReadonlyArray<T>,
 ): ReadonlyArray<T> {
   const mentions = new Set(
-    [...prompt.matchAll(/(?<![\w$])\$([\w:-]+)/gu)].map((match) =>
+    [...prompt.matchAll(/(?<![\w\p{Sc}])\p{Sc}([\w:-]+)/gu)].map((match) =>
       normalizePluginMention(match[1] ?? ""),
     ),
   );
@@ -835,6 +835,10 @@ export function selectMentionedCodexPlugins<T extends CodexPluginMentionCandidat
       pluginMentionAliases(plugin).some((alias) => mentions.has(alias)),
   );
 }
+
+// Match the skill grammar used by Claude/Cursor, leaving currency amounts as prose.
+const SKILL_MENTION_PATTERN =
+  /(^|\s)\p{Sc}(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/gu;
 
 export function buildTurnStartParams(input: {
   readonly threadId: string;
@@ -861,9 +865,10 @@ export function buildTurnStartParams(input: {
   const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
   if (input.prompt) {
     const skillMentions = input.skills?.map((skill) => `$${skill.name}`).join(" ");
+    const promptText = input.prompt.replace(SKILL_MENTION_PATTERN, "$1$$$2");
     turnInput.push({
       type: "text",
-      text: skillMentions ? `${skillMentions} ${input.prompt}` : input.prompt,
+      text: skillMentions ? `${skillMentions} ${promptText}` : promptText,
     });
   }
   for (const skill of input.skills ?? []) {
@@ -1572,7 +1577,11 @@ export const makeCodexSessionRuntime = (
     const backgroundTasks = new CodexBackgroundTasks();
     const monitorCommands = new Map<
       string,
-      { stdout: InstanceType<typeof TextDecoder>; stderr: InstanceType<typeof TextDecoder>; stopped: boolean }
+      {
+        stdout: InstanceType<typeof TextDecoder>;
+        stderr: InstanceType<typeof TextDecoder>;
+        stopped: boolean;
+      }
     >();
     const turnLock = yield* Semaphore.make(1);
     const wakeSignals = yield* Queue.sliding<void>(1);
