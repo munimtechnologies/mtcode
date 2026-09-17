@@ -19,6 +19,10 @@ export const REVEAL_COMPUTER_HISTORY_MEMORY_CHANNEL = "desktop:reveal-computer-h
 export const DELETE_COMPUTER_HISTORY_MEMORY_CHANNEL = "desktop:delete-computer-history-memory";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
 export const PASTE_AS_TEXT_CHANNEL = "desktop:paste-as-text";
+export const DEEP_LINK_ACK_CHANNEL = "desktop:deep-link:ack";
+export const DEEP_LINK_CHANNEL = "desktop:deep-link";
+export const DEEP_LINK_SUBSCRIBE_CHANNEL = "desktop:deep-link:subscribe";
+export const DEEP_LINK_UNSUBSCRIBE_CHANNEL = "desktop:deep-link:unsubscribe";
 export const SNAP_SHOT_EVENT_CHANNEL = "desktop:snap-shot-event";
 export const QUIT_SHORTCUT_CHANNEL = "desktop:quit-shortcut";
 export const GET_WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:get-window-fullscreen-state";
@@ -130,3 +134,7 @@ export const PREVIEW_POINTER_EVENT_CHANNEL = "desktop:preview-pointer-event";
 export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
 
 export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission";
+
+export const OPEN_TERMINAL_CHANNEL = "desktop:open-terminal";
+
+export const REQUEST_TERMINAL_PERMISSION_CHANNEL = "desktop:request-terminal-permission";

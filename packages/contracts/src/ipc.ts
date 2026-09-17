@@ -1,3 +1,4 @@
+import type { ExternalTerminalId, OpenExternalTerminalInput } from "./externalTerminal.ts";
 import type {
   VcsCreateRefInput,
   VcsCreateRefResult,
@@ -514,6 +515,7 @@ export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
   hostname: Schema.String,
   username: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
+  forwardAgent: Schema.optionalKey(Schema.Boolean),
 });
 export type DesktopSshEnvironmentTarget = typeof DesktopSshEnvironmentTargetSchema.Type;
 
@@ -1313,6 +1315,11 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+export interface DesktopThreadDeepLinkPayload {
+  readonly environmentId: string;
+  readonly threadId: string;
+}
+
 /**
  * A System Settings pane the app can deep-link to. The identifier crosses IPC
  * rather than a URL, so the renderer can only reach these known destinations.
@@ -1408,6 +1415,9 @@ export interface DesktopBridge {
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },
   ) => Promise<T | null>;
+  /** Request any native terminal permission before saving a preference. */
+  requestTerminalPermission?: (terminal: ExternalTerminalId) => Promise<void>;
+  openTerminal?: (input: OpenExternalTerminalInput) => Promise<void>;
   openExternal: (url: string) => Promise<boolean>;
   /**
    * Open a System Settings pane by identifier. Optional: older desktop builds
@@ -1465,6 +1475,12 @@ export interface DesktopBridge {
   pasteAsText?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   onSnapShotEvent?: (listener: (event: DesktopSnapShotEvent) => void) => () => void;
+  /**
+   * Thread deep links (`t3code://threads/<environmentId>/<threadId>`, also
+   * `t3code://app/...`) forwarded from the OS by the main process.
+   * Optional: older desktop builds never emit it.
+   */
+  onDeepLink?: (listener: (payload: DesktopThreadDeepLinkPayload) => void) => () => void;
   /**
    * Quit-confirmation hint pushes. Optional: older desktop builds never emit
    * them.

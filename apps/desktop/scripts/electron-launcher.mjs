@@ -20,7 +20,7 @@ export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
-const LAUNCHER_VERSION = 19;
+const LAUNCHER_VERSION = 20;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
   "assets",
@@ -290,7 +290,7 @@ export function resolveMacBundleInfoPlistStrings(executableName) {
     // (-1743) and never shows the Automation prompt, so Codex Computer Use and any
     // other MCP server we spawn silently fail to drive other apps.
     NSAppleEventsUsageDescription:
-      "This app needs to control other apps to run Computer Use automations you approve.",
+      "This app needs to control other apps to open project directories in your terminal and run Computer Use automations you approve.",
     NSMicrophoneUsageDescription:
       "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
   };

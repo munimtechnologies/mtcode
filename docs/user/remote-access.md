@@ -159,6 +159,20 @@ If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that T3 Code launched; a server that was already
 running is left alone.
 
+### Forward SSH agent
+
+If Git or commit signing on the remote host should use your local SSH agent,
+enable **Forward SSH agent** in the SSH form before connecting. Only enable it
+for hosts you trust. T3 Code keeps a separate SSH agent channel open and starts
+its managed remote server with that channel's `SSH_AUTH_SOCK`; this works with
+standard agents and the 1Password SSH agent without copying private keys to the
+remote host. The local agent must be running and the remote SSH server must allow
+agent forwarding. Forwarding is unavailable for a server that was already running
+on the host; stop it and reconnect so the desktop app can start it. If the remote
+machine also runs 1Password, make sure its SSH configuration does not force a
+remote `IdentityAgent` over the forwarded socket. Confirm forwarding in a T3
+terminal with `ssh-add -l`.
+
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 

@@ -1,8 +1,8 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
@@ -42,6 +42,10 @@ function ChatIndexRouteView() {
  * can host a thread.
  */
 function IndexDraftLanding() {
+  const router = useRouter();
+  // Read at effect time: a deep link can finish navigating before this
+  // index effect is flushed, and the rendered pathname would still be "/".
+  const isStillOnIndex = useEffectEvent(() => router.state.location.pathname === "/");
   const projects = useProjects();
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
@@ -60,6 +64,9 @@ function IndexDraftLanding() {
 
   useEffect(() => {
     if (!bootstrapped || startingRef.current) {
+      return;
+    }
+    if (!isStillOnIndex()) {
       return;
     }
     if (mostRecentProject !== null) {

@@ -58,3 +58,4 @@ export * from "./voice.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./projectTransfer.ts";
+export * from "./externalTerminal.ts";
