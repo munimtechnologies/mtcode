@@ -102,6 +102,7 @@ describe("plugin marketplace store", () => {
       catalogStatus: "idle",
       plugins: [],
       searchHits: [],
+      notices: [],
       catalogError: null,
       details: {},
       pending: {},
@@ -116,6 +117,23 @@ describe("plugin marketplace store", () => {
     expect(fetchPluginMarketplaceCatalog).toHaveBeenCalledOnce();
     expect(usePluginMarketplaceStore.getState().plugins).toEqual([summary]);
     expect(usePluginMarketplaceStore.getState().catalogStatus).toBe("ready");
+  });
+
+  it("keeps per-harness notices from the catalog and clears them when a server omits them", async () => {
+    const notice = {
+      harness: "codex",
+      status: "syncing",
+      message: "Codex is still syncing its plugin marketplaces.",
+    } as const;
+    vi.mocked(fetchPluginMarketplaceCatalog)
+      .mockResolvedValueOnce({ plugins: [summary], notices: [notice] })
+      .mockResolvedValueOnce({ plugins: [summary] });
+
+    await usePluginMarketplaceStore.getState().loadCatalog();
+    expect(usePluginMarketplaceStore.getState().notices).toEqual([notice]);
+
+    await usePluginMarketplaceStore.getState().loadCatalog(true);
+    expect(usePluginMarketplaceStore.getState().notices).toEqual([]);
   });
 
   it("queues forced catalog refreshes behind an in-flight request", async () => {

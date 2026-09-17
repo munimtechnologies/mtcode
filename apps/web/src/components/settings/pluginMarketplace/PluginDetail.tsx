@@ -55,6 +55,7 @@ import {
 } from "~/pluginMarketplace/api";
 import {
   MARKETPLACE_HARNESS_LABELS,
+  marketplaceDisplayName,
   marketplacePluginIncludeLabels,
 } from "~/pluginMarketplace/catalog";
 import {
@@ -186,7 +187,7 @@ function InstallTargetRow({
           <span>{harnessName}</span>
         </span>
       }
-      description={`${packageFormat(target)} · ${target.marketplaceName} · ${target.version}`}
+      description={`${packageFormat(target)} · ${target.marketplaceLabel ?? target.marketplaceName} · ${target.version}`}
       status={
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className={target.installed ? "text-success-foreground" : undefined}>
@@ -958,7 +959,7 @@ function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetai
           <div className="min-w-0 flex-1">
             <p className="font-medium text-base text-foreground sm:text-sm">Advanced details</p>
             <p className="truncate text-base/7 text-muted-foreground sm:text-sm/5">
-              {plugin.developer} · {plugin.marketplaceName} · {plugin.version}
+              {plugin.developer} · {marketplaceDisplayName(plugin)} · {plugin.version}
             </p>
           </div>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open/details:rotate-180" />
@@ -995,7 +996,8 @@ function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetai
             </dd>
             <dt className="font-medium text-base text-foreground sm:text-sm">Marketplace</dt>
             <dd className="min-w-0 text-base text-muted-foreground sm:text-sm">
-              {plugin.marketplaceName} · {plugin.marketplaceSourceType}
+              {marketplaceDisplayName(plugin)} · {plugin.marketplaceName} ·{" "}
+              {plugin.marketplaceSourceType}
             </dd>
             <dt className="font-medium text-base text-foreground sm:text-sm">Package</dt>
             <dd className="min-w-0 break-all text-base text-muted-foreground sm:text-sm">

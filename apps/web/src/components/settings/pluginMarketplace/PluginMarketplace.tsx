@@ -1,3 +1,4 @@
+import type { PluginMarketplaceNotice } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -7,9 +8,11 @@ import {
   PackageOpenIcon,
   RefreshCwIcon,
   SearchIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { Alert, AlertAction, AlertDescription } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
 import {
   Empty,
@@ -29,11 +32,16 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
+import { Spinner } from "~/components/ui/spinner";
+import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { cn } from "~/lib/utils";
 import {
   MARKETPLACE_HARNESSES,
   MARKETPLACE_HARNESS_LABELS,
+  groupMarketplaceSections,
+  marketplaceDisplayName,
   mergeMarketplaceListings,
+  type MarketplaceHarnessId,
   type MarketplacePlugin,
 } from "~/pluginMarketplace/catalog";
 import {
@@ -47,6 +55,12 @@ import { searchableSetting } from "../settingsSearch";
 import { SettingsPageContainer, SettingsSection } from "../settingsLayout";
 import { HarnessIcon, HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
 
+const SECTION_PREVIEW_COUNT = 6;
+const RESULTS_PAGE_SIZE = 24;
+// While a harness reports "syncing", the server finishes the read in the background; poll so the
+// missing plugins appear without a manual refresh.
+const SYNCING_REFRESH_MS = 5000;
+
 const KIND_FILTERS: ReadonlyArray<{
   readonly label: string;
   readonly value: MarketplaceKindFilter;
@@ -58,18 +72,82 @@ const KIND_FILTERS: ReadonlyArray<{
   { label: "Apps", value: "app" },
 ];
 
-function HarnessFilterOption({ harness }: { readonly harness: MarketplaceHarnessFilter }) {
+function isHarnessFilter(value: unknown): value is MarketplaceHarnessFilter {
+  return value === "all" || MARKETPLACE_HARNESSES.some((harness) => harness === value);
+}
+
+function HarnessTabs({
+  value,
+  counts,
+  onChange,
+}: {
+  readonly value: MarketplaceHarnessFilter;
+  readonly counts: Readonly<Record<MarketplaceHarnessFilter, number>>;
+  readonly onChange: (value: MarketplaceHarnessFilter) => void;
+}) {
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      {harness === "all" ? (
-        <LayersIcon className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : (
-        <HarnessIcon harness={harness} className="size-3.5" />
-      )}
-      <span className="truncate">
-        {harness === "all" ? "All harnesses" : MARKETPLACE_HARNESS_LABELS[harness]}
-      </span>
-    </span>
+    <ToggleGroup
+      aria-label="Harness"
+      value={[value]}
+      className="max-w-full overflow-x-auto"
+      onValueChange={(next) => {
+        const selected = next[0];
+        if (isHarnessFilter(selected)) onChange(selected);
+      }}
+    >
+      {(["all", ...MARKETPLACE_HARNESSES] as const).map((harness) => (
+        <Toggle key={harness} value={harness} aria-label={harnessTabLabel(harness)}>
+          {harness === "all" ? (
+            <LayersIcon className="size-3.5" />
+          ) : (
+            <HarnessIcon harness={harness} className="size-3.5" />
+          )}
+          <span>{harnessTabLabel(harness)}</span>
+          <span className="tabular-nums text-muted-foreground">{counts[harness]}</span>
+        </Toggle>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+function harnessTabLabel(harness: MarketplaceHarnessFilter): string {
+  return harness === "all" ? "All" : MARKETPLACE_HARNESS_LABELS[harness];
+}
+
+function CatalogNotices({
+  notices,
+  onRetry,
+}: {
+  readonly notices: ReadonlyArray<PluginMarketplaceNotice>;
+  readonly onRetry: () => void;
+}) {
+  if (notices.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {notices.map((notice) => (
+        <Alert
+          key={notice.harness}
+          variant={notice.status === "syncing" ? "info" : "warning"}
+          role={notice.status === "syncing" ? "status" : "alert"}
+          aria-label={`${MARKETPLACE_HARNESS_LABELS[notice.harness]} plugins ${notice.status}`}
+        >
+          {notice.status === "syncing" ? (
+            <Spinner className="size-4" aria-label="Syncing" />
+          ) : (
+            <TriangleAlertIcon className="size-4" />
+          )}
+          <AlertDescription>{notice.message}</AlertDescription>
+          {notice.status === "syncing" ? null : (
+            <AlertAction>
+              <Button size="xs" variant="outline" onClick={onRetry}>
+                <RefreshCwIcon />
+                Retry
+              </Button>
+            </AlertAction>
+          )}
+        </Alert>
+      ))}
+    </div>
   );
 }
 
@@ -107,7 +185,12 @@ function MarketplacePluginCard({
           <p className="truncate text-base/7 text-muted-foreground sm:text-sm/5">
             {plugin.summary}
           </p>
-          <HarnessSupportBadges support={plugin.support} />
+          <div className="flex min-w-0 items-center gap-2">
+            <HarnessSupportBadges support={plugin.support} />
+            <span className="truncate text-muted-foreground text-xs">
+              {marketplaceDisplayName(plugin)}
+            </span>
+          </div>
         </div>
         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
       </Link>
@@ -135,15 +218,97 @@ function LoadingMarketplace() {
   );
 }
 
-function MarketplaceResults({
+function PluginSection({
+  id,
+  title,
   plugins,
-  filtered,
+  featured = false,
+  showAllLabel,
+  onShowAll,
+}: {
+  readonly id: string;
+  readonly title: string;
+  readonly plugins: ReadonlyArray<MarketplacePlugin>;
+  readonly featured?: boolean;
+  readonly showAllLabel?: string;
+  readonly onShowAll?: () => void;
+}) {
+  const visible = plugins.slice(0, SECTION_PREVIEW_COUNT);
+  const hidden = plugins.length - visible.length;
+  const headingId = `marketplace-section-${id}`;
+  return (
+    <section className="space-y-2" aria-labelledby={headingId}>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id={headingId} className="font-semibold text-lg text-foreground">
+          {title}
+        </h2>
+        <p className="tabular-nums text-base text-muted-foreground sm:text-sm">
+          {plugins.length} {plugins.length === 1 ? "plugin" : "plugins"}
+        </p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {visible.map((plugin) => (
+          <MarketplacePluginCard key={plugin.id} plugin={plugin} featured={featured} />
+        ))}
+      </div>
+      {hidden > 0 && onShowAll ? (
+        <Button size="sm" variant="ghost-muted" onClick={onShowAll}>
+          {showAllLabel ?? `Show ${hidden} more`}
+        </Button>
+      ) : null}
+    </section>
+  );
+}
+
+function sectionId(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/gu, "-");
+}
+
+function BrowseSections({
+  plugins,
+  onShowInstalled,
   onSelectCategory,
 }: {
   readonly plugins: ReadonlyArray<MarketplacePlugin>;
-  readonly filtered: boolean;
+  readonly onShowInstalled: () => void;
   readonly onSelectCategory: (category: string) => void;
 }) {
+  const sections = useMemo(() => groupMarketplaceSections(plugins), [plugins]);
+  return (
+    <div className="flex flex-col gap-10">
+      {sections.installed.length > 0 ? (
+        <PluginSection
+          id="installed"
+          title="Installed"
+          plugins={sections.installed}
+          showAllLabel={`Show all ${sections.installed.length} installed`}
+          onShowAll={onShowInstalled}
+        />
+      ) : null}
+      {sections.discover.length > 0 ? (
+        <PluginSection id="discover" title="Discover" plugins={sections.discover} featured />
+      ) : null}
+      {sections.categories.map((section) => (
+        <PluginSection
+          key={section.category}
+          id={`category-${sectionId(section.category)}`}
+          title={section.category}
+          plugins={section.plugins}
+          onShowAll={() => onSelectCategory(section.category)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FilteredResults({
+  plugins,
+  onReset,
+}: {
+  readonly plugins: ReadonlyArray<MarketplacePlugin>;
+  readonly onReset: () => void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(RESULTS_PAGE_SIZE);
   if (plugins.length === 0) {
     return (
       <Empty className="min-h-64 border border-dashed border-foreground/10">
@@ -154,81 +319,40 @@ function MarketplaceResults({
           <EmptyTitle>No plugins found</EmptyTitle>
           <EmptyDescription>Try a different search, harness, or category.</EmptyDescription>
         </EmptyHeader>
+        <EmptyContent>
+          <Button size="sm" variant="outline" onClick={onReset}>
+            Clear filters
+          </Button>
+        </EmptyContent>
       </Empty>
     );
   }
-
-  if (filtered) {
-    return (
-      <section className="space-y-2" aria-labelledby="marketplace-results-title">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 id="marketplace-results-title" className="font-semibold text-lg text-foreground">
-            Results
-          </h2>
-          <p className="tabular-nums text-base text-muted-foreground sm:text-sm">
-            {plugins.length} {plugins.length === 1 ? "plugin" : "plugins"}
-          </p>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-2">
-          {plugins.map((plugin) => (
-            <MarketplacePluginCard key={plugin.id} plugin={plugin} />
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  const discover = plugins.filter((plugin) => !plugin.installed).slice(0, 4);
-  const discoverIds = new Set(discover.map((plugin) => plugin.id));
-  const categories = [...new Set(plugins.map((plugin) => plugin.category))].toSorted();
-  const sections = categories
-    .map((category) => ({
-      category,
-      plugins: plugins.filter(
-        (plugin) => plugin.category === category && !discoverIds.has(plugin.id),
-      ),
-    }))
-    .filter((section) => section.plugins.length > 0);
-
+  const visible = plugins.slice(0, visibleCount);
   return (
-    <div className="flex flex-col gap-10">
-      {discover.length > 0 ? (
-        <section className="space-y-2" aria-labelledby="discover-plugins-title">
-          <h2 id="discover-plugins-title" className="font-semibold text-lg text-foreground">
-            Discover
-          </h2>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {discover.map((plugin) => (
-              <MarketplacePluginCard key={plugin.id} plugin={plugin} featured />
-            ))}
-          </div>
-        </section>
+    <section className="space-y-2" aria-labelledby="marketplace-results-title">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="marketplace-results-title" className="font-semibold text-lg text-foreground">
+          Results
+        </h2>
+        <p className="tabular-nums text-base text-muted-foreground sm:text-sm">
+          {plugins.length} {plugins.length === 1 ? "plugin" : "plugins"}
+        </p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {visible.map((plugin) => (
+          <MarketplacePluginCard key={plugin.id} plugin={plugin} />
+        ))}
+      </div>
+      {visible.length < plugins.length ? (
+        <Button
+          size="sm"
+          variant="ghost-muted"
+          onClick={() => setVisibleCount((count) => count + RESULTS_PAGE_SIZE)}
+        >
+          Show {Math.min(RESULTS_PAGE_SIZE, plugins.length - visible.length)} more
+        </Button>
       ) : null}
-      {sections.map((section) => {
-        const headingId = `marketplace-category-${section.category.replaceAll(" ", "-")}`;
-        return (
-          <section key={section.category} className="space-y-2" aria-labelledby={headingId}>
-            <h2 id={headingId} className="font-semibold text-lg text-foreground">
-              {section.category}
-            </h2>
-            <div className="grid gap-3 lg:grid-cols-2">
-              {section.plugins.slice(0, 6).map((plugin) => (
-                <MarketplacePluginCard key={plugin.id} plugin={plugin} />
-              ))}
-            </div>
-            {section.plugins.length > 6 ? (
-              <Button
-                size="sm"
-                variant="ghost-muted"
-                onClick={() => onSelectCategory(section.category)}
-              >
-                Show {section.plugins.length - 6} more
-              </Button>
-            ) : null}
-          </section>
-        );
-      })}
-    </div>
+    </section>
   );
 }
 
@@ -239,14 +363,24 @@ export function PluginMarketplace() {
   const [category, setCategory] = useState<MarketplaceCategoryFilter>("all");
   const plugins = usePluginMarketplaceStore((state) => state.plugins);
   const searchHits = usePluginMarketplaceStore((state) => state.searchHits);
+  const notices = usePluginMarketplaceStore((state) => state.notices);
   const status = usePluginMarketplaceStore((state) => state.catalogStatus);
   const error = usePluginMarketplaceStore((state) => state.catalogError);
   const loadCatalog = usePluginMarketplaceStore((state) => state.loadCatalog);
   const searchCatalog = usePluginMarketplaceStore((state) => state.searchCatalog);
+  const refresh = () => void loadCatalog(true).catch(() => undefined);
 
   useEffect(() => {
     void loadCatalog(true).catch(() => undefined);
   }, [loadCatalog]);
+
+  useEffect(() => {
+    if (!notices.some((notice) => notice.status === "syncing")) return;
+    const timeout = window.setTimeout(() => {
+      void loadCatalog(true).catch(() => undefined);
+    }, SYNCING_REFRESH_MS);
+    return () => window.clearTimeout(timeout);
+  }, [loadCatalog, notices]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -263,6 +397,23 @@ export function PluginMarketplace() {
       ...searchHits.filter((plugin) => !knownIds.has(plugin.id)),
     ]);
   }, [plugins, searchHits]);
+  const harnessCounts = useMemo(() => {
+    const counts: Record<MarketplaceHarnessFilter, number> = {
+      all: catalogPlugins.length,
+      codex: 0,
+      claude: 0,
+      cursor: 0,
+    };
+    for (const plugin of catalogPlugins) {
+      const seen = new Set<MarketplaceHarnessId>();
+      for (const entry of plugin.support) {
+        if (seen.has(entry.harness)) continue;
+        seen.add(entry.harness);
+        counts[entry.harness] += 1;
+      }
+    }
+    return counts;
+  }, [catalogPlugins]);
   const categories = useMemo(
     () => [...new Set(catalogPlugins.map((plugin) => plugin.category))].toSorted(),
     [catalogPlugins],
@@ -271,14 +422,17 @@ export function PluginMarketplace() {
     () => filterMarketplacePlugins(catalogPlugins, { query, kind, harness, category }),
     [catalogPlugins, category, harness, kind, query],
   );
-  const isFiltered =
-    query.trim().length > 0 || kind !== "all" || harness !== "all" || category !== "all";
-  const activeFilterCount =
-    Number(kind !== "all") + Number(harness !== "all") + Number(category !== "all");
+  // The harness tabs narrow the browse layout; search, type, and category switch to a flat list.
+  const isFiltered = query.trim().length > 0 || kind !== "all" || category !== "all";
+  const activeFilterCount = Number(kind !== "all") + Number(category !== "all");
   const resetFilters = () => {
     setKind("all");
-    setHarness("all");
     setCategory("all");
+  };
+  const clearAll = () => {
+    setQuery("");
+    setHarness("all");
+    resetFilters();
   };
 
   return (
@@ -361,31 +515,6 @@ export function PluginMarketplace() {
                   </Select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <p className="font-medium text-base text-foreground sm:text-sm">Harness</p>
-                  <Select
-                    value={harness}
-                    onValueChange={(value) =>
-                      value && setHarness(value as MarketplaceHarnessFilter)
-                    }
-                  >
-                    <SelectTrigger size="sm" aria-label="Filter by harness">
-                      <SelectValue>
-                        <HarnessFilterOption harness={harness} />
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">
-                        <HarnessFilterOption harness="all" />
-                      </SelectItem>
-                      {MARKETPLACE_HARNESSES.map((harnessId) => (
-                        <SelectItem key={harnessId} value={harnessId}>
-                          <HarnessFilterOption harness={harnessId} />
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
                   <p className="font-medium text-base text-foreground sm:text-sm">Category</p>
                   <Select value={category} onValueChange={(value) => value && setCategory(value)}>
                     <SelectTrigger size="sm" aria-label="Filter by category">
@@ -405,12 +534,13 @@ export function PluginMarketplace() {
             </PopoverPopup>
           </Popover>
         </div>
+        <HarnessTabs value={harness} counts={harnessCounts} onChange={setHarness} />
       </header>
 
       <SettingsSection
         {...searchableSetting("plugin-marketplace")}
         className="space-y-0"
-        contentClassName="space-y-10"
+        contentClassName="space-y-6"
         hideHeader
       >
         {status === "idle" || status === "loading" ? <LoadingMarketplace /> : null}
@@ -424,11 +554,7 @@ export function PluginMarketplace() {
               <EmptyDescription>{error}</EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void loadCatalog(true).catch(() => undefined)}
-              >
+              <Button size="sm" variant="outline" onClick={refresh}>
                 <RefreshCwIcon />
                 Try again
               </Button>
@@ -438,18 +564,57 @@ export function PluginMarketplace() {
         {status === "ready" ? (
           <>
             {error ? (
-              <p
-                className="rounded-lg border border-warning/32 bg-warning-surface px-3 py-2 text-warning-foreground text-sm"
-                role="alert"
-              >
-                Showing cached plugin data because the latest refresh failed: {error}
-              </p>
+              <Alert variant="warning">
+                <TriangleAlertIcon className="size-4" />
+                <AlertDescription>
+                  Showing cached plugin data because the latest refresh failed: {error}
+                </AlertDescription>
+                <AlertAction>
+                  <Button size="xs" variant="outline" onClick={refresh}>
+                    <RefreshCwIcon />
+                    Retry
+                  </Button>
+                </AlertAction>
+              </Alert>
             ) : null}
-            <MarketplaceResults
-              plugins={filteredPlugins}
-              filtered={isFiltered}
-              onSelectCategory={setCategory}
-            />
+            <CatalogNotices notices={notices} onRetry={refresh} />
+            {catalogPlugins.length === 0 ? (
+              <Empty className="min-h-64 border border-dashed border-foreground/10">
+                <EmptyMedia variant="icon">
+                  <PackageOpenIcon />
+                </EmptyMedia>
+                <EmptyHeader>
+                  <EmptyTitle>
+                    {notices.some((notice) => notice.status === "syncing")
+                      ? "Loading plugin marketplaces"
+                      : "No plugins available"}
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    {notices.some((notice) => notice.status === "syncing")
+                      ? "Plugins will appear as each harness finishes syncing."
+                      : "No configured harness returned any plugins."}
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button size="sm" variant="outline" onClick={refresh}>
+                    <RefreshCwIcon />
+                    Refresh
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : isFiltered ? (
+              <FilteredResults
+                key={`${query}|${kind}|${harness}|${category}`}
+                plugins={filteredPlugins}
+                onReset={clearAll}
+              />
+            ) : (
+              <BrowseSections
+                plugins={filteredPlugins}
+                onShowInstalled={() => setKind("installed")}
+                onSelectCategory={setCategory}
+              />
+            )}
           </>
         ) : null}
       </SettingsSection>

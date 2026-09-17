@@ -1,4 +1,8 @@
-import type { PluginMarketplaceDetail, PluginMarketplacePlugin } from "@t3tools/contracts";
+import type {
+  PluginMarketplaceDetail,
+  PluginMarketplaceNotice,
+  PluginMarketplacePlugin,
+} from "@t3tools/contracts";
 import { create } from "zustand";
 
 import {
@@ -20,6 +24,8 @@ interface PluginMarketplaceStoreState {
   readonly catalogStatus: LoadStatus;
   readonly plugins: ReadonlyArray<PluginMarketplacePlugin>;
   readonly searchHits: ReadonlyArray<PluginMarketplacePlugin>;
+  /** Per-harness load problems reported with the last catalog; empty from older servers. */
+  readonly notices: ReadonlyArray<PluginMarketplaceNotice>;
   readonly catalogError: string | null;
   readonly details: Readonly<Record<string, PluginDetailState | undefined>>;
   readonly pending: Readonly<Record<string, boolean | undefined>>;
@@ -47,6 +53,7 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
   catalogStatus: "idle",
   plugins: [],
   searchHits: [],
+  notices: [],
   catalogError: null,
   details: {},
   pending: {},
@@ -67,6 +74,7 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceStoreState>((se
         set({
           catalogStatus: "ready",
           plugins: catalog.plugins,
+          notices: catalog.notices ?? [],
           catalogError: null,
         });
       } catch (error) {

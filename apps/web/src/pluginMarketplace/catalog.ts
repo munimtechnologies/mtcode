@@ -14,9 +14,108 @@ export type MarketplacePluginKind = "mcp" | "skill" | "app";
 
 export const MARKETPLACE_HARNESS_LABELS: Readonly<Record<MarketplaceHarnessId, string>> = {
   codex: "Codex",
-  claude: "Claude",
+  claude: "Claude Code",
   cursor: "Cursor",
 };
+
+export const CHATGPT_PUBLIC_MARKETPLACE_NAME = "ChatGPT Public";
+
+/** Marketplace name as shown to users; older servers only send the raw marketplace id. */
+export function marketplaceDisplayName(
+  plugin: Pick<MarketplacePlugin, "marketplaceLabel" | "marketplaceName">,
+): string {
+  return plugin.marketplaceLabel?.trim() || plugin.marketplaceName;
+}
+
+function discoverScore(plugin: MarketplacePlugin): number {
+  return (
+    (plugin.featured ? 8 : 0) +
+    (listingHasArtwork(plugin) ? 4 : 0) +
+    (plugin.category !== "Other" ? 2 : 0) +
+    (plugin.marketplaceName !== CHATGPT_PUBLIC_MARKETPLACE_NAME ? 1 : 0) +
+    (plugin.installPolicy === "AVAILABLE" ? 1 : 0)
+  );
+}
+
+/**
+ * Featured picks for the browse view: uninstalled plugins that the marketplace features or that
+ * have artwork and a real category, spread across harnesses instead of taking the first names.
+ */
+export function pickDiscoverPlugins(
+  plugins: ReadonlyArray<MarketplacePlugin>,
+  count = 4,
+): MarketplacePlugin[] {
+  const buckets = new Map<MarketplaceHarnessId, MarketplacePlugin[]>();
+  const ranked = plugins
+    .filter((plugin) => !plugin.installed)
+    .toSorted(
+      (left, right) =>
+        discoverScore(right) - discoverScore(left) || left.name.localeCompare(right.name),
+    );
+  for (const plugin of ranked) {
+    const bucket = buckets.get(plugin.sourceHarness) ?? [];
+    bucket.push(plugin);
+    buckets.set(plugin.sourceHarness, bucket);
+  }
+  const picks: MarketplacePlugin[] = [];
+  const queues = MARKETPLACE_HARNESSES.map((harness) => buckets.get(harness) ?? []);
+  while (picks.length < count && queues.some((queue) => queue.length > 0)) {
+    for (const queue of queues) {
+      const next = queue.shift();
+      if (next) picks.push(next);
+      if (picks.length >= count) break;
+    }
+  }
+  return picks;
+}
+
+export interface MarketplaceCategorySection {
+  readonly category: string;
+  readonly plugins: MarketplacePlugin[];
+}
+
+export interface MarketplaceSections {
+  readonly installed: MarketplacePlugin[];
+  readonly discover: MarketplacePlugin[];
+  readonly categories: MarketplaceCategorySection[];
+}
+
+function compareBrowseOrder(left: MarketplacePlugin, right: MarketplacePlugin): number {
+  return (
+    Number(Boolean(right.featured)) - Number(Boolean(left.featured)) ||
+    Number(listingHasArtwork(right)) - Number(listingHasArtwork(left)) ||
+    left.name.localeCompare(right.name)
+  );
+}
+
+/**
+ * Browse layout: installed plugins first, then featured picks, then categories ordered by size
+ * with the catch-all "Other" last. A plugin appears in exactly one section.
+ */
+export function groupMarketplaceSections(
+  plugins: ReadonlyArray<MarketplacePlugin>,
+  discoverCount = 4,
+): MarketplaceSections {
+  const installed = plugins.filter((plugin) => plugin.installed).toSorted(compareBrowseOrder);
+  const discover = pickDiscoverPlugins(plugins, discoverCount);
+  const placed = new Set([...installed, ...discover].map((plugin) => plugin.id));
+  const byCategory = new Map<string, MarketplacePlugin[]>();
+  for (const plugin of plugins) {
+    if (placed.has(plugin.id)) continue;
+    const group = byCategory.get(plugin.category) ?? [];
+    group.push(plugin);
+    byCategory.set(plugin.category, group);
+  }
+  const categories = [...byCategory.entries()]
+    .map(([category, group]) => ({ category, plugins: group.toSorted(compareBrowseOrder) }))
+    .toSorted(
+      (left, right) =>
+        Number(left.category === "Other") - Number(right.category === "Other") ||
+        right.plugins.length - left.plugins.length ||
+        left.category.localeCompare(right.category),
+    );
+  return { installed, discover, categories };
+}
 
 export function marketplaceListingGroupKey(name: string): string {
   return name

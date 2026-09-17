@@ -44,6 +44,7 @@ import * as Option from "effect/Option";
 import {
   CrosshairIcon,
   ArrowLeftIcon,
+  BlocksIcon,
   CloudUploadIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
@@ -2084,6 +2085,18 @@ function OpenCommandPaletteDialog(props: {
         themeHalves,
         initialAppearance: resolvedTheme,
       });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:plugins",
+    searchTerms: ["plugins", "marketplace", "mcp", "skills", "harnesses", "codex", "claude"],
+    title: "Browse plugins",
+    description: "MCP servers and skills across supported harnesses",
+    icon: <BlocksIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/plugins" });
     },
   });
 

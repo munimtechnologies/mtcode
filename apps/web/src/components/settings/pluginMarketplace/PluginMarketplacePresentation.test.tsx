@@ -2,7 +2,12 @@ import type { PluginMarketplacePlugin } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { marketplacePluginIncludeLabels } from "~/pluginMarketplace/catalog";
+import {
+  groupMarketplaceSections,
+  marketplaceDisplayName,
+  marketplacePluginIncludeLabels,
+  pickDiscoverPlugins,
+} from "~/pluginMarketplace/catalog";
 
 import { HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
 
@@ -65,6 +70,13 @@ describe("plugin marketplace presentation", () => {
     expect(markup).not.toContain('aria-label="Cursor:');
   });
 
+  it("shows the marketplace display name and falls back to the raw marketplace id", () => {
+    expect(marketplaceDisplayName({ ...plugin, marketplaceLabel: "Codex official" })).toBe(
+      "Codex official",
+    );
+    expect(marketplaceDisplayName(plugin)).toBe("openai-bundled");
+  });
+
   it("includes every extension kind without duplicating hooks", () => {
     expect(
       marketplacePluginIncludeLabels({
@@ -86,6 +98,80 @@ describe("plugin marketplace presentation", () => {
       "Hooks",
       "Language servers",
       "Monitors",
+    ]);
+  });
+});
+
+function listing(
+  id: string,
+  input: {
+    readonly harness?: PluginMarketplacePlugin["sourceHarness"];
+    readonly category?: string;
+    readonly installed?: boolean;
+    readonly featured?: boolean;
+    readonly artwork?: boolean;
+  } = {},
+): PluginMarketplacePlugin {
+  const harness = input.harness ?? "codex";
+  return {
+    ...plugin,
+    id: `${harness}:${id}`,
+    sourceHarness: harness,
+    packageName: id,
+    name: id,
+    category: input.category ?? "Productivity",
+    installed: input.installed ?? false,
+    enabled: input.installed ?? false,
+    hasLocalLogo: input.artwork ?? false,
+    logoDataUrl: null,
+    logoUrl: null,
+    ...(input.featured ? { featured: true } : {}),
+    support: [{ harness, mcp: true, skills: false, apps: false }],
+  };
+}
+
+describe("plugin marketplace browse grouping", () => {
+  it("spreads featured picks across harnesses and never features installed plugins", () => {
+    const picks = pickDiscoverPlugins([
+      listing("zeta-installed", { installed: true, featured: true }),
+      listing("plain-codex"),
+      listing("art-codex", { artwork: true }),
+      listing("featured-codex", { featured: true }),
+      listing("art-claude", { harness: "claude", artwork: true }),
+      listing("plain-cursor", { harness: "cursor", category: "Other" }),
+    ]);
+
+    expect(picks.map((entry) => entry.packageName)).toEqual([
+      "featured-codex",
+      "art-claude",
+      "plain-cursor",
+      "art-codex",
+    ]);
+  });
+
+  it("lists installed plugins first, then sized categories with Other last", () => {
+    const sections = groupMarketplaceSections(
+      [
+        listing("one", { installed: true, category: "Other" }),
+        listing("two", { category: "Other" }),
+        listing("three", { category: "Other" }),
+        listing("four", { category: "Design" }),
+        listing("five", { category: "Design", artwork: true }),
+        listing("six", { category: "Finance" }),
+      ],
+      1,
+    );
+
+    expect(sections.installed.map((entry) => entry.packageName)).toEqual(["one"]);
+    expect(sections.discover.map((entry) => entry.packageName)).toEqual(["five"]);
+    expect(sections.categories.map((section) => section.category)).toEqual([
+      "Design",
+      "Finance",
+      "Other",
+    ]);
+    expect(sections.categories[2]?.plugins.map((entry) => entry.packageName)).toEqual([
+      "three",
+      "two",
     ]);
   });
 });

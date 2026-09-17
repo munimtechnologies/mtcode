@@ -5,13 +5,22 @@ plugins from the current environment. You can also use the Plugins button at the
 sidebar or open the command palette and choose **Browse plugins**.
 
 The marketplace reads installed and available packages from configured Codex and Claude Code
-marketplaces. It also reads Cursor's public marketplace and local Cursor plugin cache. When this
-environment is signed in to ChatGPT through Codex, search also queries ChatGPT's public plugin
-index, so listings that only appear there — such as TickTick — show up in results. Filter by MCP
-server, skill, app, harness, or category, and select a plugin to inspect its contents. Plugin artwork and metadata come from the package or its published marketplace listing.
-Use the **Installed** view to see every installed package without repeating those packages throughout
-the browse categories. Equivalent category names from different marketplaces are combined into one
-category.
+marketplaces, including Codex's bundled plugins and its official remote catalog. It also reads
+Cursor's public marketplace and local Cursor plugin cache. When this environment is signed in to
+ChatGPT through Codex, search also queries ChatGPT's public plugin index, so listings that only
+appear there — such as TickTick — show up in results.
+
+Switch between **All**, **Codex**, **Claude Code**, and **Cursor** at the top of the page to browse
+one harness at a time, and use the filter button to narrow by MCP server, skill, app, or category.
+Installed plugins are listed first, followed by featured picks and then each category. Each listing
+names the marketplace it comes from, such as **Codex official** or **Bundled**, and plugin artwork
+and metadata come from the package or its published marketplace listing. Equivalent category names
+from different marketplaces are combined into one category.
+
+Each harness loads independently. If one takes a while to sync its marketplaces, the page shows the
+others right away with a notice that the slow harness is still syncing, and fills it in
+automatically when it finishes. If a harness cannot be read at all, its notice explains why and
+offers a retry while the rest of the catalog stays usable.
 
 Marketplace changes use the configured binary, home directory, and environment of that harness's
 provider instance. If more than one enabled instance of the same harness is configured, manage its
