@@ -35,6 +35,8 @@ import {
 } from "../Layers/CursorProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { loadCursorUsageLimits } from "../Layers/cursorUsageLimits.ts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -105,6 +107,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
+      const hostEnvironment = yield* HostProcessEnvironment;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -134,10 +137,17 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv);
 
       const discoverModels = yield* makeCursorModelDiscovery(effectiveConfig, processEnv);
+      // Cursor's dashboard session lives in the desktop app's state.vscdb under
+      // the host home, not the instance environment.
+      const homeDir = hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim();
+      const probeUsageLimits = loadCursorUsageLimits(homeDir ? { homeDir } : {}).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+      );
       const checkProvider = checkCursorProviderStatus(
         effectiveConfig,
         processEnv,
         discoverModels,
+        probeUsageLimits,
       ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(Crypto.Crypto, crypto),

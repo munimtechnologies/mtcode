@@ -31,6 +31,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 
 const DEVIN_PRESENTATION = {
   displayName: "Devin",
@@ -433,6 +434,13 @@ export const makeDevinProvider = Effect.fn("makeDevinProvider")(function* (
         message: settings.enabled
           ? "Checking Devin CLI availability..."
           : "Devin is disabled in T3 Code settings.",
+        // Probes spread the draft forward, so this survives every refresh.
+        // The Devin CLI has no quota surface.
+        usageLimits: makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message: "Devin does not report subscription quota.",
+        }),
       },
     }),
     supportsConversationRollback: false,

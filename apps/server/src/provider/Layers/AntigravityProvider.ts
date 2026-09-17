@@ -30,6 +30,7 @@ import {
   isCommandMissingCause,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
 const MAX_WORKSPACE_SNAPSHOTS = 32;
@@ -151,6 +152,14 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
         message: settings.enabled
           ? "Checking Antigravity availability."
           : providerDisabledMessage("Antigravity"),
+        // Health checks and session callbacks spread the draft forward, so
+        // this survives every refresh. Neither `agy` nor its local state
+        // reports subscription windows.
+        usageLimits: makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message: "Antigravity does not report subscription quota.",
+        }),
       },
     }),
     setup: { canAuthenticate: true, canInstall: true },

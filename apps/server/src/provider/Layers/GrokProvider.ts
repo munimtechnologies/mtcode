@@ -33,6 +33,7 @@ import {
   type ServerProviderDraft,
   ProviderProbeTimeoutError,
 } from "../providerSnapshot.ts";
+import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
@@ -549,6 +550,13 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
       // A failed metadata probe degrades the model picker, it does not make chats fail.
       status: acpFailed ? "warning" : "ready",
       auth,
+      // Neither the CLI nor its local state exposes subscription quota:
+      // `grok usage` only prints per-session tokens and cost.
+      usageLimits: makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "unsupported",
+        message: "Grok Build does not report subscription quota.",
+      }),
       ...(acpFailed
         ? {
             message:

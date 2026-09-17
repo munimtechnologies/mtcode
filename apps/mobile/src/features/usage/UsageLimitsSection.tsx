@@ -31,11 +31,23 @@ const PACE_LABEL = { ahead: "ahead of pace", on: "on pace", under: "under pace" 
 
 type Driver = ServerProvider["driver"];
 
+/** Drivers whose usage series colour the limit bars reuse; the rest draw in the default ink. */
+const DRIVER_USAGE_KIND: Partial<Record<string, UsageProviderKind>> = {
+  codex: "codex",
+  claudeAgent: "claude",
+  cursor: "cursor",
+  grok: "grok",
+  opencode: "opencode",
+};
+
+export function usageKindForDriver(driver: Driver): UsageProviderKind | undefined {
+  return DRIVER_USAGE_KIND[driver];
+}
+
 /** The series colour the usage chart uses for this driver, so the two views read as one. */
 function useBarColor(driver: Driver): string | null {
   const colors = useProviderColors();
-  const kind: UsageProviderKind | null =
-    driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : null;
+  const kind = usageKindForDriver(driver);
   return kind ? colors[kind] : null;
 }
 

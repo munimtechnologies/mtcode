@@ -22,10 +22,19 @@ import { AppText as Text } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { environmentPresentations } from "../../state/presentation";
-import { ResetCredits } from "./UsageLimitsSection";
+import { ResetCredits, usageKindForDriver } from "./UsageLimitsSection";
 import { useProviderColors } from "./usageProviders";
 
-const DRIVER_LABEL: Partial<Record<string, string>> = { codex: "Codex", claudeAgent: "Claude" };
+const DRIVER_LABEL: Partial<Record<string, string>> = {
+  codex: "Codex",
+  claudeAgent: "Claude",
+  cursor: "Cursor",
+  grok: "Grok",
+  opencode: "OpenCode",
+  antigravity: "Antigravity",
+  devin: "Devin",
+  pi: "Pi",
+};
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
 
 function accountName(account: LimitAccount) {
@@ -231,7 +240,7 @@ export function UsageLimitsSection({
             <PoolWindowCard
               key={`${window.kind}:${window.id}`}
               pool={window}
-              color={pool.driver === "claudeAgent" ? colors.claude : colors.codex}
+              color={colors[usageKindForDriver(pool.driver) ?? "codex"]}
               now={now}
               environmentIds={selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]}
             />

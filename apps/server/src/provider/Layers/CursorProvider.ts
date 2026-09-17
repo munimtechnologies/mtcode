@@ -7,6 +7,7 @@ import type {
   ServerProviderAuth,
   ServerProviderModel,
   ServerProviderState,
+  ServerProviderUsageLimits,
 } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import { causeErrorTag } from "@t3tools/shared/observability";
@@ -895,6 +896,7 @@ export function buildCursorProviderSnapshot(input: {
   readonly parsed: CursorAboutResult;
   readonly discoveredModels?: ReadonlyArray<ServerProviderModel>;
   readonly discoveryWarning?: string;
+  readonly usageLimits?: ServerProviderUsageLimits;
 }): ServerProviderDraft {
   const message = joinProviderMessages(input.parsed.message, input.discoveryWarning);
   return buildServerProvider({
@@ -914,6 +916,7 @@ export function buildCursorProviderSnapshot(input: {
         input.discoveryWarning && input.parsed.status === "ready" ? "warning" : input.parsed.status,
       auth: input.parsed.auth,
       ...(message ? { message } : {}),
+      ...(input.usageLimits ? { usageLimits: input.usageLimits } : {}),
     },
   });
 }
@@ -1282,6 +1285,12 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   cursorSettings: CursorSettings,
   environment?: NodeJS.ProcessEnv,
   discoverModels?: (about: CursorAboutResult) => ReturnType<typeof discoverCursorModelsViaAcp>,
+  /**
+   * Subscription usage from the Cursor desktop dashboard (see
+   * `cursorUsageLimits.ts`). Optional so probes that only care about the CLI
+   * skip the network read.
+   */
+  probeUsageLimits?: Effect.Effect<ServerProviderUsageLimits>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ProviderProbeTimeoutError,
@@ -1411,6 +1420,12 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       discoveredModels = discoveryExit.value;
     }
   }
+  // The dashboard session is independent of the CLI sign-in, but a CLI that
+  // cannot run turns has no card to put the bars on.
+  const usageLimits =
+    probeUsageLimits && parsed.auth.status !== "unauthenticated"
+      ? yield* probeUsageLimits
+      : undefined;
   return buildCursorProviderSnapshot({
     checkedAt,
     cursorSettings,
@@ -1420,6 +1435,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       () => [] as const,
     ),
     ...(discoveryWarning ? { discoveryWarning } : {}),
+    ...(usageLimits ? { usageLimits } : {}),
   });
 });
 

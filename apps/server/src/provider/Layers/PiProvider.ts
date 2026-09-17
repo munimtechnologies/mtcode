@@ -18,6 +18,7 @@ import {
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
 
 const PRESENTATION = {
   displayName: "Pi",
@@ -123,6 +124,13 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         discovered.length > 0
           ? `Pi reported ${discovered.length} available model${discovered.length === 1 ? "" : "s"}.`
           : "Pi is available, but it did not report any models.",
+      // Pi proxies whichever upstream provider the model belongs to and
+      // reports no quota of its own.
+      usageLimits: makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "unsupported",
+        message: "Pi does not report subscription quota.",
+      }),
     },
   });
 });

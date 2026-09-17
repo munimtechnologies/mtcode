@@ -44,10 +44,18 @@ const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof Ga
   under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
 };
 
+/** Drivers whose usage series colour the limit bars reuse; the rest fall back to the foreground. */
+const DRIVER_USAGE_KIND: Partial<Record<string, UsageProviderKind>> = {
+  codex: "codex",
+  claudeAgent: "claude",
+  cursor: "cursor",
+  grok: "grok",
+  opencode: "opencode",
+};
+
 /** The series colour the cost chart uses for this driver, so the two views read as one. */
 export function barColor(driver: ServerProvider["driver"]): string {
-  const kind: UsageProviderKind | undefined =
-    driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : undefined;
+  const kind = DRIVER_USAGE_KIND[driver];
   return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
 }
 
