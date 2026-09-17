@@ -27,6 +27,9 @@ export const PluginMarketplaceContents = Schema.Struct({
 });
 export type PluginMarketplaceContents = typeof PluginMarketplaceContents.Type;
 
+export const PluginMarketplaceSourceType = Schema.Literals(["local", "git", "remote", "unknown"]);
+export type PluginMarketplaceSourceType = typeof PluginMarketplaceSourceType.Type;
+
 export const PluginMarketplacePlugin = Schema.Struct({
   id: TrimmedNonEmptyString,
   sourceHarness: PluginMarketplaceHarnessId,
@@ -37,7 +40,11 @@ export const PluginMarketplacePlugin = Schema.Struct({
   category: TrimmedNonEmptyString,
   version: TrimmedNonEmptyString,
   marketplaceName: TrimmedNonEmptyString,
-  marketplaceSourceType: Schema.Literals(["local", "git", "unknown"]),
+  /** Human-readable marketplace name such as "Codex official". Absent from older servers. */
+  marketplaceLabel: Schema.optionalKey(Schema.String),
+  marketplaceSourceType: PluginMarketplaceSourceType,
+  /** True when the marketplace itself features this plugin. Absent from older servers. */
+  featured: Schema.optionalKey(Schema.Boolean),
   installPolicy: Schema.String,
   authPolicy: Schema.String,
   installed: Schema.Boolean,
@@ -51,8 +58,25 @@ export const PluginMarketplacePlugin = Schema.Struct({
 });
 export type PluginMarketplacePlugin = typeof PluginMarketplacePlugin.Type;
 
+export const PluginMarketplaceNoticeStatus = Schema.Literals(["syncing", "stale", "failed"]);
+export type PluginMarketplaceNoticeStatus = typeof PluginMarketplaceNoticeStatus.Type;
+
+/**
+ * Per-harness catalog status. `syncing` means the harness is still loading and its plugins will
+ * appear on a later refresh; `stale` means the refresh failed but previously loaded plugins are
+ * shown; `failed` means no plugins from that harness are available.
+ */
+export const PluginMarketplaceNotice = Schema.Struct({
+  harness: PluginMarketplaceHarnessId,
+  status: PluginMarketplaceNoticeStatus,
+  message: Schema.String,
+});
+export type PluginMarketplaceNotice = typeof PluginMarketplaceNotice.Type;
+
 export const PluginMarketplaceCatalog = Schema.Struct({
   plugins: Schema.Array(PluginMarketplacePlugin),
+  /** Absent from older servers; treat as an empty list. */
+  notices: Schema.optionalKey(Schema.Array(PluginMarketplaceNotice)),
 });
 export type PluginMarketplaceCatalog = typeof PluginMarketplaceCatalog.Type;
 
@@ -106,6 +130,7 @@ export const PluginMarketplaceInstallTarget = Schema.Struct({
   pluginId: TrimmedNonEmptyString,
   harness: PluginMarketplaceHarnessId,
   marketplaceName: TrimmedNonEmptyString,
+  marketplaceLabel: Schema.optionalKey(Schema.String),
   version: TrimmedNonEmptyString,
   installed: Schema.Boolean,
   enabled: Schema.Boolean,

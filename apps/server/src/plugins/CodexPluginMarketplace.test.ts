@@ -1,13 +1,16 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, expect, it } from "@effect/vitest";
+import { assert, expect, it, live } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
+  decodeCodexRuntimeCatalog,
   makeWithOptions,
   parseCursorMarketplaceHtml,
   type CodexPluginRuntime,
@@ -864,7 +867,8 @@ testLayer("CodexPluginMarketplace", (it) => {
 
       const marketplace = yield* makeMarketplace();
       const publicId = `codex:${record.pluginId}`;
-      assert.strictEqual((yield* marketplace.detail(publicId)).installed, false);
+      // The local snapshot copy counts as installed even before the remote catalog copy exists.
+      assert.strictEqual((yield* marketplace.detail(publicId)).installed, true);
       assert.deepStrictEqual(yield* marketplace.install(publicId), {
         pluginId: publicId,
         installed: true,
@@ -885,8 +889,435 @@ testLayer("CodexPluginMarketplace", (it) => {
       const removalError = yield* installedMarketplace.remove(publicId).pipe(Effect.flip);
       assert.strictEqual(removalError._tag, "PluginMarketplaceOperationError");
       assert.deepStrictEqual(runtimeRemovals, ["hyperframes@openai-curated-remote"]);
-      assert.strictEqual((yield* installedMarketplace.detail(publicId)).installed, false);
+      // The remote copy is gone but the local snapshot copy could not be removed.
+      assert.strictEqual((yield* installedMarketplace.detail(publicId)).installed, true);
     }),
+  );
+
+  it.effect("keeps remote catalog records without a path and skips unreadable ones", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-remote-" });
+      yield* fs.makeDirectory(path.join(root, ".codex-plugin"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, ".codex-plugin", "plugin.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ name: "documents", interface: { displayName: "Documents" } }),
+      );
+      const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+        [];
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const catalogJson = JSON.stringify({
+        installed: [
+          {
+            pluginId: "documents@openai-primary-runtime",
+            name: "documents",
+            marketplaceName: "openai-primary-runtime",
+            version: "26.905.11957",
+            installed: true,
+            enabled: true,
+            source: { source: "local", path: root },
+            marketplaceSource: { sourceType: "local", source: root },
+            installPolicy: "AVAILABLE",
+            authPolicy: "ON_USE",
+          },
+        ],
+        available: [
+          {
+            pluginId: "gmail@openai-curated-remote",
+            name: "gmail",
+            marketplaceName: "openai-curated-remote",
+            version: "0.1.10",
+            installed: false,
+            enabled: false,
+            source: { source: "remote", id: "plugin_connector_1p_95d3" },
+            installPolicy: "AVAILABLE",
+            authPolicy: "ON_INSTALL",
+            eligiblePlanTypes: ["plus", "pro"],
+            futureField: { nested: true },
+          },
+          { pluginId: 42, name: null },
+        ],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push({ command: input.command, args: input.args });
+            if (input.command !== "codex") return unavailableProcessOutput;
+            return processOutput(input.args[1] === "list" ? catalogJson : "{}");
+          }),
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      assert.deepStrictEqual(catalog.plugins.map((plugin) => plugin.id).toSorted(), [
+        "codex:documents@openai-primary-runtime",
+        "codex:gmail@openai-curated-remote",
+      ]);
+      const gmail = catalog.plugins.find((plugin) => plugin.packageName === "gmail");
+      assert.strictEqual(gmail?.marketplaceLabel, "Codex official");
+      assert.strictEqual(gmail?.marketplaceSourceType, "remote");
+      assert.strictEqual(gmail?.installed, false);
+      const documents = catalog.plugins.find((plugin) => plugin.packageName === "documents");
+      assert.strictEqual(documents?.name, "Documents");
+      assert.strictEqual(documents?.marketplaceLabel, "Codex runtime");
+      assert.isUndefined(catalog.notices?.find((notice) => notice.harness === "codex"));
+
+      const detail = yield* marketplace.detail("codex:gmail@openai-curated-remote");
+      assert.strictEqual(detail.installTargets[0]?.marketplaceLabel, "Codex official");
+      yield* marketplace.install("codex:gmail@openai-curated-remote");
+      expect(commands).toContainEqual({
+        command: "codex",
+        args: ["plugin", "add", "gmail@openai-curated-remote", "--json"],
+      });
+    }),
+  );
+
+  it.effect("reports a timed-out harness and still lists the others", () =>
+    Effect.gen(function* () {
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const claudeJson = JSON.stringify({
+        installed: [],
+        available: [
+          {
+            pluginId: "github@claude-plugins-official",
+            name: "github",
+            description: "GitHub workflows",
+            marketplaceName: "claude-plugins-official",
+            source: "./plugins/github",
+          },
+        ],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) => {
+          if (input.command === "codex") {
+            return Effect.fail(
+              new ProcessRunner.ProcessTimeoutError({
+                command: input.command,
+                argumentCount: input.args.length,
+                timeoutMs: 120_000,
+              }),
+            );
+          }
+          if (input.command === "claude" && input.args[1] === "list") {
+            return Effect.succeed(processOutput(claudeJson));
+          }
+          return Effect.succeed(unavailableProcessOutput);
+        },
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      assert.deepStrictEqual(
+        catalog.plugins.map((plugin) => plugin.id),
+        ["claude:github@claude-plugins-official"],
+      );
+      assert.strictEqual(catalog.plugins[0]?.marketplaceLabel, "Claude official");
+      assert.strictEqual(catalog.notices?.length, 2);
+      const codexNotice = catalog.notices?.find((notice) => notice.harness === "codex");
+      assert.strictEqual(codexNotice?.status, "failed");
+      expect(codexNotice?.message).toContain(
+        "Codex did not finish listing plugins within 120 seconds",
+      );
+      assert.strictEqual(
+        catalog.notices?.find((notice) => notice.harness === "cursor")?.status,
+        "failed",
+      );
+    }),
+  );
+
+  it.effect("keeps Codex plugins when Claude Code exits with an error", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-partial-" });
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const codexJson = JSON.stringify({
+        installed: [
+          {
+            pluginId: "browser@openai-bundled",
+            name: "browser",
+            marketplaceName: "openai-bundled",
+            version: "1.0.0",
+            installed: true,
+            enabled: true,
+            source: { source: "local", path: root },
+            installPolicy: "AVAILABLE",
+            authPolicy: "ON_INSTALL",
+          },
+        ],
+        available: [],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.succeed(
+            input.command === "codex" && input.args[1] === "list"
+              ? processOutput(codexJson)
+              : { ...unavailableProcessOutput, code: ChildProcessSpawner.ExitCode(2) },
+          ),
+      });
+      const marketplace = yield* makeTestMarketplace.pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      assert.deepStrictEqual(
+        catalog.plugins.map((plugin) => plugin.id),
+        ["codex:browser@openai-bundled"],
+      );
+      assert.strictEqual(catalog.plugins[0]?.marketplaceLabel, "Bundled");
+      const claudeNotice = catalog.notices?.find((notice) => notice.harness === "claude");
+      assert.strictEqual(claudeNotice?.status, "failed");
+      expect(claudeNotice?.message).toContain("Claude Code plugins could not be loaded");
+      expect(claudeNotice?.message).toContain("exited with code 2");
+    }),
+  );
+
+  it.effect("prefers the Codex app-server catalog and reads remote inventories on demand", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-appserver-" });
+      yield* fs.makeDirectory(path.join(root, ".codex-plugin"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(root, ".codex-plugin", "plugin.json"),
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({ name: "build-ios-apps" }),
+      );
+      const commands: Array<ReadonlyArray<string>> = [];
+      const runtimeInstalls: Array<unknown> = [];
+      const reads: Array<string> = [];
+      const listResponse = {
+        marketplaces: [
+          {
+            name: "openai-curated-remote",
+            path: null,
+            interface: { displayName: "OpenAI Curated Remote" },
+            plugins: [
+              {
+                id: "gmail@openai-curated-remote",
+                remotePluginId: "plugin_connector_1p_95d3",
+                version: "0.1.10",
+                localVersion: null,
+                name: "gmail",
+                source: { type: "remote" },
+                installed: false,
+                enabled: false,
+                installPolicy: "AVAILABLE",
+                authPolicy: "ON_INSTALL",
+                availability: "AVAILABLE",
+                eligiblePlanTypes: ["plus"],
+                interface: {
+                  displayName: "Gmail",
+                  shortDescription: "Read and manage Gmail",
+                  developerName: "OpenAI",
+                  category: "Communication",
+                  capabilities: ["Interactive"],
+                  composerIconUrl: "https://files.openai.com/gmail.png",
+                  screenshots: [],
+                  screenshotUrls: [],
+                },
+              },
+              {
+                id: "build-ios-apps@openai-curated-remote",
+                remotePluginId: "Plugin_ios",
+                name: "build-ios-apps",
+                source: { type: "remote" },
+                installed: false,
+                enabled: false,
+                availability: "AVAILABLE",
+                interface: { displayName: "Build iOS Apps", category: "Developer Tools" },
+              },
+              {
+                id: "locked@openai-curated-remote",
+                name: "locked",
+                source: { type: "remote" },
+                installed: false,
+                enabled: false,
+                availability: "DISABLED_BY_ADMIN",
+                interface: null,
+              },
+              { id: 7, name: "broken" },
+            ],
+          },
+        ],
+        featuredPluginIds: ["gmail@openai-curated-remote"],
+        marketplaceLoadErrors: [],
+      };
+      const installedResponse = {
+        marketplaces: [
+          {
+            name: "openai-curated",
+            path: path.join(root, "marketplace.json"),
+            interface: { displayName: "Codex official" },
+            plugins: [
+              {
+                id: "build-ios-apps@openai-curated",
+                remotePluginId: null,
+                localVersion: "0.1.2",
+                name: "build-ios-apps",
+                source: { type: "local", path: root },
+                installed: true,
+                enabled: true,
+                installPolicy: "AVAILABLE",
+                authPolicy: "ON_INSTALL",
+                interface: { displayName: "Build iOS Apps", category: "Developer Tools" },
+              },
+            ],
+          },
+        ],
+      };
+      const runtimeCatalog = decodeCodexRuntimeCatalog(listResponse, installedResponse);
+      assert.isTrue(Option.isSome(runtimeCatalog));
+      const runtime = {
+        installed: () => Effect.succeed([]),
+        list: () => Effect.succeed(Option.getOrThrow(runtimeCatalog)),
+        read: (target) =>
+          Effect.sync(() => {
+            reads.push(`${target.pluginName}@${target.marketplaceName}`);
+            return {
+              description: "Work with Gmail using the configured connector.",
+              skills: [{ name: "triage", description: "Triage the inbox." }],
+              mcpServerNames: [],
+              apps: [
+                {
+                  id: "connector_2128",
+                  name: "Gmail",
+                  description: null,
+                  installUrl: "https://chatgpt.com/apps/gmail",
+                },
+              ],
+              hookCount: 0,
+            };
+          }),
+        install: (pluginName, remote) =>
+          Effect.sync(() => {
+            runtimeInstalls.push([pluginName, remote]);
+          }),
+        remove: () => Effect.void,
+      } satisfies CodexPluginRuntime["Service"];
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            commands.push([input.command, ...input.args]);
+            return unavailableProcessOutput;
+          }),
+      });
+      const marketplace = yield* makeWithOptions({
+        codexPluginRuntime: runtime,
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const catalog = yield* marketplace.catalog();
+      expect(commands).not.toContainEqual(["codex", "plugin", "list", "--available", "--json"]);
+      assert.deepStrictEqual(catalog.plugins.map((plugin) => plugin.id).toSorted(), [
+        "codex:build-ios-apps@openai-curated",
+        "codex:gmail@openai-curated-remote",
+        "codex:locked@openai-curated-remote",
+      ]);
+      const gmail = catalog.plugins.find((plugin) => plugin.packageName === "gmail");
+      assert.strictEqual(gmail?.name, "Gmail");
+      assert.strictEqual(gmail?.summary, "Read and manage Gmail");
+      assert.strictEqual(gmail?.category, "Communication");
+      assert.strictEqual(gmail?.developer, "OpenAI");
+      assert.strictEqual(gmail?.featured, true);
+      assert.strictEqual(gmail?.logoUrl, "https://files.openai.com/gmail.png");
+      assert.strictEqual(gmail?.marketplaceLabel, "Codex official");
+      const ios = catalog.plugins.find((plugin) => plugin.packageName === "build-ios-apps");
+      assert.strictEqual(ios?.installed, true);
+      assert.strictEqual(ios?.category, "Developer Tools");
+      assert.strictEqual(
+        catalog.plugins.find((plugin) => plugin.packageName === "locked")?.installPolicy,
+        "DISABLED_BY_ADMIN",
+      );
+
+      const detail = yield* marketplace.detail("codex:gmail@openai-curated-remote");
+      assert.deepStrictEqual(reads, ["gmail@openai-curated-remote"]);
+      assert.strictEqual(detail.description, "Work with Gmail using the configured connector.");
+      assert.deepStrictEqual(
+        detail.skills.map((skill) => skill.invocation),
+        ["$gmail:triage"],
+      );
+      assert.deepStrictEqual(
+        detail.apps.map((app) => app.name),
+        ["Gmail"],
+      );
+      assert.strictEqual(detail.contents.appCount, 1);
+      yield* marketplace.detail("codex:gmail@openai-curated-remote");
+      assert.strictEqual(reads.length, 1);
+
+      yield* marketplace.install("codex:gmail@openai-curated-remote");
+      assert.deepStrictEqual(runtimeInstalls, [
+        [
+          "gmail",
+          { remotePluginId: "plugin_connector_1p_95d3", marketplaceName: "openai-curated-remote" },
+        ],
+      ]);
+    }),
+  );
+
+  // Uses the live clock: the sync budget is a real timeout, not a TestClock tick.
+  live("returns the other harnesses while a slow harness keeps syncing", () =>
+    Effect.gen(function* () {
+      const release = yield* Deferred.make<void>();
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const claudeJson = JSON.stringify({
+        installed: [],
+        available: [
+          {
+            pluginId: "github@claude-plugins-official",
+            name: "github",
+            description: "GitHub workflows",
+            marketplaceName: "claude-plugins-official",
+            source: "./plugins/github",
+          },
+        ],
+      });
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) => {
+          if (input.command === "codex") {
+            return Deferred.await(release).pipe(Effect.as(unavailableProcessOutput));
+          }
+          if (input.command === "claude" && input.args[1] === "list") {
+            return Effect.succeed(processOutput(claudeJson));
+          }
+          return Effect.succeed(unavailableProcessOutput);
+        },
+      });
+      const marketplace = yield* makeWithOptions({
+        harnessSyncBudget: "50 millis",
+        readCursorMarketplaceHtml: () =>
+          new PluginMarketplaceUnavailableError({
+            reason: "marketplaces_unavailable",
+            cause: new Error("Marketplace unavailable in test."),
+          }),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+        Effect.provideService(HttpClient.HttpClient, unusedHttpClient),
+      );
+
+      const catalog = yield* marketplace.catalog().pipe(Effect.timeout("2 seconds"));
+      assert.deepStrictEqual(
+        catalog.plugins.map((plugin) => plugin.id),
+        ["claude:github@claude-plugins-official"],
+      );
+      assert.strictEqual(
+        catalog.notices?.find((notice) => notice.harness === "codex")?.status,
+        "syncing",
+      );
+      yield* Deferred.succeed(release, undefined);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("installs Claude marketplace packages through the Claude Code CLI", () =>

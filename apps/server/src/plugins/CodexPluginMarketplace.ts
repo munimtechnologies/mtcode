@@ -1,5 +1,7 @@
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -9,6 +11,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -37,10 +40,12 @@ import {
   type PluginMarketplaceMcpAuthState,
   type PluginMarketplaceMcpServer,
   type PluginMarketplaceMutationResult,
+  type PluginMarketplaceNotice,
   type PluginMarketplacePlugin,
   type PluginMarketplaceSetupAction,
   type PluginMarketplaceSetupResult,
   type PluginMarketplaceSkill,
+  type PluginMarketplaceSourceType,
   type PluginMarketplaceHarnessId,
 } from "@t3tools/contracts";
 import {
@@ -77,6 +82,13 @@ import {
 } from "./ChatGptPublicPlugins.ts";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
+// A cold Codex marketplace sync can take well over 30 seconds. The CLI gets a generous ceiling,
+// while each harness only holds the catalog response for HARNESS_SYNC_BUDGET before the catalog
+// is returned with a "still syncing" notice and the read continues in the background.
+const CODEX_PLUGIN_LIST_TIMEOUT = "120 seconds";
+const HARNESS_SYNC_BUDGET = "20 seconds";
+const CODEX_CURATED_MARKETPLACE = "openai-curated";
+const CODEX_CURATED_REMOTE_MARKETPLACE = "openai-curated-remote";
 const MAX_LOGO_BYTES = 1024 * 1024;
 const MAX_CATALOG_LOGO_BYTES = 48 * 1024;
 const MAX_REMOTE_DESCRIPTION_FILES = 32;
@@ -85,9 +97,18 @@ const decodeCodexSettingsOption = Schema.decodeUnknownOption(CodexSettings);
 const decodeClaudeSettingsOption = Schema.decodeUnknownOption(ClaudeSettings);
 const decodeCursorSettingsOption = Schema.decodeUnknownOption(CursorSettings);
 
+// Codex emits `null` for absent fields, so app-server payloads must accept both null and
+// missing keys. Excess keys are ignored, which keeps newer Codex builds from breaking decoding.
+const NullableString = Schema.optionalKey(Schema.NullOr(Schema.String));
+const NullableBoolean = Schema.optionalKey(Schema.NullOr(Schema.Boolean));
+const NullableStrings = Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)));
+
+// `codex plugin list --available --json`. Remote catalog entries carry `{ source: "remote", id }`
+// with no path; older builds only emit local/git sources with a path.
 const CodexPluginSource = Schema.Struct({
   source: Schema.String,
-  path: Schema.String,
+  path: NullableString,
+  id: NullableString,
 });
 
 const CodexPluginMarketplaceSource = Schema.Struct({
@@ -99,15 +120,96 @@ const CodexPluginRecord = Schema.Struct({
   pluginId: Schema.String,
   name: Schema.String,
   marketplaceName: Schema.String,
-  version: Schema.String,
-  installed: Schema.Boolean,
-  enabled: Schema.Boolean,
-  source: CodexPluginSource,
-  marketplaceSource: Schema.optional(CodexPluginMarketplaceSource),
-  installPolicy: Schema.String,
-  authPolicy: Schema.String,
+  version: NullableString,
+  installed: NullableBoolean,
+  enabled: NullableBoolean,
+  source: Schema.optionalKey(Schema.NullOr(CodexPluginSource)),
+  marketplaceSource: Schema.optionalKey(Schema.NullOr(CodexPluginMarketplaceSource)),
+  installPolicy: NullableString,
+  authPolicy: NullableString,
 });
 type CodexPluginRecord = typeof CodexPluginRecord.Type;
+const decodeCodexPluginRecordOption = Schema.decodeUnknownOption(CodexPluginRecord);
+
+// Codex app-server `plugin/list`, `plugin/installed`, and `plugin/read` payloads, decoded
+// leniently one marketplace and one plugin at a time so a single unexpected entry cannot sink the
+// whole Codex catalog.
+const CodexRuntimePluginInterface = Schema.Struct({
+  displayName: NullableString,
+  shortDescription: NullableString,
+  longDescription: NullableString,
+  developerName: NullableString,
+  category: NullableString,
+  capabilities: NullableStrings,
+  websiteUrl: NullableString,
+  brandColor: NullableString,
+  composerIcon: NullableString,
+  logo: NullableString,
+  composerIconUrl: NullableString,
+  logoUrl: NullableString,
+  defaultPrompt: Schema.optionalKey(
+    Schema.NullOr(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+  ),
+});
+type CodexRuntimePluginInterface = typeof CodexRuntimePluginInterface.Type;
+const CodexRuntimePluginSummary = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  remotePluginId: NullableString,
+  version: NullableString,
+  localVersion: NullableString,
+  source: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ type: NullableString, path: NullableString })),
+  ),
+  installed: NullableBoolean,
+  enabled: NullableBoolean,
+  installPolicy: NullableString,
+  authPolicy: NullableString,
+  availability: NullableString,
+  interface: Schema.optionalKey(Schema.NullOr(CodexRuntimePluginInterface)),
+});
+const decodeCodexRuntimePluginSummaryOption = Schema.decodeUnknownOption(CodexRuntimePluginSummary);
+const CodexRuntimeMarketplaceEntry = Schema.Struct({
+  name: Schema.String,
+  path: NullableString,
+  interface: Schema.optionalKey(Schema.NullOr(Schema.Struct({ displayName: NullableString }))),
+  plugins: Schema.Array(Schema.Unknown),
+});
+const decodeCodexRuntimeMarketplaceEntryOption = Schema.decodeUnknownOption(
+  CodexRuntimeMarketplaceEntry,
+);
+const CodexRuntimeListResponse = Schema.Struct({
+  marketplaces: Schema.Array(Schema.Unknown),
+  featuredPluginIds: NullableStrings,
+  marketplaceLoadErrors: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Array(Schema.Struct({ marketplacePath: NullableString, message: NullableString })),
+    ),
+  ),
+});
+const decodeCodexRuntimeListResponseOption = Schema.decodeUnknownOption(CodexRuntimeListResponse);
+const CodexRuntimeReadResponse = Schema.Struct({
+  plugin: Schema.Struct({
+    description: NullableString,
+    skills: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+    mcpServers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+    apps: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+    hooks: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  }),
+});
+const decodeCodexRuntimeReadResponseOption = Schema.decodeUnknownOption(CodexRuntimeReadResponse);
+const CodexRuntimeSkillSummary = Schema.Struct({
+  name: Schema.String,
+  description: NullableString,
+});
+const decodeCodexRuntimeSkillSummaryOption = Schema.decodeUnknownOption(CodexRuntimeSkillSummary);
+const CodexRuntimeAppSummary = Schema.Struct({
+  id: Schema.String,
+  name: NullableString,
+  description: NullableString,
+  installUrl: NullableString,
+});
+const decodeCodexRuntimeAppSummaryOption = Schema.decodeUnknownOption(CodexRuntimeAppSummary);
 
 const ClaudeInstalledPlugin = Schema.Struct({
   id: Schema.String,
@@ -156,6 +258,8 @@ const MarketplaceManifestPlugin = Schema.Struct({
 });
 type MarketplaceManifestPlugin = typeof MarketplaceManifestPlugin.Type;
 const MarketplaceManifest = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  interface: Schema.optional(Schema.Struct({ displayName: Schema.optional(Schema.String) })),
   plugins: Schema.Array(MarketplaceManifestPlugin),
 });
 
@@ -206,8 +310,8 @@ const decodeCursorMarketplacePlugins = Schema.decodeUnknownEffect(
 );
 
 const CodexPluginListOutput = Schema.Struct({
-  installed: Schema.Array(CodexPluginRecord),
-  available: Schema.Array(CodexPluginRecord),
+  installed: Schema.Array(Schema.Unknown),
+  available: Schema.Array(Schema.Unknown),
 });
 const decodeCodexPluginListJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(CodexPluginListOutput),
@@ -290,12 +394,13 @@ interface PluginSourceRecord {
   readonly harness: Extract<PluginMarketplaceHarnessId, "codex" | "claude" | "cursor">;
   readonly name: string;
   readonly marketplaceName: string;
+  readonly marketplaceLabel: string;
   readonly version: string;
   readonly installed: boolean;
   readonly enabled: boolean;
   readonly pluginRoot: string | null;
   readonly manifestDirectory: ".codex-plugin" | ".claude-plugin" | ".cursor-plugin";
-  readonly marketplaceSourceType: "local" | "git" | "unknown";
+  readonly marketplaceSourceType: PluginMarketplaceSourceType;
   readonly installPolicy: string;
   readonly authPolicy: string;
   readonly fallbackDescription: string;
@@ -312,8 +417,24 @@ interface PluginSourceRecord {
   readonly directExtensions: ReadonlyArray<PluginMarketplaceExtension>;
   readonly remotePreviewSource: RemotePluginPreviewSource | null;
   readonly hasHooks: boolean;
+  /** Marketplace-provided metadata used when no plugin manifest exists on disk. */
+  readonly fallbackManifest?: PluginManifest;
+  /** Featured by the marketplace itself (Codex `featuredPluginIds`). */
+  readonly featured?: boolean;
+  /** Absolute artwork path reported by the Codex app-server for local packages. */
+  readonly runtimeLogoPath?: string | null;
+  /** Present when Codex can install or remove this plugin through its remote catalog. */
+  readonly codexRemote?: CodexRemotePluginRef;
+  /** A local marketplace snapshot copy is installed alongside the remote catalog entry. */
   readonly codexLegacyInstalled?: boolean;
+  /** Runtime id of the installed remote catalog copy, or null when only local copies exist. */
   readonly codexRuntimeInstalledId?: string | null;
+}
+
+interface CodexRemotePluginRef {
+  readonly pluginName: string;
+  readonly marketplaceName: string;
+  readonly remotePluginId: string | null;
 }
 
 interface CodexRuntimePlugin {
@@ -325,8 +446,39 @@ interface CodexRuntimePlugin {
   readonly enabled: boolean;
 }
 
+export interface CodexRuntimeCatalogPlugin extends CodexRuntimePlugin {
+  readonly marketplaceDisplayName: string | null;
+  readonly marketplacePath: string | null;
+  readonly version: string | null;
+  readonly sourceType: string | null;
+  readonly sourcePath: string | null;
+  readonly installPolicy: string | null;
+  readonly authPolicy: string | null;
+  readonly availability: string | null;
+  readonly interface: CodexRuntimePluginInterface | null;
+}
+
+export interface CodexRuntimeCatalog {
+  readonly plugins: ReadonlyArray<CodexRuntimeCatalogPlugin>;
+  readonly featuredPluginIds: ReadonlyArray<string>;
+  readonly loadErrors: ReadonlyArray<string>;
+}
+
+export interface CodexRuntimePluginDetail {
+  readonly description: string | null;
+  readonly skills: ReadonlyArray<{ readonly name: string; readonly description: string | null }>;
+  readonly mcpServerNames: ReadonlyArray<string>;
+  readonly apps: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string | null;
+    readonly description: string | null;
+    readonly installUrl: string | null;
+  }>;
+  readonly hookCount: number;
+}
+
 const CodexPluginRuntimeErrorFields = {
-  operation: Schema.Literals(["installed", "install", "remove"]),
+  operation: Schema.Literals(["installed", "list", "read", "install", "remove"]),
   pluginRef: Schema.optional(Schema.String),
   cause: Schema.optional(Schema.Defect()),
 };
@@ -385,7 +537,19 @@ export class CodexPluginRuntime extends Context.Service<
       ReadonlyArray<CodexRuntimePlugin>,
       CodexPluginRuntimeError
     >;
-    readonly install: (pluginName: string) => Effect.Effect<void, CodexPluginRuntimeError>;
+    /**
+     * Full catalog from the app-server (`plugin/list` + `plugin/installed`). This is how the Codex
+     * app itself lists plugins and is the preferred source; the CLI JSON is the fallback.
+     */
+    readonly list?: () => Effect.Effect<CodexRuntimeCatalog, CodexPluginRuntimeError>;
+    /** Inventory of a plugin that has no local package, via `plugin/read`. */
+    readonly read?: (
+      target: CodexRemotePluginRef,
+    ) => Effect.Effect<CodexRuntimePluginDetail, CodexPluginRuntimeError>;
+    readonly install: (
+      pluginName: string,
+      remote?: { readonly remotePluginId: string; readonly marketplaceName: string },
+    ) => Effect.Effect<void, CodexPluginRuntimeError>;
     readonly remove: (pluginId: string) => Effect.Effect<void, CodexPluginRuntimeError>;
   }
 >()("t3/plugins/CodexPluginMarketplace/CodexPluginRuntime") {}
@@ -439,13 +603,23 @@ interface LoadedPlugin {
   readonly record: PluginSourceRecord;
   readonly detail: PluginMarketplaceDetail;
   readonly logoPath: string | null;
+  /** The Codex app-server inventory for a remote-only plugin has been merged into `detail`. */
+  readonly codexRemoteDetailLoaded?: boolean;
 }
 
 interface CatalogSnapshot {
   readonly expiresAt: number;
   readonly catalog: PluginMarketplaceCatalog;
   readonly plugins: ReadonlyMap<string, LoadedPlugin>;
+  readonly notices: ReadonlyArray<PluginMarketplaceNotice>;
 }
+
+type HarnessSourceKey = Extract<PluginMarketplaceHarnessId, "codex" | "claude" | "cursor">;
+
+type HarnessSourceResult = Result.Result<
+  ReadonlyArray<PluginSourceRecord>,
+  PluginMarketplaceUnavailableError
+>;
 
 interface McpAuthCandidate {
   readonly target: PluginMarketplaceInstallTarget;
@@ -624,10 +798,415 @@ function publicOperationDetail(code: number | null): string {
     : `The provider exited with status ${code}.`;
 }
 
-function codexMarketplaceSourceType(record: CodexPluginRecord): "local" | "git" | "unknown" {
-  const sourceType = record.marketplaceSource?.sourceType ?? record.source.source;
-  if (sourceType === "local" || sourceType === "git") return sourceType;
-  return "unknown";
+function marketplaceSourceType(value: string | null | undefined): PluginMarketplaceSourceType {
+  return value === "local" || value === "git" || value === "remote" ? value : "unknown";
+}
+
+// Friendly names for the marketplaces Codex and Claude ship with. Codex reports
+// "OpenAI Curated Remote" for its official catalog, which is not a name users recognise.
+const KNOWN_MARKETPLACE_LABELS: Readonly<Record<string, string>> = {
+  [CODEX_CURATED_MARKETPLACE]: "Codex official",
+  [CODEX_CURATED_REMOTE_MARKETPLACE]: "Codex official",
+  "openai-bundled": "Bundled",
+  "openai-primary-runtime": "Codex runtime",
+  "claude-plugins-official": "Claude official",
+};
+
+function marketplaceLabel(name: string, displayName?: string | null): string {
+  return (
+    KNOWN_MARKETPLACE_LABELS[name] ?? cleanText(displayName ?? undefined, displayNameFromId(name))
+  );
+}
+
+/**
+ * One Codex plugin entry regardless of whether it came from the app-server catalog, the CLI
+ * JSON, or the app-server installed inventory. Entries are merged into source records by
+ * `mergeCodexEntries`.
+ */
+interface CodexCatalogEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly marketplaceName: string;
+  readonly marketplaceLabel: string;
+  readonly version: string;
+  readonly installed: boolean;
+  readonly enabled: boolean;
+  readonly pluginRoot: string | null;
+  readonly marketplaceSourceType: PluginMarketplaceSourceType;
+  readonly remotePluginId: string | null;
+  readonly installPolicy: string;
+  readonly authPolicy: string;
+  readonly interface: CodexRuntimePluginInterface | null;
+  readonly manifestCategory: string | null;
+  readonly featured: boolean;
+}
+
+function codexEntryFromRuntimePlugin(
+  plugin: CodexRuntimeCatalogPlugin,
+  featuredIds: ReadonlySet<string>,
+  isAbsolute: (value: string) => boolean,
+): CodexCatalogEntry {
+  const sourcePath = plugin.sourcePath?.trim() || null;
+  const availability = plugin.availability?.trim();
+  return {
+    id: plugin.id,
+    name: plugin.name,
+    marketplaceName: plugin.marketplaceName,
+    marketplaceLabel: marketplaceLabel(plugin.marketplaceName, plugin.marketplaceDisplayName),
+    version: cleanText(plugin.version ?? undefined, "unknown"),
+    installed: plugin.installed,
+    enabled: plugin.enabled,
+    pluginRoot: sourcePath && isAbsolute(sourcePath) ? sourcePath : null,
+    marketplaceSourceType: marketplaceSourceType(plugin.sourceType),
+    remotePluginId: plugin.remotePluginId?.trim() || null,
+    installPolicy:
+      availability && availability !== "AVAILABLE"
+        ? availability
+        : cleanText(plugin.installPolicy ?? undefined, "AVAILABLE"),
+    authPolicy: cleanText(plugin.authPolicy ?? undefined, "ON_INSTALL"),
+    interface: plugin.interface,
+    manifestCategory: null,
+    featured: featuredIds.has(plugin.id),
+  };
+}
+
+function codexEntryFromCliRecord(
+  record: CodexPluginRecord,
+  marketplace: { readonly label: string; readonly category: string | null } | undefined,
+): CodexCatalogEntry {
+  const source = record.source ?? null;
+  const sourceKind = source?.source ?? null;
+  const pluginRoot = source?.path?.trim() || null;
+  return {
+    id: record.pluginId,
+    name: record.name,
+    marketplaceName: record.marketplaceName,
+    marketplaceLabel: marketplace?.label ?? marketplaceLabel(record.marketplaceName),
+    version: cleanText(record.version ?? undefined, "unknown"),
+    installed: record.installed === true,
+    enabled: record.enabled === true,
+    pluginRoot,
+    marketplaceSourceType: marketplaceSourceType(
+      record.marketplaceSource?.sourceType ?? sourceKind,
+    ),
+    remotePluginId: sourceKind === "remote" ? (source?.id?.trim() ?? null) || null : null,
+    installPolicy: cleanText(record.installPolicy ?? undefined, "AVAILABLE"),
+    authPolicy: cleanText(record.authPolicy ?? undefined, "ON_INSTALL"),
+    interface: null,
+    manifestCategory: marketplace?.category ?? null,
+    featured: false,
+  };
+}
+
+function codexEntryFromInstalledRuntimePlugin(plugin: CodexRuntimePlugin): CodexCatalogEntry {
+  return {
+    id: plugin.id,
+    name: plugin.name,
+    marketplaceName: plugin.marketplaceName,
+    marketplaceLabel: marketplaceLabel(plugin.marketplaceName),
+    version: "unknown",
+    installed: plugin.installed,
+    enabled: plugin.enabled,
+    pluginRoot: null,
+    marketplaceSourceType: "remote",
+    remotePluginId: plugin.remotePluginId,
+    installPolicy: "AVAILABLE",
+    authPolicy: "ON_INSTALL",
+    interface: null,
+    manifestCategory: null,
+    featured: false,
+  };
+}
+
+function manifestFromCodexInterface(
+  entry: CodexCatalogEntry,
+  runtimeInterface: CodexRuntimePluginInterface | null,
+): PluginManifest {
+  const ui = runtimeInterface;
+  const category = ui?.category?.trim() || entry.manifestCategory || undefined;
+  const capabilities = ui?.capabilities?.filter((value) => value.trim().length > 0);
+  const defaultPrompt =
+    typeof ui?.defaultPrompt === "string"
+      ? ui.defaultPrompt
+      : ui?.defaultPrompt?.filter((value) => value.trim().length > 0);
+  return {
+    name: entry.name,
+    version: entry.version,
+    ...(ui?.shortDescription?.trim()
+      ? { description: ui.shortDescription }
+      : ui?.longDescription?.trim()
+        ? { description: ui.longDescription }
+        : {}),
+    interface: {
+      ...(ui?.displayName?.trim() ? { displayName: ui.displayName } : {}),
+      ...(ui?.shortDescription?.trim() ? { shortDescription: ui.shortDescription } : {}),
+      ...(ui?.longDescription?.trim() ? { longDescription: ui.longDescription } : {}),
+      ...(ui?.developerName?.trim() ? { developerName: ui.developerName } : {}),
+      ...(category ? { category } : {}),
+      ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
+      ...(ui?.websiteUrl?.trim() ? { websiteURL: ui.websiteUrl } : {}),
+      ...(defaultPrompt && defaultPrompt.length > 0 ? { defaultPrompt } : {}),
+      ...(ui?.brandColor?.trim() ? { brandColor: ui.brandColor } : {}),
+    },
+  };
+}
+
+function codexSourceRecord(
+  entry: CodexCatalogEntry,
+  remoteTwin: CodexCatalogEntry | undefined,
+  runtimeAvailable: boolean,
+): PluginSourceRecord {
+  const runtimeInterface = entry.interface ?? remoteTwin?.interface ?? null;
+  const manifest = manifestFromCodexInterface(entry, runtimeInterface);
+  const isRemote = entry.marketplaceName === CODEX_CURATED_REMOTE_MARKETPLACE;
+  // Codex's official catalog can be installed through the app-server for both the remote entry
+  // and the local `openai-curated` snapshot copy of the same plugin.
+  const codexRemote: CodexRemotePluginRef | undefined =
+    isRemote ||
+    remoteTwin ||
+    (runtimeAvailable && entry.marketplaceName === CODEX_CURATED_MARKETPLACE)
+      ? {
+          pluginName: entry.name,
+          marketplaceName: CODEX_CURATED_REMOTE_MARKETPLACE,
+          remotePluginId: (isRemote ? entry.remotePluginId : remoteTwin?.remotePluginId) ?? null,
+        }
+      : undefined;
+  const remoteInstalledId = isRemote
+    ? entry.installed
+      ? entry.id
+      : null
+    : remoteTwin?.installed
+      ? remoteTwin.id
+      : null;
+  const runtimeLogoPath = runtimeInterface?.composerIcon?.trim() || runtimeInterface?.logo?.trim();
+  const externalLogoUrl =
+    sanitizeRemoteUrl(runtimeInterface?.composerIconUrl ?? undefined) ??
+    sanitizeRemoteUrl(runtimeInterface?.logoUrl ?? undefined);
+  return {
+    pluginId: publicPluginId("codex", entry.id),
+    sourcePluginId: entry.id,
+    harness: "codex",
+    name: entry.name,
+    marketplaceName: entry.marketplaceName,
+    marketplaceLabel: entry.marketplaceLabel,
+    version: entry.version,
+    installed: entry.installed || remoteTwin?.installed === true,
+    enabled: entry.enabled || remoteTwin?.enabled === true,
+    pluginRoot: entry.pluginRoot,
+    manifestDirectory: ".codex-plugin",
+    marketplaceSourceType: entry.marketplaceSourceType,
+    installPolicy: entry.installPolicy,
+    authPolicy: entry.authPolicy,
+    fallbackDescription: "Codex plugin",
+    fallbackDisplayName: displayNameFromId(entry.name),
+    fallbackDeveloper: "Unknown",
+    fallbackCategory: "Other",
+    fallbackHomepage: null,
+    fallbackRepository: null,
+    marketplaceUrl: null,
+    externalLogoUrl,
+    directSkills: [],
+    directMcpServers: [],
+    directApps: [],
+    directExtensions: [],
+    remotePreviewSource: null,
+    hasHooks: false,
+    fallbackManifest: manifest,
+    featured: entry.featured || remoteTwin?.featured === true,
+    runtimeLogoPath: runtimeLogoPath ?? null,
+    ...(codexRemote
+      ? {
+          codexRemote,
+          codexLegacyInstalled: isRemote ? false : entry.installed,
+          codexRuntimeInstalledId: remoteInstalledId,
+        }
+      : {}),
+  };
+}
+
+function preferCodexEntry(current: CodexCatalogEntry, next: CodexCatalogEntry): CodexCatalogEntry {
+  const merged = next.interface && !current.interface ? next : current;
+  return {
+    ...merged,
+    installed: current.installed || next.installed,
+    enabled: current.enabled || next.enabled,
+    pluginRoot: current.pluginRoot ?? next.pluginRoot,
+    remotePluginId: current.remotePluginId ?? next.remotePluginId,
+    featured: current.featured || next.featured,
+  };
+}
+
+/**
+ * Collapses duplicate ids (the app-server lists installed plugins twice) and pairs each local
+ * `openai-curated` snapshot with its `openai-curated-remote` twin so the catalog shows one Codex
+ * listing per official plugin, installed when either copy is.
+ */
+function mergeCodexEntries(
+  entries: ReadonlyArray<CodexCatalogEntry>,
+  runtimeAvailable: boolean,
+): PluginSourceRecord[] {
+  const byId = new Map<string, CodexCatalogEntry>();
+  for (const entry of entries) {
+    const current = byId.get(entry.id);
+    byId.set(entry.id, current ? preferCodexEntry(current, entry) : entry);
+  }
+  const remoteByName = new Map<string, CodexCatalogEntry>();
+  for (const entry of byId.values()) {
+    if (entry.marketplaceName === CODEX_CURATED_REMOTE_MARKETPLACE) {
+      remoteByName.set(entry.name.toLocaleLowerCase(), entry);
+    }
+  }
+  const pairedRemoteIds = new Set<string>();
+  const records: PluginSourceRecord[] = [];
+  for (const entry of byId.values()) {
+    if (entry.marketplaceName === CODEX_CURATED_REMOTE_MARKETPLACE) continue;
+    const twin =
+      entry.marketplaceName === CODEX_CURATED_MARKETPLACE
+        ? remoteByName.get(entry.name.toLocaleLowerCase())
+        : undefined;
+    if (twin) pairedRemoteIds.add(twin.id);
+    records.push(codexSourceRecord(entry, twin, runtimeAvailable));
+  }
+  for (const entry of remoteByName.values()) {
+    if (pairedRemoteIds.has(entry.id)) continue;
+    records.push(codexSourceRecord(entry, undefined, runtimeAvailable));
+  }
+  return records;
+}
+
+/** Decodes app-server `plugin/list` and `plugin/installed` payloads, skipping invalid entries. */
+export function decodeCodexRuntimeCatalog(
+  listResponse: unknown,
+  installedResponse: unknown,
+): Option.Option<CodexRuntimeCatalog> {
+  const list = decodeCodexRuntimeListResponseOption(listResponse);
+  const installed = decodeCodexRuntimeListResponseOption(installedResponse);
+  if (Option.isNone(list) && Option.isNone(installed)) return Option.none();
+  const plugins: CodexRuntimeCatalogPlugin[] = [];
+  const loadErrors: string[] = [];
+  for (const response of [list, installed]) {
+    if (Option.isNone(response)) continue;
+    for (const error of response.value.marketplaceLoadErrors ?? []) {
+      const message = error.message?.trim();
+      if (message) loadErrors.push(message);
+    }
+    for (const rawMarketplace of response.value.marketplaces) {
+      const marketplace = decodeCodexRuntimeMarketplaceEntryOption(rawMarketplace);
+      if (Option.isNone(marketplace)) continue;
+      for (const rawPlugin of marketplace.value.plugins) {
+        const summary = decodeCodexRuntimePluginSummaryOption(rawPlugin);
+        if (Option.isNone(summary)) continue;
+        const plugin = summary.value;
+        plugins.push({
+          id: plugin.id,
+          name: plugin.name,
+          marketplaceName: marketplace.value.name,
+          marketplaceDisplayName: marketplace.value.interface?.displayName ?? null,
+          marketplacePath: marketplace.value.path ?? null,
+          remotePluginId: plugin.remotePluginId ?? null,
+          installed: plugin.installed === true,
+          enabled: plugin.enabled === true,
+          version: plugin.localVersion ?? plugin.version ?? null,
+          sourceType: plugin.source?.type ?? null,
+          sourcePath: plugin.source?.path ?? null,
+          installPolicy: plugin.installPolicy ?? null,
+          authPolicy: plugin.authPolicy ?? null,
+          availability: plugin.availability ?? null,
+          interface: plugin.interface ?? null,
+        });
+      }
+    }
+  }
+  return Option.some({
+    plugins,
+    featuredPluginIds: Option.isSome(list) ? (list.value.featuredPluginIds ?? []) : [],
+    loadErrors,
+  });
+}
+
+/** Decodes an app-server `plugin/read` payload, skipping invalid inventory entries. */
+export function decodeCodexRuntimePluginDetail(
+  response: unknown,
+): Option.Option<CodexRuntimePluginDetail> {
+  const decoded = decodeCodexRuntimeReadResponseOption(response);
+  if (Option.isNone(decoded)) return Option.none();
+  const plugin = decoded.value.plugin;
+  return Option.some({
+    description: plugin.description?.trim() || null,
+    skills: (plugin.skills ?? []).flatMap((raw) => {
+      const skill = decodeCodexRuntimeSkillSummaryOption(raw);
+      return Option.isSome(skill)
+        ? [{ name: skill.value.name, description: skill.value.description ?? null }]
+        : [];
+    }),
+    mcpServerNames: (plugin.mcpServers ?? []).filter(
+      (value): value is string => typeof value === "string" && value.trim().length > 0,
+    ),
+    apps: (plugin.apps ?? []).flatMap((raw) => {
+      const app = decodeCodexRuntimeAppSummaryOption(raw);
+      return Option.isSome(app)
+        ? [
+            {
+              id: app.value.id,
+              name: app.value.name ?? null,
+              description: app.value.description ?? null,
+              installUrl: app.value.installUrl ?? null,
+            },
+          ]
+        : [];
+    }),
+    hookCount: plugin.hooks?.length ?? 0,
+  });
+}
+
+const isProcessTimeoutError = Schema.is(ProcessRunner.ProcessTimeoutError);
+const isPluginMarketplaceUnavailableError = Schema.is(PluginMarketplaceUnavailableError);
+
+function harnessDisplayName(harness: HarnessSourceKey): string {
+  return harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : "Cursor";
+}
+
+function firstLine(value: string): string {
+  const line = value.split(/\r?\n/u, 1)[0]?.trim() ?? "";
+  return line.length > 160 ? `${line.slice(0, 157)}…` : line;
+}
+
+/** A short, user-facing reason a harness catalog could not be read. */
+function harnessFailureDetail(
+  harness: HarnessSourceKey,
+  error: PluginMarketplaceUnavailableError,
+): string {
+  const cause = error.cause;
+  if (isProcessTimeoutError(cause)) {
+    return `${harnessDisplayName(harness)} did not finish listing plugins within ${Math.round(cause.timeoutMs / 1000)} seconds.`;
+  }
+  if (error.exitCode !== undefined) {
+    return `the ${harnessDisplayName(harness)} plugin command exited with code ${error.exitCode}.`;
+  }
+  if (error.reason === "catalog_invalid") {
+    return `${harnessDisplayName(harness)} returned a plugin catalog that could not be read.`;
+  }
+  if (cause instanceof Error && cause.message.trim()) return firstLine(cause.message);
+  return `no ${harnessDisplayName(harness)} provider is available on this environment.`;
+}
+
+function harnessNotice(
+  harness: HarnessSourceKey,
+  status: PluginMarketplaceNotice["status"],
+  error?: PluginMarketplaceUnavailableError,
+): PluginMarketplaceNotice {
+  const name = harnessDisplayName(harness);
+  const detail = error ? harnessFailureDetail(harness, error) : "";
+  return {
+    harness,
+    status,
+    message:
+      status === "syncing"
+        ? `${name} is still syncing its plugin marketplaces. Its plugins will appear when it finishes.`
+        : status === "stale"
+          ? `Showing the last loaded ${name} plugins. Refresh failed: ${detail}`
+          : `${name} plugins could not be loaded: ${detail}`,
+  };
 }
 
 function normalizeCategory(value: string | undefined): string {
@@ -669,12 +1248,13 @@ function chatGptPublicSourceRecord(plugin: ChatGptPublicPlugin): PluginSourceRec
     harness: "codex",
     name: plugin.name,
     marketplaceName: CHATGPT_PUBLIC_MARKETPLACE_NAME,
+    marketplaceLabel: CHATGPT_PUBLIC_MARKETPLACE_NAME,
     version: plugin.version,
     installed: false,
     enabled: false,
     pluginRoot: null,
     manifestDirectory: ".codex-plugin",
-    marketplaceSourceType: "unknown",
+    marketplaceSourceType: "remote",
     installPolicy: "EXTERNAL",
     authPolicy: "ON_INSTALL",
     fallbackDescription: plugin.description,
@@ -811,7 +1391,9 @@ function catalogPlugin(
     category: detail.category,
     version: detail.version,
     marketplaceName: detail.marketplaceName,
+    ...(detail.marketplaceLabel === undefined ? {} : { marketplaceLabel: detail.marketplaceLabel }),
     marketplaceSourceType: detail.marketplaceSourceType,
+    ...(detail.featured === undefined ? {} : { featured: detail.featured }),
     installPolicy: detail.installPolicy,
     authPolicy: detail.authPolicy,
     installed: detail.installed,
@@ -987,6 +1569,8 @@ interface PluginMarketplaceOptions {
   ) => Effect.Effect<ReadonlyArray<ChatGptPublicPlugin>>;
   readonly readRemoteText?: (url: string) => Effect.Effect<string | null>;
   readonly platform?: NodeJS.Platform;
+  /** How long a catalog refresh waits for each harness before reporting it as still syncing. */
+  readonly harnessSyncBudget?: Duration.Input;
   readonly codexPluginRuntime?: CodexPluginRuntime["Service"];
   readonly mcpOAuthRuntime?: McpOAuthRuntime.McpOAuthRuntime["Service"];
   readonly commands?: McpOAuthRuntime.McpOAuthRuntimeOptions["commands"];
@@ -1557,19 +2141,22 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       const manifestPath = record.pluginRoot
         ? yield* safePluginPath(record.pluginRoot, `./${record.manifestDirectory}/plugin.json`)
         : null;
-      const manifest = manifestPath
-        ? yield* readJsonFile(manifestPath, PluginManifest).pipe(
-            Effect.orElseSucceed((): PluginManifest => ({
-              name: record.name,
-              version: record.version,
-              description: record.fallbackDescription,
-            })),
-          )
-        : ({
-            name: record.name,
-            version: record.version,
-            description: record.fallbackDescription,
-          } satisfies PluginManifest);
+      const fallbackManifest: PluginManifest = record.fallbackManifest ?? {
+        name: record.name,
+        version: record.version,
+        description: record.fallbackDescription,
+      };
+      const diskManifest = manifestPath
+        ? yield* readJsonFile(manifestPath, PluginManifest).pipe(Effect.option)
+        : Option.none();
+      // The package manifest on disk wins field by field; marketplace metadata fills the gaps.
+      const manifest: PluginManifest = Option.isSome(diskManifest)
+        ? {
+            ...fallbackManifest,
+            ...diskManifest.value,
+            interface: { ...fallbackManifest.interface, ...diskManifest.value.interface },
+          }
+        : fallbackManifest;
       const [skills, mcpServers, apps, defaultHooksFileExists] = yield* Effect.all(
         [
           loadSkills(record, manifest),
@@ -1606,8 +2193,13 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               logoRelativePath.startsWith("./") ? logoRelativePath : `./${logoRelativePath}`,
             )
           : null;
+      const runtimeLogoPath =
+        record.runtimeLogoPath && record.pluginRoot
+          ? yield* safePluginAbsolutePath(record.pluginRoot, record.runtimeLogoPath)
+          : null;
       const logoPath =
         configuredLogoPath ??
+        runtimeLogoPath ??
         (record.pluginRoot ? yield* findDefaultLogoPath(record.pluginRoot) : null);
       const homepage = sanitizeRemoteUrl(
         manifest.interface?.websiteURL ?? manifest.homepage ?? record.fallbackHomepage ?? undefined,
@@ -1644,7 +2236,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           ),
           version: cleanText(manifest.version, record.version),
           marketplaceName: record.marketplaceName,
+          marketplaceLabel: record.marketplaceLabel,
           marketplaceSourceType: record.marketplaceSourceType,
+          ...(record.featured ? { featured: true } : {}),
           installPolicy: record.installPolicy,
           authPolicy: record.authPolicy,
           installed: record.installed,
@@ -1696,27 +2290,70 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       return userHome ? path.join(userHome, ".codex") : null;
     };
 
+    // The CLI JSON carries no display metadata, so read each local marketplace manifest once for
+    // its display name and per-plugin categories.
+    const readCodexMarketplaceManifests = Effect.fn(
+      "CodexPluginMarketplace.readCodexMarketplaceManifests",
+    )(function* (records: ReadonlyArray<CodexPluginRecord>) {
+      const roots = new Map<string, string>();
+      for (const record of records) {
+        const source = record.marketplaceSource;
+        if (source?.sourceType === "local" && source.source.trim()) {
+          roots.set(record.marketplaceName, source.source);
+        }
+      }
+      const manifests = yield* Effect.forEach(
+        [...roots.entries()],
+        ([marketplaceName, root]) =>
+          Effect.gen(function* () {
+            const manifestPath = yield* safePluginPath(root, "./.agents/plugins/marketplace.json");
+            const manifest = manifestPath
+              ? yield* readJsonFile(manifestPath, MarketplaceManifest).pipe(Effect.option)
+              : Option.none();
+            return [marketplaceName, Option.getOrNull(manifest)] as const;
+          }),
+        { concurrency: 4 },
+      );
+      return new Map(manifests);
+    });
+
     const readCodexPluginRecords = Effect.fn("CodexPluginMarketplace.readCodexPluginRecords")(
       function* () {
+        const runtime = options.codexPluginRuntime;
+        // The app-server catalog is how the Codex app itself lists plugins: one fast call with
+        // display metadata for local and remote marketplaces alike. The CLI is the fallback.
+        if (runtime?.list) {
+          const listed = yield* runtime.list().pipe(Effect.result);
+          if (Result.isSuccess(listed)) {
+            const featured = new Set(listed.success.featuredPluginIds);
+            return mergeCodexEntries(
+              listed.success.plugins.map((plugin) =>
+                codexEntryFromRuntimePlugin(plugin, featured, (value) => path.isAbsolute(value)),
+              ),
+              true,
+            );
+          }
+          yield* Effect.logDebug(
+            `Codex app-server plugin catalog unavailable, using the CLI: ${String(listed.failure)}`,
+          );
+        }
         const command = yield* commandFor("codex", "codex");
         if (!command) {
           return yield* new PluginMarketplaceUnavailableError({
             reason: "codex_unavailable",
           });
         }
-        const [result, runtimeResult] = yield* Effect.all(
+        const [result, runtimeInstalled] = yield* Effect.all(
           [
             processRunner.run({
               command: command.command,
               args: ["plugin", "list", "--available", "--json"],
               cwd: marketplaceCwd,
               env: command.env,
-              timeout: "30 seconds",
-              maxOutputBytes: 8 * 1024 * 1024,
+              timeout: CODEX_PLUGIN_LIST_TIMEOUT,
+              maxOutputBytes: 32 * 1024 * 1024,
             }),
-            options.codexPluginRuntime
-              ? options.codexPluginRuntime.installed().pipe(Effect.result)
-              : Effect.succeed(null),
+            runtime ? runtime.installed().pipe(Effect.result) : Effect.succeed(null),
           ],
           { concurrency: 2 },
         ).pipe(
@@ -1736,59 +2373,49 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
             (cause) => new PluginMarketplaceUnavailableError({ reason: "catalog_invalid", cause }),
           ),
         );
-        const runtimeInventoryKnown = runtimeResult !== null && Result.isSuccess(runtimeResult);
-        const runtimeByName = new Map(
-          runtimeInventoryKnown
-            ? runtimeResult.success
-                .filter(
-                  (plugin) =>
-                    plugin.marketplaceName === "openai-curated-remote" && plugin.installed,
-                )
-                .map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const)
-            : [],
-        );
-        return [...decoded.installed, ...decoded.available].map((record): PluginSourceRecord => {
-          const usesRuntimeInventory =
-            record.marketplaceName === "openai-curated" && runtimeInventoryKnown;
-          const runtimePlugin = usesRuntimeInventory
-            ? runtimeByName.get(record.name.toLocaleLowerCase())
-            : undefined;
-          return {
-            pluginId: publicPluginId("codex", record.pluginId),
-            sourcePluginId: record.pluginId,
-            harness: "codex",
-            name: record.name,
-            marketplaceName: record.marketplaceName,
-            version: record.version,
-            installed: usesRuntimeInventory ? runtimePlugin?.installed === true : record.installed,
-            enabled: usesRuntimeInventory ? runtimePlugin?.enabled === true : record.enabled,
-            pluginRoot: record.source.path,
-            manifestDirectory: ".codex-plugin",
-            marketplaceSourceType: codexMarketplaceSourceType(record),
-            installPolicy: record.installPolicy,
-            authPolicy: record.authPolicy,
-            fallbackDescription: "Codex plugin",
-            fallbackDisplayName: displayNameFromId(record.name),
-            fallbackDeveloper: "Unknown",
-            fallbackCategory: "Other",
-            fallbackHomepage: null,
-            fallbackRepository: null,
-            marketplaceUrl: null,
-            externalLogoUrl: null,
-            directSkills: [],
-            directMcpServers: [],
-            directApps: [],
-            directExtensions: [],
-            remotePreviewSource: null,
-            hasHooks: false,
-            ...(usesRuntimeInventory
-              ? {
-                  codexLegacyInstalled: record.installed,
-                  codexRuntimeInstalledId: runtimePlugin?.id ?? null,
-                }
-              : {}),
-          };
+        // Decode one record at a time so a single unexpected entry cannot sink every Codex plugin.
+        const rawRecords = [...decoded.installed, ...decoded.available];
+        const records = rawRecords.flatMap((raw) => {
+          const record = decodeCodexPluginRecordOption(raw);
+          return Option.isSome(record) ? [record.value] : [];
         });
+        if (records.length === 0 && rawRecords.length > 0) {
+          return yield* new PluginMarketplaceUnavailableError({ reason: "catalog_invalid" });
+        }
+        if (records.length < rawRecords.length) {
+          yield* Effect.logWarning(
+            `Skipped ${rawRecords.length - records.length} unreadable Codex plugin records.`,
+          );
+        }
+        const manifests = yield* readCodexMarketplaceManifests(records);
+        const entries = records.map((record) => {
+          const manifest = manifests.get(record.marketplaceName);
+          return codexEntryFromCliRecord(
+            record,
+            manifest
+              ? {
+                  label: marketplaceLabel(record.marketplaceName, manifest.interface?.displayName),
+                  category:
+                    manifest.plugins.find((plugin) => plugin.name === record.name)?.category ??
+                    null,
+                }
+              : undefined,
+          );
+        });
+        const runtimeAvailable = runtimeInstalled !== null && Result.isSuccess(runtimeInstalled);
+        if (runtimeAvailable) {
+          const known = new Set(entries.map((entry) => entry.id));
+          for (const plugin of runtimeInstalled.success) {
+            if (
+              plugin.marketplaceName !== CODEX_CURATED_REMOTE_MARKETPLACE ||
+              known.has(plugin.id)
+            ) {
+              continue;
+            }
+            entries.push(codexEntryFromInstalledRuntimePlugin(plugin));
+          }
+        }
+        return mergeCodexEntries(entries, runtimeAvailable);
       },
     );
 
@@ -1901,6 +2528,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
               harness: "claude",
               name: plugin.name,
               marketplaceName: plugin.marketplaceName,
+              marketplaceLabel: marketplaceLabel(plugin.marketplaceName),
               version: installedPlugin?.version ?? metadata?.version ?? "Latest",
               installed: installedPlugin !== undefined,
               enabled: installedPlugin?.enabled ?? false,
@@ -2048,6 +2676,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
                 harness: "cursor",
                 name: plugin.name,
                 marketplaceName: plugin.marketplace?.displayName ?? "Cursor Marketplace",
+                marketplaceLabel: plugin.marketplace?.displayName ?? "Cursor Marketplace",
                 version: plugin.gitRef?.slice(0, 7) ?? "Current",
                 installed,
                 enabled: installed,
@@ -2162,23 +2791,128 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       return plugins.map(chatGptPublicSourceRecord);
     });
 
+    const withInstallTarget = (plugin: LoadedPlugin): LoadedPlugin => ({
+      ...plugin,
+      detail: {
+        ...plugin.detail,
+        installTargets: [
+          {
+            pluginId: plugin.detail.id,
+            harness: plugin.detail.sourceHarness,
+            marketplaceName: plugin.detail.marketplaceName,
+            marketplaceLabel: plugin.record.marketplaceLabel,
+            version: plugin.detail.version,
+            installed: plugin.record.installed,
+            enabled: plugin.record.enabled,
+            installPolicy: plugin.detail.installPolicy,
+            marketplaceUrl: plugin.detail.marketplaceUrl,
+            contents: plugin.detail.contents,
+          },
+        ],
+      },
+    });
+
+    // Each harness is read on its own background fiber so a slow harness never blocks the others.
+    // A refresh waits at most HARNESS_SYNC_BUDGET per harness, then returns what it has with a
+    // "syncing" notice; when the read finishes it invalidates the cached snapshot so the next
+    // request includes that harness. A failed read keeps the last good records with a notice.
+    const sourceScope = yield* Scope.make();
+    const lastGoodSources = yield* Ref.make(
+      new Map<HarnessSourceKey, ReadonlyArray<PluginSourceRecord>>(),
+    );
+    const inflightSources = yield* Ref.make(
+      new Map<HarnessSourceKey, Deferred.Deferred<HarnessSourceResult>>(),
+    );
+
+    const startSourceRead = Effect.fn("CodexPluginMarketplace.startSourceRead")(function* <E>(
+      harness: HarnessSourceKey,
+      read: () => Effect.Effect<ReadonlyArray<PluginSourceRecord>, E>,
+    ) {
+      const deferred = yield* Deferred.make<HarnessSourceResult>();
+      yield* Ref.update(inflightSources, (current) => new Map(current).set(harness, deferred));
+      yield* read().pipe(
+        Effect.mapError((error) =>
+          isPluginMarketplaceUnavailableError(error)
+            ? error
+            : new PluginMarketplaceUnavailableError({
+                reason: "marketplaces_unavailable",
+                cause: error,
+              }),
+        ),
+        Effect.result,
+        Effect.flatMap((result) =>
+          Effect.gen(function* () {
+            if (Result.isSuccess(result)) {
+              yield* Ref.update(lastGoodSources, (current) =>
+                new Map(current).set(harness, result.success),
+              );
+            }
+            yield* Ref.update(inflightSources, (current) => {
+              if (current.get(harness) !== deferred) return current;
+              const next = new Map(current);
+              next.delete(harness);
+              return next;
+            });
+            const cached = yield* Ref.get(cachedSnapshot);
+            if (
+              cached?.notices.some(
+                (notice) => notice.harness === harness && notice.status === "syncing",
+              )
+            ) {
+              yield* Ref.set(cachedSnapshot, null);
+            }
+            yield* Deferred.succeed(deferred, result);
+          }),
+        ),
+        Effect.forkIn(sourceScope),
+      );
+      return deferred;
+    });
+
+    const readSource = Effect.fn("CodexPluginMarketplace.readSource")(function* <E>(
+      harness: HarnessSourceKey,
+      read: () => Effect.Effect<ReadonlyArray<PluginSourceRecord>, E>,
+    ) {
+      const deferred =
+        (yield* Ref.get(inflightSources)).get(harness) ?? (yield* startSourceRead(harness, read));
+      const awaited = yield* Deferred.await(deferred).pipe(
+        Effect.timeoutOption(options.harnessSyncBudget ?? HARNESS_SYNC_BUDGET),
+      );
+      const lastGood = (yield* Ref.get(lastGoodSources)).get(harness);
+      if (Option.isNone(awaited)) {
+        return {
+          records: lastGood ?? [],
+          notice: harnessNotice(harness, "syncing"),
+          pending: true,
+          failure: null,
+        };
+      }
+      if (Result.isSuccess(awaited.value)) {
+        return { records: awaited.value.success, notice: null, pending: false, failure: null };
+      }
+      return {
+        records: lastGood ?? [],
+        notice: harnessNotice(harness, lastGood ? "stale" : "failed", awaited.value.failure),
+        pending: false,
+        failure: awaited.value.failure,
+      };
+    });
+
     const refreshSnapshot = Effect.fn("CodexPluginMarketplace.refreshSnapshot")(function* () {
-      const sourceResults = yield* Effect.all(
+      const [codex, claude, cursor, chatGpt] = yield* Effect.all(
         [
-          readCodexPluginRecords().pipe(Effect.result),
-          readClaudePluginRecords().pipe(Effect.result),
-          readCursorPluginRecords().pipe(Effect.result),
-          readChatGptPublicPluginRecords().pipe(Effect.result),
+          readSource("codex", readCodexPluginRecords),
+          readSource("claude", readClaudePluginRecords),
+          readSource("cursor", readCursorPluginRecords),
+          readChatGptPublicPluginRecords(),
         ],
         { concurrency: 4 },
       );
-      const sourceRecords = sourceResults.flatMap((result) =>
-        Result.isSuccess(result) ? [...result.success] : [],
-      );
-      if (sourceRecords.length === 0) {
-        const causes = sourceResults.flatMap((result) =>
-          Result.isFailure(result) ? [result.failure] : [],
-        );
+      const sources = [codex, claude, cursor];
+      const notices = sources.flatMap((source) => (source.notice ? [source.notice] : []));
+      const sourceRecords = [...sources.flatMap((source) => source.records), ...chatGpt];
+      if (sourceRecords.length === 0 && !sources.some((source) => source.pending)) {
+        const causes = sources.flatMap((source) => (source.failure ? [source.failure] : []));
         return yield* new PluginMarketplaceUnavailableError({
           reason: "marketplaces_unavailable",
           ...(causes.length === 0
@@ -2189,25 +2923,7 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       const sourcePlugins = yield* Effect.forEach(sourceRecords, loadPlugin, {
         concurrency: 16,
       });
-      const loadedPlugins = sourcePlugins.map((plugin) => ({
-        ...plugin,
-        detail: {
-          ...plugin.detail,
-          installTargets: [
-            {
-              pluginId: plugin.detail.id,
-              harness: plugin.detail.sourceHarness,
-              marketplaceName: plugin.detail.marketplaceName,
-              version: plugin.detail.version,
-              installed: plugin.record.installed,
-              enabled: plugin.record.enabled,
-              installPolicy: plugin.detail.installPolicy,
-              marketplaceUrl: plugin.detail.marketplaceUrl,
-              contents: plugin.detail.contents,
-            },
-          ],
-        },
-      }));
+      const loadedPlugins = sourcePlugins.map(withInstallTarget);
       const catalogPlugins = yield* Effect.forEach(
         loadedPlugins,
         (plugin) =>
@@ -2220,9 +2936,10 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       const plugins = new Map(loadedPlugins.map((plugin) => [plugin.detail.id, plugin]));
       const catalog = {
         plugins: mergeCatalogListings(catalogPlugins),
+        notices,
       } satisfies PluginMarketplaceCatalog;
       const now = yield* Clock.currentTimeMillis;
-      const snapshot = { expiresAt: now + CATALOG_CACHE_TTL_MS, catalog, plugins };
+      const snapshot = { expiresAt: now + CATALOG_CACHE_TTL_MS, catalog, plugins, notices };
       yield* Ref.set(cachedSnapshot, snapshot);
       return snapshot;
     });
@@ -2262,26 +2979,6 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       const bytes = yield* fileSystem.readFile(logoPath).pipe(Effect.option);
       if (Option.isNone(bytes) || bytes.value.byteLength > maxBytes) return null;
       return `data:${mimeType};base64,${Buffer.from(bytes.value).toString("base64")}`;
-    });
-
-    const withInstallTarget = (plugin: LoadedPlugin): LoadedPlugin => ({
-      ...plugin,
-      detail: {
-        ...plugin.detail,
-        installTargets: [
-          {
-            pluginId: plugin.detail.id,
-            harness: plugin.detail.sourceHarness,
-            marketplaceName: plugin.detail.marketplaceName,
-            version: plugin.detail.version,
-            installed: plugin.record.installed,
-            enabled: plugin.record.enabled,
-            installPolicy: plugin.detail.installPolicy,
-            marketplaceUrl: plugin.detail.marketplaceUrl,
-            contents: plugin.detail.contents,
-          },
-        ],
-      },
     });
 
     const rememberLoadedPlugins = Effect.fn("CodexPluginMarketplace.rememberLoadedPlugins")(
@@ -2334,6 +3031,101 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       return resolved;
     });
 
+    // Remote-only Codex plugins have no package on disk; their skills, apps, and MCP servers come
+    // from the app-server on demand and are cached on the snapshot.
+    const loadCodexRemoteDetail = Effect.fn("CodexPluginMarketplace.loadCodexRemoteDetail")(
+      function* (plugin: LoadedPlugin): Effect.fn.Return<LoadedPlugin> {
+        const runtime = options.codexPluginRuntime;
+        const remote = plugin.record.codexRemote;
+        if (
+          !runtime?.read ||
+          !remote ||
+          plugin.record.harness !== "codex" ||
+          plugin.record.pluginRoot !== null ||
+          plugin.codexRemoteDetailLoaded
+        ) {
+          return plugin;
+        }
+        const read = yield* runtime.read(remote).pipe(Effect.option);
+        if (Option.isNone(read)) return plugin;
+        const inventory = read.value;
+        const skills = inventory.skills
+          .map((skill): PluginMarketplaceSkill => ({
+            id: skill.name,
+            name: displayNameFromId(skill.name),
+            description: cleanText(skill.description ?? undefined, "Codex skill."),
+            invocation: `$${plugin.record.name}:${skill.name}`,
+          }))
+          .toSorted((left, right) => left.name.localeCompare(right.name));
+        const mcpServers = inventory.mcpServerNames
+          .map((name): PluginMarketplaceMcpServer => ({
+            id: name,
+            name: displayNameFromId(name),
+            transport: "unknown",
+            url: null,
+            oauthResource: null,
+            note: "Configuration supplied by the Codex catalog.",
+            toolTimeoutSeconds: null,
+            environmentVariables: [],
+          }))
+          .toSorted((left, right) => left.name.localeCompare(right.name));
+        const apps = inventory.apps
+          .map((app): PluginMarketplaceApp => ({
+            id: app.id,
+            name: cleanText(app.name ?? undefined, displayNameFromId(app.id)),
+            connectorId: app.id,
+          }))
+          .toSorted((left, right) => left.name.localeCompare(right.name));
+        const extensions =
+          inventory.hookCount > 0
+            ? [
+                marketplaceExtension(
+                  "hook",
+                  "lifecycle-hooks",
+                  "Plugin lifecycle hooks.",
+                  undefined,
+                ),
+              ]
+            : [];
+        const contents = {
+          ...plugin.detail.contents,
+          skillCount: skills.length,
+          mcpServerCount: mcpServers.length,
+          appCount: apps.length,
+          hookCount: extensions.length,
+          hasHooks: extensions.length > 0,
+        };
+        const loaded: LoadedPlugin = {
+          ...plugin,
+          codexRemoteDetailLoaded: true,
+          detail: {
+            ...plugin.detail,
+            description: cleanText(inventory.description ?? undefined, plugin.detail.description),
+            skills,
+            mcpServers,
+            apps,
+            extensions,
+            contents,
+            support: plugin.detail.support.map((entry) =>
+              entry.harness === "codex"
+                ? {
+                    ...entry,
+                    mcp: mcpServers.length > 0,
+                    skills: skills.length > 0,
+                    apps: apps.length > 0,
+                  }
+                : entry,
+            ),
+            installTargets: plugin.detail.installTargets.map((target) =>
+              target.pluginId === plugin.detail.id ? { ...target, contents } : target,
+            ),
+          },
+        };
+        yield* rememberLoadedPlugins([loaded]);
+        return loaded;
+      },
+    );
+
     const catalog = Effect.fn("CodexPluginMarketplace.catalog")(function* (query?: string) {
       const snapshot = yield* getSnapshot();
       const normalized = query?.trim() ?? "";
@@ -2344,11 +3136,12 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       if (extras.length === 0) return snapshot.catalog;
       return {
         plugins: mergeCatalogListings([...snapshot.catalog.plugins, ...extras]),
+        notices: snapshot.notices,
       } satisfies PluginMarketplaceCatalog;
     });
 
     const detail = Effect.fn("CodexPluginMarketplace.detail")(function* (pluginId: string) {
-      const plugin = yield* findPlugin(pluginId);
+      const plugin = yield* findPlugin(pluginId).pipe(Effect.flatMap(loadCodexRemoteDetail));
       const snapshot = yield* getSnapshot();
       const merged = mergeLoadedListings(listingSiblings(snapshot.plugins, plugin));
       const logoDataUrl = yield* loadLogoDataUrl(merged.logoPath);
@@ -2784,10 +3577,11 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
       pluginId: string,
     ) {
       const plugin = yield* findPlugin(pluginId);
-      const usesCodexRuntime =
-        plugin.record.harness === "codex" &&
-        plugin.record.codexLegacyInstalled !== undefined &&
-        options.codexPluginRuntime !== undefined;
+      const codexRemote =
+        plugin.record.harness === "codex" && options.codexPluginRuntime !== undefined
+          ? plugin.record.codexRemote
+          : undefined;
+      const usesCodexRuntime = codexRemote !== undefined;
       if (
         operation === "install" &&
         plugin.record.installed &&
@@ -2816,24 +3610,34 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
           detail: "Cursor currently requires plugin changes through its Marketplace UI.",
         });
       }
-      if (usesCodexRuntime && options.codexPluginRuntime) {
+      if (codexRemote && options.codexPluginRuntime) {
         const runtime = options.codexPluginRuntime;
         const invalidateCodex = Effect.gen(function* () {
           yield* invalidateSnapshot;
           if (options.onHarnessChanged) yield* options.onHarnessChanged("codex");
         });
         if (operation === "install") {
-          yield* runtime.install(plugin.record.name).pipe(
-            Effect.mapError(
-              (cause) =>
-                new PluginMarketplaceOperationError({
-                  operation,
-                  pluginId,
-                  detail: `Codex could not install ${plugin.detail.name} from its runtime catalog.`,
-                  cause,
-                }),
-            ),
-          );
+          yield* runtime
+            .install(
+              codexRemote.pluginName,
+              codexRemote.remotePluginId
+                ? {
+                    remotePluginId: codexRemote.remotePluginId,
+                    marketplaceName: codexRemote.marketplaceName,
+                  }
+                : undefined,
+            )
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PluginMarketplaceOperationError({
+                    operation,
+                    pluginId,
+                    detail: `Codex could not install ${plugin.detail.name} from its runtime catalog.`,
+                    cause,
+                  }),
+              ),
+            );
         } else if (plugin.record.codexRuntimeInstalledId) {
           yield* runtime.remove(plugin.record.codexRuntimeInstalledId).pipe(
             Effect.mapError(
@@ -3033,35 +3837,44 @@ const makeCodexPluginRuntime = (
         }),
       );
 
-    const normalize = (
-      marketplaces: ReadonlyArray<{
-        readonly name: string;
-        readonly plugins: ReadonlyArray<{
-          readonly id: string;
-          readonly name: string;
-          readonly remotePluginId?: string | null;
-          readonly installed: boolean;
-          readonly enabled: boolean;
-        }>;
-      }>,
-    ): ReadonlyArray<CodexRuntimePlugin> =>
-      marketplaces.flatMap((marketplace) =>
-        marketplace.plugins.map((plugin) => ({
-          id: plugin.id,
-          name: plugin.name,
-          marketplaceName: marketplace.name,
-          remotePluginId: plugin.remotePluginId ?? null,
-          installed: plugin.installed,
-          enabled: plugin.enabled,
-        })),
-      );
+    // Raw requests are decoded with the lenient schemas above rather than the generated ones, so a
+    // Codex release that adds fields or enum values cannot break the marketplace.
+    const readCatalog = (
+      client: CodexClient.CodexAppServerClient["Service"],
+      operation: CodexPluginRuntimeError["operation"],
+    ) =>
+      Effect.gen(function* () {
+        const [listResponse, installedResponse] = yield* Effect.all(
+          [
+            client.raw.request("plugin/list", { cwds: [cwd] }),
+            client.raw.request("plugin/installed", { cwds: [cwd] }),
+          ],
+          { concurrency: 2 },
+        );
+        const catalog = decodeCodexRuntimeCatalog(listResponse, installedResponse);
+        if (Option.isNone(catalog)) {
+          return yield* new CodexPluginOperationFailedError({
+            operation,
+            cause: new Error("Codex returned an unreadable plugin catalog."),
+          });
+        }
+        return catalog.value;
+      });
 
     return CodexPluginRuntime.of({
       installed: () =>
         withClient("installed", undefined, (client) =>
-          client
-            .request("plugin/installed", { cwds: [cwd] })
-            .pipe(Effect.map((response) => normalize(response.marketplaces))),
+          Effect.gen(function* () {
+            const response = yield* client.raw.request("plugin/installed", { cwds: [cwd] });
+            const catalog = decodeCodexRuntimeCatalog(undefined, response);
+            if (Option.isNone(catalog)) {
+              return yield* new CodexPluginOperationFailedError({
+                operation: "installed",
+                cause: new Error("Codex returned an unreadable installed plugin inventory."),
+              });
+            }
+            return catalog.value.plugins;
+          }),
         ).pipe(
           Effect.mapError((cause) =>
             isCodexPluginRuntimeError(cause)
@@ -3069,23 +3882,59 @@ const makeCodexPluginRuntime = (
               : new CodexPluginOperationFailedError({ operation: "installed", cause }),
           ),
         ),
-      install: (pluginName) =>
+      list: () =>
+        withClient("list", undefined, (client) => readCatalog(client, "list")).pipe(
+          Effect.mapError((cause) =>
+            isCodexPluginRuntimeError(cause)
+              ? cause
+              : new CodexPluginOperationFailedError({ operation: "list", cause }),
+          ),
+        ),
+      read: (target) =>
+        withClient("read", target.pluginName, (client) =>
+          Effect.gen(function* () {
+            const response = yield* client.raw.request("plugin/read", {
+              pluginName: target.pluginName,
+              remoteMarketplaceName: target.marketplaceName,
+            });
+            const detail = decodeCodexRuntimePluginDetail(response);
+            if (Option.isNone(detail)) {
+              return yield* new CodexPluginNotFoundError({
+                operation: "read",
+                pluginRef: target.pluginName,
+              });
+            }
+            return detail.value;
+          }),
+        ).pipe(
+          Effect.mapError((cause) =>
+            isCodexPluginRuntimeError(cause)
+              ? cause
+              : new CodexPluginOperationFailedError({
+                  operation: "read",
+                  pluginRef: target.pluginName,
+                  cause,
+                }),
+          ),
+        ),
+      install: (pluginName, remote) =>
         withClient("install", pluginName, (client) =>
           Effect.gen(function* () {
-            const response = yield* client.request("plugin/list", { cwds: [cwd] });
-            const candidate = normalize(response.marketplaces).find(
-              (plugin) =>
-                plugin.name.toLocaleLowerCase() === pluginName.toLocaleLowerCase() &&
-                plugin.marketplaceName === "openai-curated-remote" &&
-                plugin.remotePluginId,
-            );
+            const candidate =
+              remote ??
+              (yield* readCatalog(client, "install")).plugins.find(
+                (plugin) =>
+                  plugin.name.toLocaleLowerCase() === pluginName.toLocaleLowerCase() &&
+                  plugin.marketplaceName === CODEX_CURATED_REMOTE_MARKETPLACE &&
+                  plugin.remotePluginId,
+              );
             if (!candidate?.remotePluginId) {
               return yield* new CodexPluginNotFoundError({
                 operation: "install",
                 pluginRef: pluginName,
               });
             }
-            yield* client.request("plugin/install", {
+            yield* client.raw.request("plugin/install", {
               pluginName: candidate.remotePluginId,
               remoteMarketplaceName: candidate.marketplaceName,
             });
@@ -3104,11 +3953,12 @@ const makeCodexPluginRuntime = (
       remove: (pluginId) =>
         withClient("remove", pluginId, (client) =>
           Effect.gen(function* () {
-            yield* client.request("plugin/uninstall", { pluginId });
-            const installed = yield* client.request("plugin/installed", { cwds: [cwd] });
-            const remaining = normalize(installed.marketplaces).find(
-              (plugin) => plugin.id === pluginId && plugin.installed,
-            );
+            yield* client.raw.request("plugin/uninstall", { pluginId });
+            const installed = yield* client.raw.request("plugin/installed", { cwds: [cwd] });
+            const remaining = Option.getOrElse(
+              decodeCodexRuntimeCatalog(undefined, installed),
+              () => ({ plugins: [] }),
+            ).plugins.find((plugin) => plugin.id === pluginId && plugin.installed);
             if (remaining) {
               return yield* new CodexPluginStillInstalledError({
                 operation: "remove",
