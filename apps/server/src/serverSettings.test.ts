@@ -159,6 +159,15 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       assert.deepEqual(
         yield* decodeSettingsPatch({
+          providers: { devin: { enabled: true, binaryPath: "/tmp/devin" } },
+        }),
+        {
+          providers: { devin: { enabled: true, binaryPath: "/tmp/devin" } },
+        },
+      );
+
+      assert.deepEqual(
+        yield* decodeSettingsPatch({
           textGenerationModelSelection: {
             options: [{ id: "fastMode", value: false }],
           },
@@ -263,6 +272,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: ["claude-custom"],
         launchArgs: "",
         autoCompactWindow: "",
+        advisorModel: "",
       });
       assert.deepEqual(
         next.textGenerationModelSelection,
@@ -972,6 +982,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: [],
         launchArgs: "",
         autoCompactWindow: "",
+        advisorModel: "",
       });
       assert.deepEqual(next.providers.opencode, {
         // OpenCode is disabled by default; this update only touches paths.

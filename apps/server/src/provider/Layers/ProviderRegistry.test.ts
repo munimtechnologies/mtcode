@@ -2875,6 +2875,7 @@ it.layer(Layer.mergeAll(TestServices, ServerSettingsModule.layerTest(), TestHttp
                 "claudeAgent",
                 "codex",
                 "cursor",
+                "devin",
                 "grok",
                 "opencode",
               ]);

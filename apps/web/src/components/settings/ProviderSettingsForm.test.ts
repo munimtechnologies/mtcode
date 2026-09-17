@@ -65,6 +65,7 @@ describe("ProviderSettingsForm helpers", () => {
     expect(deriveProviderSettingsFields(claude!).map((field) => field.key)).toEqual([
       "binaryPath",
       "homePath",
+      "advisorModel",
       "autoCompactWindow",
       "launchArgs",
     ]);
