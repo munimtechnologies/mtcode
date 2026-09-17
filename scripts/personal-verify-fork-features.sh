@@ -184,6 +184,12 @@ require apps/server/src/plugins/CodexPluginMarketplace.ts "decodeCodexRuntimeCat
 require apps/web/src/components/CommandPalette.tsx 'title: "Browse plugins"' "Browse plugins command-palette action"
 require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx 'aria-label="Harness"' "harness tabs on the plugin marketplace page"
 
+# --- Usage limits for every driver (2026-09-16, 20308ea78b) ---
+# Cursor and OpenCode publish subscription windows into upstream's Limits
+# view; the fork-only AccountLimits strip/hover card was removed the same day.
+require apps/server/src/provider/Layers/CursorProvider.ts "cursorUsageLimits" "Cursor usage-limit probe wired into CursorProvider"
+require apps/server/src/provider/Layers/OpenCodeProvider.ts "opencodeUsageLimits" "OpenCode usage-limit probe wired into OpenCodeProvider"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2
