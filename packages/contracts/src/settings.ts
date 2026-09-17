@@ -1188,7 +1188,28 @@ export type ComputerHistorySettings = typeof ComputerHistorySettings.Type;
 export const ResponseStreamingMode = Schema.Literals(["turn", "paragraph", "token"]);
 export type ResponseStreamingMode = typeof ResponseStreamingMode.Type;
 
+const StorageRetentionDays = Schema.NullOr(
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+);
+
+export const WorktreeCleanupRules = Schema.Struct({
+  worktreeAfterDays: StorageRetentionDays,
+  worktreeOnMerge: Schema.Boolean,
+  worktreeOnDelete: Schema.Boolean,
+  worktreeUnchanged: Schema.Boolean,
+});
+export type WorktreeCleanupRules = typeof WorktreeCleanupRules.Type;
+
+export const WorktreeCleanup = Schema.NullOr(
+  Schema.Union([
+    Schema.Struct({ mode: Schema.Literal("off") }),
+    Schema.Struct({ mode: Schema.Literal("custom"), rules: WorktreeCleanupRules }),
+  ]),
+);
+export type WorktreeCleanup = typeof WorktreeCleanup.Type;
+
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
+  "worktreeCleanup",
   "defaultModelSelection",
   "defaultRuntimeMode",
   "defaultThreadEnvMode",
@@ -1215,6 +1236,7 @@ export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTIN
  * model, no dedicated writer model, never auto-settle).
  */
 export const ProjectSettingsOverrides = Schema.Struct({
+  worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
@@ -1235,6 +1257,18 @@ export const ProjectSettingsOverrides = Schema.Struct({
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
+export const StorageCleanupSettings = Schema.Struct({
+  worktreeAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  browserArtifactsAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   environmentLabel: TrimmedString.check(Schema.isMaxLength(40)).pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
@@ -1253,6 +1287,12 @@ export const ServerSettings = Schema.Struct({
   ),
   /** The account's own icons, synced the same way artwork is. */
   customAppIcons: Schema.Array(CustomAppIcon).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  storageCleanup: StorageCleanupSettings.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed(Schema.decodeUnknownSync(StorageCleanupSettings)({})),
+    ),
+  ),
   // How assistant text reaches clients during a turn. Deliberately a fresh
   // key (was `enableLegacyTokenStreaming`, before that
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -1638,6 +1678,32 @@ const PiSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  worktreeCleanup: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Union([
+        Schema.Struct({ mode: Schema.Literal("off") }),
+        Schema.Struct({
+          mode: Schema.Literal("custom"),
+          rules: Schema.Struct({
+            worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+            worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
+            worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
+            worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+          }),
+        }),
+      ]),
+    ),
+  ),
+  storageCleanup: Schema.optionalKey(
+    Schema.Struct({
+      worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+      worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
+      worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
+      worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+      browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+    }),
+  ),
   // Server settings
   environmentLabel: Schema.optionalKey(TrimmedString.check(Schema.isMaxLength(40))),
   sidebarArtwork: Schema.optionalKey(SidebarArtworkSelection),

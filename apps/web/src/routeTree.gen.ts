@@ -18,6 +18,7 @@ import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsVoiceRouteImport } from './routes/settings.voice'
+import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsSnapShotRouteImport } from './routes/settings.snap-shot'
 import { Route as SettingsSkillsRouteImport } from './routes/settings.skills'
@@ -83,6 +84,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const SettingsVoiceRoute = SettingsVoiceRouteImport.update({
   id: '/voice',
   path: '/voice',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsStorageRoute = SettingsStorageRouteImport.update({
+  id: '/storage',
+  path: '/storage',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
@@ -225,6 +231,7 @@ export interface FileRoutesByFullPath {
   '/settings/skills': typeof SettingsSkillsRoute
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/storage': typeof SettingsStorageRoute
   '/settings/voice': typeof SettingsVoiceRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -256,6 +263,7 @@ export interface FileRoutesByTo {
   '/settings/skills': typeof SettingsSkillsRoute
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/storage': typeof SettingsStorageRoute
   '/settings/voice': typeof SettingsVoiceRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
@@ -290,6 +298,7 @@ export interface FileRoutesById {
   '/settings/skills': typeof SettingsSkillsRoute
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/settings/storage': typeof SettingsStorageRoute
   '/settings/voice': typeof SettingsVoiceRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
@@ -325,6 +334,7 @@ export interface FileRouteTypes {
     | '/settings/skills'
     | '/settings/snap-shot'
     | '/settings/source-control'
+    | '/settings/storage'
     | '/settings/voice'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/settings/skills'
     | '/settings/snap-shot'
     | '/settings/source-control'
+    | '/settings/storage'
     | '/settings/voice'
     | '/'
     | '/$environmentId/$threadId'
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | '/settings/skills'
     | '/settings/snap-shot'
     | '/settings/source-control'
+    | '/settings/storage'
     | '/settings/voice'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
@@ -471,6 +483,13 @@ declare module '@tanstack/react-router' {
       path: '/voice'
       fullPath: '/settings/voice'
       preLoaderRoute: typeof SettingsVoiceRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/storage': {
+      id: '/settings/storage'
+      path: '/storage'
+      fullPath: '/settings/storage'
+      preLoaderRoute: typeof SettingsStorageRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/source-control': {
@@ -663,6 +682,7 @@ interface SettingsRouteChildren {
   SettingsSkillsRoute: typeof SettingsSkillsRoute
   SettingsSnapShotRoute: typeof SettingsSnapShotRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
+  SettingsStorageRoute: typeof SettingsStorageRoute
   SettingsVoiceRoute: typeof SettingsVoiceRoute
   SettingsPluginsPluginIdRoute: typeof SettingsPluginsPluginIdRoute
 }
@@ -684,6 +704,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsSkillsRoute: SettingsSkillsRoute,
   SettingsSnapShotRoute: SettingsSnapShotRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
+  SettingsStorageRoute: SettingsStorageRoute,
   SettingsVoiceRoute: SettingsVoiceRoute,
   SettingsPluginsPluginIdRoute: SettingsPluginsPluginIdRoute,
 }
