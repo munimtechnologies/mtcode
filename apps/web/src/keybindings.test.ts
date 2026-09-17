@@ -1409,15 +1409,22 @@ describe("current chat search shortcut", () => {
         }),
         "thread.search",
       );
-      for (const context of [{ terminalFocus: true }, { previewFocus: true }]) {
-        assert.equal(
-          resolveShortcutCommand(event({ key: "f", ...modifiers }), DEFAULT_RESOLVED_KEYBINDINGS, {
-            platform,
-            context,
-          }),
-          null,
-        );
-      }
+      // A focused terminal takes the shortcut for its own find bar; the preview
+      // keeps the browser's native find.
+      assert.equal(
+        resolveShortcutCommand(event({ key: "f", ...modifiers }), DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: true },
+        }),
+        "terminal.find",
+      );
+      assert.equal(
+        resolveShortcutCommand(event({ key: "f", ...modifiers }), DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { previewFocus: true },
+        }),
+        null,
+      );
       assert.equal(
         resolveShortcutCommand(
           event({ key: "f", shiftKey: true, ...modifiers }),
