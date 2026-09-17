@@ -606,6 +606,12 @@ const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
+const WorktreeBranchPrefix = TrimmedString.check(
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^(?:[a-z0-9](?:[a-z0-9/_-]*[a-z0-9])?)?$/),
+  Schema.makeFilter((value) => !value.includes("//") || "must not contain adjacent slashes"),
+);
+
 export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch" | "select";
 
 export interface ProviderSettingsFormOption {
@@ -1309,6 +1315,10 @@ export const ServerSettings = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  worktreeBranchPrefix: WorktreeBranchPrefix.pipe(
+    Schema.withDecodingDefault(Effect.succeed("t3code")),
+  ),
+  worktreeBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
@@ -1323,6 +1333,9 @@ export const ServerSettings = Schema.Struct({
         ],
       }),
     ),
+  ),
+  createGitHubPullRequestsAsDraft: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
@@ -1599,8 +1612,11 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProviderInstanceId, Schema.NullOr(RuntimeMode)),
   ),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+  worktreeBranchPrefix: Schema.optionalKey(WorktreeBranchPrefix),
+  worktreeBaseDirectory: Schema.optionalKey(TrimmedString),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  createGitHubPullRequestsAsDraft: Schema.optionalKey(Schema.Boolean),
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({
       mode: Schema.optionalKey(SourceControlWritingStyleMode),

@@ -845,6 +845,26 @@ describe("ServerSettings worktree defaults", () => {
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
     ).toBe(false);
   });
+
+  it("defaults the worktree branch prefix for legacy configs", () => {
+    expect(decodeServerSettings({}).worktreeBranchPrefix).toBe("t3code");
+  });
+
+  it.each(["", "team", "my-team", "team/backend", "team_1"])(
+    "accepts the worktree branch prefix %j",
+    (worktreeBranchPrefix) => {
+      expect(decodeServerSettingsPatch({ worktreeBranchPrefix }).worktreeBranchPrefix).toBe(
+        worktreeBranchPrefix,
+      );
+    },
+  );
+
+  it.each(["../unsafe", "team//backend", "Team", "-team", "team-", "a".repeat(65)])(
+    "rejects the unsafe worktree branch prefix %j",
+    (worktreeBranchPrefix) => {
+      expect(() => decodeServerSettingsPatch({ worktreeBranchPrefix })).toThrow();
+    },
+  );
 });
 
 describe("ServerSettings.sourceControlWritingStyle", () => {
@@ -986,6 +1006,17 @@ describe("ServerSettings environment icon", () => {
 
     const linuxSettings = decodeServerSettings({ environmentIcon: "linux" });
     expect(encodeServerSettings(linuxSettings).environmentIcon).toBe("linux");
+  });
+});
+
+describe("ServerSettings draft pull requests", () => {
+  it("keeps ready-for-review creation as the default", () => {
+    expect(decodeServerSettings({}).createGitHubPullRequestsAsDraft).toBe(false);
+  });
+  it.each([false, true])("round-trips the draft preference %s", (enabled) => {
+    const patch = decodeServerSettingsPatch({ createGitHubPullRequestsAsDraft: enabled });
+    const settings = decodeServerSettings(patch);
+    expect(encodeServerSettings(settings).createGitHubPullRequestsAsDraft).toBe(enabled);
   });
 });
 

@@ -104,16 +104,20 @@ describe("splitSharedServerPatch", () => {
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
       newWorktreesStartFromOrigin: true,
+      createGitHubPullRequestsAsDraft: false,
     });
     expect(sharedPatch).toEqual({
       sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
       newWorktreesStartFromOrigin: true,
+      createGitHubPullRequestsAsDraft: false,
     });
     expect(localPatch).toEqual({
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
+      addProjectBaseDirectory: "/workspace/repos",
+      worktreeBaseDirectory: "/workspace/worktrees",
     });
   });
 });
@@ -124,6 +128,7 @@ describe("pickSharedServerSettings", () => {
       Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, restartCapabilities)).sort(),
     ).toEqual([
       "continueThreadsAfterServerUpdate",
+      "createGitHubPullRequestsAsDraft",
       "newWorktreesStartFromOrigin",
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
@@ -354,6 +359,8 @@ describe("findSharedSettingsMismatches", () => {
           settings: {
             ...primarySettings,
             enableAgentBrowserAccess: false,
+            addProjectBaseDirectory: "/workspace/repos",
+            worktreeBaseDirectory: "/workspace/worktrees",
             defaultThreadEnvMode:
               primarySettings.defaultThreadEnvMode === "local" ? "worktree" : "local",
           },

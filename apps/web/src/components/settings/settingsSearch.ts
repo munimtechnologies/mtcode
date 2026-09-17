@@ -374,11 +374,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new worktrees latest matching remote branch local"],
   },
   {
-    id: "add-project-starts-in",
-    title: "Add project starts in",
+    id: "worktree-branch-prefix",
+    title: "Worktree branch prefix",
     to: "/settings/general",
-    scope: "environment-defaults",
-    searchTerms: ["base directory folder browser path home"],
   },
   {
     id: "unpin-confirmation",
@@ -650,6 +648,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "create-github-pull-requests-as-draft",
+    title: "Create GitHub pull requests as drafts",
+    to: "/settings/source-control",
+    searchTerms: ["pr review ready draft default"],
+    primaryOnly: true,
+  },
+  {
     id: "source-control-writing-style",
     title: "Source control writing style",
     to: "/settings/source-control",
@@ -802,10 +807,21 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "environment-directories",
+    title: "Default directories",
+    to: "/settings/connections",
+    environmentOnly: true,
+    searchTerms: [
+      "per server environment defaults repositories repos clone add project starts in base directory folder browser path home worktrees",
+    ],
+  },
+  {
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: [
+      "add pair backend host code ssh config agent tunnel saved t3 connect remote directories repositories worktrees paths",
+    ],
   },
   {
     id: "load-balancing",

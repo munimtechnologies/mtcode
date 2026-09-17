@@ -13,11 +13,13 @@ import { expect } from "vite-plus/test";
 import type { GitCommandError } from "@t3tools/contracts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as UpstreamTake from "./UpstreamTake.ts";
 
 const TestLayer = GitVcsDriver.layer.pipe(
+  Layer.provide(Layer.orDie(ServerSettings.layerTest())),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-cherry-pick-test-" })),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),

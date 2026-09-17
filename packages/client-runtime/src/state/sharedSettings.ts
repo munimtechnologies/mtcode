@@ -27,6 +27,7 @@ const SHARED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleOnMerge",
   "sidebarAutoSettlePinnedThreads",
   "newWorktreesStartFromOrigin",
+  "createGitHubPullRequestsAsDraft",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
 ] as const satisfies ReadonlyArray<keyof ServerSettings & keyof ServerSettingsPatch>;

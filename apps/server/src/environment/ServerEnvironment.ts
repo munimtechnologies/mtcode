@@ -26,6 +26,7 @@ import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveDesktopMcpPath } from "../desktopControl/desktopMcpBinary.ts";
+import { collapseHomePath } from "../pathExpansion.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.ts";
@@ -231,8 +232,14 @@ export const make = Effect.gen(function* () {
     serverVersion: packageJson.version,
     ...(homeDirectory.length > 0 ? { homeDirectory } : {}),
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+    // Shown as placeholders, so keep them short: `~` rather than the full home.
+    defaultDirectories: {
+      repositories: "~",
+      worktrees: collapseHomePath(serverConfig.worktreesDir),
+    },
     capabilities: {
       repositoryIdentity: true,
+      projectTransfer: true,
       connectionProbe: true,
       attachmentUploads: true,
       questionAttachments: true,
@@ -262,6 +269,7 @@ export const make = Effect.gen(function* () {
       threadPullRequestLinking: true,
       environmentIcon: true,
       projectCloneTracking: true,
+      worktreeBaseDirectory: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? {
