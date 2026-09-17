@@ -266,7 +266,7 @@ function InstallationSettings({ plugin }: { readonly plugin: PluginMarketplaceDe
       : "This package is managed by its provider.";
 
   return (
-    <SettingsSection title="Installation">
+    <SettingsSection title="Installation" variant="plain" contentClassName="space-y-2">
       <div className="divide-y divide-foreground/8 overflow-hidden rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
         {plugin.installTargets.map((target) => (
           <InstallTargetRow key={target.pluginId} plugin={plugin} target={target} />
@@ -476,6 +476,8 @@ function McpAuthentication({ plugin }: { readonly plugin: PluginMarketplaceDetai
   return (
     <SettingsSection
       title="MCP authentication"
+      variant="plain"
+      contentClassName="space-y-2"
       icon={<KeyRoundIcon className="size-4 text-muted-foreground" />}
     >
       <div className="divide-y divide-foreground/8 overflow-hidden rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
@@ -670,6 +672,8 @@ function ComputerUsePermissions({ plugin }: { readonly plugin: PluginMarketplace
   return (
     <SettingsSection
       title="Permission setup"
+      variant="plain"
+      contentClassName="space-y-2"
       icon={<ShieldCheckIcon className="size-4 text-muted-foreground" />}
     >
       <div className="divide-y divide-foreground/8 rounded-xl border border-foreground/8 bg-card/24 px-1 dark:bg-card/40">
@@ -912,6 +916,8 @@ function PluginContents({ plugin }: { readonly plugin: PluginMarketplaceDetail }
   return (
     <SettingsSection
       title={`${MARKETPLACE_HARNESS_LABELS[plugin.sourceHarness]} package`}
+      variant="plain"
+      contentClassName="space-y-2"
       headerAction={
         <Badge size="sm" variant="secondary">
           {MARKETPLACE_HARNESS_LABELS[plugin.sourceHarness]} · {count}
@@ -937,14 +943,16 @@ function PluginContents({ plugin }: { readonly plugin: PluginMarketplaceDetail }
           ) : null}
         </div>
       ) : (
-        <SettingsRow
-          title="Package inventory unavailable"
-          description={
-            plugin.sourceHarness === "claude"
-              ? "Claude does not expose this package inventory until the remote source can be inspected or the plugin is installed."
-              : "This marketplace entry does not publish a component inventory."
-          }
-        />
+        <div className="rounded-xl border border-foreground/8 bg-card/24 px-1 dark:bg-card/40">
+          <SettingsRow
+            title="Package inventory unavailable"
+            description={
+              plugin.sourceHarness === "claude"
+                ? "Claude does not expose this package inventory until the remote source can be inspected or the plugin is installed."
+                : "This marketplace entry does not publish a component inventory."
+            }
+          />
+        </div>
       )}
     </SettingsSection>
   );
@@ -953,7 +961,7 @@ function PluginContents({ plugin }: { readonly plugin: PluginMarketplaceDetail }
 function PluginInformation({ plugin }: { readonly plugin: PluginMarketplaceDetail }) {
   const includes = marketplacePluginIncludeLabels(plugin);
   return (
-    <SettingsSection title="Details">
+    <SettingsSection title="Details" variant="plain" contentClassName="space-y-2">
       <Collapsible className="rounded-xl border border-foreground/8 bg-card/24 dark:bg-card/40">
         <CollapsibleTrigger className="group/details flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4">
           <div className="min-w-0 flex-1">
