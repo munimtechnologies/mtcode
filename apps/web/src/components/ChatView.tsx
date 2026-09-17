@@ -8,6 +8,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
+import { usageLimitBannerItem as usageLimitBannerItemFor } from "./chat/ComposerUsageLimit";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import {
   questionAttachmentDraftId,
@@ -53,7 +54,12 @@ import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
 import { type CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  canSnooze,
+  effectiveSnoozed,
+  threadWokeAt,
+  usageLimitSnoozePreset,
+} from "@t3tools/client-runtime/state/thread-settled";
 import {
   parseCodexFeedbackCommand,
   submitCodexFeedback,
@@ -242,6 +248,7 @@ import { cn, randomHex, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
+import { snoozeWakeDescription } from "./Sidebar.snooze";
 import {
   buildProjectScript,
   commandForProjectScript,
@@ -1472,7 +1479,7 @@ export default function ChatView(props: ChatViewProps) {
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
   const threadDetailLoading = threadSyncPhase === "loading";
   const handleNewThread = useNewThreadHandler();
-  const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
+  const { settleThread, pinThread, confirmAndUnpinThread, snoozeThread } = useThreadActions();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -1932,6 +1939,16 @@ export default function ChatView(props: ChatViewProps) {
   const threadError = isServerThread
     ? (localServerError ?? activeServerThread?.session?.lastError ?? null)
     : localDraftError;
+  // A usage-limit failure is not a broken thread; the banner calms to a
+  // reached-your-limit notice with the window countdown instead of the raw
+  // provider error. Keyed to the persisted usage-limit error text so a
+  // fresh local error (failed interrupt, attachment rejection) still shows
+  // the real failure instead of hiding behind the limit notice.
+  const usageLimitError =
+    activeServerThread?.session?.status === "error" &&
+    activeServerThread.session.lastErrorKind === "usage_limit"
+      ? (activeServerThread.session.lastError ?? null)
+      : null;
   // Dismissals can only mask the shown error, never clear it: a server thread
   // keeps its error in session.lastError, so clearing the local shadow would
   // just fall through to the persisted one. Mask the current error until a
@@ -1944,6 +1961,12 @@ export default function ChatView(props: ChatViewProps) {
   )
     ? threadError
     : null;
+  const usageLimitResetsAt =
+    visibleThreadError !== null &&
+    usageLimitError !== null &&
+    visibleThreadError === usageLimitError
+      ? (activeServerThread?.session?.lastErrorResetsAt ?? null)
+      : null;
   // Dismissing only mutates the session-scoped mask set, which does not
   // trigger a render on its own; setThreadError(null) can also bail when the
   // local shadow is already empty and the banner is driven purely by
@@ -6256,6 +6279,10 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsGoal = serverConfig?.environment.capabilities.threadGoal === true;
   const nowMinute = useNowMinute();
+  // One quantized clock for the usage-limit snooze offer, so its visibility
+  // rule, its label and its snooze target can never disagree within a minute.
+  const nowMinuteIso = `${nowMinute}:00.000Z`;
+  const nowMinuteDate = useMemo(() => new Date(nowMinuteIso), [nowMinuteIso]);
   const snoozeNow = new Date().toISOString();
   const activeThreadSnoozed =
     activeThreadShell !== null &&
@@ -6602,6 +6629,117 @@ export default function ChatView(props: ChatViewProps) {
     isUnsnoozing,
     isUnsettling,
   ]);
+  // A usage-limit failure parks this thread; the card explains the window and
+  // owns the auto-resume toggle. `session.lastErrorKind === "usage_limit"`
+  // carries the failure class and `lastErrorResetsAt` the window end; the
+  // armed state lives in `usageLimitResumeAt` on the thread shell.
+  const armUsageResumeMutation = useAtomCommand(threadEnvironment.armUsageResume, {
+    reportFailure: false,
+  });
+  const disarmUsageResumeMutation = useAtomCommand(threadEnvironment.disarmUsageResume, {
+    reportFailure: false,
+  });
+  const usageLimitFailure = activeThread?.session ?? null;
+  const isUsageLimitFailed =
+    usageLimitFailure?.status === "error" &&
+    usageLimitFailure.lastErrorKind === "usage_limit" &&
+    typeof usageLimitFailure.lastErrorResetsAt === "string";
+  const usageLimitResumeArmed = activeThreadShell?.usageLimitResumeAt != null;
+  const handleToggleUsageResume = useCallback(() => {
+    if (!activeThreadRef || !isUsageLimitFailed) return;
+    const resetsAt = usageLimitFailure.lastErrorResetsAt;
+    if (typeof resetsAt !== "string") return;
+    if (usageLimitResumeArmed) {
+      void disarmUsageResumeMutation({
+        environmentId: activeThreadRef.environmentId,
+        input: { threadId: activeThreadRef.threadId },
+      });
+      return;
+    }
+    // The server rejects an arm whose window already ended; skip the dispatch
+    // for the click that lands between expiry and the card's next refresh.
+    if (Date.now() >= Date.parse(resetsAt)) return;
+    void armUsageResumeMutation({
+      environmentId: activeThreadRef.environmentId,
+      input: { threadId: activeThreadRef.threadId, resumeAt: resetsAt },
+    });
+  }, [
+    activeThreadRef,
+    armUsageResumeMutation,
+    disarmUsageResumeMutation,
+    isUsageLimitFailed,
+    usageLimitFailure,
+    usageLimitResumeArmed,
+  ]);
+  // The snooze offer rides on the same classification as the card — the
+  // persisted usage-limit failure and its reset — and is the same preset the
+  // thread's snooze menus lead with, so the two entry points agree on the
+  // wake time (a minute past the reset, so clock skew cannot wake it early).
+  const usageLimitSnoozeTarget = useMemo(() => {
+    const resetsAt = usageLimitFailure?.lastErrorResetsAt;
+    if (!isUsageLimitFailed || typeof resetsAt !== "string") return null;
+    if (!supportsSnooze || activeThreadSnoozed) return null;
+    return usageLimitSnoozePreset(resetsAt, nowMinuteDate);
+  }, [activeThreadSnoozed, isUsageLimitFailed, nowMinuteDate, supportsSnooze, usageLimitFailure]);
+  const handleSnoozeUntilUsageLimitReset = useCallback(async () => {
+    if (activeThreadRef === null || usageLimitSnoozeTarget === null) return;
+    // No success toast: the parked-thread banner that replaces this card
+    // already offers Wake now.
+    const result = await snoozeThread(activeThreadRef, usageLimitSnoozeTarget.snoozedUntil);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to snooze thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, [activeThreadRef, snoozeThread, usageLimitSnoozeTarget]);
+  const usageLimitBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (!isUsageLimitFailed || !activeThread) {
+      return null;
+    }
+    const resetsAt = usageLimitFailure?.lastErrorResetsAt;
+    if (typeof resetsAt !== "string") {
+      return null;
+    }
+    // Snoozing is blocked, not hidden, while the thread waits on an approval
+    // or a queued turn start, so the wake time still reads.
+    const snooze =
+      usageLimitSnoozeTarget === null || activeThreadShell === null
+        ? null
+        : {
+            label: `Snooze until ${snoozeWakeDescription(
+              usageLimitSnoozeTarget.snoozedUntil,
+              nowMinuteDate,
+              timestampFormat,
+            )}`,
+            disabled: !canSnooze(activeThreadShell, { now: nowMinuteIso }),
+            onSnooze: () => void handleSnoozeUntilUsageLimitReset(),
+          };
+    return usageLimitBannerItemFor({
+      threadId: activeThread.id,
+      resetsAt,
+      autoResumeArmed: usageLimitResumeArmed,
+      onArmAutoResume: handleToggleUsageResume,
+      onCancelAutoResume: handleToggleUsageResume,
+      snooze,
+    });
+  }, [
+    activeThread,
+    activeThreadShell,
+    handleSnoozeUntilUsageLimitReset,
+    handleToggleUsageResume,
+    isUsageLimitFailed,
+    nowMinuteDate,
+    nowMinuteIso,
+    timestampFormat,
+    usageLimitFailure,
+    usageLimitResumeArmed,
+    usageLimitSnoozeTarget,
+  ]);
   // Session-scoped dismissals, one key per (thread, snapshot). A set rather
   // than a single slot so dismissing the banner on one thread does not
   // resurface it on another thread dismissed earlier.
@@ -6773,12 +6911,14 @@ export default function ChatView(props: ChatViewProps) {
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     const computerUsePermissionItems =
       computerUsePermissionBannerItem === null ? [] : [computerUsePermissionBannerItem];
+    const usageLimitItems = usageLimitBannerItem === null ? [] : [usageLimitBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...feedbackBannerItems,
+        ...usageLimitItems,
         ...usageLimitsItems,
         ...projectCloneItems,
         ...systemComposerBannerItems,
@@ -6792,6 +6932,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     return [
       ...feedbackBannerItems,
+      ...usageLimitItems,
       ...usageLimitsItems,
       ...projectCloneItems,
       ...systemComposerBannerItems,
@@ -6853,6 +6994,7 @@ export default function ChatView(props: ChatViewProps) {
     resumeCompactionBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    usageLimitBannerItem,
     usageLimitsBanner,
     wokeThreadBannerItem,
   ]);
@@ -10204,6 +10346,7 @@ export default function ChatView(props: ChatViewProps) {
                   threadId: activeThread?.id ?? null,
                 }}
                 key={threadErrorBannerKey}
+                usageLimitResetsAt={usageLimitResetsAt}
                 onDismiss={() => {
                   setThreadError(activeThread.id, null);
                   dismissThreadErrorBannerForSession(threadErrorBannerKey);

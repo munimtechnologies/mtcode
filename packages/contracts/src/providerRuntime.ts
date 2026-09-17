@@ -399,6 +399,10 @@ export const TurnTokenUsage = Schema.Union([
 ]);
 export type TurnTokenUsage = typeof TurnTokenUsage.Type;
 
+/** Why a turn failed, for clients that render classes of failure differently. */
+export const RuntimeTurnFailureReason = Schema.Literals(["usage_limit"]);
+export type RuntimeTurnFailureReason = typeof RuntimeTurnFailureReason.Type;
+
 const TurnCompletedPayload = Schema.Struct({
   state: RuntimeTurnState,
   stopReason: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
@@ -406,6 +410,10 @@ const TurnCompletedPayload = Schema.Struct({
   modelUsage: Schema.optional(UnknownRecordSchema),
   totalCostUsd: Schema.optional(Schema.Number),
   errorMessage: Schema.optional(TrimmedNonEmptyStringSchema),
+  failureReason: Schema.optional(RuntimeTurnFailureReason),
+  // When the blocking window resets, epoch millis. Only meaningful with
+  // failureReason "usage_limit".
+  failureResetsAt: Schema.optional(Schema.Number),
   tokenUsage: Schema.optional(TurnTokenUsage),
 });
 export type TurnCompletedPayload = typeof TurnCompletedPayload.Type;

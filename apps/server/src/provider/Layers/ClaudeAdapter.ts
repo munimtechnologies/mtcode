@@ -329,6 +329,32 @@ interface ClaudeTurnState {
   authenticationFailureMessage: string | undefined;
   rejectedRateLimitTypes: Set<string>;
   latestAssistantRateLimited: boolean;
+  /**
+   * Credible reset time (epoch ms) per blocked window type. Reported on
+   * turn.completed as the max across the windows still rejected at that
+   * moment — a turn parked on two windows can only resume once the later one
+   * resets, and a window that recovers must stop contributing its stamp.
+   */
+  usageLimitResetsAtMsByType: Map<string, number>;
+}
+
+/**
+ * The failure's reset time: the latest stamp among the windows still blocked
+ * when the turn ended. A window that recovered earlier must not extend the
+ * wait past the windows that actually parked the turn.
+ */
+function maxUsageLimitResetMs(turn: {
+  readonly rejectedRateLimitTypes: ReadonlySet<string>;
+  readonly usageLimitResetsAtMsByType: ReadonlyMap<string, number>;
+}): number | undefined {
+  let max: number | undefined;
+  for (const limitType of turn.rejectedRateLimitTypes) {
+    const resetsAtMs = turn.usageLimitResetsAtMsByType.get(limitType);
+    if (resetsAtMs !== undefined && (max === undefined || resetsAtMs > max)) {
+      max = resetsAtMs;
+    }
+  }
+  return max;
 }
 
 interface AssistantTextBlockState {
@@ -2905,6 +2931,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     status: ProviderRuntimeTurnStatus,
     errorMessage?: string,
     result?: SDKResultMessage,
+    failure?: {
+      readonly reason: "usage_limit";
+      readonly resetsAtMs?: number | undefined;
+    },
   ) {
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
     if (resultContextWindow !== undefined) {
@@ -3106,6 +3136,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { totalCostUsd: result.total_cost_usd }
           : {}),
         ...(errorMessage ? { errorMessage } : {}),
+        ...(failure
+          ? {
+              failureReason: failure.reason,
+              ...(failure.resetsAtMs !== undefined ? { failureResetsAt: failure.resetsAtMs } : {}),
+            }
+          : {}),
         tokenUsage: normalizeClaudeTurnTokenUsage(result, turnState.hasSubagents, status),
       },
       providerRefs: nativeProviderRefs(context),
@@ -3671,6 +3707,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         authenticationFailureMessage: undefined,
         rejectedRateLimitTypes: new Set(),
         latestAssistantRateLimited: false,
+        usageLimitResetsAtMsByType: new Map(),
       };
       context.session = {
         ...context.session,
@@ -3770,9 +3807,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const turn = context.turnState;
+    const usageLimitFailure =
+      turn && (turn.rejectedRateLimitTypes.size > 0 || turn.latestAssistantRateLimited)
+        ? {
+            reason: "usage_limit" as const,
+            resetsAtMs: maxUsageLimitResetMs(turn),
+          }
+        : undefined;
     const failureHint =
       turn?.authenticationFailureMessage ??
-      (turn && (turn.rejectedRateLimitTypes.size > 0 || turn.latestAssistantRateLimited)
+      (usageLimitFailure
         ? "Claude usage limit reached. Send the message again once the limit resets."
         : undefined);
     const { status, errorMessage } = resultOutcome(message, failureHint);
@@ -3781,7 +3825,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
     }
 
-    yield* completeTurn(context, status, errorMessage, message);
+    yield* completeTurn(context, status, errorMessage, message, usageLimitFailure);
   });
 
   /**
@@ -4455,13 +4499,32 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         // Current blocking evidence is independent of whether its warning has
         // already been shown. A recovery can omit or advance the reset time;
         // its window type remains stable without clearing another window.
-        if (blocked) context.turnState.rejectedRateLimitTypes.add(limitType);
-        else if (
+        if (blocked) {
+          context.turnState.rejectedRateLimitTypes.add(limitType);
+          const resetsAtMs =
+            rateLimitInfo.resetsAt !== undefined ? rateLimitInfo.resetsAt * 1000 : undefined;
+          const nowMs = yield* Clock.currentTimeMillis;
+          if (
+            resetsAtMs !== undefined &&
+            Number.isFinite(resetsAtMs) &&
+            resetsAtMs > nowMs &&
+            resetsAtMs <= nowMs + CLAUDE_USAGE_LIMIT_MAX_WAIT_MS
+          ) {
+            context.turnState.usageLimitResetsAtMsByType.set(limitType, resetsAtMs);
+          } else {
+            // A re-rejection that no longer reports a credible reset must not
+            // keep the stamp an earlier rejection left behind.
+            context.turnState.usageLimitResetsAtMsByType.delete(limitType);
+          }
+        } else if (
           rateLimitInfo.status === "allowed" ||
           rateLimitInfo.status === "allowed_warning" ||
           overageAllowed
         ) {
           context.turnState.rejectedRateLimitTypes.delete(limitType);
+          // A recovered window stops contributing its stamp; the failure's
+          // reset time (if any) comes from the windows still blocked.
+          context.turnState.usageLimitResetsAtMsByType.delete(limitType);
         }
       }
       if (blocked && context.turnState !== undefined) {
@@ -4607,7 +4670,28 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* completeTurn(context, "failed", message);
       }
     } else if (context.turnState) {
-      yield* completeTurn(context, "interrupted", "Claude runtime stream ended.");
+      // A clean stream end with no result normally means the turn was cut off,
+      // but a turn parked on a rejected usage-limit window can also end this
+      // way; classify it as the failure it parked on so ingestion persists
+      // the window and the resume sweep can fire, instead of clearing the
+      // classification as an interruption would.
+      const usageLimitFailure =
+        context.turnState.rejectedRateLimitTypes.size > 0 ||
+        context.turnState.latestAssistantRateLimited
+          ? {
+              reason: "usage_limit" as const,
+              resetsAtMs: maxUsageLimitResetMs(context.turnState),
+            }
+          : undefined;
+      yield* completeTurn(
+        context,
+        usageLimitFailure !== undefined ? "failed" : "interrupted",
+        usageLimitFailure !== undefined
+          ? "Claude usage limit reached. Send the message again once the limit resets."
+          : "Claude runtime stream ended.",
+        undefined,
+        usageLimitFailure,
+      );
     }
 
     yield* stopSessionInternal(context, {
@@ -5818,6 +5902,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         authenticationFailureMessage: undefined,
         rejectedRateLimitTypes: new Set(),
         latestAssistantRateLimited: false,
+        usageLimitResetsAtMsByType: new Map(),
       };
 
       const updatedAt = yield* nowIso;
