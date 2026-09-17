@@ -9,6 +9,8 @@ On web and desktop, a new thread keeps the current project and carries your mode
 and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. To continue in
 an existing worktree, use **New thread in this worktree** from the branch toolbar.
+An agent that creates a worktree during a thread can move the thread there with
+the `t3_worktree_handoff` tool, so the branch toolbar and **Open** follow it.
 
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
@@ -19,6 +21,21 @@ In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Ent
 on Windows and Linux to start a new thread and immediately open another draft. The
 next draft keeps the workspace mode and base branch you selected. With **New
 worktree**, each background submission creates its own worktree.
+
+## Update thread metadata with an agent
+
+Ask the agent to rename the current thread, for example to
+`CU-869y9uv0 change the button to green`. A skill can set the name once it knows
+the task ID and description. The name syncs across your connected clients, and
+automatic title generation will not replace it. You can still rename it from
+the thread menu or ask the agent to change it again.
+
+Agents can also regenerate a title. Both actions default to the current thread
+and can target another thread in the same project. Skills use `t3_thread_update`
+and can supply a `clientRequestId` to retry an action without applying it twice
+within the same agent session. A retry returns the original command receipt and
+the thread's current saved metadata. Pull request links are managed with the
+separate `link_pull_request` and `unlink_pull_request` tools.
 
 ## Pin and reorder threads
 

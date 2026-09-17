@@ -38,6 +38,11 @@ import { ComputerToolkit } from "./toolkits/computers/tools.ts";
 import { DEFAULT_APP_DISPLAY_NAME } from "../appDisplayName.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
+import { ThreadMetadataToolkitHandlersLive } from "./toolkits/threadMetadata/handlers.ts";
+import { ThreadMetadataToolkit } from "./toolkits/threadMetadata/tools.ts";
+import * as ThreadMetadataMcp from "./ThreadMetadataMcpService.ts";
+import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
+import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import {
   DeviceScreenshotToolkitHandlersLive,
   DeviceStandardToolkitHandlersLive,
@@ -47,6 +52,13 @@ import {
   DeviceScreenshotToolkit,
   DeviceStandardToolkit,
 } from "./toolkits/device/tools.ts";
+
+import { MonitorToolkit } from "./toolkits/monitor/tools.ts";
+import { MonitorToolkitHandlersLive } from "./toolkits/monitor/handlers.ts";
+
+export const MonitorToolkitRegistrationLive = McpServer.toolkit(MonitorToolkit).pipe(
+  Layer.provide(MonitorToolkitHandlersLive),
+);
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -627,6 +639,15 @@ export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequest
   Layer.provide(PullRequestsToolkitHandlersLive),
 );
 
+export const ThreadMetadataToolkitRegistrationLive = McpServer.toolkit(ThreadMetadataToolkit).pipe(
+  Layer.provide(ThreadMetadataToolkitHandlersLive),
+  Layer.provide(ThreadMetadataMcp.layer),
+);
+
+const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
+  Layer.provide(WorktreeToolkitHandlersLive),
+);
+
 const DeviceStandardToolkitRegistrationLive = McpServer.toolkit(DeviceStandardToolkit).pipe(
   Layer.provide(DeviceStandardToolkitHandlersLive),
 );
@@ -653,5 +674,8 @@ export const layer = Layer.mergeAll(
   ThreadRelayToolkitRegistrationLive,
   ComputerToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
+  WorktreeToolkitRegistrationLive,
+  ThreadMetadataToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
+  MonitorToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

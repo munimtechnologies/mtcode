@@ -28,6 +28,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as MonitorSession from "../../mcp/MonitorSession.ts";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -296,6 +297,7 @@ const validationLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest({ desktopControl: { enabled: false } })),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(MonitorSession.layer),
   ),
 );
 
@@ -366,6 +368,7 @@ const sessionErrorLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(MonitorSession.layer),
   ),
 );
 
@@ -514,6 +517,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(MonitorSession.layer),
     );
 
     return Effect.gen(function* () {
@@ -546,6 +550,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(MonitorSession.layer),
     );
 
     return Effect.gen(function* () {
@@ -579,6 +584,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(MonitorSession.layer),
     );
 
     return Effect.gen(function* () {
@@ -633,6 +639,7 @@ const lifecycleLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(MonitorSession.layer),
   ),
 );
 
@@ -982,6 +989,68 @@ function codexTurnEvent(method: "turn/started" | "turn/completed", turnId: strin
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  it.effect(
+    "maps native background work and delivered monitor events into the shared timeline",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const mapped = yield* adapter.streamEvents.pipe(
+          Stream.filter(
+            (e) =>
+              e.type === "task.started" ||
+              e.type === "task.completed" ||
+              (e.type === "item.completed" && e.payload.title === "Monitor event"),
+          ),
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const base = {
+          kind: "notification" as const,
+          provider: ProviderDriverKind.make("codex"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          threadId: asThreadId("thread-1"),
+        };
+        yield* runtime.emit({
+          ...base,
+          id: asEventId("bg-start"),
+          method: "backgroundTask/changed",
+          payload: { taskId: "shell", description: "watch-ci", status: "running" },
+        });
+        yield* runtime.emit({
+          ...base,
+          id: asEventId("bg-output"),
+          method: "backgroundMonitor/delivered",
+          turnId: asTurnId("wake-turn"),
+          itemId: asItemId("wake-event"),
+          payload: { name: "background_monitor", output: "CI passed" },
+        });
+        yield* runtime.emit({
+          ...base,
+          id: asEventId("bg-stop"),
+          method: "backgroundTask/changed",
+          payload: { taskId: "shell", description: "watch-ci", status: "stopped" },
+        });
+        const events = Array.from(yield* Fiber.join(mapped));
+        NodeAssert.deepStrictEqual(
+          events.map((e) => e.type),
+          ["task.started", "item.completed", "task.completed"],
+        );
+        NodeAssert.deepStrictEqual(events[0]?.payload, {
+          taskId: "shell",
+          description: "watch-ci",
+          taskType: "shell",
+        });
+        NodeAssert.equal(events[1]?.turnId, "wake-turn");
+        NodeAssert.equal(events[1]?.itemId, "wake-event");
+        NodeAssert.deepStrictEqual(events[2]?.payload, {
+          taskId: "shell",
+          status: "stopped",
+          taskType: "shell",
+        });
+      }),
+  );
+
   it.effect("calculates one Codex turn total from cumulative counters", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
@@ -3225,6 +3294,7 @@ const scopedLifecycleLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(MonitorSession.layer),
   ),
 );
 
@@ -3269,6 +3339,7 @@ const scopedFailureLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(MonitorSession.layer),
   ),
 );
 
@@ -3321,6 +3392,7 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
         Layer.provideMerge(ServerSettingsService.layerTest()),
         Layer.provideMerge(providerSessionDirectoryTestLayer),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(MonitorSession.layer),
       );
       const context = yield* Layer.buildWithScope(layer, scope);
       const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
@@ -3376,6 +3448,7 @@ const usageLimitLayer = it.layer(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(MonitorSession.layer),
     Layer.provideMerge(NodeServices.layer),
   ),
 );

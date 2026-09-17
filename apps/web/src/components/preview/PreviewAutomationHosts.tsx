@@ -3,6 +3,7 @@
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
+  DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   PREVIEW_AUTOMATION_OPERATIONS,
   type EnvironmentId,
@@ -48,11 +49,7 @@ import {
   acquireBrowserSurfaceActivity,
   useBrowserSurfaceStore,
 } from "~/browser/browserSurfaceStore";
-import {
-  browserDefaultOpenProfileId,
-  browserDefaultOpenViewport,
-  resolveBrowserDefaults,
-} from "~/browser/browserDefaults";
+import { resolveBrowserDefaults } from "~/browser/browserDefaults";
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { isElectron } from "~/env";
@@ -90,6 +87,7 @@ import {
 } from "./previewAutomationTarget";
 import { resolveHostWaitBudgetMs, waitForHostReadiness } from "./previewAutomationHostBudget";
 import { isPreviewViewportReady } from "./previewViewportReadiness";
+import { previewAutomationOpenOptions } from "./previewAutomationOpenOptions";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 
 const PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS = 500;
@@ -242,13 +240,14 @@ const currentStatus = async (
     runtimeTabId && renderingActive
       ? await readRenderedViewport(runtimeTabId).catch(() => null)
       : null;
-  const viewportStatus = {
+  const snapshotStatus = {
+    ...(snapshot ? { profileId: snapshot.profileId ?? DEFAULT_BROWSER_PROFILE_ID } : {}),
     ...(viewportSetting === undefined ? {} : { viewportSetting }),
     ...(viewport === null ? {} : { viewport }),
   };
   if (runtimeTabId && tabId && previewBridge && state.desktopByTabId[tabId]) {
     const status = await previewBridge.automation.status(runtimeTabId);
-    return { ...status, tabId, visible, ...viewportStatus };
+    return { ...status, tabId, visible, ...snapshotStatus };
   }
   const navStatus = snapshot?.navStatus;
   return {
@@ -258,7 +257,7 @@ const currentStatus = async (
     url: navStatus && navStatus._tag !== "Idle" ? navStatus.url : null,
     title: navStatus && navStatus._tag !== "Idle" ? navStatus.title : null,
     loading: navStatus?._tag === "Loading",
-    ...viewportStatus,
+    ...snapshotStatus,
   };
 };
 
@@ -301,6 +300,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
       clientId: automationClientId,
       environmentId,
       supportedOperations: [...PREVIEW_AUTOMATION_OPERATIONS],
+      supportsOpenProfile: true,
     }),
     [automationClientId, environmentId],
   );
@@ -418,7 +418,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             let activeTabId = resolvePreviewAutomationOpenTab(
               state,
               request.tabId,
-              input.reuseExistingTab ?? true,
+              input.profileId === undefined && (input.reuseExistingTab ?? true),
             );
             let activeSnapshot = activeTabId
               ? (state.sessions[activeTabId] ?? state.snapshot ?? undefined)
@@ -432,10 +432,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 input: {
                   threadId: request.threadId,
                   ...(resolvedInputUrl ? { url: resolvedInputUrl } : {}),
-                  // An agent that didn't state a size gets the user's
-                  // configured default, same as a hand-opened tab.
-                  viewport: browserDefaultOpenViewport(defaults),
-                  profileId: browserDefaultOpenProfileId(defaults),
+                  ...previewAutomationOpenOptions(input, defaults),
                 },
               });
               if (result._tag === "Failure") {

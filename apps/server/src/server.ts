@@ -72,6 +72,7 @@ import { ProviderAccountLoginRunner } from "./provider/Services/ProviderAccountL
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
+import * as MonitorSession from "./mcp/MonitorSession.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ComputerViewBroker from "./desktopControl/ComputerViewBroker.ts";
 import * as ComputerTaskBroker from "./mcp/ComputerTaskBroker.ts";
@@ -564,6 +565,7 @@ const RuntimeDomainDependenciesLive = ReactorLayerLive.pipe(
   // "Service not found: t3/terminal/PtyAdapter" and the app never opens.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive.pipe(Layer.provide(PtyAdapterLive))),
   Layer.provideMerge(AntigravityInstallation.layer),
+  Layer.provideMerge(MonitorSession.layer),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

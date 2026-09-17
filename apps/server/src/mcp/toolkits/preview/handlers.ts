@@ -46,7 +46,7 @@ export function normalizePreviewOpenInput(
   return {
     ...input,
     ...(open === undefined ? {} : { open, show: open }),
-    reuseExistingTab: input.reuseExistingTab ?? true,
+    reuseExistingTab: input.reuseExistingTab ?? input.profileId === undefined,
   };
 }
 

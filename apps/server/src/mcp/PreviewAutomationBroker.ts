@@ -1,4 +1,5 @@
 import {
+  BrowserProfileId,
   PREVIEW_AUTOMATION_V1_OPERATIONS,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationControlInterruptedError,
@@ -71,6 +72,7 @@ interface ClientConnection {
   readonly connectionId: string;
   readonly environmentId: PreviewAutomationHost["environmentId"];
   readonly supportedOperations: ReadonlySet<PreviewAutomationOperation>;
+  readonly supportsOpenProfile: boolean;
   readonly focused: boolean;
   readonly focusOrder: number;
   readonly queue: Queue.Queue<PreviewAutomationStreamEvent>;
@@ -169,10 +171,16 @@ const readResultTabId = (result: unknown): PreviewTabId | null | undefined => {
   return tabId === null || isPreviewTabId(tabId) ? tabId : undefined;
 };
 
-const supportsOperation = (
+const hasOpenProfile = Schema.is(Schema.Struct({ profileId: BrowserProfileId }));
+
+const supportsRequest = (
   connection: ClientConnection,
-  operation: PreviewAutomationOperation,
-): boolean => connection.supportedOperations.has(operation);
+  request: PreviewAutomationInvokeInput,
+): boolean =>
+  connection.supportedOperations.has(request.operation) &&
+  (request.operation !== "open" ||
+    !hasOpenProfile(request.input) ||
+    connection.supportsOpenProfile);
 
 type RemoteDetailKind = "null" | "array" | "object" | "string" | "number" | "boolean";
 
@@ -359,6 +367,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       connectionId,
       environmentId: host.environmentId,
       supportedOperations: new Set(host.supportedOperations ?? PREVIEW_AUTOMATION_V1_OPERATIONS),
+      supportsOpenProfile: host.supportsOpenProfile ?? false,
       focused: false,
       focusOrder: 0,
       queue,
@@ -477,7 +486,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       // capability failure and can deliberately start a fresh provider
       // session. A dead lease is pruned above and may fail over.
       const connection =
-        hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
+        hasLiveAssignment && supportsRequest(assignedConnection, input)
           ? assignedConnection
           : hasLiveAssignment
             ? undefined
@@ -485,7 +494,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
                 .filter(
                   (host) =>
                     host.environmentId === input.scope.environmentId &&
-                    supportsOperation(host, input.operation),
+                    supportsRequest(host, input),
                 )
                 .sort(
                   (left, right) =>
