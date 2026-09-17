@@ -103,6 +103,8 @@ describe("splitSharedServerPatch", () => {
       continueThreadsAfterServerUpdate: true,
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
+      addProjectBaseDirectory: "/workspace/repos",
+      worktreeBaseDirectory: "/workspace/worktrees",
       newWorktreesStartFromOrigin: true,
       createGitHubPullRequestsAsDraft: false,
     });

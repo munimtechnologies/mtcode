@@ -529,7 +529,11 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         resumeCursor: { threadId: "provider-thread-fork", requireResume: true },
       });
       NodeAssert.equal(runtime.closeImpl.mock.calls.length, 1);
-      NodeAssert.deepStrictEqual(yield* adapter.listSessions(), []);
+      // The adapter layer is shared across this block, so sibling sessions may still be
+      // listed; forking must only have closed the source thread's own session.
+      NodeAssert.ok(
+        !(yield* adapter.listSessions()).some((session) => session.threadId === threadId),
+      );
     }),
   );
 

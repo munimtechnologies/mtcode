@@ -47,6 +47,16 @@ import * as ServerSettings from "../src/serverSettings.ts";
 import * as AnalyticsService from "../src/telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "../src/vcs/GitVcsDriver.ts";
 
+
+// Batch I2 stamps every server-update continuation with a fresh operation id so the Pi
+// supervisor can key admission on it. It is provider-level correlation, not a user message
+// (docs/adr/0005), so assertions validate its shape and compare the rest of the send.
+function withoutContinuationOperationId(send: ProviderSendTurnInput) {
+  const { operationId, ...rest } = send;
+  assert.match(String(operationId), /^server:update-continuation:[0-9a-f-]{36}$/);
+  return rest;
+}
+
 const providerInstanceId = ProviderInstanceId.make("codex");
 const projectId = ProjectId.make("project-startup-orphan");
 const threadId = ThreadId.make("thread-startup-orphan");
@@ -475,7 +485,7 @@ it.effect.each(["opt-in desktop restart", "marked remote update"] as const)(
         assert.equal(after.session?.status, "starting");
         assert.equal(after.session?.activeTurnId, null);
         assert.equal(after.session?.lastError, null);
-        assert.deepStrictEqual(yield* Deferred.await(sent), {
+        assert.deepStrictEqual(withoutContinuationOperationId(yield* Deferred.await(sent)), {
           threadId,
           continuation: true,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,

@@ -28,6 +28,16 @@ import { ServerActivation } from "./serverActivation.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 
+
+// Batch I2 stamps every server-update continuation with a fresh operation id so the Pi
+// supervisor can key admission on it. It is provider-level correlation, not a user message
+// (docs/adr/0005), so assertions validate its shape and compare the rest of the send.
+function withoutContinuationOperationId(send: ProviderSendTurnInput) {
+  const { operationId, ...rest } = send;
+  assert.match(String(operationId), /^server:update-continuation:[0-9a-f-]{36}$/);
+  return rest;
+}
+
 const providerInstanceId = ProviderInstanceId.make("codex");
 const updatedAt = "2026-08-20T12:00:00.000Z";
 
@@ -302,7 +312,7 @@ it.effect.each(
       yield* Deferred.await(continuationCleared);
 
       assert.deepStrictEqual(
-        sends.toSorted((left, right) =>
+        sends.map(withoutContinuationOperationId).toSorted((left, right) =>
           String(left.threadId).localeCompare(String(right.threadId)),
         ),
         [
@@ -907,7 +917,7 @@ for (const preparedStatus of [
         preparedStatus === "ready with failed scan" ? "ready" : preparedStatus;
       yield* runReconciliation(input);
       yield* Deferred.await(cleared);
-      assert.deepStrictEqual(sends, [
+      assert.deepStrictEqual(sends.map(withoutContinuationOperationId), [
         { threadId: thread.id, continuation: true, interactionMode: "default" },
       ]);
       assert.deepStrictEqual(binding.runtimePayload, {

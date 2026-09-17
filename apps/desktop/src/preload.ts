@@ -59,7 +59,7 @@ ipcRenderer.on(IpcChannels.DESKTOP_NOTIFICATION_ACTIVATED_CHANNEL, (_event, targ
     listener(activation);
   }
 });
-if (clientPlatform === "darwin") {
+if (clientPlatform === "darwin" && typeof window !== "undefined") {
   // Native window buttons do not scale with Chromium zoom. Keep their reserved
   // space in native points, including when a zoomed page is reloaded.
   const syncWindowControlInset = () => {

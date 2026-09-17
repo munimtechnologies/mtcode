@@ -3010,7 +3010,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           provider: ProviderDriverKind.make("claudeAgent"),
           providerInstanceId: claudeAgentInstanceId,
           threadId: asThreadId("thread-claude-idle"),
-          cwd: "/tmp/project-claude-idle",
+          cwd: fixtureCwd("project-claude-idle"),
           resumeCursor,
           runtimeMode: "full-access",
         });
