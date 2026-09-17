@@ -60,6 +60,7 @@ export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type CancelQueuedThreadTurnInput = CommandInput<"thread.queued-turn.cancel">;
 export type CorrectThreadMessageInput = CommandInput<"thread.message.correct">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
+export type ContinueThreadTurnInput = CommandInput<"thread.turn.continue">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type DismissThreadUserInputInput = CommandInput<"thread.user-input.dismiss">;
@@ -452,6 +453,18 @@ export const interruptThreadTurn: (input: InterruptThreadTurnInput) => CommandEf
   return yield* dispatch({
     ...input,
     type: "thread.turn.interrupt",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const continueThreadTurn: (input: ContinueThreadTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.continueThreadTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.turn.continue",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

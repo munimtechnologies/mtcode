@@ -21,6 +21,7 @@ import {
   type CorrectThreadMessageInput,
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
+  type ContinueThreadTurnInput,
   type LinkThreadPullRequestInput,
   type RespondToThreadApprovalInput,
   type RespondToThreadUserInputInput,
@@ -59,6 +60,7 @@ import {
   deleteThread,
   disarmThreadUsageResume,
   interruptThreadTurn,
+  continueThreadTurn,
   linkThreadPullRequest,
   respondToThreadApproval,
   respondToThreadUserInput,
@@ -321,6 +323,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     interruptTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:interrupt-turn",
       execute: (input: InterruptThreadTurnInput) => interruptThreadTurn(input),
+      scheduler,
+      concurrency,
+    }),
+    continueTurn: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:continue-turn",
+      execute: (input: ContinueThreadTurnInput) => continueThreadTurn(input),
       scheduler,
       concurrency,
     }),

@@ -55,6 +55,14 @@ require apps/web/src/components/Sidebar.tsx "GoalActiveMarker" "goal marker in s
 require apps/web/src/components/chat/ChatComposer.tsx "buildBuiltInSlashCommandItems" "/goal items in composer slash menu"
 require apps/web/src/components/chat/ChatComposer.tsx "ComposerGoalBadge" "goal badge rendered by composer"
 
+# --- One-tap Continue as a Continuation Turn (upstream #11716, taken 2026-09-16) ---
+# Upstream submits a "Continue" user message; the fork dispatches
+# thread.turn.continue so the Turn has no user message (docs/adr/0005). A merge
+# that re-takes upstream's composer handler would quietly bring the message back.
+require apps/web/src/components/ChatView.tsx "onContinueInterruptedTurn={onContinueInterruptedTurn}" "composer Continue dispatches the continuation command"
+require apps/server/src/orchestration/decider.ts 'case "thread.turn.continue"' "decider handles the one-tap continuation command"
+require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildInterruptedTurnContinuationPrompt" "provider reactor authors the interrupted-turn prompt"
+
 # --- Cross-thread tools (a0d8862a1, ae1be5092, 146cd13a6) ---
 require apps/server/src/mcp/McpHttpServer.ts "ThreadReferenceToolkit" "thread_read toolkit registered"
 require apps/server/src/mcp/McpHttpServer.ts "ThreadRelayToolkit" "thread_list/thread_send toolkit registered"

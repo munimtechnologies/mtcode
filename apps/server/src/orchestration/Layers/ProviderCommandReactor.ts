@@ -17,7 +17,10 @@ import {
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
-import { buildGoalContinuationPrompt } from "@t3tools/shared/goalContinuation";
+import {
+  buildGoalContinuationPrompt,
+  buildInterruptedTurnContinuationPrompt,
+} from "@t3tools/shared/goalContinuation";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -1303,10 +1306,14 @@ const make = Effect.gen(function* () {
       messageId === undefined && thread.goal?.status === "active"
         ? ((yield* resolveThreadDetail(event.payload.threadId))?.goal ?? null)
         : null;
+    // A one-tap Continue after an interruption is also message-less; it gets
+    // its own T3-authored prompt when no Active Goal supplies one.
     const continuationPrompt =
       continuationGoal?.status === "active"
         ? buildGoalContinuationPrompt(continuationGoal.objective)
-        : null;
+        : messageId === undefined && event.payload.continuation === "interrupted-turn"
+          ? buildInterruptedTurnContinuationPrompt()
+          : null;
     if (messageId === undefined && continuationPrompt === null) {
       return;
     }

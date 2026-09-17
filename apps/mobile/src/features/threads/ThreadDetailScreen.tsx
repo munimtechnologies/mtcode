@@ -180,6 +180,8 @@ export interface ThreadDetailScreenProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  /** One-tap Continue after Stop: a Continuation Turn, not a "Continue" message. */
+  readonly onContinueThread: () => Promise<void>;
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onCancelQueuedMessage: (messageId: MessageId) => void;
   readonly onCorrectMessage: (input: {
@@ -1301,6 +1303,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onNativePasteText={props.onNativePasteText}
                     onRemoveDraftImage={props.onRemoveDraftImage}
                     onStopThread={props.onStopThread}
+                    onContinueThread={props.onContinueThread}
                     onSendMessage={handleSendMessage}
                     onShowUsageLimits={showUsageLimits}
                     onUpdateModelSelection={props.onUpdateThreadModelSelection}

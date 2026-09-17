@@ -16,6 +16,7 @@ import {
   isModelSelectionProviderEnabled,
   parsePersistedServerObservabilitySettings,
   resolvePullRequestRankingModelSelection,
+  resolveNewThreadRuntimeMode,
   resolveSourceControlWriterModelSelection,
   resolveProjectAgentBrowserAccess,
   resolveProjectAutoPull,
@@ -520,6 +521,30 @@ describe("serverSettings helpers", () => {
     });
     expect(removed.usagePriceOverrides).toEqual({ "other-model": prices });
     expect(current.usagePriceOverrides["example-model"]?.cacheReadCostPerMillionTokens).toBe(0.5);
+  });
+
+  it("resolves and updates permission defaults per provider instance", () => {
+    const codexWork = ProviderInstanceId.make("codex-work");
+    const configured = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      defaultRuntimeMode: "approval-required",
+      providerRuntimeModeDefaults: {
+        [codexWork]: "auto",
+      },
+    });
+
+    expect(resolveNewThreadRuntimeMode(configured, codexWork)).toBe("auto");
+    expect(resolveNewThreadRuntimeMode(configured, ProviderInstanceId.make("claude"))).toBe(
+      "approval-required",
+    );
+    expect(resolveNewThreadRuntimeMode(configured, codexWork, "full-access")).toBe("full-access");
+    expect(resolveNewThreadRuntimeMode(configured, ProviderInstanceId.make("constructor"))).toBe(
+      "approval-required",
+    );
+
+    const cleared = applyServerSettingsPatch(configured, {
+      providerRuntimeModeDefaults: { [codexWork]: null },
+    });
+    expect(resolveNewThreadRuntimeMode(cleared, codexWork)).toBe("approval-required");
   });
 
   it("stores background activity profiles as a versioned object and syncs legacy aliases", () => {

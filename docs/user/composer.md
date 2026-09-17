@@ -29,6 +29,14 @@ also send files to T3 Code through another app's system share sheet.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
+## Continue after Stop
+
+After you stop a turn, the send button becomes a Continue arrow while the
+composer is empty. One tap resumes the interrupted work as a new turn. Nothing
+is typed into the composer or added to the conversation as a message; the agent
+is told to pick up where it left off. Type anything and the button goes back to
+Send.
+
 ## Send while the agent is working
 
 On web and desktop, a message sent during a running turn waits at the end of the conversation as a

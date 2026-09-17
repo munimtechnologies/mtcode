@@ -26,6 +26,17 @@ export function buildGoalContinuationPrompt(objective: string): string {
   return CONTINUATION_TEMPLATE.replace(OBJECTIVE_PLACEHOLDER, () => objective);
 }
 
+const INTERRUPTED_TURN_CONTINUATION_PROMPT = [
+  "The previous turn was interrupted before it finished.",
+  "Continue from where you left off. Do not repeat work that is already done;",
+  "pick up the remaining steps and finish them.",
+].join("\n");
+
+/** T3-authored prompt for the composer's one-tap Continue after an interrupted Turn. */
+export function buildInterruptedTurnContinuationPrompt(): string {
+  return INTERRUPTED_TURN_CONTINUATION_PROMPT;
+}
+
 export function goalContinuationCommandId(input: {
   readonly threadId: string;
   readonly goalUpdatedAt: string;

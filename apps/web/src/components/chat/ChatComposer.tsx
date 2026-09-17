@@ -253,7 +253,7 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
-import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { ComposerPrimaryActions, resolveComposerIdlePrimaryAction } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -935,6 +935,7 @@ import {
   AudioLinesIcon,
   FileIcon,
   BotIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   PaperclipIcon,
   PencilRulerIcon,
@@ -1183,8 +1184,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  canContinueInterruptedTurn?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onContinueInterruptedTurn?: (() => void) | undefined;
   onImplementPlanInNewThread: () => void;
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
@@ -1216,8 +1219,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+        canContinueInterruptedTurn={props.canContinueInterruptedTurn ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
+        onContinueInterruptedTurn={props.onContinueInterruptedTurn}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
       />
     </>
@@ -1424,6 +1429,8 @@ export interface ChatComposerProps {
   onCompactContext: () => void;
   onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
+  /** One-tap Continue after Stop: starts a Continuation Turn with no user message. */
+  onContinueInterruptedTurn: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -1536,6 +1543,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onCompactContext,
     onSend,
     onInterrupt,
+    onContinueInterruptedTurn,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -2683,6 +2691,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       attachmentTargetKey,
     ],
   );
+  const canContinueInterruptedTurn =
+    resolveComposerIdlePrimaryAction({
+      canContinueInterruptedTurn: activeThread?.latestTurn?.state === "interrupted",
+      hasSendableContent: composerSendState.hasSendableContent,
+    }) === "continue";
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
@@ -2691,7 +2704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
-    !composerSendState.hasSendableContent;
+    (!canContinueInterruptedTurn && !composerSendState.hasSendableContent);
   const voiceTranscriptionSendDisabled =
     phase === "running" ||
     isSendBusy ||
@@ -2700,7 +2713,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null;
-  const collapsedComposerPrimaryActionLabel = "Send message";
+  const collapsedComposerPrimaryActionLabel = canContinueInterruptedTurn
+    ? "Continue generation"
+    : "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
@@ -5835,6 +5850,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const handleInterruptPrimaryAction = useCallback(() => {
     void onInterrupt();
   }, [onInterrupt]);
+  // Upstream #11716 typed "Continue" into the draft and submitted it. The fork
+  // keeps Continuations message-less (docs/adr/0005), so the host dispatches
+  // thread.turn.continue and the composer stays untouched.
+  const handleContinueInterruptedTurnPrimaryAction = useCallback(() => {
+    void onContinueInterruptedTurn();
+  }, [onContinueInterruptedTurn]);
   const handleImplementPlanInNewThreadPrimaryAction = useCallback(() => {
     void onImplementPlanInNewThread();
   }, [onImplementPlanInNewThread]);
@@ -6426,18 +6447,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={(event) => {
                     event.stopPropagation();
+                    if (canContinueInterruptedTurn) {
+                      handleContinueInterruptedTurnPrimaryAction();
+                      return;
+                    }
                     submitComposer();
                   }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path
-                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  {canContinueInterruptedTurn ? (
+                    <ChevronRightIcon className="size-4" aria-hidden="true" />
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path
+                        d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
                 </button>
               </div>
             ) : null}
@@ -7178,7 +7207,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       hasSendableContent={composerSendState.hasSendableContent}
                       preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                      canContinueInterruptedTurn={canContinueInterruptedTurn}
                       onInterrupt={handleInterruptPrimaryAction}
+                      onContinueInterruptedTurn={handleContinueInterruptedTurnPrimaryAction}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                       compactDisabled={
                         compactDisabled || noProviderAvailable || isSendBusy || isConnecting

@@ -109,6 +109,7 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
+import { resolveThreadComposerPrimaryAction } from "./threadPresentation";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -146,6 +147,8 @@ export interface ThreadComposerProps {
   readonly onNativePasteText: (paste: ComposerTextPaste) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
+  /** One-tap Continue after Stop: a Continuation Turn, not a "Continue" message. */
+  readonly onContinueThread: () => Promise<void>;
   readonly onSendMessage: () => Promise<MessageId | null>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
@@ -307,10 +310,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     () => composerStripAttachments(props.draftAttachments),
     [props.draftAttachments],
   );
-  const showStopAction =
-    !hasContent &&
-    (props.selectedThread.session?.status === "running" ||
-      props.selectedThread.session?.status === "starting");
+  const primaryAction = resolveThreadComposerPrimaryAction({
+    hasContent,
+    latestTurnState: props.selectedThread.latestTurn?.state ?? null,
+    sessionStatus: props.selectedThread.session?.status ?? null,
+  });
+  const showStopAction = primaryAction === "stop";
+  const showContinueAction = primaryAction === "continue";
 
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
   const attachmentsUploading =
@@ -353,7 +359,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       draftKey: composerOwnerKey,
     });
   };
-  const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
+  const { onSendMessage, onContinueThread, onChangeDraftMessage, onShowUsageLimits } = props;
   // T3 owns /usage-limits only where Limits has data for the selected provider;
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
@@ -430,6 +436,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     attachmentBlockReason;
   const canSend =
     hasContent &&
+    !contextImports[composerOwnerKey] &&
+    !voiceInput.blocksSubmission &&
+    sendBlockedReason === null &&
+    !modelUnavailable;
+  const canContinue =
+    showContinueAction &&
     !contextImports[composerOwnerKey] &&
     !voiceInput.blocksSubmission &&
     sendBlockedReason === null &&
@@ -526,6 +538,29 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.selectedThread.id,
     props.selectedThread.title,
     voiceInput.blocksSubmission,
+  ]);
+  const handleContinue = useCallback(async () => {
+    if (!canContinue) return;
+    const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
+    if (inFlightThreadIdsRef.current.has(threadKey)) return;
+    inFlightThreadIdsRef.current.add(threadKey);
+    try {
+      await onContinueThread();
+      armAgentAwarenessLiveActivityForLocalWork({
+        environmentId: props.environmentId,
+        threadTitle: props.selectedThread.title,
+        projectTitle: props.environmentLabel ?? getProductName(),
+      });
+    } finally {
+      inFlightThreadIdsRef.current.delete(threadKey);
+    }
+  }, [
+    canContinue,
+    onContinueThread,
+    props.environmentId,
+    props.environmentLabel,
+    props.selectedThread.id,
+    props.selectedThread.title,
   ]);
 
   // ── Model menu ───────────────────────────────────────────
@@ -888,6 +923,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     variant="danger"
                     onPress={props.onStopThread}
                   />
+                ) : showContinueAction ? (
+                  <ComposerActionButton
+                    accessibilityLabel="Continue generation"
+                    icon="chevron.right"
+                    variant="primary"
+                    disabled={!canContinue}
+                    onPress={handleContinue}
+                  />
                 ) : (
                   <ComposerActionButton
                     accessibilityLabel={sendBlockedReason ?? sendLabel}
@@ -978,6 +1021,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       icon="stop.fill"
                       variant="danger"
                       onPress={props.onStopThread}
+                    />
+                  ) : showContinueAction && voicePresentation.showsSend ? (
+                    <ComposerActionButton
+                      accessibilityLabel="Continue generation"
+                      icon="chevron.right"
+                      variant="primary"
+                      disabled={!canContinue}
+                      onPress={handleContinue}
                     />
                   ) : voicePresentation.showsSend ? (
                     <ComposerActionButton

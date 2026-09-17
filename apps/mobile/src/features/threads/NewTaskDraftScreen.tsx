@@ -1176,7 +1176,11 @@ export function NewTaskDraftScreen(props: {
     if (voiceInput.blocksSubmission || pendingPastedTextAttachmentCountRef.current > 0) return;
     const selectedProject = flow.selectedProject;
     const draftKey = flow.draftKey;
-    if (!selectedProject || !draftKey) {
+    if (
+      !selectedProject ||
+      !draftKey ||
+      (environmentConnected && !selectedEnvironmentServerConfig)
+    ) {
       return;
     }
     const draft = getComposerDraftSnapshot(draftKey);
@@ -1320,6 +1324,7 @@ export function NewTaskDraftScreen(props: {
       // until the write confirms it.
       clearComposerDraftContent(draftKey, {
         clearModelSelection: true,
+        clearRuntimeMode: true,
         clearWorkspaceSelection: true,
         deferAttachmentCleanup: true,
       });
@@ -1356,6 +1361,7 @@ export function NewTaskDraftScreen(props: {
     !cloneBlocksStart &&
     attachmentBlockReason === null &&
     !modelUnavailable &&
+    (!environmentConnected || selectedEnvironmentServerConfig !== null) &&
     Boolean(flow.selectedProject) &&
     Boolean(flow.selectedModel) &&
     flow.prompt.trim().length > 0 &&
