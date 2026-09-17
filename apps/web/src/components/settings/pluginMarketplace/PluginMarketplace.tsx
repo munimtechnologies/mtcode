@@ -539,6 +539,7 @@ export function PluginMarketplace() {
 
       <SettingsSection
         {...searchableSetting("plugin-marketplace")}
+        variant="plain"
         className="space-y-0"
         contentClassName="space-y-6"
         hideHeader

@@ -61,12 +61,6 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     settingsSchema: ClaudeSettings,
   },
   {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    icon: AntigravityIcon,
-    settingsSchema: AntigravitySettings,
-  },
-  {
     value: ProviderDriverKind.make("cursor"),
     label: "Cursor",
     icon: CursorIcon,
@@ -87,16 +81,16 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     settingsSchema: OpenCodeSettings,
   },
   {
-    value: ProviderDriverKind.make("pi"),
-    label: "Pi",
-    icon: PiAgentIcon,
-    settingsSchema: PiSettings,
-  },
-  {
     value: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
     icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+  },
+  {
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    icon: PiAgentIcon,
+    settingsSchema: PiSettings,
   },
   {
     value: ProviderDriverKind.make("devin"),
