@@ -464,6 +464,9 @@ export function applyThreadDetailEvent(
                   ...(event.payload.scheduledFor !== undefined
                     ? { scheduledFor: event.payload.scheduledFor }
                     : {}),
+                  ...(event.payload.recurrence !== undefined
+                    ? { recurrence: event.payload.recurrence }
+                    : {}),
                 }
               : message,
           ),
@@ -480,7 +483,12 @@ export function applyThreadDetailEvent(
             if (message.id !== event.payload.messageId) {
               return message;
             }
-            const { deliveryState: _, scheduledFor: _released, ...deliveredMessage } = message;
+            const {
+              deliveryState: _,
+              scheduledFor: _released,
+              recurrence: _repeats,
+              ...deliveredMessage
+            } = message;
             return deliveredMessage;
           }),
           updatedAt: event.occurredAt,

@@ -249,7 +249,7 @@ import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 
 import { SkillInlineText } from "./SkillInlineText";
-import { formatScheduledSendLabel } from "./scheduleMessage";
+import { formatScheduledSendLabel, formatScheduledSendRepeatLabel } from "./scheduleMessage";
 import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
@@ -2063,7 +2063,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           {isQueued ? (
             <span className="text-muted-foreground">
               {row.message.scheduledFor !== undefined
-                ? `Scheduled for ${formatScheduledSendLabel(row.message.scheduledFor)}`
+                ? `${
+                    row.message.recurrence
+                      ? `${formatScheduledSendRepeatLabel(row.message.recurrence.repeat)} · `
+                      : ""
+                  }Scheduled for ${formatScheduledSendLabel(row.message.scheduledFor)}`
                 : "Queued"}
             </span>
           ) : null}

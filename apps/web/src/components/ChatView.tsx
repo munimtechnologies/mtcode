@@ -8500,7 +8500,11 @@ export default function ChatView(props: ChatViewProps) {
           interactionMode: sendInteractionMode,
           ...(bootstrap ? { bootstrap } : {}),
           ...(sendOptions?.scheduledFor !== undefined
-            ? { deliveryMode: "after-current" as const, scheduledFor: sendOptions.scheduledFor }
+            ? {
+                deliveryMode: "after-current" as const,
+                scheduledFor: sendOptions.scheduledFor,
+                ...(sendOptions.recurrence ? { recurrence: sendOptions.recurrence } : {}),
+              }
             : {}),
           createdAt: messageCreatedAt,
         },

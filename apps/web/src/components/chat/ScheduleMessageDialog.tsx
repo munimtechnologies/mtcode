@@ -53,8 +53,9 @@ export function ScheduleMessageDialog(props: {
           </div>
           <DialogTitle>Schedule send</DialogTitle>
           <DialogDescription>
-            The message waits in this thread's queue and goes out at the chosen time. If the agent
-            is busy then, it goes out when the current turn ends.
+            {repeat === "never"
+              ? "The message waits in this thread's queue and goes out at the chosen time. If the agent is busy then, it goes out when the current turn ends."
+              : "Each occurrence is queued when the previous one goes out. Cancel the queued message to end the series. Attachments are not repeated."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -78,6 +79,24 @@ export function ScheduleMessageDialog(props: {
               }}
               aria-invalid={error !== null}
             />
+          </label>
+          <label className="mt-4 grid gap-2 text-sm font-medium" htmlFor="scheduled-message-repeat">
+            Repeat
+            <select
+              id="scheduled-message-repeat"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24"
+              value={repeat}
+              onChange={(event) => {
+                setRepeat(event.currentTarget.value as ScheduledSendRepeat | "never");
+                setError(null);
+              }}
+            >
+              <option value="never">Never</option>
+              <option value="daily">Daily</option>
+              <option value="weekdays">Weekdays</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
           </label>
           <p className="mt-2 text-xs text-muted-foreground">{timeZone}</p>
           {error ? (

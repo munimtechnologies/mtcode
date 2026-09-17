@@ -75,6 +75,7 @@ import Migration0054 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 import Migration0055 from "./Migrations/052_ProjectionThreadTitleState.ts";
 // Fork-only: scheduled send time on queued turns (ported from KamiCode).
 import Migration0066 from "./Migrations/066_ProjectionThreadTurnQueueScheduledFor.ts";
+import Migration0067 from "./Migrations/067_ProjectionThreadTurnQueueRecurrence.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -143,6 +144,7 @@ const migrationEntries = [
   [54, "ProjectionThreadMessageContext", Migration0054],
   [55, "ProjectionThreadTitleState", Migration0055],
   [66, "ProjectionThreadTurnQueueScheduledFor", Migration0066],
+  [67, "ProjectionThreadTurnQueueRecurrence", Migration0067],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

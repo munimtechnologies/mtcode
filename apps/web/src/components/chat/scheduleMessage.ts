@@ -1,5 +1,7 @@
 export {
   formatScheduledSendLabel,
+  formatScheduledSendRepeatLabel,
+  nextScheduledSendOccurrence,
   resolveScheduledSendInstant,
 } from "@t3tools/shared/scheduledSend";
 

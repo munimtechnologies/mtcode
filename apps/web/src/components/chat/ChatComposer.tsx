@@ -31,6 +31,7 @@ import type {
   ServerProvider,
   ThreadId,
   SnapShotSource,
+  type ScheduledSendRecurrence,
 } from "@t3tools/contracts";
 import {
   ProviderDriverKind,
@@ -4014,7 +4015,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const openScheduleDialog = useCallback(() => setScheduleDialogOpen(true), []);
   const submitScheduledComposer = useCallback(
-    (scheduledFor: string) => submitComposer(undefined, "foreground", { scheduledFor }),
+    (submission: { scheduledFor: string; recurrence: ScheduledSendRecurrence | null }) =>
+      submitComposer(undefined, "foreground", {
+        scheduledFor: submission.scheduledFor,
+        ...(submission.recurrence ? { recurrence: submission.recurrence } : {}),
+      }),
     [submitComposer],
   );
   const submitCitationAndSend = useCallback(() => {

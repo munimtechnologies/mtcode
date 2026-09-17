@@ -503,6 +503,16 @@ export const OrchestrationMessageCorrection = Schema.Struct({
 });
 export type OrchestrationMessageCorrection = typeof OrchestrationMessageCorrection.Type;
 
+export const ScheduledSendRepeat = Schema.Literals(["daily", "weekdays", "weekly", "monthly"]);
+export type ScheduledSendRepeat = typeof ScheduledSendRepeat.Type;
+
+/** Repeat rule for a scheduled send. The wall-clock time comes from `scheduledFor` in `timezone`. */
+export const ScheduledSendRecurrence = Schema.Struct({
+  repeat: ScheduledSendRepeat,
+  timezone: TrimmedNonEmptyString,
+});
+export type ScheduledSendRecurrence = typeof ScheduledSendRecurrence.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
@@ -520,6 +530,8 @@ export const OrchestrationMessage = Schema.Struct({
   deliveryState: Schema.optional(Schema.Literal("queued")),
   // Present on a queued user message that the server holds until this instant.
   scheduledFor: Schema.optional(IsoDateTime),
+  // Present when the queued message re-queues itself after it goes out.
+  recurrence: Schema.optional(ScheduledSendRecurrence),
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 
@@ -1349,6 +1361,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
   deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
   // Hold the turn in the thread queue until this instant. Implies queued delivery.
   scheduledFor: Schema.optional(IsoDateTime),
+  // Requires scheduledFor: the server queues the next occurrence when this one goes out.
+  recurrence: Schema.optional(ScheduledSendRecurrence),
   // Server-authored only: ClientThreadTurnStartCommand intentionally omits
   // this field so clients and providers cannot forge another thread's identity.
   sourceThreadMessage: Schema.optional(SourceThreadMessageReference),
@@ -1374,6 +1388,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
   scheduledFor: Schema.optional(IsoDateTime),
+  recurrence: Schema.optional(ScheduledSendRecurrence),
   createdAt: IsoDateTime,
 });
 
@@ -2040,6 +2055,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   // Only meaningful on `thread.turn-queued`: the queue holds the turn until then.
   scheduledFor: Schema.optional(IsoDateTime),
+  recurrence: Schema.optional(ScheduledSendRecurrence),
   createdAt: IsoDateTime,
 });
 

@@ -2099,6 +2099,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             detail: "A scheduled send cannot use immediate delivery.",
           });
         }
+      } else if (command.recurrence !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A repeating send needs a scheduled send time.",
+        });
       }
       const queueTurn =
         command.deliveryMode === "after-current" || command.scheduledFor !== undefined;
@@ -2122,6 +2127,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           ...(command.scheduledFor !== undefined ? { scheduledFor: command.scheduledFor } : {}),
+          ...(command.recurrence !== undefined ? { recurrence: command.recurrence } : {}),
           createdAt: command.createdAt,
         },
       };

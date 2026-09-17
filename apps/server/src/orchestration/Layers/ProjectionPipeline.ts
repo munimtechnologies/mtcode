@@ -1483,6 +1483,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             queuedAt: event.payload.createdAt,
             scheduledFor: event.payload.scheduledFor ?? null,
+            recurrence: event.payload.recurrence ?? null,
             eventSequence: event.sequence,
             status: "queued",
           });

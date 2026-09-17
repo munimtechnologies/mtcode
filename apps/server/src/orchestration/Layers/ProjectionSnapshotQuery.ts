@@ -5,6 +5,7 @@ import {
   OrchestrationMessageContext,
   CheckpointRef,
   IsoDateTime,
+  ScheduledSendRecurrence,
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
@@ -119,6 +120,7 @@ const ProjectionThreadMessageDbRowSchema = Schema.Struct({
   context: Schema.NullOr(Schema.fromJsonString(OrchestrationMessageContext)),
   deliveryState: Schema.NullOr(Schema.Literal("queued")),
   scheduledFor: Schema.NullOr(IsoDateTime),
+  recurrence: Schema.NullOr(Schema.fromJsonString(ScheduledSendRecurrence)),
 });
 const ProjectionTurnStartMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
   Struct.assign({ hasOtherUserMessages: Schema.Number }),
@@ -749,6 +751,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             WHERE queued_turn.message_id = projection_thread_messages.message_id
               AND queued_turn.status = 'queued'
           ) AS "scheduledFor",
+          (
+            SELECT queued_turn.recurrence_json
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "recurrence",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -783,6 +791,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             WHERE queued_turn.message_id = projection_thread_messages.message_id
               AND queued_turn.status = 'queued'
           ) AS "scheduledFor",
+          (
+            SELECT queued_turn.recurrence_json
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "recurrence",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1401,6 +1415,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           WHERE queued_turn.message_id = projection_thread_messages.message_id
             AND queued_turn.status = 'queued'
         ) AS "scheduledFor",
+        (
+          SELECT queued_turn.recurrence_json
+          FROM projection_thread_turn_queue AS queued_turn
+          WHERE queued_turn.message_id = projection_thread_messages.message_id
+            AND queued_turn.status = 'queued'
+        ) AS "recurrence",
         created_at AS "createdAt",
         updated_at AS "updatedAt",
         EXISTS (
@@ -1444,6 +1464,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             WHERE queued_turn.message_id = projection_thread_messages.message_id
               AND queued_turn.status = 'queued'
           ) AS "scheduledFor",
+          (
+            SELECT queued_turn.recurrence_json
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "recurrence",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -1894,6 +1920,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             WHERE queued_turn.message_id = projection_thread_messages.message_id
               AND queued_turn.status = 'queued'
           ) AS "scheduledFor",
+          (
+            SELECT queued_turn.recurrence_json
+            FROM projection_thread_turn_queue AS queued_turn
+            WHERE queued_turn.message_id = projection_thread_messages.message_id
+              AND queued_turn.status = 'queued'
+          ) AS "recurrence",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -2319,6 +2351,7 @@ pending_approval_requests AS (
                   updatedAt: row.updatedAt,
                   ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
                   ...(row.scheduledFor !== null ? { scheduledFor: row.scheduledFor } : {}),
+                  ...(row.recurrence !== null ? { recurrence: row.recurrence } : {}),
                 });
                 messagesByThread.set(row.threadId, threadMessages);
               }
@@ -2653,6 +2686,7 @@ pending_approval_requests AS (
                   updatedAt: row.updatedAt,
                   deliveryState: "queued",
                   ...(row.scheduledFor !== null ? { scheduledFor: row.scheduledFor } : {}),
+                  ...(row.recurrence !== null ? { recurrence: row.recurrence } : {}),
                 });
                 queuedMessagesByThread.set(row.threadId, messages);
               }
@@ -3753,6 +3787,7 @@ pending_approval_requests AS (
             updatedAt: row.updatedAt,
             ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
             ...(row.scheduledFor !== null ? { scheduledFor: row.scheduledFor } : {}),
+            ...(row.recurrence !== null ? { recurrence: row.recurrence } : {}),
           };
           if (row.attachments !== null) {
             Object.assign(message, { attachments: row.attachments });

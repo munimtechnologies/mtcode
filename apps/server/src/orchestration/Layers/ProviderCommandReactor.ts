@@ -3,6 +3,7 @@ import {
   CommandId,
   EventId,
   isCorrectionMessage,
+  MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -62,6 +63,7 @@ import {
 } from "../../textGeneration/ThreadTitleContext.ts";
 import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
 import { findNextDueQueuedTurn, nextQueuedTurnWakeMs } from "../turnQueueScheduling.ts";
+import { nextScheduledSendOccurrence } from "@t3tools/shared/scheduledSend";
 import {
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
@@ -1694,6 +1696,54 @@ const make = Effect.gen(function* () {
     scheduledTurnWakeups.set(threadId, fiber);
   });
 
+  // A repeating send re-queues itself as a fresh message once this occurrence
+  // is handed to the provider. Only text and context repeat; attachments do not.
+  const enqueueNextRecurringSend = Effect.fn("enqueueNextRecurringSend")(function* (
+    row: ProjectionQueuedTurns.ProjectionQueuedTurn,
+    nowMs: number,
+  ) {
+    if (row.recurrence === null || row.scheduledFor === null) return;
+    const scheduledFor = nextScheduledSendOccurrence(row.scheduledFor, row.recurrence, nowMs);
+    if (scheduledFor === null) {
+      yield* Effect.logWarning("scheduled send recurrence ended: no next occurrence", {
+        threadId: row.threadId,
+        messageId: row.messageId,
+        recurrence: row.recurrence,
+      });
+      return;
+    }
+    const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
+      threadId: row.threadId,
+      messageId: row.messageId,
+    });
+    if (Option.isNone(turnStart)) return;
+    const commandId = yield* serverCommandId("recurring-send");
+    const messageId = yield* crypto.randomUUIDv4.pipe(Effect.map(MessageId.make));
+    const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.start",
+      commandId,
+      threadId: row.threadId,
+      message: {
+        messageId,
+        role: "user",
+        text: turnStart.value.message.text,
+        attachments: [],
+        ...(turnStart.value.message.context !== undefined
+          ? { context: turnStart.value.message.context }
+          : {}),
+      },
+      ...(row.modelSelection !== null ? { modelSelection: row.modelSelection } : {}),
+      ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
+      runtimeMode: row.runtimeMode,
+      interactionMode: row.interactionMode,
+      deliveryMode: "after-current",
+      scheduledFor,
+      recurrence: row.recurrence,
+      createdAt,
+    });
+  });
+
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
   ) {
@@ -1737,6 +1787,9 @@ const make = Effect.gen(function* () {
       queuedAt: next.queuedAt,
       createdAt,
     });
+    if (next.recurrence !== null && next.scheduledFor !== null) {
+      yield* enqueueNextRecurringSend(next, nowMs);
+    }
   });
   releaseScheduledTurn = (threadId) =>
     tryDispatchNextQueuedTurn(threadId).pipe(

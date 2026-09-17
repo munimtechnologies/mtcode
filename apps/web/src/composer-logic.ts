@@ -1,4 +1,4 @@
-import type { AssistantCitation } from "@t3tools/contracts";
+import type { AssistantCitation, ScheduledSendRecurrence } from "@t3tools/contracts";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
@@ -31,6 +31,8 @@ export type ComposerSubmissionIntent = "foreground" | "background";
 export interface ComposerSendOptions {
   /** Hold the message in the thread queue until this UTC instant. */
   readonly scheduledFor?: string;
+  /** Re-queue the message after each send at the same local time. Needs `scheduledFor`. */
+  readonly recurrence?: ScheduledSendRecurrence;
 }
 
 export interface ComposerTrigger {

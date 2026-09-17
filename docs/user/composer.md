@@ -46,6 +46,18 @@ the oldest queued message now. Change `thread.steerQueuedMessage` in
 **Settings → Keybindings** to use another shortcut. It leaves the current draft
 in the composer and waits if the agent needs an approval or an answer.
 
+## Schedule a message for later
+
+On web and desktop, the clock button beside Send holds the message on the server until the
+date and time you pick. It appears at the end of the conversation as a queued bubble that shows
+its send time, and it goes out then even if you close the app. If the agent is busy at that
+moment, it goes out when the current turn ends. Cancel on the bubble moves it back out of the
+queue.
+
+Choose a repeat (daily, weekdays, weekly, or monthly) to send the same message again at the same
+local time. Each occurrence is queued when the previous one goes out; cancelling the queued
+occurrence ends the series. Attachments are not repeated.
+
 ## Queue messages offline on mobile
 
 Mobile keeps local copies of draft attachments, so you can preview them and queue

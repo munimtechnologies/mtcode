@@ -13,7 +13,10 @@ import type {
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
-import { formatScheduledSendLabel } from "@t3tools/shared/scheduledSend";
+import {
+  formatScheduledSendLabel,
+  formatScheduledSendRepeatLabel,
+} from "@t3tools/shared/scheduledSend";
 import {
   parseComposerContextHref,
   collectComposerContextReferences,
@@ -1600,7 +1603,11 @@ function renderFeedEntry(
               <>
                 <Text className="font-t3-medium text-xs text-foreground-muted">
                   {message.scheduledFor !== undefined
-                    ? `Scheduled for ${formatScheduledSendLabel(message.scheduledFor)}`
+                    ? `${
+                        message.recurrence
+                          ? `${formatScheduledSendRepeatLabel(message.recurrence.repeat)} · `
+                          : ""
+                      }Scheduled for ${formatScheduledSendLabel(message.scheduledFor)}`
                     : "Queued"}
                 </Text>
                 <Pressable
