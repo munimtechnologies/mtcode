@@ -88,7 +88,6 @@ export function useNewThreadHandler() {
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
       const projects = readProjects();
-      const targetServerConfig = environmentServerConfigs.get(projectRef.environmentId);
       const {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
@@ -160,6 +159,7 @@ export function useNewThreadHandler() {
               ?.connection.phase,
           ),
       });
+      const targetServerConfig = environmentServerConfigs.get(projectRef.environmentId);
       const project =
         projects.find(
           (candidate) =>

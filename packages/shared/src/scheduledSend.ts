@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off -- Wall-clock scheduling math on user-chosen send times; callers pass the current instant in.
 /** Pure helpers for scheduled sends, shared by the web and mobile clients. */
 
 export function resolveScheduledSendInstant(

@@ -133,6 +133,7 @@ export interface ProviderServiceShape {
   readonly uploadFeedback: (
     input: ProviderUploadFeedbackInput,
   ) => Effect.Effect<ProviderUploadFeedbackResult, ProviderServiceError>;
+  /**
    * Create provider-native continuation state for a new thread. The caller
    * passes the returned cursor to startSession for the destination thread.
    */

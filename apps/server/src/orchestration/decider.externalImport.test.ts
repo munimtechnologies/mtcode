@@ -119,3 +119,6 @@ it.layer(NodeServices.layer)("thread import decider", (it) => {
         threadId,
         activity: { kind: "tool.completed", turnId },
       });
+    }),
+  );
+});

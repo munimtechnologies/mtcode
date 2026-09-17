@@ -3236,6 +3236,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
           : mapCodexRuntimeError(input.threadId, "feedback/upload", cause),
+      ),
+    );
   const forkThread: NonNullable<CodexAdapterShape["forkThread"]> = (threadId, throughTurnId) =>
     Effect.gen(function* () {
       const session = yield* requireSession(threadId);

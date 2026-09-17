@@ -55,6 +55,8 @@ export interface SettingsSearchItem {
   readonly windowsOnly?: boolean;
   readonly cloudOnly?: boolean;
   readonly environmentOnly?: boolean;
+  // Its row only renders on the primary settings page, not under environment defaults.
+  readonly primaryOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
   readonly localEnvironmentOnly?: boolean;

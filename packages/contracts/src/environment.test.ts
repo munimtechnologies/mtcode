@@ -61,6 +61,8 @@ describe("ExecutionEnvironmentDescriptor", () => {
         homeDirectory: "/Users/me",
       }).homeDirectory,
     ).toBe("/Users/me");
+  });
+
   it("preserves the native Pi external-thread capability", () => {
     expect(
       decodeDescriptor({

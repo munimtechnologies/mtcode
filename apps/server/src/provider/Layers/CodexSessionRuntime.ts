@@ -265,6 +265,7 @@ export interface CodexPluginMentionCandidate {
   readonly installed: boolean;
   readonly enabled: boolean;
   readonly displayName?: string | null | undefined;
+}
 function firstVisibleCodexUserMessage(
   turns: CodexRpc.ClientRequestResponsesByMethod["thread/fork"]["thread"]["turns"],
 ): string | undefined {
@@ -434,7 +435,7 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedError<
   }
 }
 
-export class CodexSessionRuntimeForkHistoryMissingError extends Schema.TaggedErrorClass<CodexSessionRuntimeForkHistoryMissingError>()(
+export class CodexSessionRuntimeForkHistoryMissingError extends Schema.TaggedError<CodexSessionRuntimeForkHistoryMissingError>()(
   "CodexSessionRuntimeForkHistoryMissingError",
   {
     threadId: Schema.String,

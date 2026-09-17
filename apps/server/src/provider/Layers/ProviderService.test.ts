@@ -276,6 +276,7 @@ function makeFakeCodexAdapter(
     Effect.sync(() => {
       sessions.clear();
     }),
+  );
   const forkThread = vi.fn((threadId: ThreadId, throughTurnId?: TurnId) =>
     Effect.succeed({
       resumeCursor: {

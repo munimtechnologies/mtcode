@@ -4717,6 +4717,11 @@ it.layer(makeProjectionPipelinePrefixedTestLayer("t3-import-turn-anchor-test-"))
           WHERE thread_id = ${threadId}
         `;
         assert.deepEqual(threadRows, [{ latestTurnId: "turn-import-anchor" }]);
+      }),
+    );
+  },
+);
+
 it.layer(makeProjectionPipelinePrefixedTestLayer("t3-branch-turn-anchor-test-"))(
   "OrchestrationProjectionPipeline branch turn anchors",
   (it) => {

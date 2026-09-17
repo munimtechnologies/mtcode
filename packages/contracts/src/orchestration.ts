@@ -1538,6 +1538,8 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   deliveryMode: Schema.optional(ThreadTurnDeliveryMode),
   scheduledFor: Schema.optional(IsoDateTime),
   recurrence: Schema.optional(ScheduledSendRecurrence),
+  /** Native Pi external threads: the turn takes over a session the Pi CLI already owns. */
+  externalResume: Schema.optional(Schema.Literal("takeover")),
   createdAt: IsoDateTime,
 });
 
@@ -1559,7 +1561,6 @@ export const ThreadMessageCorrectCommand = Schema.Struct({
   replacementText: Schema.String,
   modelSelection: Schema.optional(ModelSelection),
   streamingBehavior: Schema.optional(Schema.Literals(["steer", "followUp"])),
-  externalResume: Schema.optional(Schema.Literal("takeover")),
   createdAt: IsoDateTime,
 });
 
@@ -2855,7 +2856,7 @@ export const ExternalConversationImportResult = Schema.Struct({
 });
 export type ExternalConversationImportResult = typeof ExternalConversationImportResult.Type;
 
-export class ExternalConversationImportError extends Schema.TaggedErrorClass<ExternalConversationImportError>()(
+export class ExternalConversationImportError extends Schema.TaggedError<ExternalConversationImportError>()(
   "ExternalConversationImportError",
   {
     reason: Schema.Literals([

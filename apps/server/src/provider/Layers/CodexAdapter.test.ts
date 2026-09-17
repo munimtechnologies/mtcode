@@ -190,6 +190,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   uploadFeedback(reason?: string) {
     return Effect.promise(() => this.uploadFeedbackImpl(reason));
+  }
   forkThread(throughTurnId?: TurnId) {
     return Effect.promise(() => this.forkThreadImpl(throughTurnId));
   }

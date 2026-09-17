@@ -659,6 +659,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       });
       return events;
+    }
     case "thread.branch": {
       const sourceThread = yield* requireThread({
         readModel,

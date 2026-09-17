@@ -54,7 +54,7 @@ export class SelfHostedPushNotifications extends Context.Service<
   }
 >()("t3/notifications/SelfHostedPushNotifications") {}
 
-export class SelfHostedPushNotificationError extends Schema.TaggedErrorClass<SelfHostedPushNotificationError>()(
+export class SelfHostedPushNotificationError extends Schema.TaggedError<SelfHostedPushNotificationError>()(
   "SelfHostedPushNotificationError",
   { operation: Schema.String, cause: Schema.Defect() },
 ) {}

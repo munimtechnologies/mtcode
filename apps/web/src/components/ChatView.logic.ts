@@ -98,6 +98,8 @@ export function shoulderTabReserve(overlay: HTMLElement): number {
   return Math.max(
     0,
     Math.round(surface.getBoundingClientRect().top - tab.getBoundingClientRect().top),
+  );
+}
 export function isQueuedSendBlocked(input: {
   activeEnvironmentUnavailable: boolean;
   clientSettingsHydrated: boolean;

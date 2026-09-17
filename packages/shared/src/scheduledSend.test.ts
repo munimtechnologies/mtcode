@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+// @effect-diagnostics globalDate:off -- Fixed instants keep the scheduling assertions deterministic.
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   formatScheduledSendLabel,

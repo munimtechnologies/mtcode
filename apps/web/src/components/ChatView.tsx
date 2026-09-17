@@ -10092,6 +10092,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       if (isServerThread && activeServerThread && threadHasStarted(activeServerThread)) {
         return null;
+      }
       if (!threadAllows(activeThread, "changeModel")) {
         return "This thread's backing source controls its model.";
       }

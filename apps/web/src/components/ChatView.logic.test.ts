@@ -771,6 +771,9 @@ describe("shoulderTabReserve", () => {
     expect(shoulderTabReserve(overlay)).toBe(28);
     elements.set(".chat-composer-tasks-tab", elementAt(100));
     expect(shoulderTabReserve(overlay)).toBe(0);
+  });
+});
+
 describe("takeover retry identity", () => {
   const identity = createTakeoverRetryIdentity({
     threadKey: "environment-local:thread-1",

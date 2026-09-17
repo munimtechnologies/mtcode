@@ -6,6 +6,7 @@ import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopLifecycle from "../../app/DesktopLifecycle.ts";
 import * as DesktopShutdown from "../../app/DesktopShutdown.ts";
 import * as DesktopState from "../../app/DesktopState.ts";
+import * as DesktopTray from "../../app/DesktopTray.ts";
 import * as ElectronApp from "../../electron/ElectronApp.ts";
 import * as ElectronTheme from "../../electron/ElectronTheme.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
@@ -23,6 +24,7 @@ const unusedLifecycleRuntimeLayer = Layer.mergeAll(
       {} as DesktopEnvironment.DesktopEnvironment["Service"],
     ),
   ),
+  Layer.mock(DesktopTray.DesktopTray, {}),
   Layer.mock(DesktopWindow.DesktopWindow, {}),
   Layer.mock(ElectronApp.ElectronApp, {}),
   Layer.mock(ElectronTheme.ElectronTheme, {}),

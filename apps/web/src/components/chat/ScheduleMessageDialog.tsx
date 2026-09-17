@@ -1,3 +1,4 @@
+import type { ScheduledSendRecurrence, ScheduledSendRepeat } from "@t3tools/contracts";
 import { CalendarClockIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -21,16 +22,21 @@ import {
 export function ScheduleMessageDialog(props: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onSchedule: (scheduledFor: string) => void;
+  readonly onSchedule: (submission: {
+    readonly scheduledFor: string;
+    readonly recurrence: ScheduledSendRecurrence | null;
+  }) => void;
 }) {
   const { open, onOpenChange, onSchedule } = props;
   const [localDateTime, setLocalDateTime] = useState(() => defaultScheduledMessageInputValue());
+  const [repeat, setRepeat] = useState<ScheduledSendRepeat | "never">("never");
   const [error, setError] = useState<string | null>(null);
   const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
 
   useEffect(() => {
     if (!open) return;
     setLocalDateTime(defaultScheduledMessageInputValue());
+    setRepeat("never");
     setError(null);
   }, [open]);
 
@@ -40,7 +46,10 @@ export function ScheduleMessageDialog(props: {
       setError(result.error ?? "Choose a valid date and time.");
       return;
     }
-    onSchedule(result.scheduledFor);
+    onSchedule({
+      scheduledFor: result.scheduledFor,
+      recurrence: repeat === "never" ? null : { repeat, timezone: timeZone },
+    });
     onOpenChange(false);
   };
 

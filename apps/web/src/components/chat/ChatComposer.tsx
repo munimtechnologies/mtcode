@@ -31,7 +31,7 @@ import type {
   ServerProvider,
   ThreadId,
   SnapShotSource,
-  type ScheduledSendRecurrence,
+  ScheduledSendRecurrence,
 } from "@t3tools/contracts";
 import {
   ProviderDriverKind,

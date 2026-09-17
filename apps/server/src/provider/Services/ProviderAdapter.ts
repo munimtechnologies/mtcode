@@ -158,6 +158,7 @@ export interface ProviderAdapterShape<TError> {
   readonly uploadFeedback?: (
     input: ProviderUploadFeedbackInput,
   ) => Effect.Effect<ProviderUploadFeedbackResult, TError>;
+  /**
    * Fork provider-native conversation history. Native forks retain structured
    * items (including tool calls and tool results) that cannot be reconstructed
    * from T3's projected chat messages.

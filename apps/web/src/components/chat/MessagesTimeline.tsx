@@ -50,6 +50,8 @@ const NOOP_OPEN_AGENTS = () => {};
 const EMPTY_QUEUED_MESSAGES: ReadonlyArray<QueuedComposerMessage> = [];
 const NOOP_QUEUED_MESSAGE_ACTION = (_id: string) => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
+const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
+const EMPTY_REVERT_TURN_COUNTS: ReadonlyMap<MessageId, number> = new Map();
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 const NOOP_FORK_ASSISTANT_MESSAGE = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
@@ -461,8 +463,8 @@ interface MessagesTimelineProps {
   onMessageEditDraftChange?: (draft: string) => void;
   onSaveMessageEdit?: (draft: string) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
-  revertTurnCountByUserMessageId: Map<MessageId, number>;
-  onRevertUserMessage: (messageId: MessageId) => void;
+  revertTurnCountByUserMessageId?: ReadonlyMap<MessageId, number>;
+  onRevertUserMessage?: (messageId: MessageId) => void;
   onForkAssistantMessage?: (messageId: MessageId) => void;
   canForkThread?: boolean;
   isForkingThread?: boolean;
@@ -545,8 +547,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onMessageEditDraftChange = () => {},
   onSaveMessageEdit = () => {},
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
-  revertTurnCountByUserMessageId,
-  onRevertUserMessage,
+  revertTurnCountByUserMessageId = EMPTY_REVERT_TURN_COUNTS,
+  onRevertUserMessage = NOOP_REVERT_USER_MESSAGE,
   onForkAssistantMessage = NOOP_FORK_ASSISTANT_MESSAGE,
   canForkThread = false,
   isForkingThread = false,
