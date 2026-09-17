@@ -8,7 +8,7 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
-import { hasServerUpdateContinuationMarker } from "../serverUpdateContinuation.ts";
+import { readServerUpdateContinuationTurnId } from "../serverUpdateContinuation.ts";
 import {
   SessionStartupReconciler,
   type SessionStartupReconcilerShape,
@@ -58,6 +58,13 @@ const planForOrphan = (input: {
   if (input.thread.session?.providerName === "pi") {
     return "error";
   }
+  // The user already stopped this Turn: `thread.turn-interrupt-requested`
+  // projects the Turn as interrupted at once, but the provider's
+  // acknowledgement that settles the session never arrived before the process
+  // went away. Settle it, and do not start work the user just cancelled.
+  if (input.thread.latestTurn?.state === "interrupted") {
+    return "interrupt";
+  }
   if (input.thread.goal?.status === "active" || input.thread.hasQueuedTurns === true) {
     return "interrupt";
   }
@@ -76,15 +83,28 @@ const makeSessionStartupReconciler = Effect.gen(function* () {
   // belongs to the server-update continuation pass in serverRuntimeStartup,
   // which runs after this sweep; settling or resuming it here would either
   // continue it twice or take it away from that pass.
+  //
+  // "Marked" means the marker holds a Turn id, not that the key exists:
+  // ProviderService writes `continueAfterServerUpdate: null` into the binding
+  // on every sendTurn and stopSession, so nearly every binding carries the key.
+  // Deferring on key presence handed every orphan to the server-update pass,
+  // which (with its opt-in setting off, the default) settles it as an error;
+  // no thread resumed after a quit, update install or crash. A marker for a
+  // superseded Turn is stale and the server-update pass ignores it too.
   const readResumeState = (thread: OrchestrationThreadShell) =>
     sessionDirectory.getBinding(thread.id).pipe(
       Effect.map(
         Option.match({
           onNone: () => ({ hasResumeCursor: false, continuationMarked: false }),
-          onSome: (binding) => ({
-            hasResumeCursor: binding.resumeCursor != null,
-            continuationMarked: hasServerUpdateContinuationMarker(binding.runtimePayload),
-          }),
+          onSome: (binding) => {
+            const markedTurnId = readServerUpdateContinuationTurnId(binding.runtimePayload);
+            const activeTurnId = thread.session?.activeTurnId ?? null;
+            return {
+              hasResumeCursor: binding.resumeCursor != null,
+              continuationMarked:
+                markedTurnId !== null && (activeTurnId === null || markedTurnId === activeTurnId),
+            };
+          },
         }),
       ),
       Effect.catchCause((cause) =>

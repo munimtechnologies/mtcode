@@ -38,6 +38,10 @@ function makeThreadShell(
   extras?: {
     readonly goal?: { readonly status: "active" | "completed" | "blocked" };
     readonly hasQueuedTurns?: boolean;
+    readonly latestTurn?: {
+      readonly turnId: TurnId;
+      readonly state: "running" | "interrupted" | "completed" | "error";
+    };
   },
 ) {
   return {
@@ -67,6 +71,8 @@ describe("SessionStartupReconciler", () => {
     readonly resumableThreadIds?: ReadonlyArray<ThreadId>;
     /** Threads the server marked to continue after a self-update. */
     readonly continuationMarkedThreadIds?: ReadonlyArray<ThreadId>;
+    /** Exact persisted bindings, as ProviderService writes them. Wins over the sets above. */
+    readonly bindings?: ReadonlyArray<ProviderRuntimeBinding>;
     readonly dispatchImplementation?: () => ReturnType<
       OrchestrationEngineService["Service"]["dispatch"]
     >;
@@ -100,21 +106,26 @@ describe("SessionStartupReconciler", () => {
 
     const resumable = new Set(input.resumableThreadIds ?? []);
     const continuationMarked = new Set(input.continuationMarkedThreadIds ?? []);
+    const exactBindings = new Map(
+      (input.bindings ?? []).map((binding) => [binding.threadId, binding]),
+    );
     const sessionDirectory: Partial<ProviderSessionDirectoryShape> = {
       getBinding: (threadId) =>
         Effect.succeed(
-          resumable.has(threadId) || continuationMarked.has(threadId)
-            ? Option.some({
-                threadId,
-                provider: "codex",
-                ...(resumable.has(threadId)
-                  ? { resumeCursor: { threadId: `provider-${threadId}` } }
-                  : {}),
-                ...(continuationMarked.has(threadId)
-                  ? { runtimePayload: { continueAfterServerUpdate: `turn-${threadId}` } }
-                  : {}),
-              } as ProviderRuntimeBinding)
-            : Option.none(),
+          exactBindings.has(threadId)
+            ? Option.some(exactBindings.get(threadId)!)
+            : resumable.has(threadId) || continuationMarked.has(threadId)
+              ? Option.some({
+                  threadId,
+                  provider: "codex",
+                  ...(resumable.has(threadId)
+                    ? { resumeCursor: { threadId: `provider-${threadId}` } }
+                    : {}),
+                  ...(continuationMarked.has(threadId)
+                    ? { runtimePayload: { continueAfterServerUpdate: `turn-${threadId}` } }
+                    : {}),
+                } as ProviderRuntimeBinding)
+              : Option.none(),
         ),
       upsert: () => unsupported(),
       getProvider: () => unsupported(),
@@ -221,9 +232,7 @@ describe("SessionStartupReconciler", () => {
   it("settles a resumable Pi session as an error instead of resuming it", async () => {
     const threadId = ThreadId.make("thread-orphan-pi");
     const harness = createHarness({
-      threads: [
-        makeThreadShell(threadId, { ...runningSession(threadId), providerName: "pi" }),
-      ],
+      threads: [makeThreadShell(threadId, { ...runningSession(threadId), providerName: "pi" })],
       resumableThreadIds: [threadId],
     });
 
@@ -378,5 +387,182 @@ describe("SessionStartupReconciler", () => {
       command.type === "thread.session.set" ? [command.threadId] : [],
     );
     expect(attemptedThreadIds).toEqual([firstId, secondId]);
+  });
+  // Regression: bindings as ProviderService actually persists them. sendTurn and
+  // stopAll write `continueAfterServerUpdate: null`; the reconciler treated the
+  // key's presence as a server-update mark and deferred every orphan to the
+  // server-update pass, which settled it as "did not survive a server restart".
+  const claudeResumeCursor = (threadId: ThreadId) => ({
+    threadId,
+    resume: `claude-session-${threadId}`,
+    resumeSessionAt: `message-${threadId}`,
+    turnCount: 3,
+  });
+
+  function crashedBinding(
+    threadId: ThreadId,
+    provider: "claudeAgent" | "codex",
+  ): ProviderRuntimeBinding {
+    // Last write before a hard kill: ProviderService.sendTurn admitted the turn.
+    return {
+      threadId,
+      provider,
+      providerInstanceId: provider,
+      status: "running",
+      resumeCursor:
+        provider === "codex" ? { threadId: `codex-${threadId}` } : claudeResumeCursor(threadId),
+      runtimePayload: {
+        cwd: "/tmp/project",
+        model: "model",
+        activeTurnId: `turn-${threadId}`,
+        continueAfterServerUpdate: null,
+        continueAfterServerUpdatePrepared: null,
+        lastRuntimeEvent: "provider.sendTurn",
+        lastRuntimeEventAt: now,
+      },
+    } as unknown as ProviderRuntimeBinding;
+  }
+
+  function gracefullyStoppedBinding(threadId: ThreadId): ProviderRuntimeBinding {
+    // Last write of a graceful quit (Cmd-Q, update install): ProviderService's
+    // stopAll finalizer marks every binding stopped and clears its active turn,
+    // but keeps the resume cursor. The projection is not settled on the way out.
+    return {
+      threadId,
+      provider: "claudeAgent",
+      providerInstanceId: "claudeAgent",
+      status: "stopped",
+      resumeCursor: claudeResumeCursor(threadId),
+      runtimePayload: {
+        cwd: "/tmp/project",
+        model: "claude-opus-5",
+        activeTurnId: null,
+        continueAfterServerUpdate: null,
+        continueAfterServerUpdatePrepared: null,
+        lastRuntimeEvent: "provider.stopAll",
+        lastRuntimeEventAt: now,
+      },
+    } as unknown as ProviderRuntimeBinding;
+  }
+
+  function expectSettledInterruptedThenResumed(
+    dispatched: ReadonlyArray<OrchestrationCommand>,
+    threadId: ThreadId,
+  ) {
+    expect(dispatched.map((command) => command.type)).toEqual([
+      "thread.session.set",
+      "thread.turn.start",
+    ]);
+    const settle = dispatched[0]!;
+    if (settle.type === "thread.session.set") {
+      expect(settle.threadId).toBe(threadId);
+      expect(settle.session.status).toBe("interrupted");
+      expect(settle.session.activeTurnId).toBeNull();
+    }
+    const resume = dispatched[1]!;
+    if (resume.type === "thread.turn.start") {
+      expect(resume.threadId).toBe(threadId);
+      expect(resume.message.text).toContain("Continue exactly where you left off");
+    }
+  }
+
+  it.each(["claudeAgent", "codex"] as const)(
+    "resumes a %s turn that was running when the server crashed",
+    async (provider) => {
+      const threadId = ThreadId.make(`thread-crashed-${provider}`);
+      const harness = createHarness({
+        threads: [
+          makeThreadShell(
+            threadId,
+            { ...runningSession(threadId), providerName: provider },
+            { latestTurn: { turnId: TurnId.make(`turn-${threadId}`), state: "running" } },
+          ),
+        ],
+        bindings: [crashedBinding(threadId, provider)],
+      });
+
+      await runReconcile();
+
+      expectSettledInterruptedThenResumed(harness.dispatched, threadId);
+    },
+  );
+
+  it("resumes a turn that was running when the app quit gracefully for an update install", async () => {
+    const threadId = ThreadId.make("thread-graceful-quit");
+    const harness = createHarness({
+      threads: [
+        makeThreadShell(threadId, runningSession(threadId), {
+          latestTurn: { turnId: TurnId.make(`turn-${threadId}`), state: "running" },
+        }),
+      ],
+      bindings: [gracefullyStoppedBinding(threadId)],
+    });
+
+    await runReconcile();
+
+    expectSettledInterruptedThenResumed(harness.dispatched, threadId);
+  });
+
+  it("does not resume a turn the user interrupted before the app went away", async () => {
+    const threadId = ThreadId.make("thread-user-interrupted");
+    const harness = createHarness({
+      threads: [
+        makeThreadShell(threadId, runningSession(threadId), {
+          latestTurn: { turnId: TurnId.make(`turn-${threadId}`), state: "interrupted" },
+        }),
+      ],
+      bindings: [crashedBinding(threadId, "claudeAgent")],
+    });
+
+    await runReconcile();
+
+    expect(harness.dispatched.map((command) => command.type)).toEqual(["thread.session.set"]);
+    const settle = harness.dispatched[0]!;
+    if (settle.type === "thread.session.set") {
+      expect(settle.session.status).toBe("interrupted");
+      expect(settle.session.lastError).toBeNull();
+    }
+  });
+
+  it("resumes rather than defers when the server-update marker names a superseded turn", async () => {
+    const threadId = ThreadId.make("thread-stale-marker");
+    const binding = crashedBinding(threadId, "claudeAgent");
+    const harness = createHarness({
+      threads: [makeThreadShell(threadId, runningSession(threadId))],
+      bindings: [
+        {
+          ...binding,
+          runtimePayload: {
+            ...(binding.runtimePayload as Record<string, unknown>),
+            continueAfterServerUpdate: "turn-from-an-earlier-update",
+          },
+        } as ProviderRuntimeBinding,
+      ],
+    });
+
+    await runReconcile();
+
+    expectSettledInterruptedThenResumed(harness.dispatched, threadId);
+  });
+
+  it("still defers a thread whose server-update marker names its running turn", async () => {
+    const threadId = ThreadId.make("thread-live-marker");
+    const binding = gracefullyStoppedBinding(threadId);
+    const harness = createHarness({
+      threads: [makeThreadShell(threadId, runningSession(threadId))],
+      bindings: [
+        {
+          ...binding,
+          runtimePayload: {
+            ...(binding.runtimePayload as Record<string, unknown>),
+            continueAfterServerUpdate: `turn-${threadId}`,
+          },
+        } as ProviderRuntimeBinding,
+      ],
+    });
+
+    await runReconcile();
+
+    expect(harness.dispatch).not.toHaveBeenCalled();
   });
 });

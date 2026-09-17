@@ -6,6 +6,10 @@ import { TurnId } from "@t3tools/contracts";
  * startup pass in `serverRuntimeStartup.ts` owns threads carrying it; the
  * generic resume-on-restart reconciler must leave them alone so a thread is
  * not continued twice.
+ *
+ * ProviderService also writes the key as `null` on every sendTurn and
+ * stopSession to clear it, so key presence is not a mark. Use
+ * `readServerUpdateContinuationTurnId` to ask whether a thread is marked.
  */
 export const SERVER_UPDATE_CONTINUATION_KEY = "continueAfterServerUpdate";
 

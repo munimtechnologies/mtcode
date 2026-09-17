@@ -28,7 +28,6 @@ import { ServerActivation } from "./serverActivation.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 
-
 // Batch I2 stamps every server-update continuation with a fresh operation id so the Pi
 // supervisor can key admission on it. It is provider-level correlation, not a user message
 // (docs/adr/0005), so assertions validate its shape and compare the rest of the send.
@@ -312,9 +311,9 @@ it.effect.each(
       yield* Deferred.await(continuationCleared);
 
       assert.deepStrictEqual(
-        sends.map(withoutContinuationOperationId).toSorted((left, right) =>
-          String(left.threadId).localeCompare(String(right.threadId)),
-        ),
+        sends
+          .map(withoutContinuationOperationId)
+          .toSorted((left, right) => String(left.threadId).localeCompare(String(right.threadId))),
         [
           { threadId: codex.id, continuation: true, interactionMode: "default" },
           {
@@ -1010,4 +1009,56 @@ it.effect("settles failed opt-in recovery without retrying the provider turn", (
       continueAfterServerUpdatePrepared: null,
     });
   }),
+);
+
+it.effect(
+  "leaves a thread SessionStartupReconciler already settled for its resume turn alone",
+  () => {
+    // SessionStartupReconciler runs first: it settles the orphan as interrupted
+    // (activeTurnId cleared) and dispatches the continuation turn. This pass must
+    // not then settle the same thread as an error while the binding still holds
+    // the null server-update marker that sendTurn and stopAll write.
+    const resumed = makeThread("thread-resumed-by-reconciler", "interrupted");
+    const dispatched: OrchestrationCommand[] = [];
+    const bindingReads: ThreadId[] = [];
+    return runReconciliation({
+      threads: [resumed],
+      directory: {
+        getBinding: (candidate) =>
+          Effect.sync(() => bindingReads.push(candidate)).pipe(
+            Effect.as(
+              Option.some({
+                threadId: candidate,
+                provider: ProviderDriverKind.make("claudeAgent"),
+                providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+                status: "stopped" as const,
+                resumeCursor: { resume: "claude-session" },
+                runtimePayload: {
+                  activeTurnId: null,
+                  continueAfterServerUpdate: null,
+                  continueAfterServerUpdatePrepared: null,
+                  lastRuntimeEvent: "provider.stopAll",
+                },
+              }),
+            ),
+          ),
+        upsert: () => Effect.die("unused"),
+        recordImportedTranscript: () => Effect.die("unused"),
+        getProvider: () => Effect.die("unused"),
+        listThreadIds: () => Effect.die("unused"),
+        listBindings: () => Effect.succeed([]),
+      },
+      dispatch: (command) =>
+        Effect.sync(() => dispatched.push(command)).pipe(
+          Effect.as({ sequence: dispatched.length }),
+        ),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(bindingReads, []);
+          assert.deepStrictEqual(dispatched, []);
+        }),
+      ),
+    );
+  },
 );
