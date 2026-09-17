@@ -254,6 +254,7 @@ import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 
 import { SkillInlineText } from "./SkillInlineText";
+import { formatScheduledSendLabel, formatScheduledSendRepeatLabel } from "./scheduleMessage";
 import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
@@ -2168,7 +2169,17 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         )}
       >
         <div className="flex shrink-0 items-center gap-2">
-          {isQueued ? <span className="text-muted-foreground">Queued</span> : null}
+          {isQueued ? (
+            <span className="text-muted-foreground">
+              {row.message.scheduledFor !== undefined
+                ? `${
+                    row.message.recurrence
+                      ? `${formatScheduledSendRepeatLabel(row.message.recurrence.repeat)} · `
+                      : ""
+                  }Scheduled for ${formatScheduledSendLabel(row.message.scheduledFor)}`
+                : "Queued"}
+            </span>
+          ) : null}
           {isEdited ? <span className="text-muted-foreground">Edited</span> : null}
           <Tooltip>
             <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

@@ -8,6 +8,7 @@ import {
   OrchestrationProposedPlanId,
   ProviderInteractionMode,
   RuntimeMode,
+  ScheduledSendRecurrence,
   ThreadId,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
@@ -35,6 +36,9 @@ export const ProjectionQueuedTurn = Schema.Struct({
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   queuedAt: IsoDateTime,
+  // Earliest instant the queue may release this turn; null means as soon as the thread is free.
+  scheduledFor: Schema.NullOr(IsoDateTime),
+  recurrence: Schema.NullOr(ScheduledSendRecurrence),
   eventSequence: NonNegativeInt,
   status: ProjectionQueuedTurnStatus,
 });
@@ -73,6 +77,7 @@ export class ProjectionQueuedTurnRepository extends Context.Service<
 const ProjectionQueuedTurnDbRow = Schema.Struct({
   ...ProjectionQueuedTurn.fields,
   modelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+  recurrence: Schema.NullOr(Schema.fromJsonString(ScheduledSendRecurrence)),
 });
 
 export const make = Effect.gen(function* () {
@@ -93,6 +98,8 @@ export const make = Effect.gen(function* () {
         source_proposed_plan_thread_id,
         source_proposed_plan_id,
         queued_at,
+        scheduled_for,
+        recurrence_json,
         event_sequence,
         status
       ) VALUES (
@@ -107,6 +114,8 @@ export const make = Effect.gen(function* () {
         ${row.sourceProposedPlanThreadId},
         ${row.sourceProposedPlanId},
         ${row.queuedAt},
+        ${row.scheduledFor},
+        ${row.recurrence === null ? null : JSON.stringify(row.recurrence)},
         ${row.eventSequence},
         ${row.status}
       )
@@ -121,6 +130,8 @@ export const make = Effect.gen(function* () {
         source_proposed_plan_thread_id = excluded.source_proposed_plan_thread_id,
         source_proposed_plan_id = excluded.source_proposed_plan_id,
         queued_at = excluded.queued_at,
+        scheduled_for = excluded.scheduled_for,
+        recurrence_json = excluded.recurrence_json,
         event_sequence = excluded.event_sequence,
         status = excluded.status
     `,
@@ -177,6 +188,8 @@ export const make = Effect.gen(function* () {
         source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
         source_proposed_plan_id AS "sourceProposedPlanId",
         queued_at AS "queuedAt",
+        scheduled_for AS "scheduledFor",
+        recurrence_json AS "recurrence",
         event_sequence AS "eventSequence",
         status
       FROM projection_thread_turn_queue
@@ -201,6 +214,8 @@ export const make = Effect.gen(function* () {
         source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
         source_proposed_plan_id AS "sourceProposedPlanId",
         queued_at AS "queuedAt",
+        scheduled_for AS "scheduledFor",
+        recurrence_json AS "recurrence",
         event_sequence AS "eventSequence",
         status
       FROM projection_thread_turn_queue

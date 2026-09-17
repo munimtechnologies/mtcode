@@ -83,6 +83,9 @@ import Migration0058 from "./Migrations/056_ProjectionThreadsLastVisitedAt.ts";
 import Migration0059 from "./Migrations/069_SelfHostedPushDevices.ts";
 // Fork migration for native Pi lifecycle overrides (bdsqqq port).
 import Migration0060 from "./Migrations/071_PiExternalLifecycleOverrides.ts";
+// Fork-only: scheduled send time / recurrence on queued turns (KamiCode port).
+import Migration0061 from "./Migrations/066_ProjectionThreadTurnQueueScheduledFor.ts";
+import Migration0062 from "./Migrations/067_ProjectionThreadTurnQueueRecurrence.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -155,6 +158,8 @@ const migrationEntries = [
   [58, "ProjectionThreadsLastVisitedAt", Migration0058],
   [59, "SelfHostedPushDevices", Migration0059],
   [60, "PiExternalLifecycleOverrides", Migration0060],
+  [61, "ProjectionThreadTurnQueueScheduledFor", Migration0061],
+  [62, "ProjectionThreadTurnQueueRecurrence", Migration0062],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

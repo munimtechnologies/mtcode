@@ -829,7 +829,18 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               messages: thread.messages.map((entry) =>
-                entry.id === messageId ? { ...entry, deliveryState: "queued" as const } : entry,
+                entry.id === messageId
+                  ? {
+                      ...entry,
+                      deliveryState: "queued" as const,
+                      ...(payload.scheduledFor !== undefined
+                        ? { scheduledFor: payload.scheduledFor }
+                        : {}),
+                      ...(payload.recurrence !== undefined
+                        ? { recurrence: payload.recurrence }
+                        : {}),
+                    }
+                  : entry,
               ),
             }),
           };
@@ -851,7 +862,12 @@ export function projectEvent(
             threads: updateThread(nextBase.threads, payload.threadId, {
               messages: thread.messages.map((entry) => {
                 if (entry.id !== payload.messageId) return entry;
-                const { deliveryState: _dropped, ...delivered } = entry;
+                const {
+                  deliveryState: _dropped,
+                  scheduledFor: _released,
+                  recurrence: _repeats,
+                  ...delivered
+                } = entry;
                 return delivered;
               }),
             }),

@@ -11,6 +11,10 @@
       "types": "./src/delimitedPreview.ts",
       "import": "./src/delimitedPreview.ts"
     },
+    "./scheduledSend": {
+      "types": "./src/scheduledSend.ts",
+      "import": "./src/scheduledSend.ts"
+    },
     "./composerPullRequestMatches": {
       "types": "./src/composerPullRequestMatches.ts",
       "import": "./src/composerPullRequestMatches.ts"

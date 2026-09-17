@@ -128,6 +128,7 @@ import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
+  type ComposerSendOptions,
   type ComposerSubmissionIntent,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
@@ -6514,6 +6515,7 @@ export default function ChatView(props: ChatViewProps) {
   const supportsPinning = serverConfig?.environment.capabilities.threadPinning === true;
   const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsGoal = serverConfig?.environment.capabilities.threadGoal === true;
+  const supportsScheduledSend = serverConfig?.environment.capabilities.scheduledTurns === true;
   const nowMinute = useNowMinute();
   // One quantized clock for the usage-limit snooze offer, so its visibility
   // rule, its label and its snooze target can never disagree within a minute.
@@ -7972,6 +7974,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     /** A queued message being sent now instead of the live composer draft. */
     queuedMessage?: QueuedComposerMessage,
+    sendOptions?: ComposerSendOptions,
   ) => {
     e?.preventDefault();
     // Typed out in full rather than picked from the menu. Attachments or contexts
@@ -8463,9 +8466,12 @@ export default function ChatView(props: ChatViewProps) {
       );
       return;
     }
+    // A scheduled send skips the client-side queue: the server holds it durably
+    // until its time, so it must survive this client going away.
     if (
       !queuedMessage &&
       !directAnnotation &&
+      sendOptions?.scheduledFor === undefined &&
       phase === "running" &&
       activeThreadKey &&
       settings.followUpBehavior === "queue"
@@ -8962,6 +8968,13 @@ export default function ChatView(props: ChatViewProps) {
             : phase === "running" && threadAllows(activeThread, "followUp")
               ? { streamingBehavior: "followUp" as const }
               : {}),
+          ...(sendOptions?.scheduledFor !== undefined
+            ? {
+                deliveryMode: "after-current" as const,
+                scheduledFor: sendOptions.scheduledFor,
+                ...(sendOptions.recurrence ? { recurrence: sendOptions.recurrence } : {}),
+              }
+            : {}),
           createdAt: messageCreatedAt,
         },
       });
@@ -11132,7 +11145,10 @@ export default function ChatView(props: ChatViewProps) {
                             onPageScrollKeyUp={onComposerPageScrollKeyUp}
                             onPageScrollRelease={onComposerPageScrollRelease}
                             onCompactContext={onCompactContext}
-                            onSend={onSend}
+                            onSend={(event, intent, options) =>
+                              void onSend(event, intent, undefined, undefined, options)
+                            }
+                            canScheduleSend={supportsScheduledSend}
                             onInterrupt={onInterrupt}
                             onContinueInterruptedTurn={onContinueInterruptedTurn}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}

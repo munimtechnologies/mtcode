@@ -31,6 +31,7 @@ import type {
   ServerProvider,
   ThreadId,
   SnapShotSource,
+  type ScheduledSendRecurrence,
 } from "@t3tools/contracts";
 import {
   ProviderDriverKind,
@@ -72,6 +73,7 @@ import { createPortal, flushSync } from "react-dom";
 import {
   buildBuiltInSlashCommandItems,
   clampCollapsedComposerCursor,
+  type ComposerSendOptions,
   type ComposerSubmissionIntent,
   type ComposerTrigger,
   collapseExpandedComposerCursor,
@@ -984,6 +986,7 @@ import { useThreadShells } from "../../state/entities";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceTranscription } from "../../hooks/useVoiceTranscription";
 import { VoiceTranscriptionPanel } from "./VoiceTranscriptionPanel";
+import { ScheduleMessageDialog } from "./ScheduleMessageDialog";
 import { useVoiceSession } from "../voice/VoiceSession";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
@@ -1204,6 +1207,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onInterrupt: () => void;
   onContinueInterruptedTurn?: (() => void) | undefined;
   onImplementPlanInNewThread: () => void;
+  onScheduleMessage?: (() => void) | undefined;
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
@@ -1239,6 +1243,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         onInterrupt={props.onInterrupt}
         onContinueInterruptedTurn={props.onContinueInterruptedTurn}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+        onScheduleMessage={props.onScheduleMessage}
       />
     </>
   );
@@ -1446,7 +1451,13 @@ export interface ChatComposerProps {
 
   // Callbacks
   onCompactContext: () => void;
-  onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
+  onSend: (
+    e?: { preventDefault: () => void },
+    intent?: ComposerSubmissionIntent,
+    options?: ComposerSendOptions,
+  ) => void;
+  /** The active server holds scheduled turns, so the schedule affordance is shown. */
+  canScheduleSend?: boolean;
   onInterrupt: () => void;
   /** One-tap Continue after Stop: starts a Continuation Turn with no user message. */
   onContinueInterruptedTurn: () => void;
@@ -1563,6 +1574,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPageScrollRelease,
     onCompactContext,
     onSend,
+    canScheduleSend = false,
     onInterrupt,
     onContinueInterruptedTurn,
     onImplementPlanInNewThread,
@@ -3948,7 +3960,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposerAfterTranscription = useCallback(
-    (event?: { preventDefault: () => void }, intent: ComposerSubmissionIntent = "foreground") => {
+    (
+      event?: { preventDefault: () => void },
+      intent: ComposerSubmissionIntent = "foreground",
+      options?: ComposerSendOptions,
+    ) => {
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
@@ -3988,7 +4004,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           // ChatView reports its final composed-input preflight through the
           // composer handle before its first asynchronous send step.
           providerInputRejectedRef.current = false;
-          onSend(sendEvent, intent);
+          onSend(sendEvent, intent, options);
           return !providerInputRejectedRef.current;
         },
       });
@@ -4021,7 +4037,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [submitComposerAfterTranscription, voiceTranscriptionSendDisabled],
   );
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }, intent: ComposerSubmissionIntent = "foreground") => {
+    (
+      event?: { preventDefault: () => void },
+      intent: ComposerSubmissionIntent = "foreground",
+      options?: ComposerSendOptions,
+    ) => {
       if (voiceTranscription.status === "recording") {
         event?.preventDefault();
         if (voiceTranscriptionSendDisabled) return;
@@ -4032,7 +4052,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event?.preventDefault();
         return;
       }
-      submitComposerAfterTranscription(event, intent);
+      submitComposerAfterTranscription(event, intent, options);
     },
     [
       submitComposerAfterTranscription,
@@ -4042,6 +4062,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
   submitComposerRef.current = submitVoiceTranscript;
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const openScheduleDialog = useCallback(() => setScheduleDialogOpen(true), []);
+  const submitScheduledComposer = useCallback(
+    (submission: { scheduledFor: string; recurrence: ScheduledSendRecurrence | null }) =>
+      submitComposer(undefined, "foreground", {
+        scheduledFor: submission.scheduledFor,
+        ...(submission.recurrence ? { recurrence: submission.recurrence } : {}),
+      }),
+    [submitComposer],
+  );
   const submitCitationAndSend = useCallback(() => {
     const intent = composerSubmissionIntentForEnter({
       isMobileViewport,
@@ -7269,6 +7299,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onInterrupt={handleInterruptPrimaryAction}
                       onContinueInterruptedTurn={handleContinueInterruptedTurnPrimaryAction}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
+                      onScheduleMessage={
+                        canScheduleSend && !activePendingProgress ? openScheduleDialog : undefined
+                      }
                       compactDisabled={
                         resolvedCompactDisabled || noProviderAvailable || isSendBusy || isConnecting
                       }
@@ -7284,6 +7317,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
         </ComposerSurface.Main>
       </div>
+      <ScheduleMessageDialog
+        open={scheduleDialogOpen}
+        onOpenChange={setScheduleDialogOpen}
+        onSchedule={submitScheduledComposer}
+      />
     </form>
   );
 });

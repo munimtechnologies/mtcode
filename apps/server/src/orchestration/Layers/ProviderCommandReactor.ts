@@ -3,6 +3,7 @@ import {
   CommandId,
   EventId,
   isCorrectionMessage,
+  MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -27,17 +28,20 @@ import {
 } from "@t3tools/shared/goalContinuation";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -65,6 +69,8 @@ import {
   type ThreadTitleMessage,
 } from "../../textGeneration/ThreadTitleContext.ts";
 import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
+import { findNextDueQueuedTurn, nextQueuedTurnWakeMs } from "../turnQueueScheduling.ts";
+import { nextScheduledSendOccurrence } from "@t3tools/shared/scheduledSend";
 import {
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
@@ -1710,6 +1716,83 @@ const make = Effect.gen(function* () {
     },
   );
 
+  // One pending wake-up per thread for the earliest scheduled turn. Re-armed on
+  // every dispatch attempt so cancels and new schedules cannot leave a stale timer.
+  const scheduledTurnWakeups = new Map<ThreadId, Fiber.Fiber<void>>();
+  // Assigned once tryDispatchNextQueuedTurn exists; the two are mutually recursive.
+  let releaseScheduledTurn: (threadId: ThreadId) => Effect.Effect<void, never, Scope.Scope> = () =>
+    Effect.void;
+  const armScheduledTurnWakeup = Effect.fn("armScheduledTurnWakeup")(function* (
+    threadId: ThreadId,
+    wakeMs: number | null,
+    nowMs: number,
+  ) {
+    const previous = scheduledTurnWakeups.get(threadId);
+    if (previous !== undefined) {
+      scheduledTurnWakeups.delete(threadId);
+      yield* Fiber.interrupt(previous);
+    }
+    if (wakeMs === null) return;
+    const fiber = yield* Effect.sleep(Duration.millis(Math.max(0, wakeMs - nowMs))).pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          if (scheduledTurnWakeups.get(threadId) === fiber) scheduledTurnWakeups.delete(threadId);
+          return releaseScheduledTurn(threadId);
+        }),
+      ),
+      Effect.forkScoped,
+    );
+    scheduledTurnWakeups.set(threadId, fiber);
+  });
+
+  // A repeating send re-queues itself as a fresh message once this occurrence
+  // is handed to the provider. Only text and context repeat; attachments do not.
+  const enqueueNextRecurringSend = Effect.fn("enqueueNextRecurringSend")(function* (
+    row: ProjectionQueuedTurns.ProjectionQueuedTurn,
+    nowMs: number,
+  ) {
+    if (row.recurrence === null || row.scheduledFor === null) return;
+    const scheduledFor = nextScheduledSendOccurrence(row.scheduledFor, row.recurrence, nowMs);
+    if (scheduledFor === null) {
+      yield* Effect.logWarning("scheduled send recurrence ended: no next occurrence", {
+        threadId: row.threadId,
+        messageId: row.messageId,
+        recurrence: row.recurrence,
+      });
+      return;
+    }
+    const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
+      threadId: row.threadId,
+      messageId: row.messageId,
+    });
+    if (Option.isNone(turnStart)) return;
+    const commandId = yield* serverCommandId("recurring-send");
+    const messageId = yield* crypto.randomUUIDv4.pipe(Effect.map(MessageId.make));
+    const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.start",
+      commandId,
+      threadId: row.threadId,
+      message: {
+        messageId,
+        role: "user",
+        text: turnStart.value.message.text,
+        attachments: [],
+        ...(turnStart.value.message.context !== undefined
+          ? { context: turnStart.value.message.context }
+          : {}),
+      },
+      ...(row.modelSelection !== null ? { modelSelection: row.modelSelection } : {}),
+      ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
+      runtimeMode: row.runtimeMode,
+      interactionMode: row.interactionMode,
+      deliveryMode: "after-current",
+      scheduledFor,
+      recurrence: row.recurrence,
+      createdAt,
+    });
+  });
+
   const tryDispatchNextQueuedTurn = Effect.fn("tryDispatchNextQueuedTurn")(function* (
     threadId: ThreadId,
   ) {
@@ -1717,7 +1800,10 @@ const make = Effect.gen(function* () {
     if (rows.some((row) => row.status === "handoff")) {
       return;
     }
-    const next = rows.find((row) => row.status === "queued");
+    const nowMs = yield* Clock.currentTimeMillis;
+    const queuedRows = rows.filter((row) => row.status === "queued");
+    yield* armScheduledTurnWakeup(threadId, nextQueuedTurnWakeMs(queuedRows, nowMs), nowMs);
+    const next = findNextDueQueuedTurn(queuedRows, nowMs);
     if (next === undefined) {
       return;
     }
@@ -1750,7 +1836,21 @@ const make = Effect.gen(function* () {
       queuedAt: next.queuedAt,
       createdAt,
     });
+    if (next.recurrence !== null && next.scheduledFor !== null) {
+      yield* enqueueNextRecurringSend(next, nowMs);
+    }
   });
+  releaseScheduledTurn = (threadId) =>
+    tryDispatchNextQueuedTurn(threadId).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.logWarning("provider command reactor failed to release a scheduled turn", {
+              threadId,
+              cause: Cause.pretty(cause),
+            }),
+      ),
+    );
 
   const processBranchRequested = Effect.fn("processBranchRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.branch-requested" }>,
