@@ -4404,6 +4404,10 @@ export default function Sidebar() {
     },
     [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
   );
+  const handleImportConversationClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "import-conversation" });
+  }, [isMobile, setOpenMobile]);
 
   // The button mirrors chat.new: in multi-project setups both route through
   // the command palette's "New thread in..." picker, and in single-project
@@ -4417,6 +4421,11 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const hasExternalConversationImport = projects.some(
+    (project) =>
+      serverConfigs.get(project.environmentId)?.environment.capabilities
+        .externalConversationImport === true,
+  );
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
@@ -4564,6 +4573,9 @@ export default function Sidebar() {
                 </Combobox>
               }
               onNewProject={openAddProjectCommandPalette}
+              onImportConversation={
+                hasExternalConversationImport ? handleImportConversationClick : undefined
+              }
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}

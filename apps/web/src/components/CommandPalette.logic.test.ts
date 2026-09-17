@@ -193,6 +193,16 @@ describe("reduceCommandPaletteUiState", () => {
     expect(
       reduceCommandPaletteUiState(contentOpen, { _tag: "ToggleMode", mode: "content" }),
     ).toEqual({ open: false, mode: "content", openIntent: null });
+
+    const importOpen = reduceCommandPaletteUiState(contentOpen, {
+      _tag: "ToggleMode",
+      mode: "import",
+    });
+    expect(importOpen).toEqual({ open: true, mode: "import", openIntent: null });
+
+    expect(reduceCommandPaletteUiState(importOpen, { _tag: "ToggleMode", mode: "import" })).toEqual(
+      { open: false, mode: "command", openIntent: null },
+    );
   });
 
   it("switches between open modes without closing", () => {

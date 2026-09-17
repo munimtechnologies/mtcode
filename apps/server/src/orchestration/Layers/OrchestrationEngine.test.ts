@@ -10,6 +10,7 @@ import {
   CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -399,6 +400,7 @@ describe("OrchestrationEngine", () => {
 
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
     let nextSequence = 8;
+    const appendedEventTypes: Array<OrchestrationEvent["type"]> = [];
     const eventStore: OrchestrationEventStoreShape = {
       append: (event) =>
         Effect.sync(() => {
@@ -406,6 +408,7 @@ describe("OrchestrationEngine", () => {
             ...event,
             sequence: nextSequence,
           } as OrchestrationEvent;
+          appendedEventTypes.push(savedEvent.type);
           nextSequence += 1;
           return savedEvent;
         }),
@@ -473,7 +476,17 @@ describe("OrchestrationEngine", () => {
             },
           ],
           proposedPlans: [],
-          activities: [],
+          activities: [
+            {
+              id: EventId.make("activity-bootstrap-tool"),
+              tone: "tool" as const,
+              kind: "tool.completed",
+              summary: "Persisted tool call",
+              payload: { itemType: "command_execution", output: "preserved" },
+              turnId: asTurnId("turn-bootstrap"),
+              createdAt: "2026-03-03T00:00:02.250Z",
+            },
+          ],
           checkpoints: [],
           session: null,
         },

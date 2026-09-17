@@ -221,6 +221,7 @@ describe("ProviderSessionReaper", () => {
       rollbackConversation: () => unsupported(),
       getAgentHistory: () => unsupported(),
       uploadFeedback: () => unsupported(),
+      forkConversation: () => unsupported(),
       streamEvents: Stream.empty,
     };
 

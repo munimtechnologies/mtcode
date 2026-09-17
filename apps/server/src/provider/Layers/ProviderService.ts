@@ -338,6 +338,12 @@ const ProviderRollbackConversationInput = Schema.Struct({
   numTurns: NonNegativeInt,
 });
 
+const ProviderForkConversationInput = Schema.Struct({
+  threadId: ThreadId,
+  throughTurnId: Schema.optional(TurnId),
+  expectedProviderInstanceId: Schema.optional(ProviderInstanceId),
+});
+
 function toValidationError(
   operation: string,
   issue: string,
@@ -2445,6 +2451,45 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
+  const forkConversation: ProviderServiceMethod<"forkConversation"> = Effect.fn("forkConversation")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.forkConversation",
+        schema: ProviderForkConversationInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.forkConversation",
+        allowRecovery: true,
+      });
+      if (
+        input.expectedProviderInstanceId !== undefined &&
+        routed.instanceId !== input.expectedProviderInstanceId
+      ) {
+        return yield* toValidationError(
+          "ProviderService.forkConversation",
+          `Cannot fork provider instance '${routed.instanceId}' into '${input.expectedProviderInstanceId}'.`,
+        );
+      }
+      if (routed.adapter.forkThread === undefined) {
+        return yield* toValidationError(
+          "ProviderService.forkConversation",
+          `Provider '${routed.adapter.provider}' does not support conversation forks.`,
+        );
+      }
+      const fork = yield* routed.adapter.forkThread(input.threadId, input.throughTurnId);
+      yield* analytics.record("provider.conversation.forked", {
+        provider: routed.adapter.provider,
+        throughTurn: input.throughTurnId !== undefined,
+      });
+      return {
+        providerInstanceId: routed.instanceId,
+        resumeCursor: fork.resumeCursor,
+      };
+    },
+  );
+
   return {
     startSession,
     sendTurn,
@@ -2460,6 +2505,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     rollbackConversation,
     uploadFeedback,
     getAgentHistory,
+    forkConversation,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

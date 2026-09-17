@@ -53,12 +53,11 @@ export function browseInputEndPaddingClass(input: {
 }
 
 /**
- * The global search overlay hosts three mutually exclusive surfaces: the
- * command palette (⌘K), the project file picker (⌘P), and project content
- * search (⇧⌘F). One reducer owns open/mode state so the surfaces can never
- * stack and re-triggering a mode's shortcut toggles it closed.
+ * The global search overlay hosts mutually exclusive command, file, content
+ * search, and conversation import surfaces. One reducer owns open/mode state
+ * so the surfaces can never stack and re-triggering a mode closes it.
  */
-export type SearchOverlayMode = "command" | "files" | "content";
+export type SearchOverlayMode = "command" | "files" | "content" | "import";
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "add-project" | "new-thread-in" }
@@ -97,7 +96,11 @@ export function reduceCommandPaletteUiState(
         : { ...state, open: false, openIntent: null };
     case "ToggleMode":
       return state.open && state.mode === action.mode
-        ? { ...state, open: false, openIntent: null }
+        ? {
+            open: false,
+            mode: action.mode === "import" ? "command" : state.mode,
+            openIntent: null,
+          }
         : { open: true, mode: action.mode, openIntent: null };
     case "OpenSearch":
       return {

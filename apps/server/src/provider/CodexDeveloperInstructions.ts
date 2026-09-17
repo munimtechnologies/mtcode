@@ -93,6 +93,13 @@ const extraToolInstructions = (options: CodexExtraToolInstructions): string =>
     options.desktopToolsAvailable === true ? T3_CODE_DESKTOP_TOOL_INSTRUCTIONS : ""
   }${options.computerHomeWorkspace === true ? T3_CODE_COMPUTER_HOME_INSTRUCTIONS : ""}${T3_CODE_THREAD_REFERENCE_INSTRUCTIONS}${T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}`;
 
+const T3_CODE_CHAT_HISTORY_INSTRUCTIONS = `
+
+## T3 Code chat history
+
+Repository instructions, environment context, skills, permissions, and other harness-provided setup are context, not user-sent chat messages. When the user asks about the first, previous, or earlier message in the conversation, answer from the user-authored chat messages and do not identify harness-provided setup as a user message.
+`;
+
 export const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean | T3CodeToolAvailability,
   extras?: Omit<CodexExtraToolInstructions, "browserToolsAvailable">,
@@ -279,7 +286,7 @@ export function buildCodexDeveloperInstructions(
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable, extras)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable, extras);
   const history = options?.computerHistoryContext ? `\n\n${options.computerHistoryContext}` : "";
-  return `${base}
+  return `${base}${T3_CODE_CHAT_HISTORY_INSTRUCTIONS}
 
 ${buildRuntimeInstructions({ harness: "Codex", ...runtime })}${history}`;
 }

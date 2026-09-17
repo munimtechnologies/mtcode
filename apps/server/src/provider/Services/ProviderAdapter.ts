@@ -66,6 +66,11 @@ export interface ProviderThreadSnapshot {
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
 }
 
+export interface ProviderThreadFork {
+  /** Provider-native continuation state for starting the fork as a new T3 thread. */
+  readonly resumeCursor: unknown;
+}
+
 export interface ProviderAdapterShape<TError> {
   /**
    * Provider kind implemented by this adapter.
@@ -153,6 +158,14 @@ export interface ProviderAdapterShape<TError> {
   readonly uploadFeedback?: (
     input: ProviderUploadFeedbackInput,
   ) => Effect.Effect<ProviderUploadFeedbackResult, TError>;
+   * Fork provider-native conversation history. Native forks retain structured
+   * items (including tool calls and tool results) that cannot be reconstructed
+   * from T3's projected chat messages.
+   */
+  readonly forkThread?: (
+    threadId: ThreadId,
+    throughTurnId?: TurnId,
+  ) => Effect.Effect<ProviderThreadFork, TError>;
 
   /**
    * Stop all sessions owned by this adapter.

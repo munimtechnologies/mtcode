@@ -210,6 +210,34 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        // A branch copies message and activity bodies from its source thread, which the
+        // bootstrap command model omits. Hydrate only that thread.
+        if (envelope.command.type === "thread.branch") {
+          const branchCommand = envelope.command;
+          decisionReadModel = yield* projectionSnapshotQuery
+            .getThreadDetailById(branchCommand.sourceThreadId)
+            .pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    Effect.fail(
+                      new OrchestrationCommandInvariantError({
+                        commandType: branchCommand.type,
+                        detail: `Source thread '${branchCommand.sourceThreadId}' has no projected history to branch.`,
+                      }),
+                    ),
+                  onSome: (sourceThread) =>
+                    Effect.succeed({
+                      ...decisionReadModel,
+                      threads: decisionReadModel.threads.map((thread) =>
+                        thread.id === sourceThread.id ? sourceThread : thread,
+                      ),
+                    }),
+                }),
+              ),
+            );
+        }
+
         if (
           envelope.command.type === "thread.auto-settle" &&
           (yield* eventStore.hasEventAfter({

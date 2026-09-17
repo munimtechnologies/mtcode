@@ -1217,6 +1217,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            ...(event.type === "thread.message-sent" && event.payload.turnId !== null
+              ? { latestTurnId: event.payload.turnId }
+              : {}),
             updatedAt: event.occurredAt,
           });
           if (shouldRefreshThreadShellSummary(event)) {
@@ -1735,6 +1738,47 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
           });
           return;
+        case "thread.branch-requested": {
+          const [messages, turns] = yield* Effect.all([
+            projectionThreadMessageRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            }),
+            projectionTurnRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            }),
+          ]);
+          const turnsById = new Map(
+            turns.flatMap((turn) => (turn.turnId === null ? [] : [[turn.turnId, turn] as const])),
+          );
+          let pendingUserMessage: (typeof messages)[number] | null = null;
+
+          for (const message of messages) {
+            if (message.role === "user") {
+              pendingUserMessage = message;
+              continue;
+            }
+            if (
+              message.role !== "assistant" ||
+              message.turnId === null ||
+              pendingUserMessage === null
+            ) {
+              continue;
+            }
+            const turn = turnsById.get(message.turnId);
+            if (turn === undefined) {
+              continue;
+            }
+            yield* projectionTurnRepository.upsertByTurnId({
+              ...turn,
+              turnId: message.turnId,
+              pendingMessageId: pendingUserMessage.messageId,
+              requestedAt: pendingUserMessage.createdAt,
+              startedAt: pendingUserMessage.createdAt,
+            });
+            pendingUserMessage = null;
+          }
+          return;
+        }
 
         case "thread.turn-start-requested": {
           const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
@@ -1935,9 +1979,44 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.message-sent": {
-          if (event.payload.turnId === null || event.payload.role !== "assistant") {
+          if (event.payload.turnId === null) {
             return;
           }
+          if (event.payload.role === "user") {
+            const existingTurn = yield* projectionTurnRepository.getByTurnId({
+              threadId: event.payload.threadId,
+              turnId: event.payload.turnId,
+            });
+            if (Option.isSome(existingTurn)) {
+              yield* projectionTurnRepository.upsertByTurnId({
+                ...existingTurn.value,
+                pendingMessageId: existingTurn.value.pendingMessageId ?? event.payload.messageId,
+                requestedAt:
+                  existingTurn.value.requestedAt < event.payload.createdAt
+                    ? existingTurn.value.requestedAt
+                    : event.payload.createdAt,
+              });
+              return;
+            }
+            yield* projectionTurnRepository.upsertByTurnId({
+              turnId: event.payload.turnId,
+              threadId: event.payload.threadId,
+              pendingMessageId: event.payload.messageId,
+              sourceProposedPlanThreadId: null,
+              sourceProposedPlanId: null,
+              assistantMessageId: null,
+              state: "running",
+              requestedAt: event.payload.createdAt,
+              startedAt: event.payload.createdAt,
+              completedAt: null,
+              checkpointTurnCount: null,
+              checkpointRef: null,
+              checkpointStatus: null,
+              checkpointFiles: [],
+            });
+            return;
+          }
+          if (event.payload.role !== "assistant") return;
           // A completed assistant message only settles the turn once the
           // session is no longer running it — providers may emit several
           // assistant messages per turn (commentary between tool calls), and

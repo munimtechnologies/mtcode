@@ -79,6 +79,8 @@ import Migration0056 from "./Migrations/053_ProjectionUsageLimitResume.ts";
 import Migration0057 from "./Migrations/055_ProjectionThreadsAutoSettleDisabledAt.ts";
 // Upstream 053 (PR #9124); file renumbered to 056 and registered as the next free fork id.
 import Migration0058 from "./Migrations/056_ProjectionThreadsLastVisitedAt.ts";
+// Fork migration for self-hosted push device registrations (ochen1 port).
+import Migration0059 from "./Migrations/069_SelfHostedPushDevices.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -149,6 +151,7 @@ const migrationEntries = [
   [56, "ProjectionUsageLimitResume", Migration0056],
   [57, "ProjectionThreadsAutoSettleDisabledAt", Migration0057],
   [58, "ProjectionThreadsLastVisitedAt", Migration0058],
+  [59, "SelfHostedPushDevices", Migration0059],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

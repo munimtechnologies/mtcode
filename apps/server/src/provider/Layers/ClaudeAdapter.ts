@@ -284,6 +284,11 @@ interface ClaudeResumeState {
   readonly pinResumeSessionAt?: boolean;
   readonly turnCount?: number;
   readonly turnStartMessageIds?: ReadonlyArray<string | null>;
+  readonly forkSession?: boolean;
+  readonly resumePoints?: ReadonlyArray<{
+    readonly turnId: TurnId;
+    readonly resumeSessionAt: string;
+  }>;
 }
 
 interface ClaudeCompletedTurn {
@@ -1135,6 +1140,8 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     pinResumeSessionAt?: unknown;
     turnCount?: unknown;
     turnStartMessageIds?: unknown;
+    forkSession?: unknown;
+    resumePoints?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -1158,6 +1165,27 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     cursor.turnStartMessageIds.every((id: unknown) => id === null || typeof id === "string")
       ? (cursor.turnStartMessageIds as Array<string | null>)
       : undefined;
+  const forkSession = cursor.forkSession === true;
+  const resumePoints = Array.isArray(cursor.resumePoints)
+    ? cursor.resumePoints.flatMap((point) => {
+        if (
+          typeof point !== "object" ||
+          point === null ||
+          !("turnId" in point) ||
+          typeof point.turnId !== "string" ||
+          !("resumeSessionAt" in point) ||
+          typeof point.resumeSessionAt !== "string"
+        ) {
+          return [];
+        }
+        return [
+          {
+            turnId: TurnId.make(point.turnId),
+            resumeSessionAt: point.resumeSessionAt,
+          },
+        ];
+      })
+    : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
@@ -1168,6 +1196,8 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
+    ...(forkSession ? { forkSession: true } : {}),
+    ...(resumePoints && resumePoints.length > 0 ? { resumePoints } : {}),
   };
 }
 
@@ -2507,6 +2537,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         : {}),
       turnCount: context.turnStartMessageIds.length,
       turnStartMessageIds: [...context.turnStartMessageIds],
+      resumePoints: context.turns.flatMap((turn) =>
+        turn.lastAssistantUuid
+          ? [{ turnId: turn.id, resumeSessionAt: turn.lastAssistantUuid }]
+          : [],
+      ),
     };
 
     context.session = {
@@ -5092,8 +5127,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
-      const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
-      const sessionId = existingResumeSessionId ?? newSessionId;
+      const shouldForkSession =
+        resumeState?.forkSession === true && existingResumeSessionId !== undefined;
+      // A fork needs its own durable id. The Agent SDK explicitly permits
+      // sessionId alongside resume + forkSession for this purpose.
+      const newSessionId =
+        existingResumeSessionId === undefined || shouldForkSession
+          ? yield* randomUUIDv4
+          : undefined;
+      const sessionId = newSessionId ?? existingResumeSessionId;
       const queryReady = yield* Deferred.make<void>();
       // Fresh sessions can accept control RPCs immediately. Resume sessions
       // must wait for system/init — setPermissionMode hangs until then.
@@ -5675,6 +5717,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { resumeSessionAt: resumeState.resumeSessionAt }
           : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
+        ...(shouldForkSession ? { forkSession: true } : {}),
+        ...(shouldForkSession && resumeState?.resumeSessionAt
+          ? { resumeSessionAt: resumeState.resumeSessionAt }
+          : {}),
         includePartialMessages: true,
         canUseTool,
         onUserDialog,
@@ -5746,6 +5792,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(resumeState?.turnStartMessageIds
             ? { turnStartMessageIds: resumeState.turnStartMessageIds }
             : {}),
+          ...(resumeState?.resumePoints ? { resumePoints: resumeState.resumePoints } : {}),
         },
         createdAt: startedAt,
         updatedAt: startedAt,
@@ -5770,7 +5817,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         resumeSessionId: sessionId,
         pendingApprovals,
         pendingUserInputs,
-        turns: [],
+        turns:
+          resumeState?.resumePoints?.map((point) => ({
+            id: point.turnId,
+            items: [],
+            lastAssistantUuid: point.resumeSessionAt,
+          })) ?? [],
         inFlightTools,
         finalizedToolsAwaitingResult,
         claudeTasks,
@@ -6379,6 +6431,55 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  const forkThread: NonNullable<ClaudeAdapterShape["forkThread"]> = Effect.fn("forkThread")(
+    function* (threadId, throughTurnId) {
+      const context = yield* requireSession(threadId);
+      const sourceSessionId = context.resumeSessionId;
+      if (!sourceSessionId) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "Claude session id is not initialized yet.",
+        });
+      }
+
+      const throughTurn =
+        throughTurnId === undefined
+          ? context.turns.at(-1)
+          : context.turns.find((turn) => turn.id === throughTurnId);
+      if (throughTurnId !== undefined && throughTurn === undefined) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: `Turn '${throughTurnId}' does not exist in the active Claude session.`,
+        });
+      }
+
+      const currentResumeState = readClaudeResumeState(context.session.resumeCursor);
+      const resumeSessionAt =
+        throughTurnId === undefined
+          ? (throughTurn?.lastAssistantUuid ?? currentResumeState?.resumeSessionAt)
+          : throughTurn?.lastAssistantUuid;
+      const turnCount =
+        throughTurnId === undefined
+          ? (currentResumeState?.turnCount ?? context.turns.length)
+          : context.turns.findIndex((turn) => turn === throughTurn) + 1;
+      return {
+        resumeCursor: {
+          resume: sourceSessionId,
+          ...(resumeSessionAt ? { resumeSessionAt } : {}),
+          turnCount,
+          resumePoints: context.turns.flatMap((turn) =>
+            turn.lastAssistantUuid
+              ? [{ turnId: turn.id, resumeSessionAt: turn.lastAssistantUuid }]
+              : [],
+          ),
+          forkSession: true,
+        },
+      };
+    },
+  );
+
   const respondToRequest: ClaudeAdapterShape["respondToRequest"] = Effect.fn("respondToRequest")(
     function* (threadId, requestId, decision) {
       const context = yield* requireSession(threadId);
@@ -6471,6 +6572,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     readThread,
     getAgentHistory,
     rollbackThread,
+    forkThread,
     respondToRequest,
     respondToUserInput,
     stopSession,

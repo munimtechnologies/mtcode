@@ -111,6 +111,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
+import * as ConversationImport from "./conversationImport/ConversationImport.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -139,6 +140,7 @@ import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
+import { activityPayloadContainsImagePath } from "./assets/toolImageAuthorization.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -568,6 +570,7 @@ const makeWsRpcLayer = (
             return Effect.void;
         }
       };
+      const conversationImport = yield* ConversationImport.ConversationImport;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
@@ -1995,6 +1998,18 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.listExternalConversations]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listExternalConversations,
+            conversationImport.list(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.importExternalConversation]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.importExternalConversation,
+            conversationImport.importConversation(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>
@@ -3435,32 +3450,33 @@ const makeWsRpcLayer = (
                   workspaceRoot: input.resource.cwd,
                 });
               }
-              if (input.resource._tag === "project-favicon") {
+              const resource = input.resource;
+              if (resource._tag === "project-favicon") {
                 const project = yield* projectionSnapshotQuery
-                  .getActiveProjectByWorkspaceRoot(input.resource.cwd)
+                  .getActiveProjectByWorkspaceRoot(resource.cwd)
                   .pipe(
                     Effect.mapError(
                       (cause) =>
                         new AssetWorkspaceContextResolutionError({
-                          resource: input.resource,
+                          resource,
                           cause,
                         }),
                     ),
                   );
                 if (Option.isNone(project)) {
                   return yield* new AssetWorkspaceContextNotFoundError({
-                    resource: input.resource,
+                    resource,
                   });
                 }
                 return yield* issueAssetUrl({
-                  resource: input.resource,
+                  resource,
                   ...(project.value.faviconPath
                     ? { projectFaviconPath: project.value.faviconPath }
                     : {}),
                 });
               }
               const thread = yield* projectionSnapshotQuery
-                .getThreadShellById(input.resource.threadId)
+                .getThreadShellById(resource.threadId)
                 .pipe(
                   Effect.mapError(
                     (cause) =>
@@ -3491,9 +3507,39 @@ const makeWsRpcLayer = (
                   resource: input.resource,
                 });
               }
+              const path = yield* Path.Path;
+              let workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
+              if (path.isAbsolute(resource.path)) {
+                const relativePath = path.relative(workspaceRoot, resource.path);
+                const isOutsideWorkspace =
+                  relativePath === ".." ||
+                  relativePath.startsWith(`..${path.sep}`) ||
+                  path.isAbsolute(relativePath);
+                if (isOutsideWorkspace) {
+                  const detail = yield* projectionSnapshotQuery
+                    .getThreadDetailById(resource.threadId)
+                    .pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new AssetWorkspaceContextResolutionError({
+                            resource: input.resource,
+                            cause,
+                          }),
+                      ),
+                    );
+                  const isToolImage =
+                    Option.isSome(detail) &&
+                    detail.value.activities.some((activity) =>
+                      activityPayloadContainsImagePath(activity.payload, resource.path),
+                    );
+                  if (isToolImage) {
+                    workspaceRoot = path.dirname(resource.path);
+                  }
+                }
+              }
               return yield* issueAssetUrl({
                 resource: input.resource,
-                workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
+                workspaceRoot,
               });
             }),
             { "rpc.aggregate": "workspace" },

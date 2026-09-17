@@ -1235,6 +1235,24 @@ it.effect("accepts a title seed in thread.turn.start", () =>
   }),
 );
 
+it.effect("accepts a durable thread branch command", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.branch",
+      commandId: "cmd-thread-branch",
+      sourceThreadId: "thread-source",
+      sourceMessageId: "assistant-with-tools",
+      threadId: "thread-destination",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.type, "thread.branch");
+    assert.strictEqual(
+      "sourceMessageId" in parsed ? parsed.sourceMessageId : undefined,
+      "assistant-with-tools",
+    );
+  }),
+);
+
 it.effect("decodes active reorder commands through client and orchestration boundaries", () =>
   Effect.gen(function* () {
     const input = {
