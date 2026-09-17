@@ -32,7 +32,6 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AccountLimitsHoverCard } from "../usage/AccountLimits";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
@@ -157,18 +156,10 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
-  tooltipContent,
-  tooltipSide = "top",
-  tooltipAlign,
-  tooltipSideOffset,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
-  tooltipContent?: ReactNode;
-  tooltipSide?: "top" | "right" | "bottom" | "left";
-  tooltipAlign?: "start" | "center" | "end";
-  tooltipSideOffset?: number;
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
@@ -180,9 +171,7 @@ function SidebarUtilityItem({
             </SidebarMenuButton>
           }
         />
-        <TooltipPopup side={tooltipSide} align={tooltipAlign} sideOffset={tooltipSideOffset}>
-          {tooltipContent ?? label}
-        </TooltipPopup>
+        <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>
   );
@@ -276,10 +265,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
-            tooltipContent={<AccountLimitsHoverCard />}
-            tooltipSide="right"
-            tooltipAlign="end"
-            tooltipSideOffset={8}
           />
         </>
       )}

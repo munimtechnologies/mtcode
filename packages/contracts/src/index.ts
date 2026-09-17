@@ -51,7 +51,6 @@ export * from "./browserImport.ts";
 export * from "./piNative.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
-export * from "./accountLimits.ts";
 export * from "./pluginMarketplace.ts";
 export * from "./skillInventory.ts";
 export * from "./threadReference.ts";

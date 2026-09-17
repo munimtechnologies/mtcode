@@ -279,7 +279,6 @@ import {
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
-import { AccountLimitsSummary } from "./accountLimits.ts";
 import {
   UsageLimitSourceError,
   ProviderConsumeResetCreditInput,
@@ -449,7 +448,6 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
-  serverGetAccountLimits: "server.getAccountLimits",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Voice methods
@@ -754,12 +752,6 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   payload: UsageSummaryInput,
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
-});
-
-export const WsServerGetAccountLimitsRpc = Rpc.make(WS_METHODS.serverGetAccountLimits, {
-  payload: Schema.Struct({}),
-  success: AccountLimitsSummary,
-  error: EnvironmentAuthorizationError,
 });
 
 /**
@@ -1745,7 +1737,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
-  WsServerGetAccountLimitsRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,

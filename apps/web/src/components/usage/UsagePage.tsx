@@ -69,7 +69,6 @@ import { UsageLimitsSection } from "./UsageLimits";
 import { makeLimitsFixture } from "./usageLimitsFixture";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
-import { AccountLimitsSection } from "./AccountLimits";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 import {
   readUsagePagePreferences,
@@ -415,7 +414,6 @@ export function UsagePage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="wide">
-            <AccountLimitsSection />
             {selectedEnvironments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {environments.length === 0

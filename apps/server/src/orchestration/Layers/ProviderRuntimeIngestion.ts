@@ -64,7 +64,6 @@ import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
-import * as AccountLimitsService from "../../usage/AccountLimitsService.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -1018,7 +1017,6 @@ const make = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const serverSettingsService = yield* ServerSettingsService;
-  const accountLimits = yield* AccountLimitsService.AccountLimitsService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
@@ -1634,19 +1632,10 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
-      // Account limits are an account-level cache, not a thread projection, so
-      // they are ingested before the thread lookup below: the emitting thread
-      // is often already gone (session ended, thread deleted) and the limits
-      // still have to land.
+      // Rate limits are account-level, not a thread projection, so they are
+      // handled before the thread lookup below: the emitting thread is often
+      // already gone (session ended, thread deleted).
       if (event.type === "account.rate-limits.updated") {
-        yield* accountLimits.ingest({
-          provider: event.provider,
-          payload: event.payload.limits,
-          createdAt: event.createdAt,
-          ...(event.providerInstanceId === undefined
-            ? {}
-            : { providerInstanceId: event.providerInstanceId }),
-        });
         // Usage badges: updates are sparse (Claude names one window per
         // event), so fold them into what the account already reported. A turn
         // that started before this account reported anything (the first turn

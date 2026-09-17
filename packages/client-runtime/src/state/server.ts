@@ -1082,13 +1082,6 @@ export function createServerEnvironmentAtoms<R, E>(
       timeout: "30 seconds",
       refreshTrigger: ({ environmentId }) => usagePricesAtom(environmentId),
     }),
-    // Limits only move while sessions run, so a minute of staleness is fine
-    // and keeps the hover card instant after its first open.
-    accountLimits: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:server:account-limits",
-      tag: WS_METHODS.serverGetAccountLimits,
-      staleTimeMs: 60_000,
-    }),
     providerWorkspaceCapabilities: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:provider-workspace-capabilities",
       tag: WS_METHODS.serverListProviderWorkspaceCapabilities,

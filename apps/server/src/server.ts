@@ -158,7 +158,6 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
-import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
 import * as CodexPluginMarketplace from "./plugins/CodexPluginMarketplace.ts";
 import { pluginMarketplaceHttpApiLayer } from "./plugins/http.ts";
 import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
@@ -229,11 +228,6 @@ const BackgroundLayerLive = BackgroundPolicy.layer.pipe(
 );
 
 const UsageLayerLive = UsageService.layer.pipe(Layer.provide(ServerSettingsLayerLive));
-
-const AccountLimitsLayerLive = AccountLimitsService.layer.pipe(
-  Layer.provide(ServerSettingsLayerLive),
-  Layer.provide(FetchHttpClient.layer),
-);
 
 const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
@@ -625,7 +619,6 @@ const RuntimeDependenciesLive = RuntimeCoreWithConversationImportLive.pipe(
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
   Layer.provideMerge(UsageLayerLive),
-  Layer.provideMerge(AccountLimitsLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
