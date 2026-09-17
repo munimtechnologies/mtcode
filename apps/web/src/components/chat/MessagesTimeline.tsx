@@ -1,4 +1,4 @@
-import { ArrowUpIcon, ClockIcon } from "lucide-react";
+import { ArrowUpIcon, ClockIcon, PencilIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -171,6 +171,7 @@ import {
   type AssistantCitationTarget,
 } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
+import { useChatSearchTarget, type ChatSearchRequest } from "./useChatSearchTarget";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
@@ -265,6 +266,7 @@ import {
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
+  searchMessageId: MessageId | null;
   citationRequest: AssistantCitationTarget | null;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
@@ -304,6 +306,7 @@ interface TimelineRowSharedState {
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   onSteerQueuedMessage: (id: string) => void;
   steerQueuedMessageShortcutLabel: string | null;
+  onEditQueuedMessage: (id: string) => void;
   onRemoveQueuedMessage: (id: string) => void;
 }
 
@@ -398,6 +401,7 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH = {
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  searchRequest?: ChatSearchRequest | null;
   citationRequest?: AssistantCitationRequest | null;
   citationHistoryLoading?: boolean;
   onCiteAssistantText?: (
@@ -476,6 +480,7 @@ interface MessagesTimelineProps {
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
   onSteerQueuedMessage?: (id: string) => void;
   steerQueuedMessageShortcutLabel?: string | null;
+  onEditQueuedMessage?: (id: string) => void;
   onRemoveQueuedMessage?: (id: string) => void;
 }
 
@@ -484,6 +489,7 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  searchRequest = null,
   citationRequest = null,
   citationHistoryLoading = false,
   onCiteAssistantText,
@@ -541,6 +547,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   queuedMessages = EMPTY_QUEUED_MESSAGES,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
+  onEditQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -802,6 +809,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     alwaysRender: citationAlwaysRender,
   } = useAssistantCitationTarget({
     request: citationRequest,
+    suspended: searchRequest !== null,
     entries: timelineEntries,
     rows,
     listRef,
@@ -811,6 +819,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onExpandTurn: expandCitedTurn,
     onManualNavigation,
   });
+  const {
+    positioning: searchPositioning,
+    onListLoad: onSearchListLoad,
+    alwaysRender: searchAlwaysRender,
+  } = useChatSearchTarget({
+    request: searchRequest,
+    threadKey: routeThreadKey,
+    entries: timelineEntries,
+    rows,
+    listRef,
+    viewport: timelineViewportElement,
+    historyLoading: citationHistoryLoading || listIdentityKey !== routeThreadKey,
+    loadEarlier,
+    onExpandTurn: expandCitedTurn,
+    onManualNavigation,
+  });
+  const alwaysRender = searchAlwaysRender ?? citationAlwaysRender;
+  const dataVersion = searchRequest?.key ?? readyCitationRequest?.key;
+  const onListLoad = useCallback(() => {
+    onCitationListLoad();
+    onSearchListLoad();
+  }, [onCitationListLoad, onSearchListLoad]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
@@ -875,7 +905,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state);
-    if (isAtEnd !== undefined && !citationPositioning) {
+    if (isAtEnd !== undefined && !citationPositioning && !searchPositioning) {
       onIsAtEndChange(isAtEnd);
     }
     reportContentOverflow();
@@ -915,6 +945,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     );
   }, [
     citationPositioning,
+    searchPositioning,
     listRef,
     minimapItems,
     minimapStripMap,
@@ -956,6 +987,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       citationRequest: readyCitationRequest,
+      searchMessageId: searchRequest?.messageId ?? null,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -995,10 +1027,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
+      onEditQueuedMessage,
       onRemoveQueuedMessage,
     }),
     [
       readyCitationRequest,
+      searchRequest?.messageId,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -1037,6 +1071,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenWorktreeSetupTerminal,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
+      onEditQueuedMessage,
       onRemoveQueuedMessage,
     ],
   );
@@ -1113,15 +1148,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             getItemType={getItemType}
             renderItem={renderItem}
             estimatedItemSize={90}
-            initialScrollAtEnd={citationRequest === null}
+            initialScrollAtEnd={citationRequest === null && searchRequest === null}
             // Legend needs a data refresh to mount new pins without a scroll event.
-            {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
-            {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
-            onLoad={onCitationListLoad}
+            {...(dataVersion ? { dataVersion } : {})}
+            {...(alwaysRender ? { alwaysRender } : {})}
+            onLoad={onListLoad}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
             maintainScrollAtEnd={
               citationPositioning ||
+              searchPositioning ||
               anchoredEndSpace ||
               !liveFollowEnabled ||
               disclosureToggleSettling
@@ -1131,7 +1167,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   : TIMELINE_MAINTAIN_SCROLL_AT_END
             }
             maintainVisibleContentPosition={
-              citationPositioning ? false : maintainVisibleContentPosition
+              citationPositioning || searchPositioning ? false : maintainVisibleContentPosition
             }
             maintainScrollAtEndThreshold={1}
             onScroll={handleScroll}
@@ -1486,6 +1522,7 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const { searchMessageId } = use(TimelineRowCtx);
   const isExpandedToolGroup = row.kind === "work" && row.isExpandedToolGroup;
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" && row.expanded) || (row.kind === "work-live" && row.expanded);
@@ -1493,6 +1530,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   return (
     <div
       className={cn(
+        row.kind === "message" &&
+          row.message.id === searchMessageId &&
+          "rounded-md bg-primary/5 ring-1 ring-inset ring-primary/30",
         // Commentary (non-terminal assistant) rows carry no metadata row, so
         // they sit closer to the work that follows them.
         isExpandedToolGroup
@@ -1662,14 +1702,32 @@ function QueuedMessageTimelineRow({
                     variant="ghost-muted"
                     className="size-6"
                     onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => ctx.onEditQueuedMessage(queuedMessage.id)}
+                    aria-label="Edit queued message"
+                  />
+                }
+              >
+                <PencilIcon className="size-3.5" aria-hidden />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Edit in composer</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    className="size-6"
+                    onPointerDown={(event) => event.preventDefault()}
                     onClick={() => ctx.onRemoveQueuedMessage(queuedMessage.id)}
-                    aria-label="Cancel and return to the composer"
+                    aria-label="Remove queued message"
                   />
                 }
               >
                 <XIcon className="size-3.5" aria-hidden />
               </TooltipTrigger>
-              <TooltipPopup side="bottom">Cancel and return to the composer</TooltipPopup>
+              <TooltipPopup side="bottom">Remove queued message</TooltipPopup>
             </Tooltip>
           </div>
         </div>
@@ -2045,6 +2103,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           <div onCopyCapture={onBodyCopyCapture}>
             <CollapsibleUserMessageBody
               text={resolvedContext.text}
+              searchExpanded={ctx.searchMessageId === row.message.id}
               renderContextReference={renderContextReference}
               skills={ctx.skills}
               markdownCwd={ctx.markdownCwd}
@@ -3653,6 +3712,7 @@ function shouldCollapseUserMessage(text: string): boolean {
 }
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  searchExpanded?: boolean;
   text: string;
   renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
@@ -3660,6 +3720,9 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (props.searchExpanded) setExpanded(true);
+  }, [props.searchExpanded]);
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;

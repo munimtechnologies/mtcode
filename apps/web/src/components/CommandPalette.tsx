@@ -176,6 +176,7 @@ import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
+import { CHAT_SEARCH_OPEN_EVENT } from "./chat/ChatSearch";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
 import {
@@ -610,6 +611,8 @@ function CommandPaletteDialog(props: {
       data-palette-mode={props.mode}
       data-testid="command-palette"
       finalFocus={() => {
+        const chatSearch = document.querySelector<HTMLInputElement>("[data-chat-search-input]");
+        if (chatSearch) return chatSearch;
         composerHandleRef?.current?.focusAtEnd();
         return false;
       }}
@@ -1748,6 +1751,21 @@ function OpenCommandPaletteDialog(props: {
         { value: "computers", label: "Computers", items: computerThreadItems },
         { value: "projects", label: "Projects", items: projectThreadItems },
       ],
+    });
+  }
+
+  if (activeThread !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:search-current-chat",
+      searchTerms: ["search", "find", "text", "messages", "current chat"],
+      title: "Search current chat",
+      icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.search",
+      run: async () => {
+        setOpen(false);
+        window.dispatchEvent(new Event(CHAT_SEARCH_OPEN_EVENT));
+      },
     });
   }
 

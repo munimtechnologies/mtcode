@@ -378,6 +378,8 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { ThreadHandoffDialog } from "./chat/ThreadHandoffDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { ChatSearch, CHAT_SEARCH_OPEN_EVENT } from "./chat/ChatSearch";
+import type { ChatSearchRequest } from "./chat/useChatSearchTarget";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveComposerTimelineInset, resolveScrollToEndClearance } from "./composerFooterLayout";
@@ -1705,6 +1707,28 @@ export default function ChatView(props: ChatViewProps) {
   );
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [chatSearchThreadKey, setChatSearchThreadKey] = useState<string | null>(null);
+  const chatSearchOpen = chatSearchThreadKey === routeThreadKey;
+  const [chatSearchRequest, setChatSearchRequest] = useState<ChatSearchRequest | null>(null);
+  const chatSearchInputRef = useRef<HTMLInputElement>(null);
+  const openChatSearch = useCallback(() => {
+    setChatSearchThreadKey(routeThreadKey);
+    chatSearchInputRef.current?.focus();
+    chatSearchInputRef.current?.select();
+  }, [routeThreadKey]);
+  const closeChatSearch = useCallback(() => {
+    setChatSearchThreadKey(null);
+    setChatSearchRequest(null);
+    composerRef.current?.focusAtEnd();
+  }, [composerRef]);
+  useEffect(() => {
+    setChatSearchThreadKey(null);
+    setChatSearchRequest(null);
+  }, [routeThreadKey]);
+  useEffect(() => {
+    window.addEventListener(CHAT_SEARCH_OPEN_EVENT, openChatSearch);
+    return () => window.removeEventListener(CHAT_SEARCH_OPEN_EVENT, openChatSearch);
+  }, [openChatSearch]);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   useEffect(() => {
     const item = expandedImage?.images[expandedImage.index];
@@ -7288,6 +7312,13 @@ export default function ChatView(props: ChatViewProps) {
       });
       if (!command) return;
 
+      if (command === "thread.search" && isServerThread) {
+        event.preventDefault();
+        event.stopPropagation();
+        openChatSearch();
+        return;
+      }
+
       if (command === "thread.copyReference") {
         event.preventDefault();
         event.stopPropagation();
@@ -7535,6 +7566,7 @@ export default function ChatView(props: ChatViewProps) {
     confirmAndUnpinThread,
     copyActiveThreadReference,
     getShortcutContext,
+    openChatSearch,
     toggleRightPanel,
     toggleRightPanelMaximized,
     toggleTerminalVisibility,
@@ -7817,12 +7849,13 @@ export default function ChatView(props: ChatViewProps) {
     const overflow = attachments.slice(attachmentRoom);
     const restoredImages = restored.filter((attachment) => attachment.type === "image");
     const restoredFiles = restored.filter((attachment) => attachment.type === "file");
-    // The composer syncs these refs from the draft in an effect; a send before
-    // that effect runs must already see the restored content.
-    composerImagesRef.current = [...composerImagesRef.current, ...restoredImages];
-    composerFilesRef.current = [...composerFilesRef.current, ...restoredFiles];
     if (restoredImages.length > 0) addComposerDraftImages(composerDraftTarget, restoredImages);
     if (restoredFiles.length > 0) addComposerDraftFiles(composerDraftTarget, restoredFiles);
+    // The store can reject duplicates or replace file reattachment markers.
+    // An immediate send must use the accepted draft, before the ref-sync effects run.
+    const restoredDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+    composerImagesRef.current = restoredDraft?.images ?? [];
+    composerFilesRef.current = restoredDraft?.files ?? [];
     if (overflow.length > 0 && activeThreadKey) {
       useQueuedMessageStore.getState().enqueue(activeThreadKey, {
         prompt: "",
@@ -9042,6 +9075,7 @@ export default function ChatView(props: ChatViewProps) {
   // stable and does not bust TimelineRowCtx on every ChatView render.
   const queuedMessageActionsRef = useRef({
     steer: (_id: string) => {},
+    edit: (_id: string) => {},
     remove: (_id: string) => {},
   });
   queuedMessageActionsRef.current = {
@@ -9053,7 +9087,17 @@ export default function ChatView(props: ChatViewProps) {
     remove: (id) => {
       if (!activeThreadKey) return;
       const message = useQueuedMessageStore.getState().remove(activeThreadKey, id);
-      if (message) restoreQueuedMessagesToComposer([message]);
+      for (const image of message?.images ?? []) {
+        revokeBlobPreviewUrl(image.previewUrl);
+      }
+    },
+    edit: (id) => {
+      if (!activeThreadKey) return;
+      const message = useQueuedMessageStore.getState().remove(activeThreadKey, id);
+      if (message) {
+        restoreQueuedMessagesToComposer([message]);
+        focusComposer();
+      }
     },
   };
   const onSteerQueuedMessage = useCallback((id: string) => {
@@ -9061,6 +9105,9 @@ export default function ChatView(props: ChatViewProps) {
   }, []);
   const onRemoveQueuedMessage = useCallback((id: string) => {
     queuedMessageActionsRef.current.remove(id);
+  }, []);
+  const onEditQueuedMessage = useCallback((id: string) => {
+    queuedMessageActionsRef.current.edit(id);
   }, []);
   // Stop also cancels the queue: the messages return to the composer instead
   // of starting a new turn the moment the interrupted one settles.
@@ -10527,10 +10574,22 @@ export default function ChatView(props: ChatViewProps) {
                 }}
               />
             </div>
+            {chatSearchOpen && isServerThread ? (
+              <ChatSearch
+                key={activeThreadKey}
+                threadRef={routeThreadRef}
+                inputRef={chatSearchInputRef}
+                onSelect={setChatSearchRequest}
+                onClose={closeChatSearch}
+              />
+            ) : null}
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                searchRequest={
+                  paintOnlyDisplayedTimeline || !chatSearchOpen ? null : chatSearchRequest
+                }
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
                 {...(!paintOnlyDisplayedTimeline
@@ -10624,6 +10683,7 @@ export default function ChatView(props: ChatViewProps) {
                   "thread.steerQueuedMessage",
                   { context: { terminalFocus: false } },
                 )}
+                onEditQueuedMessage={onEditQueuedMessage}
                 onRemoveQueuedMessage={onRemoveQueuedMessage}
               />
 

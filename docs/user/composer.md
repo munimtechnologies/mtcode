@@ -12,6 +12,22 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+## Mermaid diagrams
+
+On web and desktop, use a `mermaid` fence to display a diagram:
+
+````markdown
+```mermaid
+flowchart LR
+  Draft --> Review --> Merge
+```
+````
+
+These previews work in sent messages and agent replies. You can switch between
+source and preview; copying a block preserves its original code. Diagrams appear
+after a reply finishes streaming. Invalid diagrams stay readable as source.
+Mobile displays these blocks as code.
+
 ## Attach files
 
 Attach up to eight files per message. Images can be up to 10 MB; other files can
