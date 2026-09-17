@@ -61,10 +61,13 @@ export function threadAllows(
   action: ThreadCapabilityAction,
 ): boolean {
   const backing = thread.backing;
-  if (backing === undefined) return true;
   if (action === "steer" || action === "followUp") {
-    return backing.capabilities.streamingBehaviors.includes(action);
+    // Streaming behaviors belong to external backings (Pi). Internal threads
+    // queue or steer through their own turn flow, and the server rejects the
+    // field for them.
+    return backing?.capabilities.streamingBehaviors.includes(action) === true;
   }
+  if (backing === undefined) return true;
   if (action === "lifecycle" || action === "approval" || action === "userInput") {
     return false;
   }

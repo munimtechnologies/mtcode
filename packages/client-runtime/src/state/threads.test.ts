@@ -34,4 +34,26 @@ describe("threadAllows", () => {
     expect(threadAllows(externalPiThread, "unsettle")).toBe(true);
     expect(threadAllows(externalPiThread, "lifecycle")).toBe(false);
   });
+
+  it("never offers Pi streaming behaviors to internal threads", () => {
+    const internalThread = {} as Pick<OrchestrationThread, "backing">;
+    expect(threadAllows(internalThread, "steer")).toBe(false);
+    expect(threadAllows(internalThread, "followUp")).toBe(false);
+    expect(threadAllows(internalThread, "rename")).toBe(true);
+  });
+
+  it("offers streaming behaviors only when the external backing lists them", () => {
+    expect(threadAllows(externalPiThread, "steer")).toBe(false);
+    const streamingPiThread = {
+      backing: {
+        ...externalPiThread.backing!,
+        capabilities: {
+          ...externalPiThread.backing!.capabilities,
+          streamingBehaviors: ["steer", "followUp"],
+        },
+      },
+    } as Pick<OrchestrationThread, "backing">;
+    expect(threadAllows(streamingPiThread, "steer")).toBe(true);
+    expect(threadAllows(streamingPiThread, "followUp")).toBe(true);
+  });
 });
