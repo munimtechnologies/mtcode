@@ -4,11 +4,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import {
-  canPauseSession,
-  canSnooze,
-  threadWokeAt,
-} from "@t3tools/client-runtime/state/thread-settled";
+import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadAllows } from "@t3tools/client-runtime/state/threads";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
@@ -120,18 +116,6 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedError<ThreadSnoozeBlo
 ) {
   override get message(): string {
     return "This thread is waiting on you. Respond to the pending request before snoozing it.";
-  }
-}
-
-export class ThreadSessionPauseBlockedError extends Schema.TaggedError<ThreadSessionPauseBlockedError>()(
-  "ThreadSessionPauseBlockedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "Only an idle session can be paused. Interrupt the running turn first.";
   }
 }
 
@@ -828,30 +812,6 @@ export function useThreadActions() {
     [resolveThreadTarget, unsnoozeThreadMutation],
   );
 
-  const pauseThreadSession = useCallback(
-    async (target: ScopedThreadRef) => {
-      const resolved = resolveThreadTarget(target);
-      // Client-side twin of the archive guard: never yank a thread mid-turn.
-      // Interrupt first, then pause. thread.session.stop needs no capability
-      // gate — it predates settlement/snooze/pinning.
-      if (resolved && !canPauseSession(resolved.thread)) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadSessionPauseBlockedError({
-              environmentId: target.environmentId,
-              threadId: target.threadId,
-            }),
-          ),
-        );
-      }
-      return stopThreadSession({
-        environmentId: target.environmentId,
-        input: { threadId: target.threadId },
-      });
-    },
-    [resolveThreadTarget, stopThreadSession],
-  );
-
   const confirmAndDeleteThread = useCallback(
     async (target: ScopedThreadRef) => {
       const localApi = readLocalApi();
@@ -891,7 +851,6 @@ export function useThreadActions() {
       unsettleThread,
       snoozeThread,
       unsnoozeThread,
-      pauseThreadSession,
       pinThread,
       unpinThread,
       confirmAndUnpinThread,
@@ -911,7 +870,6 @@ export function useThreadActions() {
       setThreadAutoSettle,
       settleThread,
       snoozeThread,
-      pauseThreadSession,
       unarchiveThread,
       unpinThread,
       unsettleThread,

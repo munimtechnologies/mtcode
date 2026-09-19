@@ -193,7 +193,6 @@ require packages/client-runtime/src/state/threadSettled.ts "threadUsageLimitRese
 require apps/server/src/orchestration/decider.ts 'reason: "cleared"' "settle/archive disarm an armed usage-limit resume"
 
 # --- Upstream PRs taken 2026-09-18 (open upstream; keep until they merge there) ---
-require apps/web/src/hooks/useThreadActionMenu.ts "canPauseSession" "Pause session menu item (#12172)"
 require apps/server/src/orchestration/ThreadSettlementPolicy.ts "autoSettleScope" "auto-settle scope: threads without a PR (#12258)"
 require apps/server/src/orchestration/ThreadSettlementPolicy.ts "snoozeWakeAt" "woken snoozed threads get a fresh auto-settle window (#12525)"
 require apps/server/src/process/externalLauncher.ts "readHostEnv(COMMAND_LOOKUP_ENV_NAMES)" "editor discovery reads the hydrated PATH (#12501)"

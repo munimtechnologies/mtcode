@@ -18,11 +18,9 @@ import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  canPauseSession,
   canSnooze,
   effectiveSnoozed,
   threadUsageLimitResetsAt,
-  isSessionPaused,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
@@ -58,7 +56,6 @@ import {
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
-  PauseIcon,
   PinIcon,
   PinOffIcon,
   PlusIcon,
@@ -1127,11 +1124,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // switching sidebars must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
-  // Paused (provider session stopped to save RAM) reads as a calm pill, not
-  // an alert color: nothing is asked of the user, and resume is the next
-  // message. Ranked below approval/input/working/failed so a live state
-  // never hides behind it.
-  const isPaused = isSessionPaused(thread);
   // A woken thread reappears at its original position (the sort is
   // deliberately static), so the pill has to carry the weight. Snoozing is
   // an explicit act, so the pill clears only when the user re-engages:
@@ -1198,12 +1190,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     label: "Failed",
                     icon: null,
                     className: "text-red-700 dark:text-red-300",
-                  }
-                : isPaused
-                ? {
-                    label: "Paused",
-                    icon: "paused" as const,
-                    className: "text-muted-foreground",
                   }
                 : isWoke
                   ? {
@@ -1874,8 +1860,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             <EyeIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "done" ? (
                             <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "paused" ? (
-                            <PauseIcon aria-hidden className="size-4 shrink-0" />
                           ) : null}
                           {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make
@@ -2204,7 +2188,6 @@ export default function Sidebar() {
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
-    pauseThreadSession,
     pinThread,
     unpinThread,
     confirmAndUnpinThread,
@@ -3257,27 +3240,6 @@ export default function Sidebar() {
     },
     [unsnoozeThread],
   );
-  const attemptPauseSession = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      void (async () => {
-        const result = await pauseThreadSession(threadRef);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to pause session",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-        // No success toast: dispatch only confirms the stop request was
-        // accepted, not that the provider stopped. The Paused pill arriving
-        // on the row is the confirmation; a failed stop reports an error.
-      })();
-    },
-    [pauseThreadSession],
-  );
   const threadListRef = useRef<HTMLUListElement | null>(null);
   const dragLabelOffsetRef = useRef(0);
   const restrictBelowPins = useCallback<Modifier>(
@@ -4245,8 +4207,6 @@ export default function Sidebar() {
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isPaused: isSessionPaused(thread),
-              canPauseNow: canPauseSession(thread),
               isRegeneratingTitle,
               isRunning:
                 thread.session?.status === "running" && thread.session.activeTurnId != null,
@@ -4317,9 +4277,6 @@ export default function Sidebar() {
             return;
           case "unsnooze":
             attemptUnsnooze(threadRef);
-            return;
-          case "pause":
-            attemptPauseSession(threadRef);
             return;
           case "pin":
             attemptPin(threadRef);
@@ -4455,7 +4412,6 @@ export default function Sidebar() {
     },
     [
       archiveThread,
-      attemptPauseSession,
       attemptPin,
       attemptSettle,
       attemptSnooze,

@@ -167,7 +167,6 @@ function ThreadNavigationSidebarPane(
     archiveThread,
     confirmDeleteThread,
     settleThread,
-    pauseThread,
     snoozeThread,
     unsnoozeThread,
     unsettleThread,
@@ -972,7 +971,6 @@ function ThreadNavigationSidebarPane(
               onSnoozeThread={snoozeThread}
               onUnsnoozeThread={unsnoozeThread}
               onUnsettleThread={unsettleThread}
-              onPauseThread={pauseThread}
               onPinThread={pinThread}
               onUnpinThread={unpinThread}
               onSetThreadAutoSettle={setThreadAutoSettle}
