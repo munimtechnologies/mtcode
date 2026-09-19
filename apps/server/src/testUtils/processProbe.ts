@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - test-only probes of the host process table.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalTimers:off - test-only probes of the host process table on the wall clock.
 import * as NodeFS from "node:fs";
 import * as Effect from "effect/Effect";
 

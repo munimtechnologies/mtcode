@@ -1204,6 +1204,9 @@ it.effect("fails an Antigravity launch on macOS when only the agy command is on 
     assert.instanceOf(error, ExternalLauncher.ExternalLauncherCommandNotFoundError);
     assert.equal(error.command, "agy");
     assert.equal(spawnCount, 0);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 for (const { platform, installPath, editor, args } of [
   {
     platform: "darwin",
@@ -1310,7 +1313,7 @@ for (const { platform, installPath, editor, args } of [
   );
 }
 
-it.effect.skipIf(windowsHost)("ignores unusable app bundles and keeps PATH launchers first", () =>
+it.effect.skipIf(windowsHost)("keeps PATH launchers ahead of an app bundle's CLI", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -1321,18 +1324,18 @@ it.effect.skipIf(windowsHost)("ignores unusable app bundles and keeps PATH launc
       const launcher = yield* ExternalLauncher.ExternalLauncher;
       return yield* launcher.resolveAvailableEditors();
     });
-    const before = yield* discover.pipe(Effect.provide(testLayer({ platform: "darwin", env })));
+    // MT Code counts an installed Cursor.app as available even when its bundled
+    // CLI is unusable: the launch falls back to `open -a Cursor`. Discovery
+    // therefore stays the same whatever state the bundled CLI is in.
     yield* fs.makeDirectory(executable, { recursive: true });
-    assert.deepEqual(
-      yield* discover.pipe(Effect.provide(testLayer({ platform: "darwin", env }))),
-      before,
-    );
+    const withBundle = yield* discover.pipe(Effect.provide(testLayer({ platform: "darwin", env })));
+    assert.include(withBundle, "cursor");
     yield* fs.remove(executable, { recursive: true });
     yield* fs.writeFileString(executable, "#!/bin/sh\n");
     yield* fs.chmod(executable, 0o644);
     assert.deepEqual(
       yield* discover.pipe(Effect.provide(testLayer({ platform: "darwin", env }))),
-      before,
+      withBundle,
     );
     yield* fs.chmod(executable, 0o755);
     yield* fs.makeDirectory(env.PATH);

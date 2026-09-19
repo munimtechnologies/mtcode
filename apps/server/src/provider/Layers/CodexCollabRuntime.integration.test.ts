@@ -332,7 +332,10 @@ describe("CodexSessionRuntime collab integration", () => {
       );
 
       yield* runtime.close;
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, MonitorSession.layer)),
+    ),
   );
 
   it.effect("looks up child model metadata once after activity registration", () =>

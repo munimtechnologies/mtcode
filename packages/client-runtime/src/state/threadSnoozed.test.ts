@@ -486,6 +486,9 @@ describe("threadUsageLimitResetsAt", () => {
     ).toBeNull();
     expect(threadUsageLimitResetsAt(shell({ lastErrorKind: "usage_limit" }))).toBeNull();
     expect(threadUsageLimitResetsAt(shell(null))).toBeNull();
+  });
+});
+
 type PauseShell = Pick<OrchestrationThreadShell, "session">;
 
 function makePauseShell(

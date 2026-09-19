@@ -348,6 +348,8 @@ describe("ThreadSettlementReactor", () => {
       projectSettingsOverrides: { [PROJECT_ID]: { sidebarAutoSettlePinnedThreads: true } },
     });
     assert.notStrictEqual(protected_, projectOptIn);
+  });
+
   it("includes project inactivity scope in the settlement settings key", () => {
     const base = ThreadSettlementReactor.autoSettlementSettingsKey(DEFAULT_SERVER_SETTINGS);
     const scoped = ThreadSettlementReactor.autoSettlementSettingsKey({

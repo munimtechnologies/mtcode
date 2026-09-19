@@ -324,6 +324,9 @@ describe("per-thread auto-settle opt out", () => {
     expect(decide(makeThread({ ...held, pullRequests: [merged] }), null, { days: null })).toBe(
       false,
     );
+  });
+});
+
 describe("PR-link inactivity scope", () => {
   it.each(["manual", "created", "agent", "stack"] as const)(
     "excludes %s links even when their PR is already closed",
