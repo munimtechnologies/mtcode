@@ -1,29 +1,42 @@
 /**
- * Alt-tab style switcher over the threads opened this session, newest first.
+ * Alt-tab style switcher over the threads opened this session, newest first
+ * (topped up by most recent activity until two have been visited, so it works
+ * straight after a reload).
  * Ctrl+Tab opens it and advances, Ctrl+Shift+Tab goes back, releasing the
  * held modifier opens the highlighted thread, Escape cancels. Mounted once at
  * the root so it works on every route, with or without the sidebar.
+ *
+ * The list is frozen on open: a thread deleted or archived mid-switch keeps
+ * its row as a muted placeholder so the highlight never slides onto a
+ * different thread, and committing on it just closes. A route change made
+ * elsewhere while the switcher is open (another shortcut, a click, a remote
+ * event) also turns the commit into a plain close.
  *
  * Browsers reserve Ctrl+Tab for their own tab switching, so the default
  * shortcut only ever reaches us in the desktop app; in a browser the commands
  * stay inert until the user rebinds them to reachable keys.
  */
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import {
   parseScopedThreadKey,
   scopedThreadKey,
   scopeProjectRef,
+  scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { recentThreadsDirectionFromCommand, resolveShortcutCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { cn } from "../lib/utils";
-import { useRecentThreadsStore } from "../recentThreadsStore";
-import { readProject, readThreadShell } from "../state/entities";
+import {
+  type RecentThreadActivity,
+  resolveRecentThreadSwitcherKeys,
+  useRecentThreadsStore,
+} from "../recentThreadsStore";
+import { readProject, readThreadShell, readThreadShells } from "../state/entities";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 
@@ -35,24 +48,64 @@ interface SwitcherSession {
   holdsCtrl: boolean;
   holdsMeta: boolean;
   holdsAlt: boolean;
+  /**
+   * Router pathname when the switcher opened. Read from the router's history
+   * rather than the rendered params: the URL moves before React renders the
+   * new route, and desktop routes live in the hash.
+   */
+  originPathname: string;
 }
 
-/** Recent thread keys that still resolve to a live, unarchived thread. */
-function liveRecentThreadKeys(): string[] {
-  const live: string[] = [];
+/**
+ * Thread keys to offer on open: the live, unarchived visit history, topped
+ * up by activity order when that history is too short to switch between.
+ */
+function switcherThreadKeys(): string[] {
+  const liveHistory: string[] = [];
   for (const key of useRecentThreadsStore.getState().recentThreadKeys) {
     const ref = parseScopedThreadKey(key);
     if (!ref) continue;
     const shell = readThreadShell(ref);
     if (shell === null || shell.archivedAt !== null) continue;
-    live.push(key);
+    liveHistory.push(key);
   }
-  return live;
+  if (liveHistory.length >= 2) return liveHistory;
+  const liveThreads: RecentThreadActivity[] = [];
+  for (const shell of readThreadShells()) {
+    if (shell.archivedAt !== null) continue;
+    liveThreads.push({
+      threadKey: scopedThreadKey(scopeThreadRef(shell.environmentId, shell.id)),
+      activityAt: shell.latestUserMessageAt ?? shell.updatedAt,
+    });
+  }
+  return resolveRecentThreadSwitcherKeys({ liveHistory, liveThreads });
+}
+
+type SwitcherEntryView =
+  | { available: true; title: string; description: string }
+  | { available: false; title: string };
+
+/**
+ * What a frozen entry shows right now. A thread deleted or archived since the
+ * switcher opened reads as unavailable instead of vanishing, so every row
+ * keeps its index.
+ */
+function describeSwitcherEntry(threadKey: string): SwitcherEntryView {
+  const ref = parseScopedThreadKey(threadKey);
+  const shell = ref ? readThreadShell(ref) : null;
+  if (!ref || !shell) return { available: false, title: "Removed thread" };
+  if (shell.archivedAt !== null) return { available: false, title: "Archived thread" };
+  const projectTitle = readProject(scopeProjectRef(ref.environmentId, shell.projectId))?.title;
+  const description = [projectTitle, shell.branch ? `#${shell.branch}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return { available: true, title: shell.title, description };
 }
 
 export function RecentThreadsSwitcher() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const navigate = useNavigate();
+  const router = useRouter();
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -76,6 +129,9 @@ export function RecentThreadsSwitcher() {
     const current = sessionRef.current;
     if (!current) return;
     updateSession(null);
+    // The route moved while the switcher was open, and not through it: the
+    // user is already somewhere else, so don't yank them to the selection.
+    if (router.history.location.pathname !== current.originPathname) return;
     const key = current.entries[index ?? current.selectedIndex];
     const ref = key === undefined ? null : parseScopedThreadKey(key);
     const shell = ref === null ? null : readThreadShell(ref);
@@ -124,7 +180,7 @@ export function RecentThreadsSwitcher() {
       });
       return;
     }
-    const entries = liveRecentThreadKeys();
+    const entries = switcherThreadKeys();
     const routeThreadKey =
       routeTarget?.kind === "server" ? scopedThreadKey(routeTarget.threadRef) : null;
     if (entries.length === 0 || (entries.length === 1 && entries[0] === routeThreadKey)) return;
@@ -140,6 +196,7 @@ export function RecentThreadsSwitcher() {
       holdsCtrl: event.ctrlKey,
       holdsMeta: event.metaKey,
       holdsAlt: event.altKey,
+      originPathname: router.history.location.pathname,
     });
   });
 
@@ -195,8 +252,20 @@ function RecentThreadsSwitcherOverlay({
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
+  const selectedKey = entries[selectedIndex];
+  const announcement =
+    selectedKey === undefined
+      ? ""
+      : `${describeSwitcherEntry(selectedKey).title}, ${selectedIndex + 1} of ${entries.length}`;
+
   return (
     <div className="pointer-events-none fixed inset-0 z-100 flex justify-center px-4">
+      {/* Focus stays in the app while switching, so the listbox's selection is
+          never announced on its own. Kept outside the listbox, which may only
+          contain options. */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </span>
       <div
         ref={listRef}
         role="listbox"
@@ -226,14 +295,10 @@ function RecentThreadsSwitcherRow({
   selected: boolean;
   onClick: () => void;
 }) {
-  const ref = parseScopedThreadKey(threadKey);
-  const shell = ref ? readThreadShell(ref) : null;
-  if (!ref || !shell) return null;
-  const projectTitle = readProject(scopeProjectRef(ref.environmentId, shell.projectId))?.title;
-  const description = [projectTitle, shell.branch ? `#${shell.branch}` : null]
-    .filter(Boolean)
-    .join(" · ");
+  const entry = describeSwitcherEntry(threadKey);
 
+  // An unavailable row stays clickable: commit() refuses to navigate to it, so
+  // clicking just closes the switcher, same as releasing on it.
   return (
     <button
       type="button"
@@ -242,15 +307,23 @@ function RecentThreadsSwitcherRow({
       // the tab order so focus stays where the user left it.
       tabIndex={-1}
       aria-selected={selected}
+      aria-disabled={entry.available ? undefined : true}
       onClick={onClick}
       className={cn(
         "flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left",
         selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
       )}
     >
-      <span className="w-full truncate text-sm font-medium">{shell.title}</span>
-      {description.length > 0 ? (
-        <span className="w-full truncate text-xs text-muted-foreground">{description}</span>
+      <span
+        className={cn(
+          "w-full truncate text-sm font-medium",
+          !entry.available && "font-normal text-muted-foreground italic",
+        )}
+      >
+        {entry.title}
+      </span>
+      {entry.available && entry.description.length > 0 ? (
+        <span className="w-full truncate text-xs text-muted-foreground">{entry.description}</span>
       ) : null}
     </button>
   );
