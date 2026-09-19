@@ -388,9 +388,10 @@ export function ComputerUseSettings() {
                 Choose <span className="font-medium text-foreground">Load unpacked</span> and select
                 the{" "}
                 <span className="font-mono text-[12px] text-foreground">
-                  native/t3-chrome-extension
+                  munim-computer-use/chrome-extension
                 </span>{" "}
-                folder from this repo (or the copy bundled with the desktop app).
+                folder bundled with the desktop app (its full path is shown below until the
+                extension is loaded).
               </li>
               <li>
                 Confirm the extension id is{" "}

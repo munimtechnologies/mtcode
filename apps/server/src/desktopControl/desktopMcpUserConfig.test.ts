@@ -11,7 +11,7 @@ describe("claudeUserDefinesDesktopMcp", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-user-",
+        prefix: "munim-computer-use-user-",
       });
 
       const defined = yield* claudeUserDefinesDesktopMcp({
@@ -27,7 +27,7 @@ describe("claudeUserDefinesDesktopMcp", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-user-",
+        prefix: "munim-computer-use-user-",
       });
       yield* fileSystem.writeFileString(
         `${baseDir}/.mcp.json`,
@@ -47,7 +47,7 @@ describe("claudeUserDefinesDesktopMcp", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-user-",
+        prefix: "munim-computer-use-user-",
       });
       yield* fileSystem.writeFileString(
         `${baseDir}/.claude.json`,
@@ -66,7 +66,7 @@ describe("claudeUserDefinesDesktopMcp", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-user-",
+        prefix: "munim-computer-use-user-",
       });
       const cwd = `${baseDir}/project`;
       yield* fileSystem.makeDirectory(cwd);
@@ -88,7 +88,7 @@ describe("claudeUserDefinesDesktopMcp", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-user-",
+        prefix: "munim-computer-use-user-",
       });
       const cwd = `${baseDir}/project`;
       yield* fileSystem.makeDirectory(cwd);
@@ -111,7 +111,7 @@ describe("claudeUserDefinesDesktopMcp", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-user-",
+        prefix: "munim-computer-use-user-",
       });
       const configDir = `${baseDir}/config`;
       const homeDir = `${baseDir}/home`;

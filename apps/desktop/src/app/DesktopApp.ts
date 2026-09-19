@@ -15,6 +15,7 @@ import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as ComputerHistoryManager from "../computerHistory/ComputerHistoryManager.ts";
+import { ensureChromeNativeHostRegistered } from "../computerUse/nativeHost.ts";
 import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
@@ -260,6 +261,11 @@ const bootstrap = Effect.gen(function* () {
           Effect.logWarning("Computer History daemon bootstrap skipped", { cause }),
       }),
     );
+    // Browser control needs MT Code's Chrome native host registered; do it now
+    // (in the background) so it works without a visit to Settings.
+    if (decoded.desktopControl.enabled && decoded.desktopControl.browserControlEnabled) {
+      void ensureChromeNativeHostRegistered();
+    }
   }).pipe(
     Effect.catch((cause) =>
       Effect.logWarning("Computer History daemon bootstrap skipped", { cause }),

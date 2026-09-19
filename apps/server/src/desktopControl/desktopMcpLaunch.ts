@@ -3,6 +3,10 @@
  * server settings. Settings lookup failures fail closed (tools omitted).
  */
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import {
+  MTCODE_DESKTOP_ENV_PREFIX,
+  mtcodeDesktopProfileEnv,
+} from "@t3tools/shared/munimComputerUse";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -53,12 +57,16 @@ export const resolveEnabledDesktopMcp = Effect.fn("desktopControl.resolveEnabled
       return undefined;
     }
 
-    const env: Array<{ name: string; value: string }> = [];
+    // Run munim-computer-use under MT Code's identity: its own bridge socket,
+    // agent-cursor app and Chrome native host, and MT-prefixed tunables.
+    const env: Array<{ name: string; value: string }> = Object.entries(
+      mtcodeDesktopProfileEnv(),
+    ).map(([name, value]) => ({ name, value }));
     if (!desktopControl.agentCursorEnabled) {
-      env.push({ name: "T3_DESKTOP_AGENT_CURSOR", value: "0" });
+      env.push({ name: `${MTCODE_DESKTOP_ENV_PREFIX}AGENT_CURSOR`, value: "0" });
     }
     if (!desktopControl.browserControlEnabled) {
-      env.push({ name: "T3_DESKTOP_BROWSER", value: "0" });
+      env.push({ name: `${MTCODE_DESKTOP_ENV_PREFIX}BROWSER`, value: "0" });
     }
 
     return { path, env } satisfies DesktopMcpLaunch;

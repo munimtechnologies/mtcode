@@ -28,6 +28,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import { mtcodeDesktopProfileEnv } from "@t3tools/shared/munimComputerUse";
 import { resolveDesktopMcpBinaryPathSync } from "./resolveBinary.ts";
 
 type DaemonState = {
@@ -273,12 +274,14 @@ export const make = Effect.gen(function* () {
 
     const binary = resolveDesktopMcpBinaryPathSync();
     if (!binary) {
-      await writeUnavailableStatus(root, "t3-desktop-mcp binary not found");
+      await writeUnavailableStatus(root, "munim-computer-use binary not found");
       return;
     }
 
     const generation = state.generation + 1;
     const child = spawn(binary, ["computer-history", "--root", root], {
+      // Same MT identity the MCP server runs under (see desktopMcpLaunch.ts).
+      env: { ...process.env, ...mtcodeDesktopProfileEnv() },
       stdio: ["ignore", "ignore", "pipe"],
       detached: false,
     });
