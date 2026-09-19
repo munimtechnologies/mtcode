@@ -555,6 +555,16 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
       success: DispatchResult,
       error: EnvironmentOrchestrationDispatchErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  // Restore-only wake for external callers that only know the provider's
+  // thread id (for example a `codex queue` callback). Never submits a turn.
+  .add(
+    HttpApiEndpoint.post("wakeThread", "/api/orchestration/threads/wake", {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Struct({ providerThreadId: TrimmedNonEmptyString }),
+      success: Schema.Struct({ threadId: ThreadId }),
+      error: EnvironmentOrchestrationThreadSnapshotErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
 /** Large, compressible pull-request payloads travel over HTTP rather than the RPC socket. */

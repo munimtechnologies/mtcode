@@ -72,6 +72,26 @@ when it resets, when Codex reports them. Send the message again after the reset.
 message also says whether your workspace owner needs to add credits or raise the
 spend limit to continue sooner.
 
+## Queue messages from outside T3 Code
+
+`codex queue --thread <codex-thread-id> --message <text>` stores a message in
+Codex's own queue. Codex only delivers it once the thread is loaded, and T3 Code
+unloads idle Codex sessions after about 30 minutes, so a queued message can wait
+until someone opens the thread and sends something. Wake the thread instead:
+
+```bash
+curl -X POST "$T3_URL/api/orchestration/threads/wake" \
+  -H "Authorization: Bearer $T3_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"providerThreadId":"<codex-thread-id>"}'
+```
+
+The wake reloads the Codex session so Codex delivers what it already queued. It
+never sends a message itself, so calling it more than once is safe. A settled
+thread is unsettled by the wake. Issue the bearer token with
+`t3 auth session issue`. It carries full admin scopes, so keep it as private as
+your Codex login.
+
 ## Send feedback to OpenAI
 
 In an existing Codex thread, send `/feedback` with an optional description, for

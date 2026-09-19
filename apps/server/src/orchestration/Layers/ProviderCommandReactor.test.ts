@@ -4511,6 +4511,117 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  effectIt.effect(
+    "reacts to thread.session.start by restoring the session without sending a turn",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const now = "2026-01-01T00:00:00.000Z";
+        const threadId = ThreadId.make("thread-1");
+        const wake = (commandId: string) =>
+          harness.engine.dispatch({
+            type: "thread.session.start",
+            commandId: CommandId.make(commandId),
+            threadId,
+            createdAt: now,
+          });
+        const readThread = Effect.promise(() => harness.readModel()).pipe(
+          Effect.map((readModel) => readModel.threads.find((entry) => entry.id === threadId)),
+        );
+
+        yield* wake("cmd-session-start-1");
+        yield* Effect.promise(() => waitFor(() => harness.startSession.mock.calls.length === 1));
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.startSession.mock.calls[0]?.[0]).toEqual(threadId);
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+        expect((yield* readThread)?.session?.status).toBe("ready");
+
+        // Repeat wakes are no-ops while the session is alive.
+        yield* wake("cmd-session-start-2");
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+        expect(harness.stopSession).not.toHaveBeenCalled();
+
+        // After the session stopped (reaper, settle), a wake restores it and
+        // unsettles the thread.
+        yield* harness.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.make("cmd-session-stop-before-wake"),
+          threadId,
+          createdAt: now,
+        });
+        yield* harness.engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-before-wake"),
+          threadId,
+        });
+        yield* Effect.promise(() => harness.drain());
+        expect((yield* readThread)?.session?.status).toBe("stopped");
+        expect((yield* readThread)?.settledOverride).toBe("settled");
+        yield* wake("cmd-session-start-3");
+        yield* Effect.promise(() => waitFor(() => harness.startSession.mock.calls.length === 2));
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+        expect((yield* readThread)?.session?.status).toBe("ready");
+        expect((yield* readThread)?.settledOverride).toBeNull();
+      }),
+  );
+
+  effectIt.effect("marks a failed thread.session.start restore as error, not starting", () =>
+    Effect.gen(function* () {
+      const attempted = yield* Deferred.make<void>();
+      const missingWorkspace = new ProviderWorkspaceMissingError({
+        threadId: ThreadId.make("thread-1"),
+        cwd: "/missing/project/worktree",
+      });
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          startSessionEffect: () =>
+            Deferred.succeed(attempted, undefined).pipe(
+              Effect.andThen(Effect.fail(missingWorkspace)),
+            ),
+        }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-1");
+
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-stopped-before-wake"),
+        threadId,
+        session: {
+          threadId,
+          status: "stopped",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.session.start",
+        commandId: CommandId.make("cmd-session-start-fails"),
+        threadId,
+        createdAt: now,
+      });
+      yield* Deferred.await(attempted);
+      yield* Effect.promise(() => harness.drain());
+
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === threadId,
+      );
+      expect(thread?.session).toMatchObject({
+        status: "error",
+        activeTurnId: null,
+        lastError: missingWorkspace.message,
+      });
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+    }),
+  );
+
   it("rejects active runtime sessions that are missing provider instance ids", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

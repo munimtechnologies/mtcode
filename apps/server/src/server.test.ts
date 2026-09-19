@@ -2236,6 +2236,60 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("wakes a thread by provider thread id without submitting a turn", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-wake-1");
+      const dispatched: Array<string> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          providerSessionDirectory: {
+            listBindings: () =>
+              Effect.succeed([
+                {
+                  threadId,
+                  provider: ProviderDriverKind.make("codex"),
+                  resumeCursor: { threadId: "codex-thread-1" },
+                  lastSeenAt: "2026-01-01T00:00:00.000Z",
+                },
+                {
+                  threadId: ThreadId.make("thread-wake-claude"),
+                  provider: ProviderDriverKind.make("claudeAgent"),
+                  resumeCursor: { threadId: "claude-thread-1" },
+                  lastSeenAt: "2026-01-01T00:00:00.000Z",
+                },
+              ]),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatched.push(command.type);
+                return { sequence: dispatched.length };
+              }),
+          },
+        },
+      });
+      const url = yield* getHttpServerUrl("/api/orchestration/threads/wake");
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const wake = (providerThreadId: string) =>
+        fetchEffect(url, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie },
+          body: jsonRequestBody({ providerThreadId }),
+        });
+
+      const response = yield* wake("codex-thread-1");
+      assert.equal(response.status, 200);
+      assert.deepEqual(yield* responseJsonEffect(response), { threadId });
+      assert.deepEqual(dispatched, ["thread.session.start"]);
+
+      const missing = yield* wake("unknown-thread");
+      assert.equal(missing.status, 404);
+      const otherProvider = yield* wake("claude-thread-1");
+      assert.equal(otherProvider.status, 404);
+      assert.deepEqual(dispatched, ["thread.session.start"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("compresses large JSON responses through the composed routes", () =>
     Effect.gen(function* () {
       const descriptor = {
