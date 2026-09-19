@@ -19,10 +19,9 @@ import {
   type LaunchEditorInput,
 } from "@t3tools/contracts";
 import { resolveEditorCommand } from "@t3tools/shared/editor";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Clock from "effect/Clock";
-import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
@@ -83,48 +82,47 @@ const DETACHED_IGNORE_STDIO_OPTIONS = {
   stderr: "ignore",
 } as const satisfies ChildProcess.CommandOptions;
 
-const compactEnv = (input: Record<string, Option.Option<string>>): NodeJS.ProcessEnv =>
-  Object.fromEntries(
-    Object.entries(input).flatMap(([key, value]) =>
-      Option.match(value, {
-        onNone: () => [],
-        onSome: (resolved) => [[key, resolved]],
+const BROWSER_LAUNCH_ENV_NAMES = [
+  "SYSTEMROOT",
+  "windir",
+  "WSL_DISTRO_NAME",
+  "WSL_INTEROP",
+  "SSH_CONNECTION",
+  "SSH_TTY",
+  "container",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+] as const;
+
+// HOME and the install roots let editor discovery find IDEs outside PATH.
+const COMMAND_LOOKUP_ENV_NAMES = [
+  "PATH",
+  "Path",
+  "path",
+  "PATHEXT",
+  "HOME",
+  "LOCALAPPDATA",
+  "ProgramFiles",
+  "ProgramW6432",
+  "XDG_DATA_HOME",
+  "ProgramFiles(x86)",
+] as const;
+
+// Not Config: the default ConfigProvider snapshots process.env on first use,
+// before `fixPath` hydrates PATH, so it only ever sees the bare launchd PATH.
+const readHostEnv = (names: ReadonlyArray<string>) =>
+  Effect.map(HostProcessEnvironment, (env): NodeJS.ProcessEnv =>
+    Object.fromEntries(
+      names.flatMap((name) => {
+        const value = env[name];
+        return value === undefined || value.length === 0 ? [] : [[name, value]];
       }),
     ),
   );
 
-const BrowserLaunchEnvConfig = Config.all({
-  SYSTEMROOT: Config.String("SYSTEMROOT").pipe(Config.option),
-  windir: Config.String("windir").pipe(Config.option),
-  WSL_DISTRO_NAME: Config.String("WSL_DISTRO_NAME").pipe(Config.option),
-  WSL_INTEROP: Config.String("WSL_INTEROP").pipe(Config.option),
-  SSH_CONNECTION: Config.String("SSH_CONNECTION").pipe(Config.option),
-  SSH_TTY: Config.String("SSH_TTY").pipe(Config.option),
-  container: Config.String("container").pipe(Config.option),
-  DISPLAY: Config.String("DISPLAY").pipe(Config.option),
-  WAYLAND_DISPLAY: Config.String("WAYLAND_DISPLAY").pipe(Config.option),
-}).pipe(Config.map(compactEnv));
-
-const CommandLookupEnvConfig = Config.all({
-  PATH: Config.String("PATH").pipe(Config.option),
-  Path: Config.String("Path").pipe(Config.option),
-  path: Config.String("path").pipe(Config.option),
-  PATHEXT: Config.String("PATHEXT").pipe(Config.option),
-  HOME: Config.String("HOME").pipe(Config.option),
-  LOCALAPPDATA: Config.String("LOCALAPPDATA").pipe(Config.option),
-  ProgramFiles: Config.String("ProgramFiles").pipe(Config.option),
-  ProgramW6432: Config.String("ProgramW6432").pipe(Config.option),
-  XDG_DATA_HOME: Config.String("XDG_DATA_HOME").pipe(Config.option),
-  "ProgramFiles(x86)": Config.String("ProgramFiles(x86)").pipe(Config.option),
-}).pipe(Config.map(compactEnv));
-
-const MacAppLookupEnvConfig = Config.all({
-  HOME: Config.String("HOME").pipe(Config.option),
-}).pipe(Config.map(compactEnv));
-
-const readBrowserLaunchEnv = BrowserLaunchEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
-const readCommandLookupEnv = CommandLookupEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
-const readMacAppLookupEnv = MacAppLookupEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
+const readBrowserLaunchEnv = readHostEnv(BROWSER_LAUNCH_ENV_NAMES);
+const readCommandLookupEnv = readHostEnv(COMMAND_LOOKUP_ENV_NAMES);
+const readMacAppLookupEnv = readHostEnv(["HOME"]);
 
 const MAC_SYSTEM_APPLICATIONS_DIR = "/Applications";
 
