@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFs from "node:fs";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeURL from "node:url";
 
 import {
   desktopMcpPathOverride,
@@ -17,9 +17,10 @@ import {
   type MunimComputerUsePlatform,
 } from "@t3tools/shared/munimComputerUse";
 
-const here = NodePath.dirname(fileURLToPath(import.meta.url));
+const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 
 function hostPlatform(): MunimComputerUsePlatform | undefined {
+  // oxlint-disable-next-line t3code/no-global-process-runtime -- Resolved once at startup, outside any Effect runtime.
   const platform = process.platform;
   return platform === "darwin" || platform === "win32" || platform === "linux"
     ? platform
@@ -42,7 +43,7 @@ function fetchedCacheDir(key: MunimComputerUseAssetKey): string | undefined {
   ];
   for (const manifestPath of candidates) {
     try {
-      const { version } = parseMunimComputerUseManifest(NodeFs.readFileSync(manifestPath, "utf8"));
+      const { version } = parseMunimComputerUseManifest(NodeFS.readFileSync(manifestPath, "utf8"));
       return munimComputerUseCacheDir({
         environment: process.env,
         homeDir: NodeOS.homedir(),
@@ -78,6 +79,7 @@ export function resolveDesktopMcpBinaryPathSync(): string | undefined {
   const override = desktopMcpPathOverride(process.env);
   const packaged = packagedDir();
   const fetched = fetchedCacheDir(
+    // oxlint-disable-next-line t3code/no-global-process-runtime -- Resolved once at startup, outside any Effect runtime.
     munimComputerUseAssetKey(platform, process.arch === "arm64" ? "arm64" : "x64"),
   );
   const candidates = [
@@ -90,7 +92,7 @@ export function resolveDesktopMcpBinaryPathSync(): string | undefined {
   ];
 
   for (const candidate of candidates) {
-    if (NodeFs.existsSync(candidate)) return candidate;
+    if (NodeFS.existsSync(candidate)) return candidate;
   }
   return undefined;
 }
@@ -108,7 +110,7 @@ export function resolveChromeExtensionDirSync(): string | undefined {
     NodePath.join(checkoutRoot(), MUNIM_COMPUTER_USE_EXTENSION_DIR),
   ];
   for (const candidate of candidates) {
-    if (NodeFs.existsSync(NodePath.join(candidate, "manifest.json"))) return candidate;
+    if (NodeFS.existsSync(NodePath.join(candidate, "manifest.json"))) return candidate;
   }
   return undefined;
 }

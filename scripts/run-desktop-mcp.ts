@@ -20,6 +20,7 @@ import {
   parseMunimComputerUseManifest,
 } from "@t3tools/shared/munimComputerUse";
 
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone build script has no Effect runtime.
 const platform = process.platform;
 if (platform !== "darwin" && platform !== "win32" && platform !== "linux") {
   console.error(`munim-computer-use has no build for ${platform}`);
@@ -41,6 +42,7 @@ const candidates = [
       environment: process.env,
       homeDir: NodeOS.homedir(),
       version: manifest.version,
+      // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone build script has no Effect runtime.
       key: munimComputerUseAssetKey(platform, process.arch === "arm64" ? "arm64" : "x64"),
       join: NodePath.join,
     }),
