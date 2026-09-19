@@ -347,16 +347,6 @@ export interface CodexSessionRuntimeShape {
   readonly close: Effect.Effect<void>;
 }
 
-export function buildPermissionsApprovalResponse(
-  permissions: EffectCodexSchema.PermissionsRequestApprovalParams["permissions"],
-  decision: ProviderApprovalDecision,
-): EffectCodexSchema.PermissionsRequestApprovalResponse {
-  return {
-    permissions: decision === "accept" || decision === "acceptForSession" ? permissions : {},
-    scope: decision === "acceptForSession" ? "session" : "turn",
-  };
-}
-
 export function isComputerUseMcpApproval(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
 ): boolean {
@@ -369,6 +359,11 @@ export function isMcpToolApproval(
   return payload.mode !== "url" && isMcpToolApprovalMeta(payload._meta);
 }
 
+/**
+ * Fork kinds for MCP tool-call guardian elicitations: `permissions` = the
+ * Computer Use connector, `tool` = any other MCP tool. Not to be confused with
+ * upstream's `permission` kind, which is Codex's `item/permissions/requestApproval`.
+ */
 export function mcpApprovalRequestKind(
   payload: EffectCodexSchema.McpServerElicitationRequestParams,
 ): ProviderRequestKind | undefined {
@@ -952,9 +947,7 @@ function classifyCodexStderrLine(rawLine: string): { readonly message: string } 
 
 export function isRecoverableThreadResumeError(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  if (
-    RECOVERABLE_THREAD_RESUME_CAPABILITY_SNIPPETS.some((snippet) => message.includes(snippet))
-  ) {
+  if (RECOVERABLE_THREAD_RESUME_CAPABILITY_SNIPPETS.some((snippet) => message.includes(snippet))) {
     return true;
   }
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -2594,62 +2587,6 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
-    yield* client.handleServerRequest("item/permissions/requestApproval", (payload) =>
-      Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(
-          yield* randomUUIDv4("permissions-approval-request"),
-        );
-        const turnId = TurnId.make(payload.turnId);
-        const itemId = ProviderItemId.make(payload.itemId);
-        const decision = yield* Deferred.make<ProviderApprovalDecision>();
-
-        yield* Ref.update(pendingApprovalsRef, (current) => {
-          const next = new Map(current);
-          next.set(requestId, {
-            requestId,
-            jsonRpcId: payload.itemId,
-            requestKind: "permissions",
-            turnId,
-            itemId,
-            decision,
-          });
-          return next;
-        });
-        yield* Ref.update(approvalCorrelationsRef, (current) => {
-          const next = new Map(current);
-          next.set(payload.itemId, {
-            requestId,
-            requestKind: "permissions",
-            turnId,
-            itemId,
-          });
-          return next;
-        });
-
-        yield* emitEvent({
-          kind: "request",
-          threadId: options.threadId,
-          method: "item/permissions/requestApproval",
-          requestId,
-          requestKind: "permissions",
-          turnId,
-          itemId,
-          payload,
-        });
-
-        const resolved = yield* Deferred.await(decision).pipe(
-          Effect.ensuring(
-            Ref.update(pendingApprovalsRef, (current) => {
-              const next = new Map(current);
-              next.delete(requestId);
-              return next;
-            }),
-          ),
-        );
-        return buildPermissionsApprovalResponse(payload.permissions, resolved);
-      }),
-    );
-
     yield* client.handleServerRequest("mcpServer/elicitation/request", (payload) =>
       Effect.gen(function* () {
         // Computer Use / MCP tool guardian approvals keep the fork's approval
@@ -2770,6 +2707,69 @@ export const makeCodexSessionRuntime = (
           ),
         );
         return toMcpElicitationResponse(payload, resolved);
+      }),
+    );
+
+    yield* client.handleServerRequest("item/permissions/requestApproval", (payload) =>
+      Effect.gen(function* () {
+        const requestId = ApprovalRequestId.make(
+          yield* randomUUIDv4("app-permission-approval-request"),
+        );
+        const turnId = TurnId.make(payload.turnId);
+        const itemId = ProviderItemId.make(payload.itemId);
+        const decision = yield* Deferred.make<ProviderApprovalDecision>();
+
+        yield* Ref.update(pendingApprovalsRef, (current) => {
+          const next = new Map(current);
+          next.set(requestId, {
+            requestId,
+            jsonRpcId: payload.itemId,
+            requestKind: "permission",
+            turnId,
+            itemId,
+            decision,
+          });
+          return next;
+        });
+        yield* Ref.update(approvalCorrelationsRef, (current) => {
+          const next = new Map(current);
+          next.set(payload.itemId, {
+            requestId,
+            requestKind: "permission",
+            turnId,
+            itemId,
+          });
+          return next;
+        });
+
+        yield* emitEvent({
+          kind: "request",
+          threadId: options.threadId,
+          method: "item/permissions/requestApproval",
+          requestId,
+          requestKind: "permission",
+          ...(turnId ? { turnId } : {}),
+          ...(itemId ? { itemId } : {}),
+          payload,
+        });
+
+        const resolved = yield* Deferred.await(decision).pipe(
+          Effect.ensuring(
+            Ref.update(pendingApprovalsRef, (current) => {
+              const next = new Map(current);
+              next.delete(requestId);
+              return next;
+            }),
+          ),
+        );
+        // Approving grants the requested profile; denying answers with an
+        // empty grant so the app-server treats the permission as withheld.
+        const grantedPermissions =
+          resolved === "accept" || resolved === "acceptForSession" ? payload.permissions : {};
+        return {
+          permissions: grantedPermissions,
+          ...(resolved === "acceptForSession" ? { scope: "session" as const } : {}),
+        } satisfies EffectCodexSchema.PermissionsRequestApprovalResponse;
       }),
     );
 
@@ -3347,6 +3347,17 @@ export const makeCodexSessionRuntime = (
           suppressMonitorWakes = true;
           backgroundTasks.cancelWakes();
         }).pipe(
+          // Settle parked approvals FIRST, before waiting on turnLock. The
+          // transport answers server requests inline on its stdin read loop,
+          // so a pending command/file/app-permission prompt blocks every
+          // incoming message, including the turn/interrupt, monitor-terminate
+          // and in-flight turn/start responses - cancelling after those RPCs
+          // (or queueing behind a sendTurn that holds the lock) would deadlock
+          // Stop exactly when a card is open. Settling releases the handler,
+          // which answers the peer and unblocks the loop. Pending user-input
+          // prompts block the same way; settle them too.
+          Effect.andThen(settlePendingApprovals("cancel")),
+          Effect.andThen(settlePendingUserInputs({})),
           Effect.andThen(
             turnLock.withPermit(
               Effect.gen(function* () {
@@ -3354,6 +3365,10 @@ export const makeCodexSessionRuntime = (
                 suppressMonitorWakes = true;
                 backgroundTasks.cancelWakes();
                 queuedUserTurns.clear();
+                // Again under the lock: a prompt may have opened while Stop
+                // waited for the permit, and it would block the RPCs below.
+                yield* settlePendingApprovals("cancel");
+                yield* settlePendingUserInputs({});
                 for (const monitor of monitorCommands.values()) monitor.stopped = true;
                 const monitorCleanup = yield* Effect.forEach(
                   Array.from(monitorCommands.keys()),

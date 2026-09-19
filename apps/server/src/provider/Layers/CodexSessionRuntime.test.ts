@@ -15,7 +15,6 @@ import {
 import { codexLaunchArgv, codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildMcpApprovalResponse,
-  buildPermissionsApprovalResponse,
   buildCodexForkHistoryInjection,
   buildTurnStartParams,
   describeMcpElicitation,
@@ -444,38 +443,6 @@ describe("buildTurnStartParams", () => {
         },
       ],
     });
-  });
-});
-
-describe("buildPermissionsApprovalResponse", () => {
-  const permissions = {
-    network: { enabled: true },
-    fileSystem: {
-      entries: [{ access: "write" as const, path: { type: "path" as const, path: "/tmp" } }],
-    },
-  };
-
-  it("grants the requested execution context for this turn", () => {
-    NodeAssert.deepStrictEqual(buildPermissionsApprovalResponse(permissions, "accept"), {
-      permissions,
-      scope: "turn",
-    });
-  });
-
-  it("persists an accepted execution context only for acceptForSession", () => {
-    NodeAssert.deepStrictEqual(buildPermissionsApprovalResponse(permissions, "acceptForSession"), {
-      permissions,
-      scope: "session",
-    });
-  });
-
-  it("denies every requested capability on decline or cancellation", () => {
-    for (const decision of ["decline", "cancel"] as const) {
-      NodeAssert.deepStrictEqual(buildPermissionsApprovalResponse(permissions, decision), {
-        permissions: {},
-        scope: "turn",
-      });
-    }
   });
 });
 

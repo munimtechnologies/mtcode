@@ -83,9 +83,14 @@ export const ProviderRequestKind = Schema.Literals([
   "command",
   "file-read",
   "file-change",
+  // Fork: MCP tool-call guardian elicitations. `permissions` = the Computer Use
+  // connector (also stored on pre-merge Codex app-permission rows), `tool` =
+  // any other MCP tool. Distinct from upstream's `permission` below.
   "tool",
   "permissions",
   "mcp-elicitation",
+  // Codex `item/permissions/requestApproval` (upstream).
+  "permission",
 ]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const ProviderApprovalDecision = Schema.Literals([

@@ -14,6 +14,7 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationThreadActivity,
   type ProjectId,
+  type ProviderRequestKind,
   type ProviderRuntimeEvent,
   type ResponseStreamingMode,
   RuntimeRequestId,
@@ -400,14 +401,7 @@ function sessionStatusAllowsActiveTurn(
 
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
-):
-  | "command"
-  | "file-read"
-  | "file-change"
-  | "mcp-elicitation"
-  | "permissions"
-  | "tool"
-  | undefined {
+): ProviderRequestKind | undefined {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -419,6 +413,11 @@ function requestKindFromCanonicalRequestType(
       return "file-change";
     case "mcp_elicitation_approval":
       return "mcp-elicitation";
+    // Codex app-permission requests (upstream).
+    case "permission_approval":
+      return "permission";
+    // Fork: Computer Use MCP elicitations (`permissions`) and generic MCP tool
+    // guardian approvals (`tool`).
     case "permissions_approval":
       return "permissions";
     case "tool_approval":
@@ -505,11 +504,13 @@ export function runtimeEventToActivities(
                   ? "File-change approval requested"
                   : requestKind === "mcp-elicitation"
                     ? "App access approval requested"
-                    : requestKind === "permissions"
-                      ? "Permission requested"
-                      : requestKind === "tool"
-                        ? "Tool approval requested"
-                        : "Approval requested",
+                    : requestKind === "permission"
+                      ? "App permission approval requested"
+                      : requestKind === "permissions"
+                        ? "Permission requested"
+                        : requestKind === "tool"
+                          ? "Tool approval requested"
+                          : "Approval requested",
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),

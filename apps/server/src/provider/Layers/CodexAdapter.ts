@@ -922,10 +922,10 @@ function toRequestTypeFromMethod(method: string): CanonicalRequestType {
       return "file_read_approval";
     case "item/fileChange/requestApproval":
       return "file_change_approval";
-    case "item/permissions/requestApproval":
-      return "permissions_approval";
     case "mcpServer/elicitation/request":
       return "mcp_elicitation_approval";
+    case "item/permissions/requestApproval":
+      return "permission_approval";
     case "applyPatchApproval":
       return "apply_patch_approval";
     case "execCommandApproval":
@@ -945,8 +945,9 @@ function resolveOpenedRequestType(
   method: string,
   kind: ProviderRequestKind | undefined,
 ): CanonicalRequestType {
-  // MT desktop permissions / generic tool approvals ride MCP elicitations; their kind is
-  // the only thing that tells them apart from a plain elicitation.
+  // Computer Use (`permissions`) / generic MCP tool (`tool`) approvals ride MCP
+  // elicitations; their kind is the only thing that tells them apart from a plain
+  // elicitation. Codex app-permission requests use upstream's `permission` kind.
   if (kind === "permissions" || kind === "tool") return toRequestTypeFromKind(kind);
   const byMethod = toRequestTypeFromMethod(method);
   return byMethod === "unknown" && kind ? toRequestTypeFromKind(kind) : byMethod;
@@ -966,6 +967,8 @@ function toRequestTypeFromKind(kind: ProviderRequestKind | undefined): Canonical
       return "tool_approval";
     case "mcp-elicitation":
       return "mcp_elicitation_approval";
+    case "permission":
+      return "permission_approval";
     default:
       return "unknown";
   }
@@ -1596,19 +1599,21 @@ function mapToRuntimeEvents(
           // wants to write under.
           return nonEmptyDetail(payload?.reason) ?? nonEmptyDetail(payload?.grantRoot);
         }
+        case "mcpServer/elicitation/request":
+          return elicitation?.message;
         case "item/permissions/requestApproval": {
           const payload = readPayload(
             EffectCodexSchema.ServerRequest__PermissionsRequestApprovalParams,
             event.payload,
           );
-          return payload?.reason ?? undefined;
-        }
-        case "mcpServer/elicitation/request": {
-          const payload = readPayload(
-            EffectCodexSchema.ServerRequest__McpServerElicitationRequestParams,
-            event.payload,
+          const requestedPaths = [
+            ...(payload?.permissions.fileSystem?.read ?? []),
+            ...(payload?.permissions.fileSystem?.write ?? []),
+          ];
+          return (
+            nonEmptyDetail(payload?.reason) ??
+            (requestedPaths.length > 0 ? `Access: ${requestedPaths.join(", ")}` : undefined)
           );
-          return payload?.message ?? undefined;
         }
         case "applyPatchApproval": {
           const payload = readPayload(
