@@ -168,6 +168,13 @@ overrides:
   tailwindcss: "catalog:"
   vite: "catalog:"
   yaml: "catalog:"
+  # MT Code: transitive runtime advisories (Dependabot). Each stays within the
+  # range its dependents accept; decode-uri-component's fix is ESM-only and
+  # image-size has no fixed release, so both stay as they are.
+  "path-to-regexp@>=6 <6.3.0": 6.3.0
+  "valibot@>=1 <1.4.2": ^1.4.2
+  "xml2js@<0.5.0": 0.6.2
+  "xcode>uuid": ^11.1.1
 
 packageExtensions:
   "@clerk/expo@*":
