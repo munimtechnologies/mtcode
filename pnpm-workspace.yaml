@@ -15,7 +15,6 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
-  msgpackr-extract: true
   msw: false
   node-pty: true
   playwright: false
