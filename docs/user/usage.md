@@ -101,19 +101,3 @@ settings section when you no longer need it.
 Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
 Claude quotas. Tap it to open **Usage → Limits**. On iOS, use **Edit Widget** to choose Session,
 Weekly, or both for each provider. Reopen T3 to refresh expired readings.
-
-## Turn usage badges
-
-After a turn finishes, a small badge under the assistant's reply says what it cost: **Included**
-when the plan covered it, **X% of limit** when the provider reports rate-limit windows and the
-turn's share of the tightest one is known, or the billed amount when the provider reports a cost
-or the turn ran over the limit. Hover the badge for the token counts, window utilization, and cost
-estimate behind it. The badge names the plan the provider reports ("Claude Max 20x", "ChatGPT
-Plus") or, failing that, the provider.
-
-The composer footer also carries a live pill with the tightest plan window from the thread's newest
-report. Hover it for every reported window with its reset countdown, the last turn, and this
-month's spending per provider.
-
-Badges depend on what each provider reports. Claude and Codex report windows and tokens; Cursor
-reports neither, so its badges only say when a plan limit refused a turn.

@@ -33,15 +33,6 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { formatTokens } from "@t3tools/shared/usageFormat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
-import {
-  addTurnTokens,
-  buildTurnUsagePayload,
-  mergeRateLimitSnapshots,
-  normalizeRateLimitSnapshot,
-  turnUsageActivity,
-  type RateLimitSnapshot,
-  type TurnTokenTotals,
-} from "../turnUsage.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -1041,13 +1032,6 @@ export function runtimeEventToActivities(
 }
 
 const make = Effect.gen(function* () {
-  // Latest plan-window report per provider instance, and the report seen when
-  // each turn started (keyed by thread:turn), for per-turn usage badges.
-  const latestRateLimits = new Map<string, RateLimitSnapshot>();
-  const turnRateLimitBaselines = new Map<string, RateLimitSnapshot | null>();
-  // Tokens reported per model call while a turn runs (keyed by thread:turn),
-  // for providers that never put usage on turn.completed (Codex).
-  const turnTokenTotals = new Map<string, TurnTokenTotals>();
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const crypto = yield* Crypto.Crypto;
@@ -1788,34 +1772,9 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
-      // Rate limits are account-level, not a thread projection, so they are
-      // handled before the thread lookup below: the emitting thread is often
-      // already gone (session ended, thread deleted).
+      // Rate limits are account-level, not a thread projection, so the thread
+      // path ignores them.
       if (event.type === "account.rate-limits.updated") {
-        // Usage badges: updates are sparse (Claude names one window per
-        // event), so fold them into what the account already reported. A turn
-        // that started before this account reported anything (the first turn
-        // after a server start) takes the first report it sees as its
-        // baseline; providers report with each response, so this undercounts
-        // only by the turn's first request.
-        const update = normalizeRateLimitSnapshot(event.payload);
-        if (update) {
-          const rateLimitKey = event.providerInstanceId ?? event.provider;
-          const snapshot = mergeRateLimitSnapshots(
-            latestRateLimits.get(rateLimitKey) ?? null,
-            update,
-          );
-          latestRateLimits.set(rateLimitKey, snapshot);
-          let turnId = toTurnId(event.turnId) ?? null;
-          if (turnId === null) {
-            const thread = yield* resolveThreadRuntimeContext(event.threadId);
-            turnId = thread?.session?.activeTurnId ?? null;
-          }
-          const turnKey = `${event.threadId}:${turnId ?? ""}`;
-          if (turnRateLimitBaselines.get(turnKey) === null) {
-            turnRateLimitBaselines.set(turnKey, snapshot);
-          }
-        }
         return;
       }
       if (
@@ -1840,22 +1799,6 @@ const make = Effect.gen(function* () {
       const isTerminalTurn = event.type === "turn.completed" || event.type === "turn.aborted";
       const isCompactedThreadState =
         event.type === "thread.state.changed" && event.payload.state === "compacted";
-      // Usage badges: remember the plan window before a turn, and the tokens
-      // reported while it runs, so turn.completed can describe what it cost.
-      const rateLimitKey = event.providerInstanceId ?? event.provider;
-      if (event.type === "turn.started" && eventTurnId) {
-        turnRateLimitBaselines.set(
-          `${thread.id}:${eventTurnId}`,
-          latestRateLimits.get(rateLimitKey) ?? null,
-        );
-      }
-      if (event.type === "thread.token-usage.updated") {
-        const tokenKey = `${thread.id}:${eventTurnId ?? activeTurnId ?? ""}`;
-        turnTokenTotals.set(
-          tokenKey,
-          addTurnTokens(turnTokenTotals.get(tokenKey), event.payload.usage),
-        );
-      }
       const pendingTurnStart =
         event.type === "session.started" ||
         event.type === "session.state.changed" ||
@@ -2731,42 +2674,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      let usageActivity: OrchestrationThreadActivity | null = null;
-      const baselineKey = `${thread.id}:${eventTurnId ?? ""}`;
-      const before = turnRateLimitBaselines.get(baselineKey) ?? null;
-      const accumulatedTokens = turnTokenTotals.get(baselineKey);
-      if (isTerminalTurn) {
-        // Aborted turns report nothing, but must not leak their snapshot.
-        turnRateLimitBaselines.delete(baselineKey);
-        turnTokenTotals.delete(baselineKey);
-      }
-      if (event.type === "turn.completed") {
-        const usagePayload = buildTurnUsagePayload({
-          provider: event.provider,
-          usage: event.payload.usage ?? accumulatedTokens,
-          totalCostUsd: event.payload.totalCostUsd,
-          before,
-          after: latestRateLimits.get(rateLimitKey) ?? null,
-          // The account snapshot alone cannot say a turn was refused: a
-          // saturated window can belong to another model, and a stopped turn
-          // was stopped by the user. The badge follows how the turn ended.
-          outcome: {
-            state: event.payload.state,
-            failureReason: event.payload.failureReason,
-          },
-        });
-        if (usagePayload) {
-          usageActivity = turnUsageActivity({
-            eventId: event.eventId,
-            turnId: eventTurnId ?? null,
-            createdAt: now,
-            payload: usagePayload,
-          });
-        }
-      }
-      const activities = usageActivity
-        ? [...runtimeEventToActivities(activityEvent, taskTitle), usageActivity]
-        : runtimeEventToActivities(activityEvent, taskTitle);
+      const activities = runtimeEventToActivities(activityEvent, taskTitle);
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, "thread-activity-append").pipe(
           Effect.flatMap((commandId) =>

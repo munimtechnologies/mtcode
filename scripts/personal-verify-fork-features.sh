@@ -154,11 +154,6 @@ require apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.tsx 'if (state
 require apps/web/src/components/chat/ChatHeader.tsx "<ProcessesButton />" "Processes dialog button mounted in chat header actions"
 require apps/server/src/terminal/Manager.ts "registerProcessOrigin(processPid" "terminal PTY registered as a process origin"
 
-# --- Per-turn usage badges (ported from t3neo) ---
-require apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts "buildTurnUsagePayload" "turn usage activity emitted by the ingestion"
-require apps/web/src/components/ChatView.tsx "turnUsageByTurnId={turnUsageByTurnId}" "turn usage badges passed to the timeline"
-require apps/web/src/components/chat/ChatComposer.tsx "<ComposerUsageBadge" "live usage pill in the composer footer"
-
 # --- Desktop auto-download / auto-install (personal fork) ---
 # The 2026-09-01 sync silently broke auto-install when upstream turned
 # installDownloadedUpdate into a function (the fork line yielded the function).

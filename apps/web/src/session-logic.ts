@@ -511,7 +511,7 @@ export function deriveWorkLogEntries(
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.kind === "turn.plan.updated") continue;
-    // Rendered as a badge under the assistant reply, not as a timeline row.
+    // Older builds recorded per-turn usage badges; they are not timeline rows.
     if (activity.kind === "provider.turn.usage") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isNoContentRuntimeWarning(activity)) continue;
