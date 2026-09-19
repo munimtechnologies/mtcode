@@ -7,8 +7,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  canPauseSession,
   canSnooze,
   effectiveSnoozed,
+  isSessionPaused,
   threadUsageLimitResetsAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
@@ -95,6 +97,7 @@ export function useThreadActionMenu(input: {
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
+    pauseThreadSession,
     pinThread,
     confirmAndUnpinThread,
     setThreadAutoSettle,
@@ -161,6 +164,8 @@ export function useThreadActionMenu(input: {
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
+          isPaused: isSessionPaused(thread),
+          canPauseNow: canPauseSession(thread),
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
@@ -251,6 +256,9 @@ export function useThreadActionMenu(input: {
             return;
           case "unsnooze":
             await reportFailure("Failed to wake thread", () => unsnoozeThread(threadRef));
+            return;
+          case "pause":
+            await reportFailure("Failed to pause session", () => pauseThreadSession(threadRef));
             return;
           case "pin":
             await reportFailure("Failed to pin thread", () => pinThread(threadRef));
@@ -368,6 +376,7 @@ export function useThreadActionMenu(input: {
       logicalProjectKeyByPhysicalKey,
       markUnread,
       onStartRename,
+      pauseThreadSession,
       pinThread,
       projectCwd,
       projectGroupingSettings,
