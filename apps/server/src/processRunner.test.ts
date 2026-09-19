@@ -437,7 +437,7 @@ describe("runProcess", () => {
       expect(yield* waitForProcessExit(pid)).toBe(true);
       const error = yield* Fiber.join(fiber);
       expect(error._tag).toBe("ProcessTimeoutError");
-    }).pipe(Effect.provide(ProcessRunner.layer), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
   );
 
   it.effect("returns a synthetic timed out result when timeoutBehavior is timedOutResult", () =>
