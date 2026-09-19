@@ -39,7 +39,12 @@ const makeThread = (
 const decide = (
   thread: OrchestrationThreadShell,
   pullRequest: SettlementPullRequest | null = null,
-  settings: { days?: number | null; merge?: boolean; pinned?: boolean } = {},
+  settings: {
+    days?: number | null;
+    merge?: boolean;
+    pinned?: boolean;
+    scope?: "all" | "without-pr";
+  } = {},
 ) =>
   resolveAutoSettlementAt({
     thread,
@@ -48,6 +53,7 @@ const decide = (
     autoSettleAfterDays: settings.days === undefined ? 3 : settings.days,
     autoSettleOnMerge: settings.merge ?? true,
     autoSettlePinnedThreads: settings.pinned ?? false,
+    autoSettleScope: settings.scope ?? "all",
   }) !== null;
 
 describe("resolveAutoSettlementAt", () => {
@@ -103,6 +109,35 @@ describe("resolveAutoSettlementAt", () => {
   it("settles inactive threads with open pull requests", () => {
     expect(decide(makeThread(), { state: "open", updatedAt: NOW })).toBe(true);
   });
+
+  it.each(["linkedPullRequest", "branchPullRequest"] as const)(
+    "excludes %s from inactivity regardless of PR state",
+    (link) => {
+      const settings = { scope: "without-pr" as const, merge: false };
+      const thread = makeThread({
+        [link]: {
+          projectId: ProjectId.make("project-1"),
+          repository: "owner/repo",
+          number: 1,
+          url: "https://example.test/owner/repo/pull/1",
+        },
+      });
+      expect(decide(thread, null, settings)).toBe(false);
+      expect(decide(thread, { state: "open" }, settings)).toBe(false);
+      expect(decide(thread, { state: "merged", mergedAt: NOW }, settings)).toBe(false);
+      expect(decide(thread, { state: "closed", closedAt: NOW }, settings)).toBe(true);
+      expect(
+        decide(
+          thread,
+          { state: "merged", mergedAt: NOW },
+          { ...settings, merge: true, days: null },
+        ),
+      ).toBe(true);
+      expect(decide(makeThread(), null, settings)).toBe(true);
+      expect(decide(makeThread(), null, { ...settings, days: null })).toBe(false);
+      expect(decide(thread, null, { ...settings, scope: "all" })).toBe(true);
+    },
+  );
 
   it("settles closed requests and honors the merge setting", () => {
     expect(decide(makeThread(), { state: "closed", closedAt: NOW }, { merge: false })).toBe(true);
@@ -289,6 +324,40 @@ describe("per-thread auto-settle opt out", () => {
     expect(decide(makeThread({ ...held, pullRequests: [merged] }), null, { days: null })).toBe(
       false,
     );
+describe("PR-link inactivity scope", () => {
+  it.each(["manual", "created", "agent", "stack"] as const)(
+    "excludes %s links even when their PR is already closed",
+    (source) => {
+      const link = {
+        ...linkedRequest(1, terminalSnapshot("closed", "2026-08-01T00:00:00.000Z")),
+        source,
+      };
+      const thread = makeThread({ pullRequests: [link] });
+      expect(decide(thread, null, { scope: "without-pr" })).toBe(false);
+      expect(decide(thread, null, { scope: "all" })).toBe(true);
+    },
+  );
+
+  it("ignores dismissed stack links but still checks the saved branch PR", () => {
+    const thread = makeThread({
+      pullRequests: [{ ...linkedRequest(1, null), source: "stack-dismissed" }],
+    });
+    expect(decide(thread, null, { scope: "without-pr" })).toBe(true);
+    expect(
+      decide(
+        {
+          ...thread,
+          branchPullRequest: {
+            projectId: thread.projectId,
+            repository: "org/repo",
+            number: 2,
+            url: "https://github.com/org/repo/pull/2",
+          },
+        },
+        null,
+        { scope: "without-pr" },
+      ),
+    ).toBe(false);
   });
 });
 

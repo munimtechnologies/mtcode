@@ -2,7 +2,10 @@ import type { EnvironmentId, ProjectId, ServerSettings } from "@t3tools/contract
 
 export type AutoSettleSettings = Pick<
   ServerSettings,
-  "sidebarAutoSettleAfterDays" | "sidebarAutoSettleOnMerge" | "sidebarAutoSettlePinnedThreads"
+  | "sidebarAutoSettleAfterDays"
+  | "sidebarAutoSettleOnMerge"
+  | "sidebarAutoSettlePinnedThreads"
+  | "sidebarAutoSettleScope"
 >;
 
 interface AutoSettleSyncTarget {
@@ -10,6 +13,7 @@ interface AutoSettleSyncTarget {
   readonly projectId?: ProjectId | null;
   readonly label: string;
   readonly settings: AutoSettleSettings | null;
+  readonly supportsScope?: boolean;
 }
 
 /** Receives connected, capable targets. Applying these defaults must preserve other settings. */
@@ -18,13 +22,17 @@ export function planAutoSettleSettingsSync(
     readonly environmentId: EnvironmentId;
     readonly projectId?: ProjectId | null;
     readonly settings: AutoSettleSettings;
+    readonly supportsScope?: boolean;
   },
   targets: readonly AutoSettleSyncTarget[],
 ) {
-  const patch: AutoSettleSettings = {
+  const patch = {
     sidebarAutoSettleAfterDays: reference.settings.sidebarAutoSettleAfterDays,
     sidebarAutoSettleOnMerge: reference.settings.sidebarAutoSettleOnMerge,
     sidebarAutoSettlePinnedThreads: reference.settings.sidebarAutoSettlePinnedThreads,
+    ...(reference.supportsScope
+      ? { sidebarAutoSettleScope: reference.settings.sidebarAutoSettleScope }
+      : {}),
   };
   const mismatches = targets.filter(
     (target) =>
@@ -33,7 +41,11 @@ export function planAutoSettleSettingsSync(
       target.settings !== null &&
       (target.settings.sidebarAutoSettleAfterDays !== patch.sidebarAutoSettleAfterDays ||
         target.settings.sidebarAutoSettleOnMerge !== patch.sidebarAutoSettleOnMerge ||
-        target.settings.sidebarAutoSettlePinnedThreads !== patch.sidebarAutoSettlePinnedThreads),
+        target.settings.sidebarAutoSettlePinnedThreads !==
+          patch.sidebarAutoSettlePinnedThreads ||
+        (target.supportsScope === true &&
+          patch.sidebarAutoSettleScope !== undefined &&
+          target.settings.sidebarAutoSettleScope !== patch.sidebarAutoSettleScope)),
   );
   return { patch, mismatches };
 }
