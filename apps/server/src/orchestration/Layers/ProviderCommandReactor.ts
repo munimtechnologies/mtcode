@@ -57,6 +57,7 @@ import {
 } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
+import { customTextGenerationPolicy } from "../../textGeneration/TextGenerationPresets.ts";
 import { ProviderAuthService } from "../../provider/Services/ProviderAuthService.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -1092,14 +1093,14 @@ const make = Effect.gen(function* () {
     }) {
       const attachments = input.attachments ?? [];
       yield* Effect.gen(function* () {
-        const { textGenerationModelSelection: modelSelection } = yield* projectSettingsForThread(
-          input.threadId,
-        );
+        const { textGenerationModelSelection: modelSelection, threadTitleInstructions } =
+          yield* projectSettingsForThread(input.threadId);
 
         const generated = yield* textGeneration
           .generateThreadTitle({
             cwd: input.cwd,
             message: input.messageText,
+            policy: customTextGenerationPolicy({ threadTitleInstructions }),
             ...(attachments.length > 0 ? { attachments } : {}),
             modelSelection,
           })
@@ -1190,14 +1191,13 @@ const make = Effect.gen(function* () {
         thread,
         projects: project ? [project] : [],
       }) ?? process.cwd();
-    const { textGenerationModelSelection: modelSelection } = resolveProjectSettings(
-      yield* serverSettingsService.getSettings,
-      thread.projectId,
-    ).settings;
+    const { textGenerationModelSelection: modelSelection, threadTitleInstructions } =
+      resolveProjectSettings(yield* serverSettingsService.getSettings, thread.projectId).settings;
     const generated = yield* textGeneration.generateThreadTitle({
       cwd,
       message,
       previousTitle,
+      policy: customTextGenerationPolicy({ threadTitleInstructions }),
       ...(attachments.length > 0 ? { attachments } : {}),
       modelSelection,
     });

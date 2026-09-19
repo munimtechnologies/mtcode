@@ -157,6 +157,7 @@ import {
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
+import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThemeLibrary } from "./ThemeSettings";
@@ -2920,6 +2921,7 @@ export function GeneralSettingsPanel() {
   const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
   const mixedWorktreeBranchPrefix = useScopedSettingsMixed(["worktreeBranchPrefix"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
+  const mixedThreadTitleInstructions = useScopedSettingsMixed(["threadTitleInstructions"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
       ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
@@ -4019,6 +4021,47 @@ export function GeneralSettingsPanel() {
             )
           }
         />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("thread-title-instructions")}
+          settingKeys={["threadTitleInstructions"]}
+          description="Additional instructions for new and regenerated thread titles on selected environments. Leave blank to use the default style."
+          resetAction={
+            mixedThreadTitleInstructions ||
+            settings.threadTitleInstructions !==
+              DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions ? (
+              <SettingResetButton
+                label="thread title instructions"
+                onClick={() =>
+                  updateSettings({
+                    threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
+                  })
+                }
+              />
+            ) : null
+          }
+        >
+          <div className="mt-3 max-w-2xl pb-3.5">
+            <Textarea
+              key={`${scope.environmentIds.join(",")}:${mixedThreadTitleInstructions}:${settings.threadTitleInstructions}`}
+              defaultValue={mixedThreadTitleInstructions ? "" : settings.threadTitleInstructions}
+              onBlur={(event) => {
+                const threadTitleInstructions = event.target.value.trim();
+                if (threadTitleInstructions !== event.target.defaultValue.trim()) {
+                  updateSettings({ threadTitleInstructions });
+                }
+              }}
+              rows={4}
+              maxLength={20_000}
+              placeholder={
+                mixedThreadTitleInstructions
+                  ? "Mixed. Enter instructions for all selected environments."
+                  : "Start each title with an emoji. Prefer sentence case."
+              }
+              aria-label="Thread title instructions"
+            />
+          </div>
+        </SettingsRow>
       </SettingsSection>
 
       <DesktopNotificationsSettings />

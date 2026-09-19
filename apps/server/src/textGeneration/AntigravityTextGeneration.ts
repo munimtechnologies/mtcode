@@ -398,6 +398,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
           previousTitle: input.previousTitle,
           linkedContext: input.linkedContext,
           attachments: input.attachments,
+          policy: input.policy,
         }),
         modelSelection: input.modelSelection,
       });

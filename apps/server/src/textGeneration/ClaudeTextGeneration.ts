@@ -405,6 +405,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         previousTitle: input.previousTitle,
         linkedContext: input.linkedContext,
         attachments: input.attachments,
+        policy: input.policy,
       });
 
       const generated = yield* runClaudeJson({
