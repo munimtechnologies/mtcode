@@ -302,6 +302,19 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     );
   });
 
+  /**
+   * The periodic tick skips instead of queueing when a probe is already in
+   * flight. A probe that runs to its timeout would otherwise be followed by
+   * every tick that piled up behind the semaphore, each spawning the probe
+   * process again with nothing new to learn.
+   */
+  const refreshSnapshotUnlessProbing = Effect.fn("refreshSnapshotUnlessProbing")(function* () {
+    const nextSettings = yield* input.getSettings;
+    yield* refreshSemaphore.withPermitsIfAvailable(1)(
+      applySnapshotBase(nextSettings, { forceRefresh: true }),
+    );
+  });
+
   const hasProviderStatusDemand = Effect.gen(function* () {
     const state = yield* Ref.get(snapshotStateRef);
     const instanceId = state.snapshot.instanceId;
@@ -359,7 +372,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
             Duration.toMillis(Duration.fromInputUnsafe(refreshInterval)) > 0
               ? hasProviderStatusDemand.pipe(
                   Effect.flatMap((shouldRefresh) =>
-                    shouldRefresh ? refreshSnapshot().pipe(Effect.asVoid) : Effect.void,
+                    shouldRefresh ? refreshSnapshotUnlessProbing() : Effect.void,
                   ),
                 )
               : Effect.void,

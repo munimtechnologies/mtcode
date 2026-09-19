@@ -24,7 +24,6 @@ import {
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
 import * as Arr from "effect/Array";
-import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Result from "effect/Result";
 import { PlusIcon } from "lucide-react";
@@ -69,13 +68,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../ui/empty";
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
 import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -92,9 +84,9 @@ import {
   backgroundActivityOverrideSettings,
   buildProviderInstanceUpdatePatch,
   durationToSeconds,
-  normalizeIntervalSeconds,
-  PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
+  PROVIDER_HEALTH_INTERVAL_MIN_SECONDS,
 } from "./SettingsPanels.logic";
+import { ProviderHealthIntervalField } from "./ProviderHealthIntervalField";
 import {
   PolicyTooltip,
   SettingResetButton,
@@ -1203,7 +1195,7 @@ export function EnvironmentProviderSettings({
               </PolicyTooltip>
             </span>
           }
-          description="Refresh provider status, versions, and models in the background. Set to 0 to disable."
+          description={`Refresh provider status, versions, and models in the background. Set to 0 to disable. Minimum ${PROVIDER_HEALTH_INTERVAL_MIN_SECONDS} seconds.`}
           resetAction={
             providerHealthRefreshIntervalSeconds !== defaultProviderHealthRefreshIntervalSeconds ? (
               <span inert={readOnly} className={readOnly ? "opacity-50" : undefined}>
@@ -1231,32 +1223,19 @@ export function EnvironmentProviderSettings({
                 readOnly && "opacity-50 select-none",
               )}
             >
-              <NumberField
-                value={providerHealthRefreshIntervalSeconds}
-                min={0}
-                step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
-                size="sm"
-                className="w-32"
-                onValueChange={(value) =>
+              <ProviderHealthIntervalField
+                valueSeconds={providerHealthRefreshIntervalSeconds}
+                label="Provider health check interval"
+                onCommit={(interval) =>
                   updateSettings(
                     backgroundActivityOverrideSettings(
                       settings.backgroundActivity,
                       resolvedBackgroundActivity,
-                      {
-                        providerHealthRefreshInterval: Duration.seconds(
-                          normalizeIntervalSeconds(value),
-                        ),
-                      },
+                      { providerHealthRefreshInterval: interval },
                     ),
                   )
                 }
-              >
-                <NumberFieldGroup>
-                  <NumberFieldDecrement aria-label="Decrease provider health check interval" />
-                  <NumberFieldInput aria-label="Provider health check interval in seconds" />
-                  <NumberFieldIncrement aria-label="Increase provider health check interval" />
-                </NumberFieldGroup>
-              </NumberField>
+              />
               <span className="text-xs text-muted-foreground">seconds</span>
             </div>
           }

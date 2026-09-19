@@ -17,7 +17,9 @@ import {
   hasChangedBackgroundActivitySettings,
   hasChangedVoiceTranscriptionSettings,
   isProjectGroupingEnabled,
+  normalizeProviderHealthIntervalSeconds,
   projectGroupingModeFromToggle,
+  PROVIDER_HEALTH_INTERVAL_MIN_SECONDS,
   resolveBackgroundActivityProfileOption,
   shouldRestoreVoiceTranscriptionDefaults,
   voiceTranscriptionModelOptions,
@@ -326,5 +328,27 @@ describe("getChangedBrowserSettingLabels", () => {
       "Open links in",
       "Floating preview",
     ]);
+  });
+});
+
+describe("normalizeProviderHealthIntervalSeconds", () => {
+  const min = PROVIDER_HEALTH_INTERVAL_MIN_SECONDS;
+
+  it("keeps zero and values at or above the minimum", () => {
+    expect(normalizeProviderHealthIntervalSeconds(0, min)).toBe(0);
+    expect(normalizeProviderHealthIntervalSeconds(min, 0)).toBe(min);
+    expect(normalizeProviderHealthIntervalSeconds(600, min)).toBe(600);
+  });
+
+  it("snaps a value typed below the minimum down to disabled when decreasing", () => {
+    expect(normalizeProviderHealthIntervalSeconds(min - 15, min)).toBe(0);
+  });
+
+  it("snaps a value typed below the minimum up to the minimum when increasing", () => {
+    expect(normalizeProviderHealthIntervalSeconds(15, 0)).toBe(min);
+  });
+
+  it("treats a negative value as disabled", () => {
+    expect(normalizeProviderHealthIntervalSeconds(-5, min)).toBe(0);
   });
 });

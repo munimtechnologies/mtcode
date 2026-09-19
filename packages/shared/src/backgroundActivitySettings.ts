@@ -4,9 +4,23 @@ import {
   DEFAULT_BACKGROUND_ACTIVITY_PROFILE,
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL,
+  MIN_PROVIDER_HEALTH_REFRESH_INTERVAL,
   type ServerSettings,
 } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
+
+/**
+ * Zero disables periodic probes. Any other interval is floored at
+ * {@link MIN_PROVIDER_HEALTH_REFRESH_INTERVAL} so a persisted or patched
+ * value cannot schedule probes faster than the settings UI allows.
+ */
+export function clampProviderHealthRefreshInterval(interval: Duration.Duration): Duration.Duration {
+  const millis = Duration.toMillis(interval);
+  if (millis <= 0) return Duration.zero;
+  return millis < Duration.toMillis(MIN_PROVIDER_HEALTH_REFRESH_INTERVAL)
+    ? MIN_PROVIDER_HEALTH_REFRESH_INTERVAL
+    : interval;
+}
 
 export interface ResolvedBackgroundActivitySettings {
   readonly profile: BackgroundActivityProfile;
@@ -85,8 +99,9 @@ export function resolveBackgroundActivitySettings(
     profile: baseProfile,
     automaticGitFetchInterval:
       overrides.automaticGitFetchInterval ?? preset.automaticGitFetchInterval,
-    providerHealthRefreshInterval:
+    providerHealthRefreshInterval: clampProviderHealthRefreshInterval(
       overrides.providerHealthRefreshInterval ?? preset.providerHealthRefreshInterval,
+    ),
     hostPowerMonitorActiveInterval:
       overrides.hostPowerMonitorActiveInterval ?? preset.hostPowerMonitorActiveInterval,
     hostPowerMonitorIdleInterval:

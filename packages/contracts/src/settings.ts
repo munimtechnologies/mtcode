@@ -1083,6 +1083,12 @@ export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyle
 
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 export const DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL = Duration.minutes(5);
+/**
+ * Shortest allowed gap between periodic provider health probes. Zero still
+ * disables them. Matches the 30 second step the settings UI offers, so a
+ * persisted or patched value cannot run probes faster than the UI allows.
+ */
+export const MIN_PROVIDER_HEALTH_REFRESH_INTERVAL = Duration.seconds(30);
 
 export const BackgroundActivityProfile = Schema.Literals([
   "balanced",
