@@ -917,7 +917,7 @@ describe("hasConfiguredMcpServer", () => {
   });
 
   it("matches a named MCP server without treating a sibling as present", () => {
-    const args = ["-c", `mcp_servers.${DESKTOP_MCP_SERVER_NAME}.command='/usr/bin/t3-desktop-mcp'`];
+    const args = ["-c", `mcp_servers.${DESKTOP_MCP_SERVER_NAME}.command='/usr/bin/munim-computer-use'`];
     NodeAssert.equal(hasConfiguredMcpServerNamed(args, DESKTOP_MCP_SERVER_NAME), true);
     NodeAssert.equal(hasConfiguredMcpServerNamed(args, "t3-code"), false);
   });

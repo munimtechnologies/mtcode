@@ -14,7 +14,13 @@
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option; native verification runs directly.
-      "entry": ["knip-schemas.ts", "mobile-native-client.ts"],
+      // .mcp.json runs run-desktop-mcp.ts; `fetch:desktop-mcp` runs the fetcher.
+      "entry": [
+        "knip-schemas.ts",
+        "mobile-native-client.ts",
+        "run-desktop-mcp.ts",
+        "fetch-munim-computer-use.ts",
+      ],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.

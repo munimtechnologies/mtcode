@@ -257,6 +257,12 @@ verify that the update stops before restart and run `npx t3@<version> service up
 server machine. Also test the manual or desktop-managed guidance when those environments are
 available.
 
+## Computer Use binary (munim-computer-use)
+
+The desktop-control MCP server is not built here. `scripts/build-desktop-artifact.ts` fetches the [munim-computer-use](https://github.com/munimtechnologies/munim-computer-use) release pinned in `native/munim-computer-use.json` (version plus the sha256 of each asset from the release's `SHA256SUMS.txt`), caches it under `~/.cache/mtcode/munim-computer-use/<version>/`, and stages the platform binary, the Chrome extension and, on macOS, MT's agent-cursor app into `Resources/munim-computer-use/`. A pin still reading `FILL-AT-RELEASE`, a missing asset, or a hash mismatch fails the build.
+
+To ship a new munim-computer-use: publish its release first (with Linux and extension assets), then update the version and hashes in the pin, then release MT Code. To try an unreleased build, set `MTCODE_COMPUTER_USE_BINARY` and `MTCODE_COMPUTER_USE_EXTENSION_DIR` for the desktop build, or `MTCODE_DESKTOP_MCP_PATH` for a dev server.
+
 ## Desktop auto-update notes
 
 - Updater runtime: `apps/desktop/src/updates/DesktopUpdates.ts`.

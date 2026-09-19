@@ -79,8 +79,11 @@ require apps/server/src/provider/Layers/CodexSessionRuntime.ts "mcpApprovalReque
 require apps/server/src/serverRuntimeStartup.ts "sessionStartupReconciler" "startup reconciler runs at boot"
 
 # --- Computer-use agent cursor (b671c08ef) ---
-require native/t3-chrome-extension/background.js "paintCursor" "agent pointer painted into pages by the Chrome extension"
-require native/t3-desktop-mcp-rs/src/main.rs "agent_cursor" "native desktop pointer overlay driven by tool lifecycle"
+# --- Computer Use ships munim-computer-use (fetched, not built) under MT's identity ---
+require scripts/build-desktop-artifact.ts "stageMunimComputerUse" "desktop build stages the pinned munim-computer-use release"
+require apps/server/src/desktopControl/desktopMcpLaunch.ts "mtcodeDesktopProfileEnv" "desktop MCP launched under the MT identity profile"
+require apps/desktop/src/computerHistory/ComputerHistoryManager.ts "mtcodeDesktopProfileEnv" "Computer History daemon runs under the MT identity profile"
+require apps/desktop/src/computerUse/nativeHost.ts "install-native-host" "MT Code registers its Chrome native host"
 
 # --- Computer-use desktop MCP auto-injection into agent sessions (b671c08ef lineage, 2026-08-25) ---
 # Every spawned session gets the bundled `mt-desktop` MCP server; user-defined

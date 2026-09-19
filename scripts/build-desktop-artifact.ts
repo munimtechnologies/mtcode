@@ -17,6 +17,10 @@ import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import {
+  MUNIM_COMPUTER_USE_RESOURCE_DIR,
+  munimComputerUseExecutableName,
+} from "@t3tools/shared/munimComputerUse";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
@@ -34,6 +38,7 @@ import {
   selectCliRuntimeExternalDependencies,
 } from "./lib/cli-external-packages.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
+import { stageMunimComputerUse } from "./lib/munim-computer-use.ts";
 import { selectDesktopRuntimeExternalDependencies } from "./lib/desktop-external-packages.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -447,28 +452,24 @@ export class ResourceMonitorBuildOutputMissingError extends Schema.TaggedError<R
   }
 }
 
-export const DESKTOP_MCP_EXECUTABLE_NAME = "t3-desktop-mcp";
-
 /**
- * On-disk name of the desktop-control server for a platform.
- *
- * The staged directory keeps the bare name on every platform; only the
- * executable inside it carries Windows' suffix. The server's resolver has to
- * agree with this exactly or it will look for a file that is not there.
+ * On-disk name of the desktop-control server (munim-computer-use) for a
+ * platform. The staged directory keeps the bare name on every platform; only
+ * the executable inside it carries Windows' suffix. The server's resolver has
+ * to agree with this exactly or it will look for a file that is not there.
  */
 export function desktopMcpExecutableName(platform: typeof BuildPlatform.Type): string {
-  return platform === "win" ? `${DESKTOP_MCP_EXECUTABLE_NAME}.exe` : DESKTOP_MCP_EXECUTABLE_NAME;
+  return munimComputerUseExecutableName(
+    platform === "win" ? "win32" : platform === "mac" ? "darwin" : "linux",
+  );
 }
 
-export class DesktopMcpBuildOutputMissingError extends Schema.TaggedError<DesktopMcpBuildOutputMissingError>()(
-  "DesktopMcpBuildOutputMissingError",
-  {
-    candidates: Schema.Array(Schema.String),
-    arch: BuildArch,
-  },
+export class MunimComputerUseStageError extends Schema.TaggedError<MunimComputerUseStageError>()(
+  "MunimComputerUseStageError",
+  { reason: Schema.String },
 ) {
   override get message(): string {
-    return `Desktop MCP build for ${this.arch} produced no binary at any of: ${this.candidates.join(", ")}.`;
+    return `Staging munim-computer-use failed: ${this.reason}`;
   }
 }
 
@@ -1113,12 +1114,13 @@ export const DESKTOP_EXTRA_RESOURCES = [
     to: "resource-monitor",
   },
   {
-    // Staged by `stageDesktopMcp` on macOS and `stageDesktopMcpRust` elsewhere, but never listed
-    // here — so it was built on every release and then left out of the bundle, and Computer Use
-    // and Computer History both reported the binary missing on an installed app while working
-    // fine from a checkout. `resolveDesktopMcpBinaryPathSync` looks for exactly this layout.
-    from: "apps/desktop/prod-resources/t3-desktop-mcp",
-    to: "t3-desktop-mcp",
+    // munim-computer-use (binary, Chrome extension, macOS agent-cursor app), staged by
+    // `stageDesktopMcp`. It must be listed here or it is fetched and then left out of the
+    // bundle: Computer Use and Computer History then report the binary missing on an installed
+    // app while working fine from a checkout. `resolveDesktopMcpBinaryPathSync` and the
+    // server's resolver look for exactly this layout.
+    from: `apps/desktop/prod-resources/${MUNIM_COMPUTER_USE_RESOURCE_DIR}`,
+    to: MUNIM_COMPUTER_USE_RESOURCE_DIR,
   },
   {
     // Alternate app icons the user can switch to at runtime. The bundle's own
@@ -2217,74 +2219,6 @@ const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSel
   },
 );
 
-/**
- * Build and stage the Windows/Linux desktop-control MCP server.
- *
- * macOS is served by the Swift package in `native/t3-desktop-mcp`; this is the
- * Rust crate covering the other two. Both emit a binary called
- * `t3-desktop-mcp`, so the server's resolver treats every platform the same.
- */
-const stageDesktopMcpRust = Effect.fn("stageDesktopMcpRust")(function* (input: {
-  readonly repoRoot: string;
-  readonly stageResourcesDir: string;
-  readonly platform: typeof BuildPlatform.Type;
-  readonly arch: typeof BuildArch.Type;
-  readonly verbose: boolean;
-}) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const manifestPath = path.join(input.repoRoot, "native/t3-desktop-mcp-rs/Cargo.toml");
-  const executableName = desktopMcpExecutableName(input.platform);
-  // The desktop server has the same per-platform target matrix as the resource
-  // monitor, so it reuses that mapping rather than growing a parallel one.
-  const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
-
-  const destinationDirectory = path.join(input.stageResourcesDir, DESKTOP_MCP_EXECUTABLE_NAME);
-  const destinationPath = path.join(destinationDirectory, executableName);
-  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
-  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
-
-  for (const rustTarget of rustTargets) {
-    const spawnCommand = yield* resolveSpawnCommand("cargo", [
-      "build",
-      "--locked",
-      "--release",
-      "--manifest-path",
-      manifestPath,
-      "--target",
-      rustTarget,
-    ]);
-    yield* runCommand(
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        cwd: input.repoRoot,
-        shell: spawnCommand.shell,
-      }),
-      {
-        label: `cargo build desktop mcp (${rustTarget})`,
-        verbose: input.verbose,
-      },
-    );
-
-    const binaryPath = path.join(
-      input.repoRoot,
-      "native/t3-desktop-mcp-rs/target",
-      rustTarget,
-      "release",
-      executableName,
-    );
-    if (!(yield* fs.exists(binaryPath))) {
-      return yield* new DesktopMcpBuildOutputMissingError({
-        candidates: [binaryPath],
-        arch: input.arch,
-      });
-    }
-    yield* fs.copyFile(binaryPath, destinationPath);
-    if (input.platform !== "win") {
-      yield* fs.chmod(destinationPath, 0o755);
-    }
-  }
-});
-
 export const stageLinuxCaptureHelper = Effect.fn("stageLinuxCaptureHelper")(function* (input: {
   readonly backend: "kde" | "hyprland";
   readonly repoRoot: string;
@@ -2431,113 +2365,42 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   }
 });
 
-// macOS Swift desktop MCP. Windows/Linux stage the Rust binary via
-// `stageDesktopMcpRust` instead — this helper is the Darwin path only.
+/**
+ * Stage munim-computer-use, the desktop-control MCP server, into Resources.
+ *
+ * MT Code does not build it: the release pinned in `native/munim-computer-use.json`
+ * is fetched (cached, sha256-verified) and its platform binary plus the Chrome
+ * extension are copied in, with MT's agent-cursor app on macOS. An unfilled pin
+ * fails the build; `MTCODE_COMPUTER_USE_BINARY` / `MTCODE_COMPUTER_USE_EXTENSION_DIR`
+ * stage a local build instead (see scripts/lib/munim-computer-use.ts).
+ */
 const stageDesktopMcp = Effect.fn("stageDesktopMcp")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
   readonly arch: typeof BuildArch.Type;
   readonly verbose: boolean;
 }) {
-  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const packagePath = path.join(input.repoRoot, "native/t3-desktop-mcp");
-  // SwiftPM emits a fat binary directly when handed several --arch flags, so
-  // this needs no separate lipo step the way the Rust monitor does.
-  const archArgs =
-    input.arch === "universal"
-      ? ["--arch", "arm64", "--arch", "x86_64"]
-      : ["--arch", input.arch === "arm64" ? "arm64" : "x86_64"];
-  const spawnCommand = yield* resolveSpawnCommand("swift", [
-    "build",
-    "-c",
-    "release",
-    "--package-path",
-    packagePath,
-    ...archArgs,
-  ]);
-  yield* runCommand(
-    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-      cwd: input.repoRoot,
-      shell: spawnCommand.shell,
-    }),
-    {
-      label: `swift build desktop mcp (${input.arch})`,
-      verbose: input.verbose,
-    },
-  );
-
-  // Multi-arch builds land under .build/apple/Products/Release; single-arch
-  // builds land under .build/release.
-  const candidates = [
-    path.join(packagePath, ".build/apple/Products/Release", DESKTOP_MCP_EXECUTABLE_NAME),
-    path.join(packagePath, ".build/release", DESKTOP_MCP_EXECUTABLE_NAME),
-  ];
-  let binaryPath: string | undefined;
-  for (const candidate of candidates) {
-    if (yield* fs.exists(candidate)) {
-      binaryPath = candidate;
-      break;
-    }
-  }
-  if (binaryPath === undefined) {
-    return yield* new DesktopMcpBuildOutputMissingError({ candidates, arch: input.arch });
-  }
-
-  const destinationDirectory = path.join(input.stageResourcesDir, DESKTOP_MCP_EXECUTABLE_NAME);
-  const destinationPath = path.join(destinationDirectory, DESKTOP_MCP_EXECUTABLE_NAME);
-  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
-  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
-  yield* fs.copyFile(binaryPath, destinationPath);
-  yield* fs.chmod(destinationPath, 0o755);
-
-  // Agent cursor overlay: a minimal LSUIElement .app so AppKit will actually
-  // put the pointer window up. The MCP server itself stays a bare executable
-  // so it keeps inheriting the host app's TCC grants; only the overlay needs a
-  // bundle identity. Same binary, different launch path (see AgentCursor.swift).
-  const overlayAppName = "T3AgentCursor.app";
-  const overlayExecutableName = "T3AgentCursor";
-  const overlayAppDir = path.join(destinationDirectory, overlayAppName);
-  const overlayMacOSDir = path.join(overlayAppDir, "Contents", "MacOS");
-  const overlayPlistPath = path.join(overlayAppDir, "Contents", "Info.plist");
-  const overlayExecutablePath = path.join(overlayMacOSDir, overlayExecutableName);
-  yield* fs.makeDirectory(overlayMacOSDir, { recursive: true });
-  yield* fs.copyFile(binaryPath, overlayExecutablePath);
-  yield* fs.chmod(overlayExecutablePath, 0o755);
-  yield* fs.writeFileString(
-    overlayPlistPath,
-    `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
-	<key>CFBundleExecutable</key>
-	<string>${overlayExecutableName}</string>
-	<key>CFBundleIdentifier</key>
-	<string>com.t3tools.t3code.agent-cursor</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>T3 Agent Cursor</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
-	<key>LSUIElement</key>
-	<true/>
-	<key>NSHighResolutionCapable</key>
-	<true/>
-	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
-</dict>
-</plist>
-`,
-  );
+  const platform =
+    input.platform === "win" ? "win32" : input.platform === "mac" ? "darwin" : "linux";
+  yield* Effect.tryPromise({
+    try: () =>
+      stageMunimComputerUse({
+        repoRoot: input.repoRoot,
+        platform,
+        arch: input.arch,
+        destination: path.join(input.stageResourcesDir, MUNIM_COMPUTER_USE_RESOURCE_DIR),
+        environment: process.env,
+        log: (message) => {
+          if (input.verbose) process.stdout.write(`[munim-computer-use] ${message}\n`);
+        },
+      }),
+    catch: (cause) =>
+      new MunimComputerUseStageError({
+        reason: cause instanceof Error ? cause.message : String(cause),
+      }),
+  });
 });
 
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
@@ -3931,22 +3794,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     verbose: options.verbose,
   });
   yield* stageAlternateAppIcons({ repoRoot, stageResourcesDir });
-  if (options.platform === "mac") {
-    yield* stageDesktopMcp({
-      repoRoot,
-      stageResourcesDir,
-      arch: options.arch,
-      verbose: options.verbose,
-    });
-  } else {
-    yield* stageDesktopMcpRust({
-      repoRoot,
-      stageResourcesDir,
-      platform: options.platform,
-      arch: options.arch,
-      verbose: options.verbose,
-    });
-  }
+  yield* stageDesktopMcp({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
   if (options.platform === "linux") {
     for (const backend of ["kde", "hyprland"] as const)
       yield* stageLinuxCaptureHelper({

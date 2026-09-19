@@ -11,16 +11,16 @@ describe("desktopMcpBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-binary-",
+        prefix: "munim-computer-use-binary-",
       });
-      const binaryPath = `${baseDir}/t3-desktop-mcp`;
+      const binaryPath = `${baseDir}/munim-computer-use`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
       yield* fileSystem.chmod(binaryPath, 0o755);
 
       const resolved = yield* resolveDesktopMcpPath().pipe(
         Effect.provideService(HostProcessPlatform, "darwin"),
         Effect.provideService(HostProcessEnvironment, {
-          T3CODE_DESKTOP_MCP_PATH: binaryPath,
+          MTCODE_DESKTOP_MCP_PATH: binaryPath,
         }),
       );
 
@@ -32,13 +32,13 @@ describe("desktopMcpBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-binary-",
+        prefix: "munim-computer-use-binary-",
       });
 
       // Windows ships the .exe; the other platforms do not.
       for (const [platform, name] of [
-        ["linux", "t3-desktop-mcp"],
-        ["win32", "t3-desktop-mcp.exe"],
+        ["linux", "munim-computer-use"],
+        ["win32", "munim-computer-use.exe"],
       ] as const) {
         const binaryPath = `${baseDir}/${name}`;
         yield* fileSystem.writeFileString(binaryPath, "binary");
@@ -49,7 +49,7 @@ describe("desktopMcpBinary", () => {
         const resolved = yield* resolveDesktopMcpPath().pipe(
           Effect.provideService(HostProcessPlatform, platform),
           Effect.provideService(HostProcessEnvironment, {
-            T3CODE_DESKTOP_MCP_PATH: binaryPath,
+            MTCODE_DESKTOP_MCP_PATH: binaryPath,
           }),
         );
         assert.equal(resolved, binaryPath);
@@ -57,13 +57,66 @@ describe("desktopMcpBinary", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("still honours the deprecated T3CODE_DESKTOP_MCP_PATH, after the MT name", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "munim-computer-use-binary-",
+      });
+      const legacyPath = `${baseDir}/legacy`;
+      const currentPath = `${baseDir}/current`;
+      for (const binaryPath of [legacyPath, currentPath]) {
+        yield* fileSystem.writeFileString(binaryPath, "binary");
+        yield* fileSystem.chmod(binaryPath, 0o755);
+      }
+
+      const legacyOnly = yield* resolveDesktopMcpPath().pipe(
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provideService(HostProcessEnvironment, { T3CODE_DESKTOP_MCP_PATH: legacyPath }),
+      );
+      assert.equal(legacyOnly, legacyPath);
+
+      const both = yield* resolveDesktopMcpPath().pipe(
+        Effect.provideService(HostProcessPlatform, "darwin"),
+        Effect.provideService(HostProcessEnvironment, {
+          MTCODE_DESKTOP_MCP_PATH: currentPath,
+          T3CODE_DESKTOP_MCP_PATH: legacyPath,
+        }),
+      );
+      assert.equal(both, currentPath);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("falls back to a local munim-computer-use checkout build", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const checkout = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "munim-computer-use-checkout-",
+      });
+      const binaryDir = `${checkout}/windows-linux/target/release`;
+      yield* fileSystem.makeDirectory(binaryDir, { recursive: true });
+      const binaryPath = `${binaryDir}/munim-computer-use`;
+      yield* fileSystem.writeFileString(binaryPath, "binary");
+      yield* fileSystem.chmod(binaryPath, 0o755);
+
+      const resolved = yield* resolveDesktopMcpPath().pipe(
+        Effect.provideService(HostProcessPlatform, "linux"),
+        Effect.provideService(HostProcessEnvironment, {
+          HOME: checkout,
+          MUNIM_COMPUTER_USE_CHECKOUT: checkout,
+        }),
+      );
+      assert.equal(resolved, binaryPath);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("returns undefined on platforms with no desktop backend", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-binary-",
+        prefix: "munim-computer-use-binary-",
       });
-      const binaryPath = `${baseDir}/t3-desktop-mcp`;
+      const binaryPath = `${baseDir}/munim-computer-use`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
 
       // Neither backend covers these, so the tools must not be offered even
@@ -72,7 +125,7 @@ describe("desktopMcpBinary", () => {
         const resolved = yield* resolveDesktopMcpPath().pipe(
           Effect.provideService(HostProcessPlatform, platform),
           Effect.provideService(HostProcessEnvironment, {
-            T3CODE_DESKTOP_MCP_PATH: binaryPath,
+            MTCODE_DESKTOP_MCP_PATH: binaryPath,
           }),
         );
         assert.equal(resolved, undefined);
@@ -84,13 +137,13 @@ describe("desktopMcpBinary", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-mcp-binary-",
+        prefix: "munim-computer-use-binary-",
       });
 
       const resolved = yield* resolveDesktopMcpPath().pipe(
         Effect.provideService(HostProcessPlatform, "darwin"),
         Effect.provideService(HostProcessEnvironment, {
-          T3CODE_DESKTOP_MCP_PATH: `${baseDir}/does-not-exist`,
+          MTCODE_DESKTOP_MCP_PATH: `${baseDir}/does-not-exist`,
         }),
       );
 

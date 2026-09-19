@@ -9,9 +9,15 @@ import type {
   DesktopComputerUsePermissionsState,
   DesktopComputerUsePrivacyPane,
 } from "@t3tools/contracts";
+import {
+  MTCODE_CHROME_EXTENSION_ID as CHROME_EXTENSION_ID,
+  MTCODE_CHROME_NATIVE_HOST,
+  MTCODE_DESKTOP_PROFILE,
+} from "@t3tools/shared/munimComputerUse";
 import * as Electron from "electron";
 
-const CHROME_EXTENSION_ID = "kgdolgnijopbghhomnblabjkmjhnoage";
+import { resolveChromeExtensionDirSync } from "../computerHistory/resolveBinary.ts";
+import { ensureChromeNativeHostRegistered } from "./nativeHost.ts";
 
 function platformTag(): DesktopComputerUsePermissionsState["platform"] {
   switch (process.platform) {
@@ -142,14 +148,11 @@ function chromeExtensionInstalledInPreferences(preferencesPath: string): boolean
 }
 
 /**
- * Host manifest names, newest first. Installs made before the rename carry
- * only the old one, and the installer writes both, so either counts as
- * registered.
+ * MT Code writes this manifest itself (see nativeHost.ts). Older manifests from
+ * the pre-munim-computer-use installer point at a relay for a bridge MT Code no
+ * longer binds, so they do not count.
  */
-const NATIVE_HOST_MANIFEST_NAMES = [
-  "com.munim.mtcode.desktop.json",
-  "com.t3tools.t3code.desktop.json",
-] as const;
+const NATIVE_HOST_MANIFEST_NAMES = [`${MTCODE_CHROME_NATIVE_HOST}.json`] as const;
 
 function anyHostManifest(directory: string): boolean {
   return NATIVE_HOST_MANIFEST_NAMES.some((name) => {
@@ -169,7 +172,7 @@ function nativeHostRegistered(root: string): boolean {
 function nativeHostRegisteredWindows(): boolean {
   const local = process.env.LOCALAPPDATA;
   if (!local) return false;
-  return anyHostManifest(NodePath.join(local, "t3-desktop-mcp"));
+  return anyHostManifest(NodePath.join(local, MTCODE_DESKTOP_PROFILE.name));
 }
 
 function resolveChromeExtensionStatus(): {
@@ -211,9 +214,12 @@ function resolveChromeExtensionStatus(): {
     };
   }
   if (hostRegistered) {
+    const extensionDir = resolveChromeExtensionDirSync();
     return {
       status: "missing",
-      detail: "Native host registered — load the unpacked extension in chrome://extensions",
+      detail: extensionDir
+        ? `Native host registered — load the unpacked extension from ${extensionDir} in chrome://extensions`
+        : "Native host registered — load the unpacked extension in chrome://extensions",
     };
   }
   return {
@@ -223,6 +229,9 @@ function resolveChromeExtensionStatus(): {
 }
 
 export function readComputerUsePermissions(): DesktopComputerUsePermissionsState {
+  // Opening Computer Use settings is where the extension gets set up, so make
+  // sure the host it needs is registered (a no-op once done this launch).
+  void ensureChromeNativeHostRegistered();
   const platform = platformTag();
   const chromeExtension = resolveChromeExtensionStatus();
 
