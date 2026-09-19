@@ -2,23 +2,21 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useLocation, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { useThreadShells } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { resolveShortcutCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import {
-  attentionNotificationTitle,
   resolveNextAttentionThreadKey,
   resolveThreadAttention,
   sortAttentionItems,
   type ThreadAttentionItem,
 } from "../attentionQueue";
 import { primaryServerKeybindingsAtom } from "~/state/server";
-import { stackedThreadToast, toastManager } from "./ui/toast";
 
 function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -49,12 +47,6 @@ function attentionItemsForThreads(
   );
 }
 
-function toastTypeForAttention(item: ThreadAttentionItem): "error" | "info" | "success" {
-  if (item.state === "failed") return "error";
-  if (item.state === "ready") return "success";
-  return "info";
-}
-
 export function ThreadAttentionQueue() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const routeTarget = useParams({
@@ -77,10 +69,6 @@ export function ThreadAttentionQueue() {
     () => new Map(attentionItems.map((item) => [item.threadKey, item] as const)),
     [attentionItems],
   );
-  const shortcutLabel = shortcutLabelForCommand(keybindings, "thread.nextAttention") ?? "⌥L";
-  const toastIdsByThreadKey = useRef(new Map<string, ReturnType<typeof toastManager.add>>());
-  const initializedRef = useRef(false);
-  const previousAttentionKeysRef = useRef(new Map<string, string>());
 
   const openAttentionItem = useCallback(
     (item: ThreadAttentionItem) => {
@@ -103,56 +91,6 @@ export function ThreadAttentionQueue() {
     currentThreadKey,
     pathname,
     routeTarget?.kind,
-  ]);
-
-  useEffect(() => {
-    const currentKeys = new Set(attentionItemsByKey.keys());
-    for (const [threadKey, toastId] of toastIdsByThreadKey.current) {
-      if (!currentKeys.has(threadKey)) {
-        toastManager.close(toastId);
-        toastIdsByThreadKey.current.delete(threadKey);
-      }
-    }
-
-    const previousAttentionKeys = previousAttentionKeysRef.current;
-    if (initializedRef.current) {
-      for (const item of attentionItems) {
-        const previousKey = previousAttentionKeys.get(item.threadKey);
-        if (previousKey === item.attentionKey || item.threadKey === currentThreadKey) continue;
-
-        const toast = stackedThreadToast({
-          type: toastTypeForAttention(item),
-          title: attentionNotificationTitle(item),
-          description: `${shortcutLabel} to review next`,
-          timeout: 0,
-          data: {
-            onClose: () => acknowledgeThreadAttention(item.threadKey, item.attentionKey),
-          },
-          actionProps: {
-            children: "Open",
-            onClick: () => openAttentionItem(item),
-          },
-        });
-        const existingToastId = toastIdsByThreadKey.current.get(item.threadKey);
-        if (existingToastId) {
-          toastManager.update(existingToastId, toast);
-        } else {
-          toastIdsByThreadKey.current.set(item.threadKey, toastManager.add(toast));
-        }
-      }
-    }
-
-    previousAttentionKeysRef.current = new Map(
-      attentionItems.map((item) => [item.threadKey, item.attentionKey]),
-    );
-    initializedRef.current = true;
-  }, [
-    acknowledgeThreadAttention,
-    attentionItems,
-    attentionItemsByKey,
-    currentThreadKey,
-    openAttentionItem,
-    shortcutLabel,
   ]);
 
   useEffect(() => {

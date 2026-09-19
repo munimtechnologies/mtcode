@@ -80,7 +80,3 @@ export function resolveNextAttentionThreadKey(input: {
   if (currentIndex === -1) return input.items[0]?.threadKey ?? null;
   return input.items[(currentIndex + 1) % input.items.length]?.threadKey ?? null;
 }
-
-export function attentionNotificationTitle(item: ThreadAttentionItem): string {
-  return `${item.state}: ${item.thread.title}`;
-}
