@@ -18,6 +18,11 @@ vi.mock("electron", () => ({
   },
 }));
 
+// Registration runs the real munim-computer-use binary, which writes into the
+// machine's Chrome profiles; a unit test must never do that.
+const registerNativeHost = vi.hoisted(() => vi.fn(async () => false));
+vi.mock("./nativeHost.ts", () => ({ ensureChromeNativeHostRegistered: registerNativeHost }));
+
 import * as Electron from "electron";
 
 import { openComputerUsePrivacySettings, readComputerUsePermissions } from "./permissions.ts";
@@ -35,6 +40,8 @@ describe("computerUse permissions", () => {
       );
       assert.equal(state.permissions[0]?.status, "denied");
       assert.equal(state.permissions[1]?.status, "denied");
+      // Reading the state is where the extension gets set up, so it registers the host.
+      assert.ok(registerNativeHost.mock.calls.length > 0);
     } finally {
       Object.defineProperty(process, "platform", { value: previous });
     }

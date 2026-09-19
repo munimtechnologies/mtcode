@@ -1,7 +1,8 @@
 {
   "mcpServers": {
     "mt-desktop": {
-      "command": "native/t3-desktop-mcp/.build/release/t3-desktop-mcp"
+      "command": "node",
+      "args": ["scripts/run-desktop-mcp.ts"]
     }
   }
 }

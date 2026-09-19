@@ -654,8 +654,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           to: "resource-monitor",
         },
         {
-          from: "apps/desktop/prod-resources/t3-desktop-mcp",
-          to: "t3-desktop-mcp",
+          from: "apps/desktop/prod-resources/munim-computer-use",
+          to: "munim-computer-use",
         },
         {
           from: "apps/desktop/prod-resources/app-icons",
@@ -672,8 +672,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           to: "resource-monitor",
         },
         {
-          from: "apps/desktop/prod-resources/t3-desktop-mcp",
-          to: "t3-desktop-mcp",
+          from: "apps/desktop/prod-resources/munim-computer-use",
+          to: "munim-computer-use",
         },
         {
           from: "apps/desktop/prod-resources/app-icons",
@@ -1959,20 +1959,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("suffixes the desktop server executable only on Windows", () => {
     // The server's resolver builds the same name; if these drift the packaged
     // app silently offers no desktop tools.
-    assert.equal(desktopMcpExecutableName("win"), "t3-desktop-mcp.exe");
-    assert.equal(desktopMcpExecutableName("mac"), "t3-desktop-mcp");
-    assert.equal(desktopMcpExecutableName("linux"), "t3-desktop-mcp");
-  });
-
-  it("builds the desktop server for the same Rust targets as the resource monitor", () => {
-    // stageDesktopMcpRust reuses this mapping, so a Windows or Linux artifact
-    // build compiles the crate for exactly the architectures it ships.
-    assert.deepStrictEqual(resolveResourceMonitorRustTargets("win", "x64"), [
-      "x86_64-pc-windows-msvc",
-    ]);
-    assert.deepStrictEqual(resolveResourceMonitorRustTargets("linux", "arm64"), [
-      "aarch64-unknown-linux-gnu",
-    ]);
+    assert.equal(desktopMcpExecutableName("win"), "munim-computer-use.exe");
+    assert.equal(desktopMcpExecutableName("mac"), "munim-computer-use");
+    assert.equal(desktopMcpExecutableName("linux"), "munim-computer-use");
   });
 
   it.effect("declares the Apple Events usage description on macOS builds", () =>
@@ -2046,8 +2035,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         to: "resource-monitor",
       },
       {
-        from: "apps/desktop/prod-resources/t3-desktop-mcp",
-        to: "t3-desktop-mcp",
+        from: "apps/desktop/prod-resources/munim-computer-use",
+        to: "munim-computer-use",
       },
       {
         from: "apps/desktop/prod-resources/app-icons",
