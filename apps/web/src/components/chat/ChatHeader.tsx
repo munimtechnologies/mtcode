@@ -37,7 +37,6 @@ import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { onToggleComputerView } from "../../computerViewBus";
 import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { ComputerViewDialog } from "../computers/ComputerViewDialog";
-import { ProcessesButton } from "../processes/ProcessesDialog";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
@@ -458,7 +457,6 @@ export const ChatHeader = memo(function ChatHeader({
           "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
         )}
       >
-        <ProcessesButton />
         {supportsComputerView && (
           <Tooltip>
             <TooltipTrigger

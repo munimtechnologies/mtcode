@@ -19,11 +19,6 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
-import {
-  registerProcessOrigin,
-  unregisterProcessOrigin,
-  type ProcessOrigin,
-} from "../../diagnostics/ProcessOrigins.ts";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -85,8 +80,6 @@ export interface AcpSpawnInput {
 
 export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
-  /** Processes dialog: who the spawned agent works for; probes leave it out. */
-  readonly origin?: ProcessOrigin;
   readonly cwd: string;
   readonly resumeSessionId?: string;
   readonly resumeMethod?: "load" | "resume";
@@ -493,13 +486,6 @@ export const make = (
             }),
         ),
       );
-    if (options.origin) {
-      const origin = options.origin;
-      registerProcessOrigin(child.pid, origin);
-      yield* Effect.addFinalizer(() => Effect.sync(() => unregisterProcessOrigin(child.pid))).pipe(
-        Effect.provideService(Scope.Scope, runtimeScope),
-      );
-    }
 
     yield* child.stderr.pipe(
       Stream.decodeText(),
