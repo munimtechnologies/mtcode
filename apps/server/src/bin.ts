@@ -29,6 +29,7 @@ import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { sshHelperCommand } from "./cli/sshHelper.ts";
 import { themeCommand } from "./cli/theme.ts";
+import { threadCommand } from "./cli/thread.ts";
 import { triageCommand } from "./cli/triage.ts";
 import { resolveAppDisplayName } from "./appDisplayName.ts";
 
@@ -124,6 +125,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       pairCommand,
       authCommand,
       projectCommand,
+      threadCommand,
       serviceCommand,
       updateCommand,
       uninstallCommand,
