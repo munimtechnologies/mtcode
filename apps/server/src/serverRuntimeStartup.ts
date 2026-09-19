@@ -718,7 +718,9 @@ export const reconcileProviderSessions = Effect.gen(function* () {
             const capabilities = yield* providerService.getCapabilities(providerInstanceId);
             yield* providerService.sendTurn({
               threadId: thread.id,
-              operationId: CommandId.make(`server:update-continuation:${yield* crypto.randomUUIDv4}`),
+              operationId: CommandId.make(
+                `server:update-continuation:${yield* crypto.randomUUIDv4}`,
+              ),
               ...(capabilities.promptlessTurnContinuation === true
                 ? { continuation: true }
                 : { input: SERVER_UPDATE_CONTINUATION_PROMPT }),

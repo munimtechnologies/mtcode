@@ -86,6 +86,8 @@ import Migration0060 from "./Migrations/071_PiExternalLifecycleOverrides.ts";
 // Fork-only: scheduled send time / recurrence on queued turns (KamiCode port).
 import Migration0061 from "./Migrations/066_ProjectionThreadTurnQueueScheduledFor.ts";
 import Migration0062 from "./Migrations/067_ProjectionThreadTurnQueueRecurrence.ts";
+// Upstream 053 (PR #7721); registered as the next free fork id.
+import Migration0063 from "./Migrations/053_PullRequestFilesViewed.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -160,6 +162,7 @@ const migrationEntries = [
   [60, "PiExternalLifecycleOverrides", Migration0060],
   [61, "ProjectionThreadTurnQueueScheduledFor", Migration0061],
   [62, "ProjectionThreadTurnQueueRecurrence", Migration0062],
+  [63, "PullRequestFilesViewed", Migration0063],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

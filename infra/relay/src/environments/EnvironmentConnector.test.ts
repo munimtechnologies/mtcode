@@ -210,9 +210,7 @@ function makeLinks(
   return {
     updateLabel: () => Effect.void,
     upsert: () => Effect.void,
-    listUsersForEnvironment: () => Effect.succeed([]),
     listDeliveryUsersForEnvironment: () => Effect.succeed([]),
-    listPublicKeysForEnvironment: () => Effect.succeed([environmentKeyPair.publicKey]),
     listForUser: () => Effect.succeed([]),
     getForUser: () =>
       Effect.succeed({

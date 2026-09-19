@@ -138,30 +138,6 @@ const linuxRuntimeDirCandidates = (
   return candidates.filter((candidate) => candidate.length > 0);
 };
 
-function resolveDefaultLinuxDbusSessionBusPath(input: {
-  readonly env: NodeJS.ProcessEnv;
-  readonly uid: number | undefined;
-  readonly exists?: (path: string) => boolean;
-}): string | null {
-  for (const runtimeDir of linuxRuntimeDirCandidates(input.env, input.uid)) {
-    const busPath = `${runtimeDir}/bus`;
-    if (input.exists === undefined || input.exists(busPath)) {
-      return busPath;
-    }
-  }
-
-  return null;
-}
-
-export function resolveDefaultLinuxDbusSessionBusAddress(input: {
-  readonly env: NodeJS.ProcessEnv;
-  readonly exists: (path: string) => boolean;
-  readonly uid: number | undefined;
-}): string | null {
-  const busPath = resolveDefaultLinuxDbusSessionBusPath(input);
-  return busPath !== null && input.exists(busPath) ? `unix:path=${busPath}` : null;
-}
-
 const pathComparisonKey = (entry: string, platform: NodeJS.Platform) => {
   const normalized = entry.trim().replace(/^"+|"+$/g, "");
   return platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -391,10 +367,7 @@ const readLoginShellEnvironment = (
     : runCommandOutput({
         probe: "login-shell",
         command: shell,
-        args: [
-          platform === "darwin" ? "-lc" : "-ilc",
-          capturePosixEnvironmentCommand(names, mode),
-        ],
+        args: [platform === "darwin" ? "-lc" : "-ilc", capturePosixEnvironmentCommand(names, mode)],
         timeout: platform === "darwin" ? MACOS_LOGIN_SHELL_TIMEOUT : LOGIN_SHELL_TIMEOUT,
         ...(platform === "darwin" ? { forceKillAfter: MACOS_LOGIN_SHELL_TERMINATE_GRACE } : {}),
       }).pipe(Effect.map((output) => extractEnvironment(output, names, mode)));

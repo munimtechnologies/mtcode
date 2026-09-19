@@ -607,7 +607,7 @@ const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
     Schema.decodeTo(
       Schema.String,
-      SchemaTransformation.transformOrFail({
+      SchemaTransformation.transformEffect({
         decode: (value) => Effect.succeed(value || fallback),
         encode: (value) => Effect.succeed(value),
       }),
@@ -1059,6 +1059,7 @@ export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  otlpLogsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
@@ -1780,6 +1781,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+      otlpLogsUrl: Schema.optionalKey(TrimmedString),
     }),
   ),
   desktopControl: Schema.optionalKey(

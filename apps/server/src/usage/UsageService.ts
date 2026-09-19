@@ -137,6 +137,11 @@ const encodeRatesCache = Schema.encodeEffect(
 const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.Codec<unknown>);
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeScanCacheFile = Schema.encodeEffect(ScanCacheJson);
+const encodeUsageRecordKey = Schema.encodeSync(ScanCacheJson);
+const CachedSource = Schema.Struct({ dir: Schema.String, volumeId: Schema.String });
+const decodeCachedSources = Schema.decodeUnknownOption(
+  Schema.Struct({ sources: Schema.Record(Schema.String, CachedSource) }),
+);
 
 export function readGrokHomeOverride(environment: NodeJS.ProcessEnv): string | undefined {
   const value = environment["GROK_HOME"]?.trim();
@@ -196,7 +201,12 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
 
   const fileCache: ScanCache = new Map();
+  const sourceCache = new Map<string, typeof CachedSource.Type>();
   let cacheDirty = false;
+  const isWithinDirectory = (filePath: string, dir: string) => {
+    const relative = path.relative(dir, filePath);
+    return relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+  };
 
   const ratesCachePath = path.join(config.stateDir, "usage-model-rates.json");
   const scanCachePath = path.join(config.stateDir, "usage-scan-cache.json");
@@ -295,10 +305,12 @@ export const make = Effect.gen(function* () {
    */
   const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* (
     settings: ServerSettingsValue,
+    retentionCutoffMs: number,
   ) {
     type JsonlSource = {
       readonly provider: TranscriptProviderKind;
       readonly dir: string;
+      readonly volumeId: string;
       readonly kind: "jsonl";
     };
     type OpenCodeSource = {
@@ -314,17 +326,42 @@ export const make = Effect.gen(function* () {
     // Two instances can point at one physical directory through symlinks
     // (or macOS's /tmp → /private/tmp). Canonicalising before de-duplication
     // stops the same transcripts being counted once per alias. A directory
-    // that does not resolve (typically: does not exist) keeps its configured
-    // path and is reported as missing further down.
-    const pushJsonl = (provider: TranscriptProviderKind, dir: string) =>
+    // that does not resolve (typically: does not exist) keeps its last known
+    // canonical path, falling back to the configured one, and is reported as
+    // missing further down.
+    const pushJsonl = (provider: TranscriptProviderKind, configuredDir: string) =>
       Effect.gen(function* () {
-        const canonical = yield* fileSystem
-          .realPath(dir)
-          .pipe(Effect.catchCause(() => Effect.succeed(dir)));
-        const key = `${provider}\0${canonical}`;
+        const directory = path.resolve(configuredDir);
+        const sourceKey = provider + "\0" + directory;
+        const previous = sourceCache.get(sourceKey);
+        // Keep canonical paths and source fingerprints stable after root cleanup,
+        // including aliases and clients merging pre-cleanup environment summaries.
+        const dir = yield* fileSystem
+          .realPath(directory)
+          .pipe(Effect.catchCause(() => Effect.succeed(previous?.dir ?? directory)));
+        const currentVolumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
+        const hasRetainedHistory = fileCache
+          .entries()
+          .some(
+            ([filePath, entry]) =>
+              entry.provider === provider &&
+              entry.mtimeMs >= retentionCutoffMs &&
+              entry.records.length + entry.tailRecords.length > 0 &&
+              isWithinDirectory(filePath, dir),
+          );
+        // A recreated directory still reports the retained history under its old identity.
+        const volumeId =
+          previous?.dir === dir && (hasRetainedHistory || !currentVolumeId)
+            ? previous.volumeId || currentVolumeId
+            : currentVolumeId;
+        if (previous?.dir !== dir || previous.volumeId !== volumeId) {
+          sourceCache.set(sourceKey, { dir, volumeId });
+          cacheDirty = true;
+        }
+        const key = `${provider}\0${dir}`;
         if (seen.has(key)) return;
         seen.add(key);
-        dirs.push({ provider, dir: canonical, kind: "jsonl" });
+        dirs.push({ provider, dir, volumeId, kind: "jsonl" });
       });
 
     for (const candidate of listProviderHomeCandidates(settings, "claude", hostEnvironment)) {
@@ -445,6 +482,11 @@ export const make = Effect.gen(function* () {
       );
       if (document === null) return;
       for (const [path, entry] of decodeScanCache(document)) fileCache.set(path, entry);
+      const sources = decodeCachedSources(document);
+      if (Option.isSome(sources)) {
+        for (const [key, source] of Object.entries(sources.value.sources))
+          sourceCache.set(key, source);
+      }
     }),
   );
 
@@ -452,7 +494,10 @@ export const make = Effect.gen(function* () {
     if (!cacheDirty) return;
     // Cleared only after the write lands, so a failed persist is retried on
     // the next scan instead of leaving disk permanently stale.
-    yield* encodeScanCacheFile(encodeScanCache(fileCache)).pipe(
+    yield* encodeScanCacheFile({
+      ...encodeScanCache(fileCache),
+      sources: Object.fromEntries(sourceCache),
+    }).pipe(
       Effect.flatMap((serialized) => fileSystem.writeFileString(scanCachePath, serialized)),
       Effect.map(() => {
         cacheDirty = false;
@@ -503,7 +548,8 @@ export const make = Effect.gen(function* () {
       );
       // A read failure is not an empty transcript: caching it under this
       // (size, mtime) would silently drop the file's usage until it changes.
-      if (parsed === null) return [];
+      if (parsed === null)
+        return cached?.provider === provider ? [...cached.records, ...cached.tailRecords] : [];
 
       // Stored already de-duplicated within the file, which is 99% of all
       // duplicates. The aggregator still runs the cross-file dedupe pass. One
@@ -552,17 +598,18 @@ export const make = Effect.gen(function* () {
   const collectDirs = Effect.fn("UsageService.collectDirs")(function* (
     windowStartMs: number,
     settings: ServerSettingsValue,
+    retentionCutoffMs: number,
   ) {
     // The home resolvers ask for `Path` themselves; satisfy them from the
     // instance we already hold so the scan stays context-free.
-    const dirs = yield* resolveTranscriptDirs(settings).pipe(
+    const dirs = yield* resolveTranscriptDirs(settings, retentionCutoffMs).pipe(
       Effect.provideService(Path.Path, path),
     );
     const scanned: ScannedSource[] = [];
     for (const source of dirs) {
       const { dir } = source;
-      const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
       if (source.kind === "opencodeSqlite") {
+        const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
         const databasePaths: string[] = [];
         for (const databasePath of source.databasePaths) {
           const databaseExists = yield* fileSystem
@@ -580,6 +627,8 @@ export const make = Effect.gen(function* () {
         });
         continue;
       }
+      // Resolved (and kept stable across transcript cleanup) by resolveTranscriptDirs.
+      const { volumeId } = source;
       const exists = yield* fileSystem
         .exists(dir)
         .pipe(Effect.catchCause(() => Effect.succeed(false)));
@@ -662,11 +711,18 @@ export const make = Effect.gen(function* () {
     const windowStartMs =
       (hourlyWindow?.sinceTimeMs ?? DateTime.toEpochMillis(windowStart.value)) - MTIME_SLACK_MS;
 
+    // Keep at least 90 days warm for short views, but never drop entries that
+    // fall inside the window being walked (e.g. an "All" scan from 2020).
+    const retentionCutoffMs = Math.min(
+      windowStartMs,
+      startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    );
+
     // Pricing only matters once records are aggregated, so the rate table
     // loads while transcripts stream instead of gating them: a cold rates
     // fetch on a slow network no longer delays the scan by its own timeout.
     const [, scannedDirs] = yield* Effect.all(
-      [ensureRates(false), collectDirs(windowStartMs, settings)],
+      [ensureRates(false), collectDirs(windowStartMs, settings, retentionCutoffMs)],
       { concurrency: 2 },
     );
 
@@ -681,15 +737,11 @@ export const make = Effect.gen(function* () {
     });
 
     const sources: UsageSource[] = [];
-    const livePaths = new Set<string>();
-    const walkedRoots: string[] = [];
 
     for (const source of scannedDirs) {
       const { provider, dir, volumeId, resolvedHomePath } = source;
-      const exists =
-        source.kind === "jsonl" ? source.files !== null : source.databasePaths.length > 0;
 
-      if (!exists) {
+      if (source.kind === "opencodeSqlite" && source.databasePaths.length === 0) {
         sources.push({
           fingerprint: { hostId, provider, resolvedHomePath, volumeId },
           status: "missing",
@@ -697,10 +749,7 @@ export const make = Effect.gen(function* () {
           skippedFiles: 0,
           malformedRecords: 0,
           distinctSessions: 0,
-          message:
-            source.kind === "jsonl"
-              ? "No transcript directory on this environment."
-              : "OpenCode usage database was not found.",
+          message: "OpenCode usage database was not found.",
         });
         continue;
       }
@@ -755,26 +804,53 @@ export const make = Effect.gen(function* () {
         continue;
       }
 
-      // `exists` already proved the walk completed; this narrows the type.
-      if (source.files === null) continue;
-      walkedRoots.push(dir);
+      const files = source.files;
+      const retainedFiles = [...(files ?? [])];
+      const livePaths = new Set(retainedFiles.map((file) => file.path));
+      // Cleanup may remove transcripts, but the usage we already saved still
+      // contributes to this source. Keep the normal aggregation and dedupe path.
+      for (const [filePath, entry] of fileCache) {
+        if (
+          entry.provider !== provider ||
+          entry.mtimeMs < retentionCutoffMs ||
+          livePaths.has(filePath) ||
+          !isWithinDirectory(filePath, dir)
+        )
+          continue;
+        retainedFiles.push({ path: filePath, records: [...entry.records, ...entry.tailRecords] });
+      }
       let scannedFiles = 0;
       let skippedFiles = 0;
       // Distinct per directory. Buckets carry per-cell session counts, but a
       // session spans days and models, so clients total this figure instead.
       const sessionIds = new Set<string>();
 
-      for (const file of source.files) {
-        livePaths.add(file.path);
+      for (const file of retainedFiles) {
         if (file.records.length === 0) {
           skippedFiles += 1;
           continue;
         }
         scannedFiles += 1;
+        const codexEventOccurrences = new Map<string, number>();
         for (const record of file.records) {
-          // Only sessions that contributed in-window count: the mtime slack
-          // admits boundary files whose records fall outside the range.
-          if (aggregator.add(record) && record.sessionId.length > 0) {
+          let usageRecord = record;
+          if (record.provider === "codex" && record.sessionId.length > 0) {
+            // Match moved rollout copies without collapsing repeated equal events
+            // within one rollout (timestamps can have only second precision).
+            const key = encodeUsageRecordKey([
+              record.provider,
+              record.sessionId,
+              record.timestampMs,
+              record.model,
+              record.totals,
+            ]);
+            const occurrence = (codexEventOccurrences.get(key) ?? 0) + 1;
+            codexEventOccurrences.set(key, occurrence);
+            usageRecord = { ...record, dedupeKey: key + ":" + occurrence };
+          }
+          // Only sessions contributing in-window count; the mtime slack can
+          // admit boundary files whose records fall outside the range.
+          if (aggregator.add(usageRecord) && record.sessionId.length > 0) {
             sessionIds.add(record.sessionId);
           }
         }
@@ -782,12 +858,13 @@ export const make = Effect.gen(function* () {
 
       sources.push({
         fingerprint: { hostId, provider, resolvedHomePath, volumeId },
-        status: "ok",
+        // Clients exclude missing sources, so saved records remain an available source.
+        status: files === null && scannedFiles === 0 ? "missing" : "ok",
         scannedFiles,
         skippedFiles,
         malformedRecords: 0,
         distinctSessions: sessionIds.size,
-        message: null,
+        message: files === null ? "No transcript directory on this environment." : null,
       });
     }
 
@@ -822,18 +899,7 @@ export const make = Effect.gen(function* () {
     }
     sources.push(toCursorUsageSource(cursorExport, cursorSessionIds.size));
 
-    // Keep at least 90 days warm for short views, but never drop entries that
-    // fall inside the window we just walked (e.g. an "All" scan from 2020).
-    const retentionCutoffMs = Math.min(
-      windowStartMs,
-      startedAtMs - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-    );
-    const pruned = pruneScanCache(fileCache, {
-      livePaths,
-      walkedRoots,
-      windowStartMs,
-      retentionCutoffMs,
-    });
+    const pruned = pruneScanCache(fileCache, retentionCutoffMs);
     if (pruned > 0) cacheDirty = true;
     yield* persistScanCache();
 

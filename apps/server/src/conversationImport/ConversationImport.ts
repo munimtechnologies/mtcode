@@ -304,21 +304,18 @@ const makeConversationImport = Effect.gen(function* () {
         ...(cwd === undefined ? {} : { cwd }),
       });
     }
-    return Array.from(
-      indexed,
-      ([externalThreadId, entry]): IndexedConversation => ({
-        externalThreadId,
-        title: titleFromPrompt(
-          entry.firstPrompt,
-          source.provider === "claudeAgent" ? "Claude conversation" : "Codex conversation",
-        ),
-        preview: previewFromPrompt(entry.lastPrompt),
-        ...(entry.cwd ? { cwd: entry.cwd } : {}),
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-        transcriptPath: files.get(externalThreadId) as string,
-      }),
-    );
+    return Array.from(indexed, ([externalThreadId, entry]): IndexedConversation => ({
+      externalThreadId,
+      title: titleFromPrompt(
+        entry.firstPrompt,
+        source.provider === "claudeAgent" ? "Claude conversation" : "Codex conversation",
+      ),
+      preview: previewFromPrompt(entry.lastPrompt),
+      ...(entry.cwd ? { cwd: entry.cwd } : {}),
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      transcriptPath: files.get(externalThreadId) as string,
+    }));
   });
 
   const list: ConversationImportShape["list"] = Effect.fn("ConversationImport.list")(
@@ -343,22 +340,20 @@ const makeConversationImport = Effect.gen(function* () {
         if (marker) imported.set(markerKey(marker), binding.threadId);
       }
       const conversations = sources.flatMap((source, sourceIndex) =>
-        sourceIndexes[sourceIndex]!.map(
-          (candidate): ExternalConversationSummary => ({
-            externalThreadId: candidate.externalThreadId,
-            provider: source.provider,
-            providerInstanceId: source.providerInstanceId,
-            providerLabel: source.providerLabel,
-            title: candidate.title,
-            preview: candidate.preview,
-            ...(candidate.cwd ? { cwd: candidate.cwd } : {}),
-            createdAt: candidate.createdAt,
-            updatedAt: candidate.updatedAt,
-            ...(imported.get(sourceKey(source, candidate.externalThreadId)) === undefined
-              ? {}
-              : { importedThreadId: imported.get(sourceKey(source, candidate.externalThreadId)) }),
-          }),
-        ),
+        sourceIndexes[sourceIndex]!.map((candidate): ExternalConversationSummary => ({
+          externalThreadId: candidate.externalThreadId,
+          provider: source.provider,
+          providerInstanceId: source.providerInstanceId,
+          providerLabel: source.providerLabel,
+          title: candidate.title,
+          preview: candidate.preview,
+          ...(candidate.cwd ? { cwd: candidate.cwd } : {}),
+          createdAt: candidate.createdAt,
+          updatedAt: candidate.updatedAt,
+          ...(imported.get(sourceKey(source, candidate.externalThreadId)) === undefined
+            ? {}
+            : { importedThreadId: imported.get(sourceKey(source, candidate.externalThreadId)) }),
+        })),
       );
       conversations.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       return { conversations: conversations.slice(0, input.limit ?? DEFAULT_LIST_LIMIT) };

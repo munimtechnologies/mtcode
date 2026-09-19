@@ -278,10 +278,10 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
   const arch = yield* HostProcessArchitecture;
   const httpClient = yield* HttpClient.HttpClient;
   const releaseBaseUrl = Option.getOrUndefined(
-    yield* Config.string(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
+    yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
   );
-  const appData = yield* Config.string("APPDATA").pipe(Config.withDefault(""));
-  const systemRoot = yield* Config.string("SystemRoot").pipe(Config.withDefault("C:\\Windows"));
+  const appData = yield* Config.String("APPDATA").pipe(Config.withDefault(""));
+  const systemRoot = yield* Config.String("SystemRoot").pipe(Config.withDefault("C:\\Windows"));
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
@@ -709,19 +709,14 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     if (!(yield* fs.exists(unitPath))) {
       return { supported: true, installed: false, current: false, ...base };
     }
-    const [
-      startupScript,
-      shortcutScript,
-      runtimeEntryExists,
-      runtimeSentinel,
-      stateText,
-    ] = yield* Effect.all([
-      fs.readFileString(startupScriptPath).pipe(Effect.option),
-      fs.readFileString(shortcutScriptPath).pipe(Effect.option),
-      fs.exists(runtimePaths.entryPath),
-      fs.readFileString(runtimePaths.sentinelPath).pipe(Effect.option),
-      fs.readFileString(statePath).pipe(Effect.option),
-    ]);
+    const [startupScript, shortcutScript, runtimeEntryExists, runtimeSentinel, stateText] =
+      yield* Effect.all([
+        fs.readFileString(startupScriptPath).pipe(Effect.option),
+        fs.readFileString(shortcutScriptPath).pipe(Effect.option),
+        fs.exists(runtimePaths.entryPath),
+        fs.readFileString(runtimePaths.sentinelPath).pipe(Effect.option),
+        fs.readFileString(statePath).pipe(Effect.option),
+      ]);
     const state = Option.isSome(stateText) ? parseServiceState(stateText.value) : undefined;
     const installedVersion = Option.isSome(stateText)
       ? serviceStateActiveVersion(stateText.value)

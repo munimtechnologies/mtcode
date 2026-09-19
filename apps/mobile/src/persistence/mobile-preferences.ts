@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
+import type { ProviderInstanceId, SidebarProjectGroupingMode } from "@t3tools/contracts";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
 import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
 import * as MobileDatabase from "./mobile-database";
@@ -45,6 +45,11 @@ export interface Preferences {
   readonly planModeEnabled?: boolean;
   /** When false, messages sent during active work wait on the server for the next turn. */
   readonly steerActiveTurns?: boolean;
+  /** Model favorites belong to this device, like the web client setting. */
+  readonly modelFavorites?: ReadonlyArray<{
+    readonly provider: ProviderInstanceId;
+    readonly model: string;
+  }>;
   /** Fresh keys reset both shelves to collapsed when users update. */
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
@@ -107,6 +112,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     steerActiveTurns?: boolean;
+    modelFavorites?: Preferences["modelFavorites"];
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
   } = {};
@@ -181,6 +187,17 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.steerActiveTurns === "boolean") {
     preferences.steerActiveTurns = parsed.steerActiveTurns;
+  }
+  if (Array.isArray(parsed.modelFavorites)) {
+    preferences.modelFavorites = parsed.modelFavorites.filter(
+      (favorite) =>
+        typeof favorite === "object" &&
+        favorite !== null &&
+        typeof favorite.provider === "string" &&
+        favorite.provider.length > 0 &&
+        typeof favorite.model === "string" &&
+        favorite.model.trim().length > 0,
+    );
   }
   if (typeof parsed.threadListSettledShelfExpanded === "boolean") {
     preferences.threadListSettledShelfExpanded = parsed.threadListSettledShelfExpanded;

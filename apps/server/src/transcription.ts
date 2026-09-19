@@ -144,7 +144,7 @@ export const transcriptionEnvironmentApiKeyStatus = Effect.fn(
   "transcriptionEnvironmentApiKeyStatus",
 )(function* (provider: VoiceTranscriptionProvider) {
   const providerConfig = transcriptionProviderConfig(provider);
-  const value = yield* Config.string(providerConfig.apiKeyEnvironmentVariable).pipe(
+  const value = yield* Config.String(providerConfig.apiKeyEnvironmentVariable).pipe(
     Config.withDefault(""),
   );
   return value.trim().length > 0;
@@ -156,7 +156,7 @@ const resolveTranscriptionApiKey = Effect.fn("voiceTranscription.resolveApiKey")
   const providerConfig = transcriptionProviderConfig(input.provider);
   const apiKey =
     input.apiKey.trim() ||
-    (yield* Config.string(providerConfig.apiKeyEnvironmentVariable).pipe(
+    (yield* Config.String(providerConfig.apiKeyEnvironmentVariable).pipe(
       Config.withDefault(""),
     )).trim();
   if (!apiKey) {

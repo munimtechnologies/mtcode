@@ -496,7 +496,12 @@ describe("DesktopDeepLink", () => {
     return Effect.gen(function* () {
       yield* configureWith(
         makeServices(harness, { baseName: "MT Code", isPackaged: true, platform: "darwin" }),
-        { processArguments: ["/Applications/MT Code.app", `mtcode://threads/${ENVIRONMENT_ID}/${THREAD_ID}`] },
+        {
+          processArguments: [
+            "/Applications/MT Code.app",
+            `mtcode://threads/${ENVIRONMENT_ID}/${THREAD_ID}`,
+          ],
+        },
       );
 
       assert.deepEqual(harness.registeredSchemes, ["mtcode"]);

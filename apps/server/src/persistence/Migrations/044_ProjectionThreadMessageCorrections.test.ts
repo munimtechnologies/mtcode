@@ -7,7 +7,7 @@ import { runMigrations } from "../Migrations.ts";
 import Migration044 from "./044_ProjectionThreadMessageCorrections.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 layer("044_ProjectionThreadMessageCorrections", (it) => {
   it.effect("adds nullable correction columns to message projections", () =>

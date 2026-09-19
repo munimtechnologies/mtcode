@@ -21,6 +21,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { FetchHttpClient, HttpServer } from "effect/unstable/http";
+import * as NetAddress from "effect/unstable/net/NetAddress";
 
 import * as EnvironmentAuth from "../src/auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../src/auth/ServerSecretStore.ts";
@@ -46,7 +47,6 @@ import * as ServerRuntimeStartup from "../src/serverRuntimeStartup.ts";
 import * as ServerSettings from "../src/serverSettings.ts";
 import * as AnalyticsService from "../src/telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "../src/vcs/GitVcsDriver.ts";
-
 
 // Batch I2 stamps every server-update continuation with a fresh operation id so the Pi
 // supervisor can key admission on it. It is provider-level correlation, not a user message
@@ -117,7 +117,7 @@ const startupDependencies = Layer.mergeAll(
   Layer.succeed(
     HttpServer.HttpServer,
     HttpServer.HttpServer.of({
-      address: { _tag: "TcpAddress", hostname: "127.0.0.1", port: 3773 },
+      address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
       serve: (() => Effect.void) as HttpServer.HttpServer["Service"]["serve"],
     }),
   ),

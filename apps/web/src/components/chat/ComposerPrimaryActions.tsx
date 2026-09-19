@@ -1,5 +1,10 @@
 import { memo, type PointerEventHandler } from "react";
-import { CalendarClockIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import {
+  CalendarClockIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
@@ -266,7 +271,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                     ? "Queue message"
                     : showContinueInterruptedTurn
                       ? "Continue generation"
-                    : "Send message"
+                      : "Send message"
       }
     >
       {stageBackdropVariant ? (

@@ -20,10 +20,8 @@ const TRANSCRIPT_READ_CHUNK_BYTES = 64 * 1024;
 const isAgentId = Schema.is(Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]+$/)));
 const isSessionId = Schema.is(Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9-]+$/)));
 
-const decodeTranscriptEntry = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.Struct({ type: Schema.String })),
-  { onExcessProperty: "preserve" },
-);
+// Decode the whole record: decodeHistoryMessage reads fields beyond `type`.
+const decodeTranscriptEntry = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const decodeHistoryMessage = Schema.decodeUnknownOption(
   Schema.Struct({
     type: Schema.Literals(["user", "assistant"]),

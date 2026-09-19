@@ -2735,7 +2735,12 @@ export function ConnectionsSettings() {
         ...(savedBackendSshForwardAgent ? { forwardAgent: true } : {}),
       });
     },
-    [connectSavedBackendSshTarget, desktopBridge, isAddingSavedBackend, savedBackendSshForwardAgent],
+    [
+      connectSavedBackendSshTarget,
+      desktopBridge,
+      isAddingSavedBackend,
+      savedBackendSshForwardAgent,
+    ],
   );
 
   const handleSavedBackendSshHostKeyDown = useCallback(

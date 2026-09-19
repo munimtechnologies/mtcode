@@ -58,6 +58,7 @@ import { inlineCodeFilePathCandidate } from "@t3tools/client-runtime/markdown-li
 import { mediaFileReference, mediaUrlReference } from "@t3tools/client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@t3tools/shared/filePreview";
 import * as Cause from "effect/Cause";
+import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
   Children,
@@ -3026,8 +3027,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
               environmentId,
               input: {
                 projectId: pullRequestProject.id,
+                host: pullRequestCandidate.authority ?? pullRequestCandidate.host,
                 repository:
-                  pullRequestProject.repositoryIdentity?.displayName ??
+                  sourceControlRepositorySelector(pullRequestProject.repositoryIdentity) ??
                   pullRequestCandidate.repository,
                 number: pullRequestCandidate.number,
               },

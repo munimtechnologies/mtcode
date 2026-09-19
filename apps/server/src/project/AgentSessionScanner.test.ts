@@ -1329,7 +1329,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
               Effect.map((file) => ({
                 ...file,
                 stat: file.stat,
-                readAlloc: (size: FileSystem.SizeInput) => {
+                readAlloc: (size: number) => {
                   reservedBytes += Number(size);
                   requests.push(Number(size));
                   return file.readAlloc(size);
@@ -1897,7 +1897,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
                   : {
                       ...file,
                       stat: file.stat,
-                      readAlloc: (size: FileSystem.SizeInput) =>
+                      readAlloc: (size: number) =>
                         file.readAlloc(size).pipe(
                           Effect.tap((chunk) =>
                             Effect.sync(() => {
@@ -2345,7 +2345,10 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
               payload: { type: "user_message", message: "Future work" },
             }),
           ].join("\n"),
-          mtimeMs: nowMs + 1,
+          // Node's BigInt stat (which the Effect file system now uses) floors
+          // sub-millisecond precision, so a one-millisecond offset can round
+          // back to `nowMs`; use a full second to stay clear of the clock.
+          mtimeMs: nowMs + 1_000,
         });
 
         const outcomes = yield* runRecentThreadOutcomes({
@@ -2399,7 +2402,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
               Effect.map((file) => ({
                 ...file,
                 stat: file.stat,
-                readAlloc: (size: FileSystem.SizeInput) =>
+                readAlloc: (size: number) =>
                   file.readAlloc(size).pipe(
                     Effect.tap((chunk) =>
                       Effect.gen(function* () {

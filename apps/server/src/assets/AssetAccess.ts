@@ -225,7 +225,7 @@ const readVisualizationFile = Effect.fn("AssetAccess.readVisualizationFile")(fun
       });
       if (!isWithinAllowedRoot) return null;
 
-      const content = yield* file.readAlloc(info.size);
+      const content = yield* file.readAlloc(Number(info.size));
       if (Option.isSome(yield* file.readAlloc(1))) return null;
       const bytes = Option.getOrElse(content, () => new Uint8Array());
       return {

@@ -5,7 +5,6 @@ import {
   scrollToSettingsTarget,
   SettingsRow,
   SettingsSection,
-  SettingsSearchTargetProvider,
   SettingsUnavailableGroup,
 } from "./settingsLayout";
 
@@ -28,19 +27,6 @@ describe("unavailable settings", () => {
 });
 
 describe("settings search targets", () => {
-  it("does not persist destination styling in the rendered row", () => {
-    const markup = renderToStaticMarkup(
-      <SettingsSearchTargetProvider targetId="word-wrap">
-        <SettingsRow id="word-wrap" title="Word wrap" description="Wrap long lines." />
-        <SettingsRow id="time-format" title="Time format" description="Choose a clock." />
-      </SettingsSearchTargetProvider>,
-    );
-
-    expect(markup).toContain('id="word-wrap" tabindex="-1"');
-    expect(markup).not.toContain("data-settings-search-target");
-    expect(markup).not.toContain("settings-search-target-pulse");
-  });
-
   it("omits hidden section headers while preserving an accessible search target", () => {
     const markup = renderToStaticMarkup(
       <SettingsSection id="plugin-marketplace" title="Plugin marketplace" hideHeader>

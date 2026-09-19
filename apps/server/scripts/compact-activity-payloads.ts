@@ -112,10 +112,10 @@ const compact = Effect.fn("compactActivityPayloads")(function* (apply: boolean) 
 });
 
 const command = Command.make("compact-activity-payloads", {
-  baseDir: Flag.string("base-dir").pipe(
+  baseDir: Flag.String("base-dir").pipe(
     Flag.withDescription("T3 home directory, for example ~/.mt"),
   ),
-  apply: Flag.boolean("apply").pipe(
+  apply: Flag.Boolean("apply").pipe(
     Flag.withDefault(false),
     Flag.withDescription("Write the changes. Without it the script only reports."),
   ),

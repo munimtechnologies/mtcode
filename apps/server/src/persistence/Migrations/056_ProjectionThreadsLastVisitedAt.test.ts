@@ -6,14 +6,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 layer("056_ProjectionThreadsLastVisitedAt", (it) => {
   it.effect("adds last_visited_at and backfills existing threads as read", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
-      yield* runMigrations({ toMigrationInclusive: 56 });
+      yield* runMigrations({ toMigrationInclusive: 57 });
       yield* sql`
         INSERT INTO projection_threads (
           thread_id,
@@ -34,8 +34,8 @@ layer("056_ProjectionThreadsLastVisitedAt", (it) => {
         )
       `;
 
-      const migrations = yield* runMigrations({ toMigrationInclusive: 57 });
-      assert.deepEqual(migrations, [[57, "ProjectionThreadsLastVisitedAt"]]);
+      const migrations = yield* runMigrations({ toMigrationInclusive: 58 });
+      assert.deepEqual(migrations, [[58, "ProjectionThreadsLastVisitedAt"]]);
 
       const rows = yield* sql<{ readonly lastVisitedAt: string | null }>`
         SELECT last_visited_at AS "lastVisitedAt"
@@ -44,7 +44,7 @@ layer("056_ProjectionThreadsLastVisitedAt", (it) => {
       `;
       assert.deepEqual(rows, [{ lastVisitedAt: "2026-01-02T00:00:00.000Z" }]);
 
-      const rerun = yield* runMigrations({ toMigrationInclusive: 57 });
+      const rerun = yield* runMigrations({ toMigrationInclusive: 58 });
       assert.deepEqual(rerun, []);
     }),
   );

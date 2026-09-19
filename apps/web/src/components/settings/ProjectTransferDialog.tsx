@@ -223,7 +223,8 @@ export function ProjectTransferDialog({
               </Select>
               {target && !ready && (
                 <p className="text-xs text-muted-foreground">
-                  Connect both machines using a version of {APP_BASE_NAME} that supports project copying.
+                  Connect both machines using a version of {APP_BASE_NAME} that supports project
+                  copying.
                 </p>
               )}
             </div>

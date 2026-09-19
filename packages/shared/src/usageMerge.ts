@@ -143,9 +143,9 @@ function sourceRichness(
  * Several environments on one machine (worktree servers, for instance) resolve
  * the same provider home and would otherwise double count every token. Among
  * claimable sources for one fingerprint, the richest in-window contribution
- * wins; equal richness keeps the lexicographically first environment id so the
- * winner does not flicker between renders. Losers have that provider's buckets
- * dropped.
+ * wins; equal richness keeps the most recently read summary, and environment
+ * ids break remaining ties so the winner does not flicker between renders.
+ * Losers have that provider's buckets dropped.
  */
 function claimSources(environments: readonly EnvironmentUsage[]): {
   readonly ownerByFingerprint: ReadonlyMap<string, EnvironmentId>;
@@ -156,7 +156,11 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
   const labelByEnvironmentId = new Map<EnvironmentId, string>();
   const duplicates: string[] = [];
 
-  const ordered = [...environments].sort((a, b) => a.environmentId.localeCompare(b.environmentId));
+  const ordered = [...environments].sort(
+    (a, b) =>
+      (Date.parse(b.summary.readAt) || 0) - (Date.parse(a.summary.readAt) || 0) ||
+      a.environmentId.localeCompare(b.environmentId),
+  );
 
   for (const environment of ordered) {
     labelByEnvironmentId.set(environment.environmentId, environment.label);

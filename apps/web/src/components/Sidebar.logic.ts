@@ -5,8 +5,8 @@ import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuItem } from "@t3tools/contracts";
-import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
+import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
 import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
@@ -1014,21 +1014,45 @@ export { sortActiveThreadsByOrderKey as sortThreadsForSidebar } from "@t3tools/c
 export { pinOrderKeyBetween, planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@t3tools/client-runtime/state/thread-sort";
 
+const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
+
 /**
- * Search the already-ordered sidebar thread collection by title or linked PR.
- * Keeping the input order means lifecycle ordering (active, snoozed, settled)
- * remains stable while the user narrows the list.
+ * Search the already-ordered sidebar thread collection by title or linked PR,
+ * plus any thread whose messages the server matched (`contentMatchKeys`, keyed
+ * by `threadSearchMatchKey`). Keeping the input order means lifecycle ordering
+ * (active, snoozed, settled) remains stable while the user narrows the list.
  */
 export function searchSidebarThreads<
-  T extends { readonly title: string } & Parameters<typeof threadPullRequestSearchTerms>[0],
->(threads: readonly T[], query: string): T[] {
+  T extends {
+    readonly environmentId: EnvironmentId;
+    readonly id: ThreadId;
+    readonly title: string;
+  } & Parameters<typeof threadPullRequestSearchTerms>[0],
+>(
+  threads: readonly T[],
+  query: string,
+  contentMatchKeys: ReadonlySet<string> = EMPTY_CONTENT_MATCH_KEYS,
+): T[] {
   const normalizedQuery = query.trim().toLowerCase();
   if (normalizedQuery.length === 0) return [];
-  return threads.filter((thread) =>
-    [thread.title, ...threadPullRequestSearchTerms(thread)].some((term) =>
+  const titleMatches: T[] = [];
+  const contentMatches: T[] = [];
+  for (const thread of threads) {
+    const matchesTitle = [thread.title, ...threadPullRequestSearchTerms(thread)].some((term) =>
       term.toLowerCase().includes(normalizedQuery),
-    ),
-  );
+    );
+    if (matchesTitle) {
+      titleMatches.push(thread);
+    } else if (
+      contentMatchKeys.size > 0 &&
+      contentMatchKeys.has(
+        threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      )
+    ) {
+      contentMatches.push(thread);
+    }
+  }
+  return [...titleMatches, ...contentMatches];
 }
 
 export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
@@ -1063,120 +1087,6 @@ export function reduceSidebarProjectScopeMenuState(
     case "project-settings-opened":
       return { open: false, query: "" };
   }
-}
-
-export interface SidebarThreadContentMatch {
-  readonly source: "user" | "assistant";
-  readonly snippet: string;
-  readonly query: string;
-}
-
-export interface SidebarSearchResult<T> {
-  readonly thread: T;
-  readonly matchedTitle: boolean;
-  readonly contentMatch?: SidebarThreadContentMatch | undefined;
-}
-
-export function mergeSidebarThreadSearchResults<
-  T extends {
-    readonly id: string;
-    readonly environmentId?: string | undefined;
-    readonly title: string;
-  },
->(
-  threads: readonly T[],
-  query: string,
-  contentMatches: ReadonlyArray<EnvironmentThreadSearchMatch> = [],
-): SidebarSearchResult<T>[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (normalizedQuery.length === 0) return [];
-
-  const titleMatches = searchSidebarThreads(threads, query);
-  const contentMatchByThreadKey = new Map<string, EnvironmentThreadSearchMatch>();
-  for (const match of contentMatches) {
-    const key = `${match.environmentId}:${match.threadId}`;
-    if (!contentMatchByThreadKey.has(key)) {
-      contentMatchByThreadKey.set(key, match);
-    }
-  }
-
-  const threadByKey = new Map<string, T>();
-  for (const thread of threads) {
-    const key = `${thread.environmentId ?? ""}:${thread.id}`;
-    if (!threadByKey.has(key)) {
-      threadByKey.set(key, thread);
-    }
-  }
-
-  const seenKeys = new Set<string>();
-  const results: SidebarSearchResult<T>[] = [];
-
-  for (const thread of titleMatches) {
-    const key = `${thread.environmentId ?? ""}:${thread.id}`;
-    seenKeys.add(key);
-    const contentMatch = contentMatchByThreadKey.get(key);
-    results.push({
-      thread,
-      matchedTitle: true,
-      contentMatch: contentMatch
-        ? {
-            source: contentMatch.source,
-            snippet: contentMatch.snippet,
-            query,
-          }
-        : undefined,
-    });
-  }
-
-  for (const match of contentMatches) {
-    const key = `${match.environmentId}:${match.threadId}`;
-    if (seenKeys.has(key)) continue;
-    const thread = threadByKey.get(key);
-    if (!thread) continue;
-    seenKeys.add(key);
-    results.push({
-      thread,
-      matchedTitle: false,
-      contentMatch: {
-        source: match.source,
-        snippet: match.snippet,
-        query,
-      },
-    });
-  }
-
-  return results;
-}
-
-/** Title hits stay first. Within each group, reuse the active-thread sort so
-    search does not dump recently-talked threads under old title matches. */
-export function sortSidebarSearchResults<
-  T extends {
-    readonly id: string;
-    readonly environmentId?: string | undefined;
-    readonly createdAt: string;
-    readonly latestUserMessageAt: string | null;
-  },
->(
-  results: readonly SidebarSearchResult<T>[],
-  sortOrder: SidebarThreadSortOrder,
-): SidebarSearchResult<T>[] {
-  const threadKey = (thread: T) => `${thread.environmentId ?? ""}:${thread.id}`;
-  const sortGroup = (group: readonly SidebarSearchResult<T>[]) => {
-    const byKey = new Map(group.map((result) => [threadKey(result.thread), result]));
-    return sortActiveThreadsForSidebar(
-      group.map((result) => result.thread),
-      sortOrder,
-    ).flatMap((thread) => {
-      const result = byKey.get(threadKey(thread));
-      return result === undefined ? [] : [result];
-    });
-  };
-
-  return [
-    ...sortGroup(results.filter((result) => result.matchedTitle)),
-    ...sortGroup(results.filter((result) => !result.matchedTitle)),
-  ];
 }
 
 // Settled rows are history, so they order by when the work ENDED, not when

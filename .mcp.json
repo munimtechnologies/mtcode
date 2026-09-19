@@ -1,12 +1,5 @@
 {
   "mcpServers": {
-    "xcodebuildmcp": {
-      "command": "npx",
-      "args": ["--yes", "xcodebuildmcp@2.6.2", "mcp"],
-      "env": {
-        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,ui-automation,debugging,logging"
-      }
-    },
     "mt-desktop": {
       "command": "native/t3-desktop-mcp/.build/release/t3-desktop-mcp"
     }
