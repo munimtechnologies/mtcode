@@ -4,6 +4,7 @@ import {
   type DesktopCaptureConfigPreview,
   type DesktopSnapShotState,
 } from "@t3tools/contracts";
+import { APP_BASE_NAME } from "~/branding";
 import { parseKeybindingShortcut } from "@t3tools/shared/keybindings";
 import { FileDiff } from "@pierre/diffs/react";
 import { parseDiffFromFile } from "@pierre/diffs";
@@ -243,7 +244,7 @@ export function CaptureShortcutConfig({
         <p role="status" className="text-muted-foreground">
           {state.shortcutPending
             ? "Connecting to your desktop…"
-            : "Restart T3 Code to finish connecting your shortcut."}
+            : `Restart ${APP_BASE_NAME} to finish connecting your shortcut.`}
         </p>
       ) : null}
       <details className="text-xs text-muted-foreground">

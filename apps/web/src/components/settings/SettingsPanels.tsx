@@ -56,6 +56,7 @@ import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import {
+  APP_BASE_NAME,
   APP_DISPLAY_VERSION,
   APP_HAS_UPDATE_TRACKS,
   HOSTED_APP_CHANNEL,
@@ -4151,7 +4152,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description="Notices for dependencies, assets, and optional tools used by T3 Code."
+          description={`Notices for dependencies, assets, and optional tools used by ${APP_BASE_NAME}.`}
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

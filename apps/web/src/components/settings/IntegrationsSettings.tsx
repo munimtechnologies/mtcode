@@ -1,4 +1,5 @@
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import { APP_BASE_NAME } from "~/branding";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { DeviceHostsSettings } from "./DeviceHostsSettings";
 import { ExternalTerminalSetting } from "./ExternalTerminalSetting";
@@ -522,7 +523,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
 
 const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
   system: "Your default browser",
-  app: "T3 Code",
+  app: APP_BASE_NAME,
 };
 
 function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {
