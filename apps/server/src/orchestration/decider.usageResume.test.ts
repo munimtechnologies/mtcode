@@ -188,4 +188,47 @@ it.layer(NodeServices.layer)("usage-limit resume decider", (it) => {
       expect(list.map((event) => event.type)).toContain("thread.usage-resume-disarmed");
     }),
   );
+
+  for (const command of [
+    {
+      type: "thread.settle" as const,
+      commandId: CommandId.make("cmd-settle"),
+      threadId: ThreadId.make("thread-1"),
+    },
+    {
+      type: "thread.archive" as const,
+      commandId: CommandId.make("cmd-archive"),
+      threadId: ThreadId.make("thread-1"),
+    },
+  ]) {
+    it.effect(`disarms an armed resume on ${command.type}`, () =>
+      Effect.gen(function* () {
+        const events = yield* decideOrchestrationCommand({
+          command,
+          readModel: makeReadModel(
+            makeThread({
+              sessionStatus: "error",
+              lastErrorKind: "usage_limit",
+              lastErrorResetsAt: RESETS_AT,
+              usageLimitResumeAt: RESETS_AT,
+            }),
+          ),
+        });
+        const list = Array.isArray(events) ? events : [events];
+        const disarmed = list.find((event) => event.type === "thread.usage-resume-disarmed");
+        expect(disarmed?.payload).toMatchObject({ reason: "cleared" });
+      }),
+    );
+
+    it.effect(`leaves ${command.type} alone when no resume is armed`, () =>
+      Effect.gen(function* () {
+        const events = yield* decideOrchestrationCommand({
+          command,
+          readModel: makeReadModel(makeThread({ sessionStatus: "error" })),
+        });
+        const list = Array.isArray(events) ? events : [events];
+        expect(list.map((event) => event.type)).not.toContain("thread.usage-resume-disarmed");
+      }),
+    );
+  }
 });

@@ -866,26 +866,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.archive": {
-      yield* requireThreadNotArchived({
+      const thread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,
       });
       const occurredAt = yield* nowIso;
-      return {
+      const archivedEvent = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt,
           commandId: command.commandId,
         })),
-        type: "thread.archived",
+        type: "thread.archived" as const,
         payload: {
           threadId: command.threadId,
           archivedAt: occurredAt,
           updatedAt: occurredAt,
         },
       };
+      // An armed usage-limit resume must not fire later on an archived thread
+      // (or stale, after it is unarchived).
+      if (thread.usageLimitResumeAt == null) return archivedEvent;
+      return [
+        archivedEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.usage-resume-disarmed" as const,
+          payload: { threadId: command.threadId, reason: "cleared" as const },
+        },
+      ];
     }
 
     case "thread.unarchive": {
@@ -1005,6 +1021,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               payload: { requestId, responseMode: "message" },
             },
           },
+        });
+      }
+      // Settling is also "don't continue this on its own".
+      if (thread.usageLimitResumeAt != null) {
+        companionEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.usage-resume-disarmed",
+          payload: { threadId: command.threadId, reason: "cleared" },
         });
       }
       if (thread.pinnedAt != null) {

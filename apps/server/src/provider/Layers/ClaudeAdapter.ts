@@ -365,12 +365,14 @@ interface ClaudeTurnState {
 /**
  * The usage-limit classification a turn ends with, if any: a window still
  * rejected (or an assistant message the API refused as rate limited) when the
- * turn stopped. A user interrupt is never a usage-limit stop.
+ * turn stopped. A user interrupt or a sign-in failure is never a usage-limit stop.
  */
 function usageLimitFailureFor(
   turn: ClaudeTurnState | undefined,
 ): { readonly reason: "usage_limit"; readonly resetsAtMs: number | undefined } | undefined {
   if (!turn || turn.interruptRequested) return undefined;
+  // A signed-out turn is an auth failure, even with a rejected window on file.
+  if (turn.authenticationFailureMessage !== undefined) return undefined;
   if (turn.rejectedRateLimitTypes.size === 0 && !turn.latestAssistantRateLimited) return undefined;
   return { reason: "usage_limit", resetsAtMs: maxUsageLimitResetMs(turn) };
 }

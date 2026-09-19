@@ -185,6 +185,22 @@ require apps/web/src/components/settings/pluginMarketplace/PluginMarketplace.tsx
 require apps/server/src/provider/Drivers/CursorDriver.ts "readCursorUsageLimits" "Cursor usage-limit probe wired into CursorProvider"
 require apps/server/src/provider/Drivers/OpenCodeDriver.ts "loadOpenCodeUsageLimits" "OpenCode usage-limit probe wired into OpenCodeProvider"
 
+# --- Usage-limit recovery (upstream #11215 + #9012 port; kept over #12458, 2026-09-18) ---
+require apps/server/src/persistence/Migrations.ts "ProjectionUsageLimitResume" "usage-limit resume migration (fork id 56)"
+require apps/server/src/server.ts "UsageLimitResumeReactor.layer" "usage-limit resume sweep wired"
+require apps/server/src/provider/Layers/ClaudeAdapter.ts "usageLimitFailureFor" "Claude usage-limit classification"
+require packages/client-runtime/src/state/threadSettled.ts "threadUsageLimitResetsAt" "snooze-until-reset source"
+require apps/server/src/orchestration/decider.ts 'reason: "cleared"' "settle/archive disarm an armed usage-limit resume"
+
+# --- Upstream PRs taken 2026-09-18 (open upstream; keep until they merge there) ---
+require apps/web/src/hooks/useThreadActionMenu.ts "canPauseSession" "Pause session menu item (#12172)"
+require apps/server/src/orchestration/ThreadSettlementPolicy.ts "autoSettleScope" "auto-settle scope: threads without a PR (#12258)"
+require apps/server/src/orchestration/ThreadSettlementPolicy.ts "snoozeWakeAt" "woken snoozed threads get a fresh auto-settle window (#12525)"
+require apps/server/src/process/externalLauncher.ts "readHostEnv(COMMAND_LOOKUP_ENV_NAMES)" "editor discovery reads the hydrated PATH (#12501)"
+require apps/server/src/process/externalLauncher.ts "resolveMacAppBundle" "macOS editor app-bundle discovery"
+require apps/server/src/provider/Layers/CodexSessionRuntime.ts "RECOVERABLE_THREAD_RESUME_CAPABILITY_SNIPPETS" "Codex resume falls back on unsupported list_turns (#12468)"
+require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts '"thread.session-start-requested" ||' "Codex wake for externally queued messages (#12466)"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "fork-feature verification FAILED — an upstream merge dropped call sites." >&2
