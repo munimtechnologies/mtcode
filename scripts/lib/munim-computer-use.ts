@@ -15,7 +15,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { promisify } from "node:util";
+import * as NodeUtil from "node:util";
 
 import {
   MTCODE_AGENT_CURSOR_BUNDLE_ID,
@@ -32,7 +32,7 @@ import {
   type MunimComputerUsePlatform,
 } from "@t3tools/shared/munimComputerUse";
 
-const execFile = promisify(NodeChildProcess.execFile);
+const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 const MUNIM_COMPUTER_USE_MANIFEST_PATH = "native/munim-computer-use.json";
 
@@ -140,6 +140,7 @@ async function downloadTo(url: string, destination: string): Promise<void> {
  * tar.gz alike; GNU tar on Linux does not read zip, so zips go to unzip there.
  */
 async function extractArchive(archive: string, name: string, destination: string) {
+  // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone build script has no Effect runtime.
   if (name.endsWith(".zip") && process.platform === "linux") {
     await execFile("unzip", ["-o", "-q", archive, "-d", destination]);
     return;
