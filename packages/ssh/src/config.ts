@@ -77,7 +77,13 @@ function globToRegExp(pattern: string): RegExp {
   );
 }
 
-const expandGlob = Effect.fnUntraced(function* (pattern: string) {
+const expandGlob = Effect.fnUntraced(function* (
+  pattern: string,
+): Effect.fn.Return<
+  ReadonlyArray<string>,
+  PlatformError.PlatformError,
+  FileSystem.FileSystem | Path.Path
+> {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   if (!pattern.includes("*") && !pattern.includes("?")) {
@@ -86,20 +92,18 @@ const expandGlob = Effect.fnUntraced(function* (pattern: string) {
 
   const directory = path.dirname(pattern);
   const basePattern = path.basename(pattern);
-  if (!(yield* fs.exists(directory))) {
-    return NO_HOSTS;
-  }
-
+  const directories = yield* expandGlob(directory);
   const matcher = globToRegExp(basePattern);
-  const entries = yield* fs.readDirectory(directory);
   const matchedPaths: string[] = [];
-  for (const entry of entries) {
-    if (!matcher.test(entry)) {
-      continue;
-    }
-    const entryPath = path.join(directory, entry);
-    if (yield* fs.exists(entryPath)) {
-      matchedPaths.push(entryPath);
+  for (const matchedDirectory of directories) {
+    // A wildcard in a parent component may match an ordinary file.
+    const info = yield* fs.stat(matchedDirectory);
+    if (info.type !== "Directory") continue;
+    const entries = yield* fs.readDirectory(matchedDirectory);
+    for (const entry of entries) {
+      if (!matcher.test(entry)) continue;
+      const entryPath = path.join(matchedDirectory, entry);
+      if (yield* fs.exists(entryPath)) matchedPaths.push(entryPath);
     }
   }
   return matchedPaths.toSorted((left, right) => left.localeCompare(right));
@@ -120,6 +124,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
   if (visited.has(resolvedPath) || !(yield* fs.exists(resolvedPath))) {
     return NO_HOSTS;
   }
+  if ((yield* fs.stat(resolvedPath)).type !== "File") return NO_HOSTS;
   visited.add(resolvedPath);
 
   const aliases = new Set<string>();
