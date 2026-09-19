@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  prepareKatexHtmlForClipboard,
+  chatMarkdownClipboardPayload,
   serializeRenderedMarkdownFragment,
 } from "./markdown-clipboard";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
@@ -70,12 +70,6 @@ class FakeElement {
       if (target === 'input[type="checkbox"]') {
         return element.tagName === "INPUT" && element.getAttribute("type") === "checkbox";
       }
-      if (target === 'annotation[encoding="application/x-tex"]') {
-        return (
-          element.tagName === "ANNOTATION" &&
-          element.getAttribute("encoding") === "application/x-tex"
-        );
-      }
       return element.tagName === target.toUpperCase();
     };
     const search = (parent: FakeElement): FakeElement | null => {
@@ -141,6 +135,40 @@ describe("serializeRenderedMarkdownFragment", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([String.raw`$\frac{1}{2}$`, "\\[\n\\frac{1}{2}\n\\]"])(
+    "copies the LaTeX when the selection is entirely inside an equation: %s",
+    (source) => {
+      const math = Object.assign(new FakeElement("SPAN", [], { "data-markdown-copy": source }), {
+        cloneNode: () => math,
+      }).append(new FakeText("1212"));
+      const fragment = new FakeElement("DIV");
+      const container = Object.assign(fragment, {
+        innerHTML: "",
+        appendChild(child: FakeText) {
+          fragment.append(child);
+        },
+        replaceChildren(child: FakeElement) {
+          fragment.childNodes.splice(0, fragment.childNodes.length, child);
+        },
+        querySelectorAll: () => [],
+      });
+      vi.stubGlobal("document", { createElement: () => container });
+      const selection = {
+        rangeCount: 1,
+        getRangeAt: () => ({
+          collapsed: false,
+          cloneContents: () => new FakeText("1"),
+          commonAncestorContainer: {
+            nodeType: ELEMENT_NODE,
+            closest: (selector: string) => (selector === "pre" ? null : math),
+          },
+        }),
+      } as unknown as Selection;
+
+      expect(chatMarkdownClipboardPayload(selection)?.text).toBe(source);
+    },
+  );
+
   it("wraps inline code in backticks", () => {
     const paragraph = new FakeElement("P").append(
       new FakeText("run "),
@@ -194,31 +222,6 @@ describe("serializeRenderedMarkdownFragment", () => {
     const container = new FakeElement("DIV").append(code);
 
     expect(serializeRenderedMarkdownFragment(asNode(container))).toBe("first line\nsecond line");
-  });
-
-  it("serializes inline KaTeX back to explicit LaTeX delimiters", () => {
-    const annotation = new FakeElement("ANNOTATION", [], {
-      encoding: "application/x-tex",
-    }).append(new FakeText("e^{i\\pi} + 1 = 0"));
-    const math = new FakeElement("SPAN", ["katex"]).append(annotation);
-    const container = new FakeElement("DIV").append(new FakeText("Euler: "), math);
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "Euler: \\(e^{i\\pi} + 1 = 0\\)",
-    );
-  });
-
-  it("serializes display KaTeX back to explicit LaTeX delimiters", () => {
-    const annotation = new FakeElement("ANNOTATION", [], {
-      encoding: "application/x-tex",
-    }).append(new FakeText("A_t = \\lambda_t A_t^{\\text{local}}"));
-    const math = new FakeElement("SPAN", ["katex"]).append(annotation);
-    const display = new FakeElement("SPAN", ["katex-display"]).append(math);
-    const container = new FakeElement("DIV").append(display);
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "\\[\nA_t = \\lambda_t A_t^{\\text{local}}\n\\]",
-    );
   });
 
   it("keeps fences when a bare list item sits alongside the code block", () => {
@@ -310,27 +313,5 @@ describe("serializeRenderedMarkdownFragment", () => {
     expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
       "Hello World (Document template)",
     );
-  });
-});
-
-describe("prepareKatexHtmlForClipboard", () => {
-  it("keeps the visual KaTeX branch and removes duplicate MathML", () => {
-    const removeMathml = vi.fn();
-    const revealHtml = vi.fn();
-    const katex = {
-      querySelector: vi.fn((selector: string) => {
-        if (selector === ":scope > .katex-mathml") return { remove: removeMathml };
-        if (selector === ":scope > .katex-html") return { removeAttribute: revealHtml };
-        return null;
-      }),
-    };
-    const container = {
-      querySelectorAll: vi.fn(() => [katex]),
-    };
-
-    prepareKatexHtmlForClipboard(container as unknown as Element);
-
-    expect(removeMathml).toHaveBeenCalledOnce();
-    expect(revealHtml).toHaveBeenCalledWith("aria-hidden");
   });
 });

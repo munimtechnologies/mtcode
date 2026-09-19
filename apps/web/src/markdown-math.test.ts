@@ -1,192 +1,132 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import type { Options as ReactMarkdownOptions } from "react-markdown";
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import remarkMath from "remark-math";
+import type { Root, RootContent } from "mdast";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified, type Plugin } from "unified";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  MARKDOWN_MATH_CODE_CLASS_NAMES,
-  normalizeLatexMathDelimiters,
-  rehypeStripKatexErrorTitle,
-  remarkPromoteBracketDisplayMath,
-} from "./markdown-math";
+import { createIncrementalMarkdownPlugin } from "./markdown-incremental";
+import { remarkNormalizeListItemIndentation } from "./markdown-list-indentation";
+import { remarkChatMath } from "./markdown-math";
 
-const MATH_SANITIZE_SCHEMA = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    code: [
-      ...(defaultSchema.attributes?.code ?? []).filter(
-        (attribute) => !Array.isArray(attribute) || attribute[0] !== "className",
-      ),
-      ["className", /^language-./, ...MARKDOWN_MATH_CODE_CLASS_NAMES],
-    ],
-  },
-} satisfies Parameters<typeof rehypeSanitize>[0];
-
-const MATH_REHYPE_PLUGINS = [
-  [rehypeKatex, { output: "htmlAndMathml", errorColor: "var(--destructive)" }],
-  rehypeStripKatexErrorTitle,
-] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
-
-const SANITIZED_MATH_REHYPE_PLUGINS = [
-  [rehypeSanitize, MATH_SANITIZE_SCHEMA],
-  ...MATH_REHYPE_PLUGINS,
-] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
-
-function renderMarkdown(source: string, sanitize = false): string {
-  const remarkPlugins = [
-    [remarkMath, { singleDollarTextMath: false }],
-    [remarkPromoteBracketDisplayMath, { source }],
-  ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
-  return renderToStaticMarkup(
-    createElement(
-      ReactMarkdown,
-      {
-        remarkPlugins,
-        rehypePlugins: sanitize ? SANITIZED_MATH_REHYPE_PLUGINS : MATH_REHYPE_PLUGINS,
-      },
-      normalizeLatexMathDelimiters(source),
-    ),
-  );
+function parser() {
+  return unified().use(remarkParse).use(remarkGfm).use(remarkChatMath);
 }
 
-describe("normalizeLatexMathDelimiters", () => {
-  it("renders normalized delimiters through KaTeX", () => {
-    const html = renderMarkdown("Euler: \\(e^{i\\pi} + 1 = 0\\)");
-    expect(html).toContain('class="katex"');
-    expect(html).toContain("mathml");
+function parse(source: string) {
+  const processor = parser();
+  return processor.runSync(processor.parse(source), source);
+}
+
+function mathNodes(tree: Root) {
+  const result: Array<Extract<RootContent, { type: "math" | "inlineMath" }>> = [];
+  const visit = (node: Root | RootContent) => {
+    if (node.type === "math" || node.type === "inlineMath") result.push(node);
+    if ("children" in node) node.children.forEach(visit);
+  };
+  visit(tree);
+  return result;
+}
+
+describe("chat math", () => {
+  it.each([
+    [String.raw`$\frac{a_1}{b^2}$`, false],
+    [String.raw`\(\frac{a_1}{b^2}\)`, false],
+    [String.raw`$$\frac{a_1}{b^2}$$`, true],
+    [String.raw`\[\frac{a_1}{b^2}\]`, true],
+    ["$$\n\\frac{a_1}{b^2}\n$$", true],
+    ["\\[\n\\frac{a_1}{b^2}\n\\]", true],
+  ])("parses %s and preserves its copy source", (source, display) => {
+    const nodes = mathNodes(parse(source));
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]?.value.trim()).toBe(String.raw`\frac{a_1}{b^2}`);
+    expect(nodes[0]?.data?.hProperties).toEqual({
+      className: [display ? "math-display" : "math-inline"],
+      dataMathSource: source,
+    });
   });
 
-  it("renders same-line bracket delimiters as display math", () => {
-    const html = renderMarkdown("Before \\[E=mc^2\\] after", true);
-    expect(html).toContain('class="katex-display"');
+  it("keeps Markdown syntax inside formulas literal", () => {
+    const source = String.raw`Text \(a_* + \text{**value**} + \text{\$5}\) then $x$.`;
+    expect(mathNodes(parse(source)).map((node) => node.value)).toEqual([
+      String.raw`a_* + \text{**value**} + \text{\$5}`,
+      "x",
+    ]);
   });
 
-  it("uses the theme error color without a native parse-error title", () => {
-    const html = renderMarkdown("Broken: \\(x^\\)", true);
-    expect(html).toContain('class="katex-error"');
-    expect(html).toContain('style="color:var(--destructive)"');
-    expect(html).not.toContain("title=");
+  it("supports matrices, blank lines, and escaped backslashes in display math", () => {
+    const equation = "\\begin{pmatrix}1 & 2 \\\\\n\n3 & 4\\end{pmatrix}";
+    expect(mathNodes(parse(`\\[\n${equation}\n\\]`))[0]?.value.trim()).toBe(equation);
   });
 
-  it("keeps parenthesized delimiters inline", () => {
-    const html = renderMarkdown("Before \\(E=mc^2\\) after");
-    expect(html).toContain('class="katex"');
-    expect(html).not.toContain('class="katex-display"');
+  it("allows trailing whitespace after a display delimiter", () => {
+    expect(mathNodes(parse("\\[\nx + y\n\nz\n\\]  \t"))[0]?.value).toBe("x + y\n\nz");
   });
 
-  it("leaves ordinary dollar amounts as text", () => {
-    const html = renderMarkdown("Costs rose from $20,000 to USD$30,000");
-    expect(html).not.toContain('class="katex"');
-    expect(html).toContain("$20,000 to USD$30,000");
+  it.each(["> \\[\n> x+y\n> \\]", "- \\[\n  x+y\n  \\]"])(
+    "copies multiline math without quote or list prefixes: %s",
+    (source) => {
+      expect(mathNodes(parse(source))[0]?.data?.hProperties?.dataMathSource).toBe("\\[\nx+y\n\\]");
+    },
+  );
+
+  it.each([
+    String.raw`Before \[x^2\] after.`,
+    String.raw`- Inline \(x^2\) and $y$.`,
+    "> \\[\n> x^2\n> \\]",
+    "| Value |\n| --- |\n| \\(x^2\\) |",
+    String.raw`[Equation \(x^2\)](https://example.com)`,
+  ])("renders math inside prose and Markdown containers: %s", (source) => {
+    expect(mathNodes(parse(source)).length).toBeGreaterThan(0);
   });
 
-  it("rewrites paired inline and display delimiters", () => {
-    expect(normalizeLatexMathDelimiters("inline \\(a+b\\)\n\n\\[\nE=mc^2\n\\]")).toBe(
-      "inline $$a+b$$\n\n$$\nE=mc^2\n$$",
-    );
+  it.each([
+    String.raw`Use \`$x$ and \(y\)\` as examples.`.replaceAll("\\`", "`"),
+    "```latex\n$x$ \\(y\\) \\[z\\]\n```",
+    "~~~math\n$x$ \\(y\\)\n~~~",
+    "    $x$ \\(y\\) \\[z\\]",
+    String.raw`Escaped \$5 and \$10, and \\(x\\).`,
+    String.raw`[Link](https://example.com/\(x\))`,
+    String.raw`<div title="\(x\) and $x$">raw HTML</div>`,
+    "The price rose from $5 to $10, then $20. Set $PATH later.",
+    "Budget ranges like $5-$10 or $20-$30 stay prices.",
+  ])("preserves code, escapes, links, HTML, and prices: %s", (source) => {
+    expect(mathNodes(parse(source))).toEqual([]);
   });
 
-  it("preserves source length and task-list offsets", () => {
-    const source = "Display \\[a+b\\]\n\n- [ ] task with \\(c+d\\) inline";
-    const normalized = normalizeLatexMathDelimiters(source);
-    expect(normalized).toHaveLength(source.length);
-    expect(normalized.indexOf("[ ]")).toBe(source.indexOf("[ ]"));
+  it("preserves checkbox source positions after math", () => {
+    const source = "\\[x\\]\n\n- [ ] task";
+    const list = parse(source).children.find((node) => node.type === "list");
+    expect(list?.children[0]?.position?.start.offset).toBe(source.indexOf("- [ ]"));
   });
 
-  it("leaves unmatched and escaped delimiters unchanged", () => {
-    expect(
-      normalizeLatexMathDelimiters("\\(open only and a stray \\] plus \\\\(literal\\\\)"),
-    ).toBe("\\(open only and a stray \\] plus \\\\(literal\\\\)");
+  it("does not let prices consume a later equation", () => {
+    expect(mathNodes(parse("$5 or $10 or $20, followed by $x+y$."))).toMatchObject([
+      { value: "x+y" },
+    ]);
   });
 
-  it("recovers valid pairs after unmatched or mismatched delimiters", () => {
-    const cases = [
-      ["Mention \\( literally, then \\(a+b\\)", "Mention \\( literally, then $$a+b$$"],
-      ["Mention \\[ literally, then \\(a+b\\)", "Mention \\[ literally, then $$a+b$$"],
-      ["Mention \\( literally, then \\[a+b\\]", "Mention \\( literally, then $$a+b$$"],
-      ["Mismatched \\( text \\] then \\[a+b\\]", "Mismatched \\( text \\] then $$a+b$$"],
-    ] as const;
+  it("keeps display math and its source when recovering an over-indented list", () => {
+    const source = String.raw`-       \[x^2\]`;
+    const processor = parser().use(remarkNormalizeListItemIndentation as Plugin<[], Root>);
+    const tree = processor.runSync(processor.parse(source), source);
+    expect(mathNodes(tree)[0]?.data?.hProperties).toEqual({
+      className: ["math-display"],
+      dataMathSource: String.raw`\[x^2\]`,
+    });
+  });
 
-    for (const [source, expected] of cases) {
-      expect(normalizeLatexMathDelimiters(source)).toBe(expected);
+  it("can parse every streamed prefix and matches a fresh parse after cached code", () => {
+    const incremental = createIncrementalMarkdownPlugin();
+    const source =
+      "```ts\nconst x = 1;\n```\n\n" +
+      String.raw`Inline \(\frac{x}{2}\) and $y$.` +
+      "\n\n\\[\n\\begin{aligned}a &= b \\\\\nc &= d\\end{aligned}\n\\]";
+    for (let end = 0; end <= source.length; end++) {
+      const prefix = source.slice(0, end);
+      const processor = parser().use(incremental);
+      expect(processor.runSync(processor.parse(prefix), prefix), `prefix ${end}`).toEqual(
+        parse(prefix),
+      );
     }
-  });
-
-  it("continues to rewrite adjacent valid pairs", () => {
-    expect(normalizeLatexMathDelimiters("\\(a\\) and \\[b\\]")).toBe("$$a$$ and $$b$$");
-  });
-
-  it("leaves inline, fenced, quoted fenced, and indented code unchanged", () => {
-    const source = [
-      "`\\(inline\\)`",
-      "```md",
-      "\\(fenced\\)",
-      "```",
-      "> ~~~",
-      "> \\(quoted\\)",
-      "> ~~~",
-      "    \\(indented\\)",
-      "prose \\(math\\)",
-    ].join("\n");
-    expect(normalizeLatexMathDelimiters(source)).toBe(
-      source.replace("prose \\(math\\)", () => "prose $$math$$"),
-    );
-  });
-
-  it("leaves link destinations, autolinks, and HTML attributes unchanged", () => {
-    const source = [
-      "[file](file:///tmp/foo\\(bar\\).ts)",
-      "<https://example.com/foo\\(bar\\)>",
-      '<span title="\\(attribute\\)">text</span>',
-      "[label \\(x\\)](https://example.com)",
-    ].join("\n");
-    expect(normalizeLatexMathDelimiters(source)).toBe(
-      source.replace("label \\(x\\)", () => "label $$x$$"),
-    );
-  });
-
-  it("pairs delimiters across the text nodes inline formatting creates", () => {
-    expect(normalizeLatexMathDelimiters("\\(open **bold** close\\)")).toBe(
-      "$$open **bold** close$$",
-    );
-    expect(normalizeLatexMathDelimiters("\\(a_{i}_ b\\)")).toBe("$$a_{i}_ b$$");
-  });
-
-  it("does not pair delimiters across a blank line", () => {
-    const source = "\\[ opened here\n\nclosed there \\]";
-    expect(normalizeLatexMathDelimiters(source)).toBe(source);
-  });
-
-  it("renders a bracket display block whose body would form a setext heading", () => {
-    const source = [
-      "For any vector \\(\\mathbf A\\), BKE says",
-      "\\[",
-      "\\underbrace{\\left(\\frac{d\\mathbf A}{dt}\\right)_I}_{\\text{fixed}}",
-      "=",
-      "\\underbrace{\\left(\\frac{d\\mathbf A}{dt}\\right)_R}_{\\text{rotating}} + \\mathbf A.",
-      "\\]",
-      "",
-      "Next paragraph.",
-    ].join("\n");
-    const normalized = normalizeLatexMathDelimiters(source);
-    expect(normalized).toHaveLength(source.length);
-    expect(normalized).toContain("\n$$\n\\underbrace");
-    expect(normalized).toContain("\\mathbf A.\n$$\n");
-
-    const html = renderMarkdown(source, true);
-    expect(html).not.toContain("<h1");
-    expect(html).toContain('class="katex-display"');
-    // The raw TeX survives only inside KaTeX's MathML annotation, never as prose.
-    expect(html).not.toMatch(/<p>[^<]*underbrace/);
-  });
-
-  it("leaves unrelated escapes and dollar amounts unchanged", () => {
-    const source = "just \\* escapes, \\_underscores\\_ and $5 dollars";
-    expect(normalizeLatexMathDelimiters(source)).toBe(source);
   });
 });

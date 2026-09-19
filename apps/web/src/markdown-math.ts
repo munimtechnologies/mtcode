@@ -1,203 +1,211 @@
-import remarkGfm from "remark-gfm";
-import remarkParse from "remark-parse";
-import { unified } from "unified";
+import type { Root, RootContent } from "mdast";
+// oxlint-disable-next-line unicorn/require-module-specifiers -- Load only the parser's token type augmentation.
+import type {} from "micromark-extension-math";
+import { asciiDigit, markdownLineEnding, markdownSpace } from "micromark-util-character";
+import type { Construct, State } from "micromark-util-types";
+import remarkMath from "remark-math";
+import type { Plugin } from "unified";
 
-interface MarkdownNode {
-  readonly type?: string;
-  readonly value?: unknown;
-  readonly url?: unknown;
-  data?: {
-    hProperties?: Record<string, unknown>;
-  };
-  readonly position?: {
-    readonly start?: { readonly offset?: number };
-    readonly end?: { readonly offset?: number };
-  };
-  readonly children?: readonly MarkdownNode[];
-}
+const BACKSLASH = 92;
 
-interface PromoteBracketDisplayMathOptions {
-  readonly source: string;
-}
-
-interface HtmlNode {
-  readonly type?: string;
-  properties?: Record<string, unknown>;
-  readonly children?: readonly HtmlNode[];
-}
-
-export const MARKDOWN_MATH_CODE_CLASS_NAMES = ["math-inline", "math-display"] as const;
-
-const markdownParser = unified().use(remarkParse).use(remarkGfm);
-
-type Delimiter = "(" | ")" | "[" | "]";
-
-interface DelimiterMatch {
-  readonly index: number;
-  readonly delimiter: Delimiter;
-}
-
-/**
- * Converts LaTeX delimiters into the syntax understood by `remark-math`.
- *
- * CommonMark consumes the backslash in `\(` before remark plugins run. We
- * therefore inspect the original source, but use CommonMark's own text-node
- * positions to avoid rewriting code, HTML, and link destinations. Rewrites
- * are paired and length preserving so task-list source offsets remain valid.
- *
- * Delimiters are paired across text nodes, in source order. LaTeX inside a
- * `\[...\]` block routinely splits the surrounding paragraph before we get
- * here: `_{...}` reads as emphasis and a line holding only `=` turns the
- * previous lines into a setext heading. Pairing per text node would leave
- * such blocks unrendered. A pair never spans a blank line, which is also
- * where TeX itself refuses to continue math mode.
+/** Recognize TeX delimiters in the parser, so code, links, and HTML retain their
+ * normal Markdown boundaries and source positions remain valid while streaming.
  */
-export function normalizeLatexMathDelimiters(source: string): string {
-  if (!source.includes("\\(") && !source.includes("\\[")) return source;
-
-  const delimiters: DelimiterMatch[] = [];
-  const tree = markdownParser.parse(source) as MarkdownNode;
-
-  const visit = (node: MarkdownNode, linkUrl: string | null) => {
-    const nextLinkUrl = node.type === "link" && typeof node.url === "string" ? node.url : linkUrl;
-
-    if (node.type === "text") {
-      // Autolink labels are their destination. Treat them as URLs rather than
-      // prose even though the Markdown AST represents them as text children.
-      if (!(nextLinkUrl !== null && node.value === nextLinkUrl)) {
-        collectTextNodeDelimiters(source, node, delimiters);
-      }
-      return;
-    }
-
-    node.children?.forEach((child) => visit(child, nextLinkUrl));
-  };
-
-  visit(tree, null);
-  const replacements = pairDelimiters(source, delimiters);
-  if (replacements.size === 0) return source;
-
-  const output = source.split("");
-  for (const [index, replacement] of replacements) {
-    output[index] = replacement[0]!;
-    output[index + 1] = replacement[1]!;
-  }
-  return output.join("");
-}
-
-/**
- * Preserves the display semantics of same-line `\[...\]` expressions.
- *
- * `remark-math` parses their length-preserving `$$...$$` normalization as
- * inline math unless the delimiters occupy their own lines. The original
- * source has matching offsets, so it can distinguish bracket-display math
- * without inserting newlines and invalidating task-list source positions.
- */
-export function remarkPromoteBracketDisplayMath(options: PromoteBracketDisplayMathOptions) {
-  return (tree: MarkdownNode): void => {
-    const visit = (node: MarkdownNode) => {
-      if (node.type === "inlineMath") {
-        const start = node.position?.start?.offset;
-        const end = node.position?.end?.offset;
-        if (
-          start !== undefined &&
-          end !== undefined &&
-          options.source.slice(start, start + 2) === "\\[" &&
-          options.source.slice(end - 2, end) === "\\]"
-        ) {
-          node.data = {
-            ...node.data,
-            hProperties: {
-              ...node.data?.hProperties,
-              className: ["language-math", "math-display"],
-            },
+function latexMath(flow: boolean): Construct {
+  return {
+    name: flow ? "latexMathFlow" : "latexMathText",
+    ...(flow ? { concrete: true } : {}),
+    /** Tokenize a TeX-delimited expression while preserving Markdown source positions. */
+    tokenize(effects, ok, nok) {
+      const math = flow ? "mathFlow" : "mathText";
+      const fence = flow ? "mathFlowFence" : "mathTextSequence";
+      const value = flow ? "mathFlowValue" : "mathTextData";
+      let closing: number;
+      let inValue = false;
+      const closingDelimiter: Construct = {
+        partial: true,
+        /** Probe for the matching closing delimiter without consuming a failed match. */
+        tokenize(checkEffects, yes, no) {
+          return (code) => {
+            checkEffects.enter("mathTextSequence");
+            checkEffects.consume(code);
+            return (next) => {
+              if (next !== closing) return no(next);
+              checkEffects.consume(next);
+              checkEffects.exit("mathTextSequence");
+              return yes;
+            };
           };
+        },
+      };
+
+      return start;
+
+      /** Begin the math token at the opening backslash. */
+      function start(code: number | null): State | undefined {
+        effects.enter(math);
+        effects.enter(fence);
+        effects.consume(code);
+        return opening;
+      }
+
+      /** Select the matching delimiter, allowing only brackets in flow mode. */
+      function opening(code: number | null): State | undefined {
+        if (code !== 91 && (flow || code !== 40)) return nok(code);
+        closing = code === 91 ? 93 : 41;
+        effects.consume(code);
+        effects.exit(fence);
+        return inside;
+      }
+
+      /** Consume formula content until a matching delimiter or an incomplete ending. */
+      function inside(code: number | null): State | undefined {
+        if (code === null) return nok(code);
+        if (markdownLineEnding(code)) {
+          if (inValue) effects.exit(value);
+          inValue = false;
+          effects.enter("lineEnding");
+          effects.consume(code);
+          effects.exit("lineEnding");
+          return inside;
         }
+        if (code === BACKSLASH) {
+          return effects.check(closingDelimiter, close, escape)(code);
+        }
+        if (!inValue) effects.enter(value);
+        inValue = true;
+        effects.consume(code);
+        return inside;
       }
 
-      node.children?.forEach(visit);
-    };
+      /** Keep escaped characters inside the formula instead of treating them as delimiters. */
+      function escape(code: number | null): State | undefined {
+        if (!inValue) effects.enter(value);
+        inValue = true;
+        effects.consume(code);
+        return (next) => {
+          if (next === null) return nok(next);
+          if (markdownLineEnding(next)) return inside(next);
+          effects.consume(next);
+          return inside;
+        };
+      }
 
-    visit(tree);
+      /** Finish the formula and check trailing content when parsing a display block. */
+      function close(code: number | null): State | undefined {
+        if (inValue) effects.exit(value);
+        effects.enter(fence);
+        effects.consume(code);
+        return (next) => {
+          effects.consume(next);
+          effects.exit(fence);
+          effects.exit(math);
+          return flow ? after : ok;
+        };
+      }
+
+      /** Accept a display block only when the rest of its line is whitespace. */
+      function after(code: number | null): State | undefined {
+        // A display formula with surrounding prose belongs to the paragraph.
+        if (code === null || markdownLineEnding(code)) return ok(code);
+        if (markdownSpace(code)) {
+          effects.enter("whitespace");
+          return trailingSpace(code);
+        }
+        return nok(code);
+      }
+
+      /** Consume trailing display-block whitespace before checking the line ending. */
+      function trailingSpace(code: number | null): State | undefined {
+        if (markdownSpace(code)) {
+          effects.consume(code);
+          return trailingSpace;
+        }
+        effects.exit("whitespace");
+        return after(code);
+      }
+    },
   };
 }
 
-/** Removes KaTeX's native parse-error tooltip after KaTeX generates its HTML. */
-export function rehypeStripKatexErrorTitle() {
-  return (tree: HtmlNode): void => {
-    const visit = (node: HtmlNode) => {
-      const className = node.properties?.className;
-      if (
-        node.type === "element" &&
-        Array.isArray(className) &&
-        className.includes("katex-error")
-      ) {
-        delete node.properties?.title;
-      }
-      node.children?.forEach(visit);
+/** Add dollar and TeX math, keeping the authored source for selection-and-copy. */
+export const remarkChatMath: Plugin<[], Root> = function () {
+  remarkMath.call(this);
+  const data = this.data();
+  const extensions = data.micromarkExtensions ?? (data.micromarkExtensions = []);
+  const dollarSyntax = extensions.at(-1)?.text;
+  const dollar = dollarSyntax?.[36];
+  if (dollarSyntax && dollar && !Array.isArray(dollar)) {
+    dollarSyntax[36] = {
+      ...dollar,
+      /** Reject spaced single-dollar expressions so prices do not swallow later math. */
+      tokenize(effects, ok, nok) {
+        return dollar.tokenize.call(
+          this,
+          effects,
+          (code) => {
+            const token = this.events.at(-1)?.[1];
+            const source = token ? this.sliceSerialize(token) : "";
+            // Single-dollar math hugs its content. Otherwise prices such as
+            // "$5 and $10" can consume the opener of a later real equation.
+            // A digit right after the closer is a price range ("$5-$10"), as in Pandoc.
+            return !source.startsWith("$$") && (/^\$\s|\s\$$/.test(source) || asciiDigit(code))
+              ? nok(code)
+              : ok(code);
+          },
+          nok,
+        );
+      },
     };
+  }
+  extensions.push({
+    flow: { [BACKSLASH]: latexMath(true) },
+    text: { [BACKSLASH]: latexMath(false) },
+  });
 
+  // Attach rendering metadata during parsing: list recovery parses synthetic
+  // source later, and its offsets do not belong to the original message.
+  const parse = this.parser;
+  if (!parse) return;
+  this.parser = (source, file) => {
+    const tree = parse(source, file) as Root;
+    /** Attach rendering and copy metadata, removing container prefixes from copied formulas. */
+    const visit = (node: Root | RootContent, inContainer = false) => {
+      if (node.type === "math" || node.type === "inlineMath") {
+        const start = node.position?.start.offset;
+        const end = node.position?.end.offset;
+        const authored =
+          start === undefined || end === undefined ? undefined : source.slice(start, end);
+        const display =
+          node.type === "math" || authored?.startsWith("\\[") || authored?.startsWith("$$");
+        let copySource = authored ?? (display ? `$$\n${node.value}\n$$` : `$${node.value}$`);
+        if (inContainer && /[\r\n]/.test(copySource)) {
+          // Source offsets include quote/list prefixes on continuation lines.
+          // The parsed value omits them, so copying just the formula stays valid.
+          const opening = /^\\[[(]|^\$+/.exec(copySource)?.[0] ?? "$$";
+          const closing = opening === "\\[" ? "\\]" : opening === "\\(" ? "\\)" : opening;
+          const padding = node.type === "math" ? "\n" : "";
+          const ending = copySource.endsWith(closing) ? `${padding}${closing}` : "";
+          copySource = `${opening}${padding}${node.value}${ending}`;
+        }
+        // Use one code node for both modes; ChatMarkdown renders it without its
+        // code-block toolbar. Only these classes opt into math, not code fences.
+        node.data = {
+          hName: "code",
+          hProperties: {
+            className: [display ? "math-display" : "math-inline"],
+            dataMathSource: copySource,
+          },
+          hChildren: [{ type: "text", value: node.value }],
+        };
+      }
+      if ("children" in node) {
+        node.children.forEach((child) =>
+          visit(child, inContainer || node.type === "blockquote" || node.type === "listItem"),
+        );
+      }
+    };
     visit(tree);
+    return tree;
   };
-}
-
-function collectTextNodeDelimiters(
-  source: string,
-  node: MarkdownNode,
-  delimiters: DelimiterMatch[],
-): void {
-  const start = node.position?.start?.offset;
-  const end = node.position?.end?.offset;
-  if (start === undefined || end === undefined) return;
-
-  for (let index = start; index < end - 1; index += 1) {
-    if (source[index] !== "\\" || isEscapedBackslash(source, index)) continue;
-    const delimiter = source[index + 1];
-    if (delimiter === "(" || delimiter === ")" || delimiter === "[" || delimiter === "]") {
-      delimiters.push({ index, delimiter });
-      index += 1;
-    }
-  }
-}
-
-function pairDelimiters(source: string, delimiters: DelimiterMatch[]): Map<number, string> {
-  const replacements = new Map<number, string>();
-  // Text nodes arrive in document order, but nested nodes can surface after
-  // their siblings; sort so pairing follows the source.
-  const ordered = [...delimiters].sort((left, right) => left.index - right.index);
-
-  let opener: DelimiterMatch | null = null;
-  for (const match of ordered) {
-    if (match.delimiter === "(" || match.delimiter === "[") {
-      // Math delimiters do not nest. Prefer the newest opener so malformed
-      // prose cannot prevent a later valid expression from rendering.
-      opener = match;
-      continue;
-    }
-    if (opener === null) continue;
-
-    const expectedCloser = opener.delimiter === "(" ? ")" : "]";
-    if (match.delimiter !== expectedCloser) continue;
-    if (containsBlankLine(source, opener.index, match.index)) {
-      opener = null;
-      continue;
-    }
-
-    replacements.set(opener.index, "$$");
-    replacements.set(match.index, "$$");
-    opener = null;
-  }
-  return replacements;
-}
-
-function containsBlankLine(source: string, start: number, end: number): boolean {
-  return /\n[ \t]*\n/.test(source.slice(start, end));
-}
-
-function isEscapedBackslash(source: string, index: number): boolean {
-  let precedingBackslashes = 0;
-  for (let cursor = index - 1; cursor >= 0 && source[cursor] === "\\"; cursor -= 1) {
-    precedingBackslashes += 1;
-  }
-  return precedingBackslashes % 2 === 1;
-}
+};

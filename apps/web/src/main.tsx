@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
 import "./index.css";
-import "katex/dist/katex.min.css";
 
 import { isElectron } from "./env";
 import { ConnectProvidersRoot, useConnectProviders } from "./cloud/connectProviderContext";

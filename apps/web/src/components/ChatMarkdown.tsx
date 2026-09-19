@@ -69,6 +69,7 @@ import React, {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
+  lazy,
   use,
   useCallback,
   memo,
@@ -87,7 +88,6 @@ import ReactMarkdown from "react-markdown";
 import { toHtml } from "hast-util-to-html";
 import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import { defaultUrlTransform } from "react-markdown";
-import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
@@ -95,8 +95,8 @@ import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { remarkGithubAlerts } from "../markdown-github-alerts";
+import { remarkChatMath } from "../markdown-math";
 import {
   artifactTemplateFromHastProperties,
   CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES,
@@ -154,12 +154,6 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
-import {
-  MARKDOWN_MATH_CODE_CLASS_NAMES,
-  normalizeLatexMathDelimiters,
-  rehypeStripKatexErrorTitle,
-  remarkPromoteBracketDisplayMath,
-} from "../markdown-math";
 import {
   extractMarkdownLinkHrefs,
   isWindowsDrivePathHref,
@@ -289,6 +283,7 @@ export function shouldUseMarkdownFileBrowserPrimaryAction(input: {
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const EMPTY_REMARK_PLUGINS: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [];
+const MarkdownMath = lazy(() => import("./chat/MarkdownMath"));
 
 const ARTIFACT_TEMPLATE_ICON_BY_KIND = {
   document: FileTextIcon,
@@ -486,9 +481,10 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
       ...(defaultSchema.attributes?.code ?? []).filter(
         (attribute) => !Array.isArray(attribute) || attribute[0] !== "className",
       ),
-      ["className", /^language-./, ...MARKDOWN_MATH_CODE_CLASS_NAMES],
+      ["className", /^language-./, "math-inline", "math-display"],
       "dataCodeMeta",
       "dataInlineCode",
+      "dataMathSource",
     ],
     blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
     div: [...(defaultSchema.attributes?.div ?? []), ...CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES],
@@ -515,6 +511,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkChatMath,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkCodexDirectives,
@@ -524,6 +521,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
+  remarkChatMath,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkCodexDirectives,
@@ -532,22 +530,48 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkNormalizeLinksAndTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
-const CHAT_MARKDOWN_KATEX_OPTIONS = {
-  output: "htmlAndMathml",
-  errorColor: "var(--destructive)",
-} as const;
+/** Parse raw HTML while reserving math rendering and copy metadata for parser-owned nodes. */
+function rehypeRawMath() {
+  const parseRaw = rehypeRaw({ passThrough: ["chatMath"] });
+  return (...[tree, file]: Parameters<typeof parseRaw>) => {
+    /** Carry parsed math through HTML processing using a node type HTML cannot create. */
+    const protect = (node: MarkdownImageHastNode) => {
+      if (
+        node.type === "element" &&
+        node.tagName === "code" &&
+        typeof node.properties?.dataMathSource === "string"
+      ) {
+        // Raw HTML can create elements and attributes, but not this AST node type.
+        node.type = "chatMath";
+      }
+      node.children?.forEach(protect);
+    };
+    protect(tree);
+    const parsed = parseRaw(tree, file);
+    /** Restore parsed math and remove math metadata supplied by raw HTML. */
+    const restore = (node: MarkdownImageHastNode) => {
+      if (node.type === "chatMath") {
+        node.type = "element";
+      } else if (node.type === "element" && node.properties) {
+        delete node.properties.dataMathSource;
+        const classes = node.properties.className;
+        if (Array.isArray(classes)) {
+          node.properties.className = classes.filter(
+            (name) => name !== "math-inline" && name !== "math-display",
+          );
+        }
+      }
+      node.children?.forEach(restore);
+    };
+    restore(parsed);
+    return parsed;
+  };
+}
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
-  rehypeRaw,
+  rehypeRawMath,
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
-  [rehypeKatex, CHAT_MARKDOWN_KATEX_OPTIONS],
-  rehypeStripKatexErrorTitle,
-] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
-
-const CHAT_MARKDOWN_REHYPE_PLUGINS_WITHOUT_RAW_HTML = [
-  [rehypeKatex, CHAT_MARKDOWN_KATEX_OPTIONS],
-  rehypeStripKatexErrorTitle,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
@@ -3217,10 +3241,37 @@ const CHAT_MARKDOWN_COMPONENTS = {
       normalizedHref,
     );
   },
+  /** Render parsed math, inline file links, or code with the appropriate copy behavior. */
   code: function MarkdownCode({ node, children, className, ...props }) {
     const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip } = use(
       ChatMarkdownRendererContext,
     );
+    const classes = className?.split(/\s+/);
+    const displayMath = classes?.includes("math-display") === true;
+    if (displayMath || classes?.includes("math-inline")) {
+      const math = nodeToPlainText(children);
+      const source =
+        typeof node?.properties.dataMathSource === "string"
+          ? node.properties.dataMathSource
+          : displayMath
+            ? `$$\n${math}\n$$`
+            : `$${math}$`;
+      const fallback = (
+        <code
+          className={displayMath ? "chat-markdown-math-display" : "chat-markdown-math-inline"}
+          data-markdown-copy={displayMath ? `\n\n${source}\n\n` : source}
+        >
+          {source}
+        </code>
+      );
+      return (
+        <RenderErrorBoundary resetKeys={[math]} fallback={fallback}>
+          <Suspense fallback={fallback}>
+            <MarkdownMath math={math} source={source} display={displayMath} />
+          </Suspense>
+        </RenderErrorBoundary>
+      );
+    }
     if (node?.properties?.dataInlineCode != null) {
       const codeText = nodeToPlainText(children);
       const fileLinkMeta =
@@ -3439,27 +3490,17 @@ function ChatMarkdown({
     localMediaPreview,
     setLocalMediaPreview,
   } = useChatMarkdownState({ text, ...props });
-  const markdownSource = useMemo(() => normalizeLatexMathDelimiters(text), [text]);
   const incrementalParsing =
     props.isStreaming === true &&
     extraRemarkPlugins.length === 0 &&
     /(?:^|\n) {0,3}(?:`{3}|~{3})/.test(text);
   const remarkPlugins = useMemo(
-    () =>
-      [
-        remarkGfm,
-        [remarkMath, { singleDollarTextMath: false }],
-        [remarkPromoteBracketDisplayMath, { source: text }],
-        remarkGithubAlerts,
-        remarkNormalizeListItemIndentation,
-        remarkCodexDirectives,
-        ...(lineBreaks ? [remarkBreaks] : []),
-        remarkPreserveCodeMeta,
-        remarkNormalizeLinksAndTagInlineCode,
-        ...extraRemarkPlugins,
-        ...(incrementalParsing ? [createIncrementalMarkdownPlugin()] : []),
-      ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>,
-    [extraRemarkPlugins, incrementalParsing, lineBreaks, text],
+    () => [
+      ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
+      ...extraRemarkPlugins,
+      ...(incrementalParsing ? [createIncrementalMarkdownPlugin()] : []),
+    ],
+    [extraRemarkPlugins, incrementalParsing, lineBreaks],
   );
 
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
@@ -3479,16 +3520,12 @@ function ChatMarkdown({
       <ChatMarkdownRendererContext value={componentState}>
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
-          rehypePlugins={
-            parseRawHtml
-              ? CHAT_MARKDOWN_REHYPE_PLUGINS
-              : CHAT_MARKDOWN_REHYPE_PLUGINS_WITHOUT_RAW_HTML
-          }
+          rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
           skipHtml={false}
           components={CHAT_MARKDOWN_COMPONENTS}
           urlTransform={markdownUrlTransform}
         >
-          {markdownSource}
+          {text}
         </ReactMarkdown>
       </ChatMarkdownRendererContext>
       {localMediaPreview ? (
