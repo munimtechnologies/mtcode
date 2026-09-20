@@ -14,6 +14,16 @@ name: Download counts
 # release, and 7396 of the first 7430 "downloads" were feed and blockmap
 # fetches rather than anyone getting the app. That is why shields.io's own
 # github/downloads/:repo/total badge cannot be used here.
+#
+# Read the total as a floor. GitHub counts a download only for a full-file
+# request: a Range request returns 206 and leaves the counter alone (verified
+# against a release asset), and electron-updater fetches the .blockmap and then
+# range-requests the archive whenever a blockmap is published -- which is every
+# release here. So auto-updates to existing installs are invisible to this
+# number, and `gh release upload --clobber` resets an asset's counter when a
+# release is republished (16 installer assets so far). What the badge does
+# report honestly is full downloads: new installs and anything that could not
+# take the differential path.
 on:
   schedule:
     # 07:11 UTC, off the hour so it does not queue behind the rush.
