@@ -1,0 +1,13 @@
+Generated with built-in image_gen before the request to match the original Nightly SVG style.
+
+moonrise
+Use case: stylized-concept. Generate one finished MT Code sidebar header background, wide 3:1 landscape. Match a restrained premium night-sky / engineering-blueprint UI art collection. Smooth minimal illustration, subtle texture, low contrast, dark negative space for white interface controls. Must remain pleasing at 300x80 pixels and survive horizontal center cropping. Bottom edge fades smoothly to charcoal #202020. Edge-to-edge artwork only: absolutely no words, logo, labels, frames, UI or mockups. Scene: Moonrise: a tiny pale moon on the right over softly layered midnight-blue hills, indigo sky, sparse tiny stars, faint lavender haze.
+
+ocean
+Use case: stylized-concept. Generate one finished MT Code sidebar header background, wide 3:1 landscape. Match a restrained premium night-sky / engineering-blueprint UI art collection. Smooth minimal illustration, subtle texture, low contrast, dark negative space for white interface controls. Must remain pleasing at 300x80 pixels and survive horizontal center cropping. Bottom edge fades smoothly to charcoal #202020. Edge-to-edge artwork only: absolutely no words, logo, labels, frames, UI or mockups. Scene: Ocean: abstract slow ocean swells in deep navy and muted turquoise, silky layered wave silhouettes, subtle blue reflected moonlight.
+
+ember
+Use case: stylized-concept. Generate one finished MT Code sidebar header background, wide 3:1 landscape. Match a restrained premium night-sky / engineering-blueprint UI art collection. Smooth minimal illustration, subtle texture, low contrast, dark negative space for white interface controls. Must remain pleasing at 300x80 pixels and survive horizontal center cropping. Bottom edge fades smoothly to charcoal #202020. Edge-to-edge artwork only: absolutely no words, logo, labels, frames, UI or mockups. Scene: Ember: dark charcoal landscape with low rolling dunes in muted rust and copper, a restrained amber horizon glow, smoky plum sky.
+
+grove
+Use case: stylized-concept. Generate one finished MT Code sidebar header background, wide 3:1 landscape. Match a restrained premium night-sky / engineering-blueprint UI art collection. Smooth minimal illustration, subtle texture, low contrast, dark negative space for white interface controls. Must remain pleasing at 300x80 pixels and survive horizontal center cropping. Bottom edge fades smoothly to charcoal #202020. Edge-to-edge artwork only: absolutely no words, logo, labels, frames, UI or mockups. Scene: Grove: layers of misty evergreen forest silhouettes in deep pine and muted sage, subdued cool morning haze, no prominent individual tree.

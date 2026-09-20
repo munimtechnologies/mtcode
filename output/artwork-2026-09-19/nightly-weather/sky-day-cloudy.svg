@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="384" viewBox="0 0 288 96" fill="none">
+<defs>
+ <linearGradient id="sky" x1="24" y1="0" x2="264" y2="96" gradientUnits="userSpaceOnUse" spreadMethod="reflect"><stop stop-color="#2a72c0"/><stop offset=".5" stop-color="#5e9ad6"/><stop offset="1" stop-color="#c9e2f4"/></linearGradient>
+ <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(226 22) rotate(137) scale(120 84)"><stop stop-color="#f4fbff" stop-opacity=".4"/><stop offset=".5" stop-color="#e8dcff" stop-opacity=".16"/><stop offset="1" stop-color="#2a72c0" stop-opacity="0"/></radialGradient>
+ <linearGradient id="cloud" x1="0" y1="60" x2="288" y2="96" gradientUnits="userSpaceOnUse"><stop stop-color="#ffffff" stop-opacity=".5"/><stop offset=".52" stop-color="#d8ecff" stop-opacity=".62"/><stop offset="1" stop-color="#e8dcff" stop-opacity=".5"/></linearGradient>
+ <radialGradient id="flash" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(186 34) scale(88 54)"><stop stop-color="#e4eaff" stop-opacity=".38"/><stop offset="1" stop-color="#e4eaff" stop-opacity="0"/></radialGradient>
+ <filter id="soft" x="-24" y="-24" width="336" height="144" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="4"/></filter>
+ <filter id="haze" x="-24" y="-24" width="336" height="144" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="9"/></filter>
+ <mask id="crescent"><circle cx="226" cy="22" r="7" fill="#fff"/><circle cx="221" cy="18.5" r="6.5" fill="#000"/></mask>
+</defs>
+<rect width="288" height="96" fill="url(#sky)"/>
+<rect width="288" height="96" fill="url(#glow)"/>
+
+
+
+<g filter="url(#soft)" fill="url(#cloud)"><path d="M-12 88C-12 74 0 63 14 63C18 50 30 41 44 41C58 41 70 49 74 62C79 57 86 54 94 54C110 54 123 66 124 82C132 83 138 88 141 96H-12V88Z" transform="translate(0 0)" fill-opacity="1"/><path d="M150 96C151 84 161 75 173 75C176 64 186 57 198 57C210 57 220 64 223 75C231 75 238 80 241 87C250 87 257 91 260 96H150Z" transform="translate(0 0)" fill-opacity="0.8"/></g>
+
+
+</svg>

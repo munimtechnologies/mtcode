@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="384" viewBox="0 0 288 96" fill="none">
+<defs>
+ <linearGradient id="sky" x1="24" y1="0" x2="264" y2="96" gradientUnits="userSpaceOnUse" spreadMethod="reflect"><stop stop-color="#0a1120"/><stop offset=".5" stop-color="#171a33"/><stop offset="1" stop-color="#281c42"/></linearGradient>
+ <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(216 18) rotate(137) scale(150 96)"><stop stop-color="#46538f" stop-opacity=".3"/><stop offset=".5" stop-color="#a98dd0" stop-opacity=".16"/><stop offset="1" stop-color="#0a1120" stop-opacity="0"/></radialGradient>
+ <linearGradient id="cloud" x1="0" y1="60" x2="288" y2="96" gradientUnits="userSpaceOnUse"><stop stop-color="#8ba4ce" stop-opacity=".5"/><stop offset=".52" stop-color="#8e96d2" stop-opacity=".62"/><stop offset="1" stop-color="#a98dd0" stop-opacity=".5"/></linearGradient>
+ <radialGradient id="flash" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(186 34) scale(88 54)"><stop stop-color="#e4eaff" stop-opacity=".38"/><stop offset="1" stop-color="#e4eaff" stop-opacity="0"/></radialGradient>
+ <filter id="soft" x="-24" y="-24" width="336" height="144" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="4"/></filter>
+ <filter id="haze" x="-24" y="-24" width="336" height="144" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="9"/></filter>
+ <mask id="crescent"><circle cx="216" cy="18" r="8" fill="#fff"/><circle cx="211" cy="14.5" r="7.5" fill="#000"/></mask>
+</defs>
+<rect width="288" height="96" fill="url(#sky)"/>
+<rect width="288" height="96" fill="url(#glow)"/>
+
+
+
+<g filter="url(#haze)" fill="url(#cloud)"><path d="M-12 88C-12 74 0 63 14 63C18 50 30 41 44 41C58 41 70 49 74 62C79 57 86 54 94 54C110 54 123 66 124 82C132 83 138 88 141 96H-12V88Z" transform="translate(120 -18)" fill-opacity="0.35"/><path d="M150 96C151 84 161 75 173 75C176 64 186 57 198 57C210 57 220 64 223 75C231 75 238 80 241 87C250 87 257 91 260 96H150Z" transform="translate(-120 -14)" fill-opacity="0.3"/><path d="M-12 88C-12 74 0 63 14 63C18 50 30 41 44 41C58 41 70 49 74 62C79 57 86 54 94 54C110 54 123 66 124 82C132 83 138 88 141 96H-12V88Z" transform="translate(-30 4)" fill-opacity="0.45"/><path d="M-12 88C-12 74 0 63 14 63C18 50 30 41 44 41C58 41 70 49 74 62C79 57 86 54 94 54C110 54 123 66 124 82C132 83 138 88 141 96H-12V88Z" transform="translate(56 -4)" fill-opacity="0.42"/><path d="M150 96C151 84 161 75 173 75C176 64 186 57 198 57C210 57 220 64 223 75C231 75 238 80 241 87C250 87 257 91 260 96H150Z" transform="translate(24 2)" fill-opacity="0.4"/></g>
+<g filter="url(#haze)" fill="#8ba4ce"><ellipse cx="60" cy="44" rx="130" ry="9" opacity=".3"/><ellipse cx="210" cy="62" rx="140" ry="10" opacity=".34"/><ellipse cx="96" cy="80" rx="150" ry="11" opacity=".36"/></g>
+
+</svg>
