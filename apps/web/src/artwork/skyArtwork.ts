@@ -325,8 +325,20 @@ const cloudLift: Record<SkyWeather, number> = {
  */
 const RAMP_POSITIONS = [0, 0.12, 0.26, 0.52, 0.74, 1] as const;
 
+const luminance = (color: string) =>
+  (Number.parseInt(color.slice(1, 3), 16) * 0.2126 +
+    Number.parseInt(color.slice(3, 5), 16) * 0.7152 +
+    Number.parseInt(color.slice(5, 7), 16) * 0.0722) /
+  255;
+
 export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly string[] {
-  const [bottom, mid, top, , cloudA, cloudB] = scenes[phase][weather];
+  const [rawBottom, mid, top, , cloudA, cloudB] = scenes[phase][weather];
+  // The mark's drop shadow is only a little darker than the tile's night sky.
+  // A bright scene would drop it all the way to that scene's darkest colour,
+  // which reads as a hole punched round the mark, so the floor rises with the
+  // sky: no change at night, most of the way to the mid tone at midday.
+  const floor = Math.min(0.65, Math.max(0, (luminance(mid) - 0.12) * 1.5));
+  const bottom = mix(rawBottom, mid, floor);
   // Night keeps one cloud treatment across its weather so the whole row reads
   // as the same sky the default icon shows.
   const lift = phase === "night" ? cloudLift.cloudy : cloudLift[weather];
