@@ -139,10 +139,13 @@ fi
 echo "WIN_REMOTE=$WIN_REMOTE"
 WIN_LOCAL="$REPO/release/$(basename "$WIN_REMOTE")"
 scp -o BatchMode=yes "$WIN_HOST:$WIN_REMOTE" "$WIN_LOCAL"
-# Also pull yml/blockmap if present
-ssh -o BatchMode=yes "$WIN_HOST" "powershell.exe -NoProfile -Command \"Get-ChildItem $WIN_RELEASE_DIR/*MT-Code*, $WIN_RELEASE_DIR/*Munim*, $WIN_RELEASE_DIR/nightly.yml -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name\"" | tr -d '\r' | while read -r name; do
-  [[ -z "$name" ]] && continue
-  [[ "$name" == *.exe ]] && continue
+# Pull back the blockmap and the Windows updater feed for THIS build. Name them
+# explicitly: a wildcard sweep re-copies every stale artifact the build host has
+# ever produced, which is how a nightly.yml from an old build rode along to
+# every release while latest.yml -- matching no wildcard -- was never fetched at
+# all, leaving Windows with no update feed from 0.0.43 on.
+WIN_EXE_NAME=$(basename "$WIN_REMOTE")
+for name in "${WIN_EXE_NAME}.blockmap" latest.yml; do
   scp -o BatchMode=yes "$WIN_HOST:$WIN_RELEASE_DIR/$name" "$REPO/release/$name" || true
 done
 fi
@@ -151,12 +154,46 @@ ASSETS=("$MAC_DMG")
 [[ -n "$MAC_ZIP" && -f "$MAC_ZIP" ]] && ASSETS+=("$MAC_ZIP")
 [[ -f "${MAC_DMG}.blockmap" ]] && ASSETS+=("${MAC_DMG}.blockmap")
 [[ -n "$MAC_ZIP" && -f "${MAC_ZIP}.blockmap" ]] && ASSETS+=("${MAC_ZIP}.blockmap")
-[[ -n "$MAC_YML" && -f "$MAC_YML" ]] && ASSETS+=("$MAC_YML")
 [[ -n "$WIN_LOCAL" && -f "$WIN_LOCAL" ]] && ASSETS+=("$WIN_LOCAL")
 [[ -n "$WIN_LOCAL" && -f "${WIN_LOCAL}.blockmap" ]] && ASSETS+=("${WIN_LOCAL}.blockmap")
+
+# A manifest naming another build is worse than no manifest: the updater
+# believes whatever version it reads. Ship only manifests describing this build.
+# personal-publish-munim-win.ps1 strips the nightly suffix from the Windows
+# build version, so the stripped base counts as a match.
+BASE_VERSION="${T3CODE_DESKTOP_VERSION%%-nightly.*}"
+MAC_FEED_OK=0
+WIN_FEED_OK=0
+add_manifest() {
+  local yml="$1" found
+  [[ -f "$yml" ]] || return 0
+  found=$(awk '/^version:/ { print $2; exit }' "$yml" | tr -d "\"'")
+  if [[ "$found" != "$T3CODE_DESKTOP_VERSION" && "$found" != "$BASE_VERSION" ]]; then
+    echo "skipping stale manifest $(basename "$yml"): names ${found:-unreadable}, publishing $T3CODE_DESKTOP_VERSION"
+    return 0
+  fi
+  ASSETS+=("$yml")
+  case "$(basename "$yml")" in
+    *-mac.yml) MAC_FEED_OK=1 ;;
+    *) WIN_FEED_OK=1 ;;
+  esac
+}
+[[ -n "$MAC_YML" ]] && add_manifest "$MAC_YML"
 for y in "$REPO"/release/latest.yml "$REPO"/release/nightly.yml "$REPO"/release/*Munim*.yml "$REPO"/release/*MT-Code*.yml; do
-  [[ -f "$y" ]] && ASSETS+=("$y")
+  add_manifest "$y"
 done
+
+# An installer published without its feed file is invisible to every updater in
+# the field. Windows shipped that way from 0.0.43 to 0.0.84 because nothing
+# checked; refuse to publish instead.
+if [[ "$MAC_FEED_OK" != "1" ]]; then
+  echo "no Mac update feed for $T3CODE_DESKTOP_VERSION: installed clients would never see this release" >&2
+  exit 1
+fi
+if [[ -n "$WIN_LOCAL" && "$WIN_FEED_OK" != "1" ]]; then
+  echo "no Windows update feed (latest.yml) for $T3CODE_DESKTOP_VERSION: check the scp back from $WIN_HOST" >&2
+  exit 1
+fi
 
 # Deduplicate (no associative arrays: macOS ships bash 3.2)
 UNIQUE_ASSETS=()
