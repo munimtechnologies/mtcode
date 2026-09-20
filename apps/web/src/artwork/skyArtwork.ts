@@ -346,7 +346,12 @@ export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly stri
   // its lit horizon, which would only make them brighter.
   const toward = lift > 0 ? "#ffffff" : mid;
   const amount = Math.abs(lift);
-  return [bottom, mid, top, mix(cloudB, toward, amount), mix(cloudA, toward, amount), "#ffffff"];
+  // Ordered by their own brightness, never by their role in the sky. A dusk or
+  // midday palette can have a lit horizon brighter than its clouds, and out of
+  // order those stops invert the tile's own shading: a shadow lands lighter
+  // than what it falls on, which is what makes the mark look cut out.
+  const stops = [bottom, mid, top, mix(cloudB, toward, amount), mix(cloudA, toward, amount)];
+  return [...stops.sort((a, b) => luminance(a) - luminance(b)), "#ffffff"];
 }
 
 /** The ramp colour for a 0..1 tone, honouring where each stop sits. */
