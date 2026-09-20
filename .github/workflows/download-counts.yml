@@ -51,7 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          UPDATES_ORIGIN: https://updates.munimtech.com
+          UPDATES_ORIGIN: https://updates.mtcode.munimtech.com
         run: |
           set -euo pipefail
 

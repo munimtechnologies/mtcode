@@ -2,7 +2,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$DesktopVersion,
   [string]$UpdateRepository = "munimtechnologies/mtcode",
-  [string]$UpdateUrl = "https://updates.munimtech.com"
+  [string]$UpdateUrl = "https://updates.mtcode.munimtech.com"
 )
 
 $ErrorActionPreference = "Stop"

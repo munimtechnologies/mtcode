@@ -4,7 +4,7 @@
   "compatibility_date": "2026-09-20",
   "observability": { "enabled": true },
   "workers_dev": true,
-  "routes": [{ "pattern": "updates.munimtech.com", "custom_domain": true }],
+  "routes": [{ "pattern": "updates.mtcode.munimtech.com", "custom_domain": true }],
   "d1_databases": [
     {
       "binding": "DB",

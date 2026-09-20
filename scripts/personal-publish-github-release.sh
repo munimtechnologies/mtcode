@@ -33,7 +33,7 @@ export GITHUB_REPOSITORY="$RELEASE_REPO"
 # download counter ignores the range requests a differential update is made of,
 # so publishing straight at the repo hides every auto-update. The Worker serves
 # the same yml and redirects to the same assets on this release.
-UPDATE_URL="${T3_MUNIM_UPDATE_URL:-https://updates.munimtech.com}"
+UPDATE_URL="${T3_MUNIM_UPDATE_URL:-https://updates.mtcode.munimtech.com}"
 export T3CODE_DESKTOP_UPDATE_URL="$UPDATE_URL"
 
 # Never publish a build whose upstream merge dropped fork features (kept

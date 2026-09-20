@@ -1,6 +1,6 @@
 # MT Code update feed
 
-A Cloudflare Worker at `updates.munimtech.com` that sits between the desktop
+A Cloudflare Worker at `updates.mtcode.munimtech.com` that sits between the desktop
 updater and GitHub Releases, so updates can be counted.
 
 ## Why it exists

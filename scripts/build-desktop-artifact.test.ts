@@ -301,7 +301,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                T3CODE_DESKTOP_UPDATE_URL: "https://updates.munimtech.com/",
+                T3CODE_DESKTOP_UPDATE_URL: "https://updates.mtcode.munimtech.com/",
                 T3CODE_DESKTOP_UPDATE_REPOSITORY: "munimtechnologies/mtcode",
               },
             }),
@@ -316,7 +316,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       // generic provider turns it on by default.
       assert.deepStrictEqual(config, {
         provider: "generic",
-        url: "https://updates.munimtech.com",
+        url: "https://updates.mtcode.munimtech.com",
         channel: "latest",
         useMultipleRangeRequest: false,
       });
