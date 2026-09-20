@@ -21,6 +21,24 @@ Android uses **Material You Layout** by default unless you have turned it off in
 It changes shapes, spacing, and controls independently
 of the selected theme.
 
+## Sidebar sky and app icon
+
+On web and desktop, choose **Sidebar artwork** in Appearance for a fixed sky, or choose
+**Local day & night** to follow sunrise and sunset. **Local day, night & weather** also follows
+clouds, rain, snow, fog, and storms. Both modes include dawn and dusk, and use the same soft cloud
+and star style as Night sky. The send button follows the selected artwork.
+
+Search for a city or choose **Use my location**. Approximate coordinates are stored only on that
+device and sent to [Open-Meteo](https://open-meteo.com/) for daylight and weather. Set a location
+on each device where you use an automatic mode. Weather refreshes every 15 minutes while the app
+is visible. If location or weather is unavailable, the app keeps the last sky or shows Night sky
+until it can update. **Clear location** removes the saved coordinates.
+
+For the running desktop app, set **App icon → Match sidebar artwork** to put the same sky behind
+the white MT mark. You can also choose a fixed sky or a separate local day/night/weather mode
+for the icon. This changes the running Dock or window icon, not the installed app bundle or the
+mobile launcher icon. With no sidebar artwork, Match sidebar artwork uses the default app icon.
+
 ## Motion
 
 The main sidebar, right panel, and terminal drawer open and close immediately by default. Move the

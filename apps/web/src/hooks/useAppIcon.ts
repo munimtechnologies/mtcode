@@ -1,6 +1,14 @@
 import { useEffect } from "react";
 
 import { usePrimarySettings } from "./useSettings";
+import { useSidebarStageBackdropVariant } from "../components/SidebarStageBackdrop";
+import { isLocalSky, SKY_OPTIONS } from "../artwork/skyArtwork";
+import {
+  BLUEPRINT_ICON_BACKGROUND,
+  NIGHT_ICON_BACKGROUND,
+  renderArtworkAppIcon,
+  renderSkyAppIcon,
+} from "../artwork/appIconArtwork";
 
 /**
  * Keeps the running app's icon in step with the account's choice.
@@ -15,12 +23,47 @@ export function useAppIcon(): void {
     selection: settings.appIcon,
     custom: settings.customAppIcons,
   }));
+  const artworkMode =
+    selection === "match-artwork" ||
+    isLocalSky(selection) ||
+    SKY_OPTIONS.some((option) => option.value === selection);
+  const artwork = useSidebarStageBackdropVariant(
+    true,
+    selection === "match-artwork" ? undefined : artworkMode ? selection : "none",
+  );
+  const sky = artwork?.kind === "custom" ? artwork.sky : undefined;
+  const background =
+    artwork?.kind === "custom"
+      ? artwork.image
+      : artwork?.kind === "dev"
+        ? BLUEPRINT_ICON_BACKGROUND
+        : artwork?.kind === "nightly"
+          ? NIGHT_ICON_BACKGROUND
+          : null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const setIcon = window.desktopBridge?.setAppIcon;
     if (setIcon === undefined) return;
+    let cancelled = false;
+    if (artworkMode) {
+      if (background === null) {
+        void setIcon({ id: "default" }).catch(() => undefined);
+      } else {
+        // A sky recolours the shipped tile; anything else is cropped artwork.
+        void (sky ? renderSkyAppIcon(sky.phase, sky.weather) : renderArtworkAppIcon(background))
+          .then((image) => {
+            if (!cancelled) return setIcon({ id: "artwork", image });
+          })
+          .catch(() => {
+            if (!cancelled) void setIcon({ id: "default" }).catch(() => undefined);
+          });
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
     const own = custom.find((icon) => icon.id === selection);
     void setIcon(own ? { id: own.id, image: own.image } : { id: selection }).catch(() => undefined);
-  }, [custom, selection]);
+  }, [custom, selection, artworkMode, background, sky]);
 }

@@ -1,4 +1,6 @@
 import { SettingsGroup } from "./SettingsGroup";
+import { LocalSkySettings } from "./LocalSkySettings";
+import { isLocalSky, SKY_OPTIONS } from "../../artwork/skyArtwork";
 import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
 import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
@@ -1819,6 +1821,9 @@ function SidebarArtworkRow() {
     () => [
       { value: "night", label: "Night sky" },
       { value: "day", label: "Blueprint" },
+      { value: "local-day-night", label: "Local day & night" },
+      { value: "local-weather", label: "Local day, night & weather" },
+      ...SKY_OPTIONS,
       { value: "none", label: "None" },
       ...custom.map((artwork) => ({ value: artwork.id, label: artwork.name })),
     ],
@@ -1877,7 +1882,7 @@ function SidebarArtworkRow() {
               if (typeof value === "string") updateSettings({ sidebarArtwork: value });
             }}
           >
-            <SelectTrigger className="w-full sm:w-48" aria-label="Sidebar artwork">
+            <SelectTrigger className="w-full sm:w-60" aria-label="Sidebar artwork">
               <SelectValue>
                 {options.find((option) => option.value === selection)?.label ?? "None"}
               </SelectValue>
@@ -1890,6 +1895,7 @@ function SidebarArtworkRow() {
               ))}
             </SelectPopup>
           </Select>
+          {isLocalSky(selection) ? <LocalSkySettings /> : null}
           <div className="flex items-center gap-2">
             {custom.some((artwork) => artwork.id === selection) ? (
               <Button size="xs" variant="ghost" onClick={() => removeArtwork(selection ?? "")}>
@@ -1940,6 +1946,10 @@ function AppIconRow() {
       { value: "default", label: "MT Code" },
       { value: "light", label: "Light — black mark" },
       { value: "dark", label: "Dark — white mark" },
+      { value: "match-artwork", label: "Match sidebar artwork" },
+      { value: "local-day-night", label: "Local day & night" },
+      { value: "local-weather", label: "Local day, night & weather" },
+      ...SKY_OPTIONS,
       ...custom.map((icon) => ({ value: icon.id, label: icon.name })),
     ],
     [custom],
@@ -1998,7 +2008,7 @@ function AppIconRow() {
               if (typeof value === "string") updateSettings({ appIcon: value });
             }}
           >
-            <SelectTrigger className="w-full sm:w-48" aria-label="App icon">
+            <SelectTrigger className="w-full sm:w-60" aria-label="App icon">
               <SelectValue>
                 {options.find((option) => option.value === selection)?.label ?? "MT Code"}
               </SelectValue>
@@ -2011,6 +2021,13 @@ function AppIconRow() {
               ))}
             </SelectPopup>
           </Select>
+          {isLocalSky(selection) ? <LocalSkySettings /> : null}
+          {selection === "match-artwork" ? (
+            <p className="max-w-sm text-xs text-muted-foreground">
+              Keeps the MT mark and follows your sidebar artwork, including local daylight and
+              weather. Applies to the running desktop app.
+            </p>
+          ) : null}
           <div className="flex items-center gap-2">
             {custom.some((icon) => icon.id === selection) ? (
               <Button size="xs" variant="ghost" onClick={() => removeIcon(selection ?? "")}>

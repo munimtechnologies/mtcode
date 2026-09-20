@@ -5,11 +5,26 @@ import { APP_HAS_UPDATE_TRACKS, APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 import { usePrimarySettings } from "../hooks/useSettings";
+import {
+  isLocalSky,
+  SKY_OPTIONS,
+  skyArtworkImage,
+  type SkyPhase,
+  type SkyWeather,
+} from "../artwork/skyArtwork";
+import { useLocalSky } from "../artwork/localSky";
 
 export type SidebarStageBackdropVariant =
   | { readonly kind: "nightly" }
   | { readonly kind: "dev" }
-  | { readonly kind: "custom"; readonly image: string; readonly name: string };
+  | {
+      readonly kind: "custom";
+      readonly image: string;
+      readonly name: string;
+      // Set when the image is one of the generated skies, so the app icon can
+      // draw the square composition instead of cropping the header band.
+      readonly sky?: { readonly phase: SkyPhase; readonly weather: SkyWeather };
+    };
 export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
 export const NIGHTLY_BACKDROP: SidebarStageBackdropVariant = { kind: "nightly" };
@@ -35,6 +50,15 @@ export function resolveSidebarArtwork(input: {
   if (input.enabled === false) return null;
   const selection = input.selection.trim();
   if (selection === "none") return null;
+  if (isLocalSky(selection)) return NIGHTLY_BACKDROP;
+  const sky = SKY_OPTIONS.find((option) => option.value === selection);
+  if (sky)
+    return {
+      kind: "custom",
+      image: skyArtworkImage(sky.phase, sky.weather),
+      name: sky.label,
+      sky: { phase: sky.phase, weather: sky.weather },
+    };
   if (selection === "night") return NIGHTLY_BACKDROP;
   if (selection === "day") return DEV_BACKDROP;
   if (selection.length > 0 && selection !== "auto") {
@@ -91,12 +115,25 @@ export function useEnvironmentStageLabel(): string {
   });
 }
 
-export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
+export function useSidebarStageBackdropVariant(
+  enabled = true,
+  selectionOverride?: string,
+): SidebarStageBackdropVariant | null {
   const stageLabel = useEnvironmentStageLabel();
   const artwork = usePrimarySettings((settings) => ({
-    selection: settings.sidebarArtwork,
+    selection: selectionOverride ?? settings.sidebarArtwork,
     custom: settings.customSidebarArtworks,
   }));
+  const localSky = useLocalSky(isLocalSky(artwork.selection));
+  if (isLocalSky(artwork.selection) && localSky.ready && localSky.location) {
+    const weather = artwork.selection === "local-weather" ? localSky.weather : "clear";
+    return {
+      kind: "custom",
+      image: skyArtworkImage(localSky.phase, weather),
+      name: `Local ${localSky.phase} · ${weather}`,
+      sky: { phase: localSky.phase, weather },
+    };
+  }
   // An explicit pick is the user telling us what to draw, so it outranks the
   // environment-identification mode and the palette heuristic that upstream
   // uses to decide whether artwork suits the current theme. `enabled` still

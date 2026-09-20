@@ -529,11 +529,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "sidebar-artwork",
     title: "Sidebar artwork",
     to: "/settings/appearance",
+    searchTerms: ["sky dawn dusk day night weather location city clouds rain snow storm"],
   },
   {
     id: "app-icon",
     title: "App icon",
     to: "/settings/appearance",
+    searchTerms: ["dock artwork match sky daylight weather location"],
   },
   {
     id: "keybindings",
