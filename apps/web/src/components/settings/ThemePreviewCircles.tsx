@@ -12,7 +12,6 @@ import {
   type ThemeAppearance,
   type ThemeDefinition,
 } from "../../themePalette";
-import { APP_DISPLAY_NAME } from "~/branding";
 
 const THEME_PREVIEW_ROLES = [
   "sidebar",
@@ -56,10 +55,13 @@ const STANDARD_THEME_PREVIEW_COLORS: Record<
   },
 };
 
+// The unthemed app wears T3 Code's stock palette, so its card is named for
+// what it paints rather than for the distro. MT Code's own pair ships as a
+// built-in theme (MT_CODE_THEME), which is what a fresh install selects.
 export const STANDARD_THEME_CARDS: ReadonlyArray<ThemeCardDefinition> = [
   {
     id: "default",
-    label: `${APP_DISPLAY_NAME}`,
+    label: "T3 Code",
     previews: (["light", "dark"] as const).map((mode) => ({
       mode,
       colors: STANDARD_THEME_PREVIEW_COLORS[mode],

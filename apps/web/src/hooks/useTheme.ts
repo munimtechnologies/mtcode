@@ -9,6 +9,7 @@ import {
   canonicalThemePreference,
   isKnownThemePreference,
   getThemePreferenceMode,
+  MT_CODE_THEME_ID,
   parseThemeHalves,
   resolveDesktopTheme,
   resolveThemeAppearance,
@@ -37,8 +38,10 @@ type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+// A fresh install wears MT Code, which carries both halves. The stock T3 Code
+// palette stays one click away in the theme library.
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
-  theme: "system",
+  theme: MT_CODE_THEME_ID,
   resolvedTheme: "light",
   systemDark: false,
   followSystem: true,
@@ -152,6 +155,20 @@ function getSystemDark() {
   );
 }
 
+/** Whether a theme the app can still honor was picked, as opposed to the default. */
+function hasStoredThemePreference(): boolean {
+  if (typeof window === "undefined") return false;
+  // The caller already resolved the theme through the same key; a read that
+  // failed there must not be retried (and logged) a second time here.
+  if (themeStorageReadFailure !== null) return false;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw !== null && isKnownThemePreference(raw);
+  } catch {
+    return false;
+  }
+}
+
 function readStoredFollowSystem(theme: Theme): boolean {
   if (typeof window === "undefined") return theme === "system";
 
@@ -163,7 +180,10 @@ function readStoredFollowSystem(theme: Theme): boolean {
     // Fall back to the legacy theme value when the separate preference is unavailable.
   }
 
-  return theme === "system";
+  // The default theme names an appearance (light) the way any theme does, so
+  // an install that never picked one -- or picked a theme that has since been
+  // removed -- would otherwise pin itself to light instead of following the OS.
+  return theme === "system" || !hasStoredThemePreference();
 }
 
 function isThemePreferenceMode(value: string | null): value is ThemePreferenceMode {

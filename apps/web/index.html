@@ -51,6 +51,20 @@
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
+          "mt-code": {
+            light: {
+              background: "oklch(0.991069 0 0)",
+              foreground: "oklch(0.273936 0.005477 286.033)",
+              accent: "oklch(0.487701 0.217531 264.105)",
+              chrome: "oklch(0.991069 0 0)",
+            },
+            dark: {
+              background: "oklch(0.209036 0 0)",
+              foreground: "oklch(0.949888 0.001075 17.179)",
+              accent: "oklch(0.269409 0.003662 286.151)",
+              chrome: "oklch(0.209036 0 0)",
+            },
+          },
           "t3-chat": {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
@@ -134,6 +148,7 @@
           "system",
           "light",
           "dark",
+          "mt-code",
           "t3-chat",
           "grove",
           "ocean",
@@ -230,8 +245,11 @@
             "t3-iris": "iris",
           };
           const isLegacyT3ChatDark = storedTheme === "t3-chat-dark";
+          // Nothing stored means a fresh install, which wears MT Code rather
+          // than the unthemed T3 Code palette. Mirrors the runtime's
+          // DEFAULT_THEME_SNAPSHOT.
           const themeId =
-            storedTheme === null ? "" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
+            storedTheme === null ? "mt-code" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
           const legacyMode = isLegacyT3ChatDark ? "dark" : null;
           const builtInModes = BUILT_IN_THEME_MODES[themeId] ?? null;
           const customTheme = builtInModes ? null : findCustomTheme(themeId);
@@ -248,7 +266,11 @@
             storedTheme === "dark" ||
             storedTheme === "system" ||
             themeModes !== null;
-          const theme = isKnownTheme && storedTheme ? storedTheme : "system";
+          const theme = isKnownTheme && storedTheme ? storedTheme : "mt-code";
+          // A theme the app cannot honor (never picked, or since removed)
+          // follows the OS the way an unthemed install always has. Mirrors the
+          // runtime's readStoredFollowSystem.
+          const hasStoredPreference = storedTheme !== null && isKnownTheme;
           const isThemed = isKnownTheme && themeModes !== null;
           const baseAppearance = customTheme ? customTheme.appearance : "light";
           const systemMode = prefersDark ? "dark" : "light";
@@ -266,7 +288,7 @@
               ? "system"
               : storedFollowSystem === "false"
                 ? preferenceMode
-                : theme === "system"
+                : theme === "system" || !hasStoredPreference
                   ? "system"
                   : preferenceMode;
           // A valid mix half for the wanted appearance takes over: it decides

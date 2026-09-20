@@ -26,6 +26,7 @@ import {
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
+  MT_CODE_THEME,
   OCEAN_THEME,
 } from "../../themePalette";
 import {
@@ -56,6 +57,7 @@ import { ThemeWireframe } from "./ThemeWireframe";
 import { APP_DISPLAY_NAME } from "~/branding";
 
 const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = [
+  MT_CODE_THEME,
   T3_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,

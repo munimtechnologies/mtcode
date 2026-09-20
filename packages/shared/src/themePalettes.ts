@@ -1,5 +1,12 @@
 export const BUILT_IN_THEME_IDS = ["t3-chat", "grove", "ocean", "ember", "iris"] as const;
 
+/**
+ * MT Code's own palette. Kept out of {@link BUILT_IN_THEME_IDS}, which is the
+ * set mobile pre-generates uniwind classes for: this one ships to web and
+ * desktop only, where themes are applied as CSS variables at runtime.
+ */
+export const MT_CODE_THEME_ID = "mt-code";
+
 /** The standard T3 Code palette, kept separate from the optional built-in theme library. */
 export const MOBILE_DEFAULT_THEME_ID = "t3-code";
 
@@ -20,6 +27,7 @@ export const RESERVED_THEME_IDS: ReadonlySet<string> = new Set([
   "system",
   "light",
   "dark",
+  MT_CODE_THEME_ID,
   ...BUILT_IN_THEME_IDS,
   "t3-chat-dark",
   "t3-grove",
@@ -883,7 +891,154 @@ export const IRIS_THEME: ThemeDefinition = {
   sidebarArtwork: true,
 };
 
+/**
+ * The dark half MT Code wears out of the box: a raised-charcoal palette
+ * (lighter than T3's near-black) that keeps the stock light side untouched.
+ * Paired with {@link T3_CODE_LIGHT_THEME_COLORS} by {@link MT_CODE_THEME}.
+ */
+export const MT_CODE_DARK_THEME_COLORS: ThemeColors = {
+  canvas: "oklch(0.209036 0 0)",
+  chrome: "oklch(0.209036 0 0)",
+  toolbar: "oklch(0.209036 0 0)",
+  toolbarForeground: "oklch(0.949888 0.001075 17.179)",
+  toolbarBorder: "oklch(0.349036 0.001465 89.876)",
+  toolbarControl: "oklch(0.299036 0.0104 89.876)",
+  toolbarControlForeground: "oklch(0.949888 0.001075 17.179)",
+  toolbarControlHover: "oklch(0.349036 0.0128 89.876)",
+  surface: "oklch(0.269409 0.003662 286.151)",
+  surfaceRaised: "oklch(0.269409 0.003662 286.151)",
+  surfaceOverlay: "oklch(0.269409 0.003662 286.151)",
+  text: "oklch(0.949888 0.001075 17.179)",
+  textMuted: "oklch(0.820319 0 0)",
+  border: "oklch(0.369036 0.001282 89.876)",
+  input: "oklch(0.419036 0.001465 89.876)",
+  focus: "oklch(0.269409 0.003662 286.151)",
+  accent: "oklch(0.269409 0.003662 286.151)",
+  accentForeground: "oklch(0.990339 0.008411 325.64)",
+  secondary: "oklch(0.309036 0.001831 89.876)",
+  secondaryForeground: "oklch(0.95 0.000915 89.876)",
+  muted: "oklch(0.269036 0.001282 89.876)",
+  mutedForeground: "oklch(0.820319 0 0)",
+  placeholder: "oklch(0.820319 0 0)",
+  secondaryLabel: "oklch(0.820319 0 0)",
+  iconMuted: "oklch(0.820319 0 0)",
+  error: "oklch(0.655108 0.221148 23.473)",
+  errorForeground: "oklch(0.702184 0.189226 22.228)",
+  errorSurface: "oklch(0.278509 0.046369 17.413)",
+  warning: "oklch(0.772406 0.172798 65.367)",
+  warningForeground: "oklch(0.829017 0.171221 81.038)",
+  warningSurface: "oklch(0.308631 0.044837 76.593)",
+  update: "oklch(0.269409 0.003662 286.151)",
+  updateForeground: "oklch(0.95 0.000915 89.876)",
+  updateSurface: "oklch(0.349036 0.002014 89.876)",
+  accentSurface: "oklch(0.339036 0.002014 89.876)",
+  accentSurfaceForeground: "oklch(0.95 0.000915 89.876)",
+  messageSurface: "oklch(0.369036 0.002197 89.876)",
+  messageForeground: "oklch(0.95 0.000915 89.876)",
+  messageAction: "oklch(0.625513 0.188432 259.456)",
+  messageActionForeground: "oklch(0.222003 0.03479 328.979)",
+  messageActionHover: "oklch(0.665891 0.165827 259.299)",
+  codeBackground: "oklch(0.244036 0.0064 89.876)",
+  codeForeground: "oklch(0.949888 0.001075 17.179)",
+  sidebar: "oklch(0.269409 0.003662 286.151)",
+  sidebarForeground: "oklch(0.990339 0.008411 325.64)",
+  sidebarMutedForeground: "oklch(0.820319 0 0)",
+  sidebarControlSurface: "oklch(0.309036 0.012 89.876)",
+  sidebarRowHover: "oklch(0.289036 0.001648 89.876)",
+  sidebarRowActive: "oklch(0.329036 0.002014 89.876)",
+  sidebarRowSelected: "oklch(0.349036 0.002197 89.876)",
+  sidebarBorder: "oklch(0.379036 0.001465 89.876)",
+  terminalBackground: "oklch(0.209036 0 0)",
+  terminalForeground: "oklch(0.949888 0.001075 17.179)",
+  terminalCursor: "oklch(0.269409 0.003662 286.151)",
+  terminalSelection: "oklch(0.389036 0.002014 89.876)",
+  terminalScrollbar: "oklch(0.429036 0.008 89.876)",
+  terminalScrollbarHover: "oklch(0.509036 0.008 89.876)",
+};
+
+/**
+ * The same pixels as {@link T3_CODE_LIGHT_THEME_COLORS}, in the canonical
+ * OKLCH form every shipped theme is stored in (that constant stays hex: it
+ * mirrors the raw index.css tokens the editor seeds drafts from).
+ */
+export const MT_CODE_LIGHT_THEME_COLORS: ThemeColors = {
+  canvas: "oklch(0.991069 0 0)",
+  chrome: "oklch(0.991069 0 0)",
+  toolbar: "oklch(0.991069 0 0)",
+  toolbarForeground: "oklch(0.273936 0.005477 286.033)",
+  toolbarBorder: "oklch(0.919729 0.004032 286.32)",
+  toolbarControl: "oklch(1 0 0)",
+  toolbarControlForeground: "oklch(0.273936 0.005477 286.033)",
+  toolbarControlHover: "oklch(0.967434 0.001326 286.375)",
+  surface: "oklch(1 0 0)",
+  surfaceRaised: "oklch(0.991069 0 0)",
+  surfaceOverlay: "oklch(1 0 0)",
+  text: "oklch(0.273936 0.005477 286.033)",
+  textMuted: "oklch(0.552018 0.015347 285.886)",
+  border: "oklch(0.919729 0.004032 286.32)",
+  input: "oklch(0.871108 0.005451 286.286)",
+  focus: "oklch(0.487701 0.217531 264.105)",
+  accent: "oklch(0.487701 0.217531 264.105)",
+  accentForeground: "oklch(1 0 0)",
+  secondary: "oklch(0.985104 0 0)",
+  secondaryForeground: "oklch(0.273936 0.005477 286.033)",
+  muted: "oklch(0.985104 0 0)",
+  mutedForeground: "oklch(0.552018 0.015347 285.886)",
+  placeholder: "oklch(0.552018 0.015347 285.886)",
+  secondaryLabel: "oklch(0.552018 0.015347 285.886)",
+  iconMuted: "oklch(0.552018 0.015347 285.886)",
+  error: "oklch(0.637823 0.237287 25.436)",
+  errorForeground: "oklch(0.509494 0.208583 28.513)",
+  errorSurface: "oklch(0.953832 0.018524 13.379)",
+  warning: "oklch(0.772406 0.172798 65.367)",
+  warningForeground: "oklch(0.557046 0.158291 45.359)",
+  warningSurface: "oklch(0.970123 0.018056 78.243)",
+  update: "oklch(0.487701 0.217531 264.105)",
+  updateForeground: "oklch(0.487701 0.217531 264.105)",
+  updateSurface: "oklch(0.92544 0.023947 270.334)",
+  accentSurface: "oklch(0.967434 0.001326 286.375)",
+  accentSurfaceForeground: "oklch(0.210331 0.00586 285.885)",
+  messageSurface: "oklch(0.967434 0.001326 286.375)",
+  messageForeground: "oklch(0.273936 0.005477 286.033)",
+  messageAction: "oklch(0.487701 0.217531 264.105)",
+  messageActionForeground: "oklch(1 0 0)",
+  messageActionHover: "oklch(0.531018 0.195488 264.655)",
+  codeBackground: "oklch(1 0 0)",
+  codeForeground: "oklch(0.273936 0.005477 286.033)",
+  sidebar: "oklch(0.985104 0 0)",
+  sidebarForeground: "oklch(0.273936 0.005477 286.033)",
+  sidebarMutedForeground: "oklch(0.552018 0.015347 285.886)",
+  sidebarControlSurface: "oklch(0.967434 0.001326 286.375)",
+  sidebarRowHover: "oklch(0.991069 0 0)",
+  sidebarRowActive: "oklch(1 0 0)",
+  sidebarRowSelected: "oklch(1 0 0)",
+  sidebarBorder: "oklch(0.919729 0.004032 286.32)",
+  terminalBackground: "oklch(0.991069 0 0)",
+  terminalForeground: "oklch(0.273936 0.005477 286.033)",
+  terminalCursor: "oklch(0.335595 0.045603 253.947)",
+  terminalSelection: "oklch(0.873532 0.011656 252.099)",
+  terminalScrollbar: "oklch(0.876096 0 0)",
+  terminalScrollbarHover: "oklch(0.798372 0 0)",
+};
+
+/**
+ * MT Code's own look: the stock light palette plus the charcoal dark half.
+ * The unthemed app still paints T3's pair, which the theme library offers as
+ * the "T3 Code" card.
+ */
+export const MT_CODE_THEME: ThemeDefinition = {
+  id: MT_CODE_THEME_ID,
+  label: "MT Code",
+  appearance: "light",
+  colors: MT_CODE_LIGHT_THEME_COLORS,
+  variants: {
+    light: MT_CODE_LIGHT_THEME_COLORS,
+    dark: MT_CODE_DARK_THEME_COLORS,
+  },
+};
+
 export const BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
+  MT_CODE_THEME,
   T3_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,
