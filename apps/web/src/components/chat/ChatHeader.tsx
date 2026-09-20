@@ -105,6 +105,21 @@ const TITLE_MENU_OPEN_DELAY_MS = 500;
 // Matches the @3xl/header-actions container breakpoint owned by this header.
 const HEADER_ACTIONS_EXPANDED_BREAKPOINT_REM = 48;
 
+/**
+ * The monitor button is a remote desktop into *another* machine. On the
+ * computer the thread already runs on, the screen it would show is the one the
+ * user is looking at, so the button (and its `computerView.toggle` shortcut)
+ * stay hidden there even though the capability is advertised.
+ */
+export function shouldShowComputerView(input: {
+  readonly capabilityAdvertised: boolean;
+  readonly activeThreadEnvironmentId: EnvironmentId;
+  readonly primaryEnvironmentId: EnvironmentId | null;
+}): boolean {
+  if (!input.capabilityAdvertised) return false;
+  return input.activeThreadEnvironmentId !== input.primaryEnvironmentId;
+}
+
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
   readonly activeThreadEnvironmentId: EnvironmentId;
@@ -175,9 +190,14 @@ export const ChatHeader = memo(function ChatHeader({
   const threadEnvironmentPresentation = useEnvironment(activeThreadEnvironmentId);
   // Gated on the environment's descriptor: the capability is only advertised
   // when the server ships the computerView RPCs and the machine has the
-  // desktop-control binary to serve them.
-  const supportsComputerView =
-    threadEnvironmentPresentation?.serverConfig?.environment.capabilities.computerView === true;
+  // desktop-control binary to serve them. Viewing the machine you are sitting
+  // at is not remote desktop, so the local environment never offers it.
+  const supportsComputerView = shouldShowComputerView({
+    capabilityAdvertised:
+      threadEnvironmentPresentation?.serverConfig?.environment.capabilities.computerView === true,
+    activeThreadEnvironmentId,
+    primaryEnvironmentId,
+  });
   const [computerViewOpen, setComputerViewOpen] = useState(false);
   useEffect(() => {
     if (!supportsComputerView) return undefined;

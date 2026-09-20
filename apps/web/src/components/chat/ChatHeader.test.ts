@@ -1,7 +1,52 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveRenameCommit, shouldShowOpenInPicker } from "./ChatHeader";
+import { resolveRenameCommit, shouldShowComputerView, shouldShowOpenInPicker } from "./ChatHeader";
+
+describe("shouldShowComputerView", () => {
+  const primaryEnvironmentId = EnvironmentId.make("environment-primary");
+  const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+
+  it("offers the view for a thread on another computer", () => {
+    expect(
+      shouldShowComputerView({
+        capabilityAdvertised: true,
+        activeThreadEnvironmentId: remoteEnvironmentId,
+        primaryEnvironmentId,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides the view for a thread on this computer", () => {
+    expect(
+      shouldShowComputerView({
+        capabilityAdvertised: true,
+        activeThreadEnvironmentId: primaryEnvironmentId,
+        primaryEnvironmentId,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the view when the environment does not advertise it", () => {
+    expect(
+      shouldShowComputerView({
+        capabilityAdvertised: false,
+        activeThreadEnvironmentId: remoteEnvironmentId,
+        primaryEnvironmentId,
+      }),
+    ).toBe(false);
+  });
+
+  it("offers the view when no environment is primary yet", () => {
+    expect(
+      shouldShowComputerView({
+        capabilityAdvertised: true,
+        activeThreadEnvironmentId: remoteEnvironmentId,
+        primaryEnvironmentId: null,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");

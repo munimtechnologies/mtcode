@@ -12,12 +12,16 @@ export interface DesktopMcpToolCall {
 }
 
 /**
- * Viewer input to desktop-MCP tool call. Scroll x/y are intentionally unused:
- * the MCP scroll tool acts at the current cursor position and takes no
- * coordinates.
+ * Viewer input to desktop-MCP tool call. The viewer process runs the desktop
+ * MCP in remote-control mode, where every one of these drives the machine's
+ * real pointer and keyboard rather than being routed to a window in the
+ * background -- so a plain pointer move is a `hover`, and the wheel carries the
+ * coordinates it should act over.
  */
 export function computerViewToolCall(input: ComputerViewInput): DesktopMcpToolCall {
   switch (input.type) {
+    case "move":
+      return { name: "hover", arguments: { x: input.x, y: input.y } };
     case "click":
       return input.button === "right"
         ? { name: "right_click", arguments: { x: input.x, y: input.y } }
@@ -44,6 +48,8 @@ export function computerViewToolCall(input: ComputerViewInput): DesktopMcpToolCa
         name: "scroll",
         arguments: {
           direction: input.direction,
+          x: input.x,
+          y: input.y,
           ...(input.amount === undefined ? {} : { amount: input.amount }),
         },
       };

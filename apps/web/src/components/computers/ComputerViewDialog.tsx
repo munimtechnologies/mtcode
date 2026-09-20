@@ -34,6 +34,13 @@ import {
 
 /** Coalesce wheel spam into one scroll per flush so serial input keeps up. */
 const WHEEL_FLUSH_MS = 150;
+/**
+ * Pointer moves are coalesced to this cadence. The browser reports motion far
+ * faster than the remote machine can act on it and only the latest position
+ * matters, so a viewer sweeping across the picture costs one RPC per frame
+ * rather than one per reported pixel.
+ */
+const POINTER_MOVE_FLUSH_MS = 40;
 
 interface ComputerViewDialogProps {
   environmentId: EnvironmentId;
@@ -84,6 +91,8 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
   const pointerDownRef = useRef<{ x: number; y: number; button: "left" | "right" } | null>(null);
   const wheelRef = useRef<{ deltaX: number; deltaY: number; x: number; y: number } | null>(null);
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moveRef = useRef<{ x: number; y: number } | null>(null);
+  const moveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sendInput = useCallback(
     (input: ComputerViewInput) => {
@@ -158,6 +167,28 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
     [controlEnabled, sendInput, toScreenPoint],
   );
 
+  /**
+   * The remote pointer follows this one, so hover states, tooltips and menus
+   * behave the way they do when sitting at the machine. Skipped while a button
+   * is held: that gesture is resolved as a click or drag on release.
+   */
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLImageElement>) => {
+      if (!controlEnabled || pointerDownRef.current !== null) return;
+      const point = toScreenPoint(event.clientX, event.clientY);
+      if (point === null) return;
+      moveRef.current = point;
+      moveTimerRef.current ??= setTimeout(() => {
+        moveTimerRef.current = null;
+        const pending = moveRef.current;
+        moveRef.current = null;
+        if (pending === null) return;
+        sendInput({ type: "move", x: pending.x, y: pending.y });
+      }, POINTER_MOVE_FLUSH_MS);
+    },
+    [controlEnabled, sendInput, toScreenPoint],
+  );
+
   const handleWheel = useCallback(
     (event: ReactWheelEvent<HTMLImageElement>) => {
       if (!controlEnabled) return;
@@ -184,6 +215,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
   useEffect(
     () => () => {
       if (wheelTimerRef.current !== null) clearTimeout(wheelTimerRef.current);
+      if (moveTimerRef.current !== null) clearTimeout(moveTimerRef.current);
     },
     [],
   );
@@ -405,6 +437,7 @@ export const ComputerViewDialog = memo(function ComputerViewDialog({
             draggable={false}
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
+            onPointerMove={handlePointerMove}
             onWheel={handleWheel}
             onContextMenu={(event) => event.preventDefault()}
             // A stream narrower than the window is drawn smoothly rather than

@@ -21,6 +21,7 @@ import {
   selectComputerViewDisplay,
   type ComputerViewDisplayInfo,
 } from "@t3tools/shared/computerView";
+import { MTCODE_DESKTOP_ENV_PREFIX } from "@t3tools/shared/munimComputerUse";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -187,7 +188,15 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
       );
     }
     const command = ChildProcess.make(launch.path, [], {
-      env: Object.fromEntries(launch.env.map(({ name, value }) => [name, value])),
+      env: {
+        ...Object.fromEntries(launch.env.map(({ name, value }) => [name, value])),
+        // This process exists to be driven by a person watching the screen it
+        // captures, so its input takes over the real pointer and keyboard
+        // instead of being routed to a window in the background. Agent
+        // sessions run their own desktop-MCP process, which keeps the
+        // background behaviour and leaves this machine's user alone.
+        [`${MTCODE_DESKTOP_ENV_PREFIX}REMOTE_CONTROL`]: "1",
+      },
       extendEnv: true,
       stdin: { stream: "pipe", endOnDone: false },
       stdout: "pipe",

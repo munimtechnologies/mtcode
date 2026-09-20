@@ -30,11 +30,18 @@ describe("computerViewToolCall", () => {
     });
   });
 
-  it("maps scrolls without coordinates (the tool scrolls at the cursor)", () => {
+  it("maps scrolls over the point the viewer scrolled at", () => {
     assert.deepEqual(
       computerViewToolCall({ type: "scroll", x: 100, y: 100, direction: "down", amount: 3 }),
-      { name: "scroll", arguments: { direction: "down", amount: 3 } },
+      { name: "scroll", arguments: { direction: "down", x: 100, y: 100, amount: 3 } },
     );
+  });
+
+  it("maps pointer motion to a hover, which moves the remote cursor", () => {
+    assert.deepEqual(computerViewToolCall({ type: "move", x: 7, y: 9 }), {
+      name: "hover",
+      arguments: { x: 7, y: 9 },
+    });
   });
 
   it("maps keys with modifiers and drops empty modifier lists", () => {

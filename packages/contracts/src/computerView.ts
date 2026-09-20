@@ -87,6 +87,19 @@ export const ComputerViewClickInput = Schema.Struct({
 });
 export type ComputerViewClickInput = typeof ComputerViewClickInput.Type;
 
+/**
+ * Pointer motion with no button down. The viewer sends these as the mouse
+ * moves over the picture so the remote cursor tracks it, the way it does in
+ * any other remote desktop -- hover states, tooltips and drag targets all
+ * depend on the pointer actually being there.
+ */
+export const ComputerViewMoveInput = Schema.Struct({
+  type: Schema.Literal("move"),
+  x: Schema.Number,
+  y: Schema.Number,
+});
+export type ComputerViewMoveInput = typeof ComputerViewMoveInput.Type;
+
 export const ComputerViewDragInput = Schema.Struct({
   type: Schema.Literal("drag"),
   fromX: Schema.Number,
@@ -122,6 +135,7 @@ export type ComputerViewTypeInput = typeof ComputerViewTypeInput.Type;
 
 export const ComputerViewInput = Schema.Union([
   ComputerViewClickInput,
+  ComputerViewMoveInput,
   ComputerViewDragInput,
   ComputerViewScrollInput,
   ComputerViewKeyInput,
