@@ -80,7 +80,8 @@ function starLevels(): Map<number, number> {
   return levels;
 }
 
-const EDGE_REACH = 40;
+const EDGE_BAND = 10;
+const EDGE_FEATHER = 7;
 
 /** How far a point sits inside the tile's squircle, in its own 1024 units. */
 function edgeInset(x: number, y: number): number {
@@ -119,10 +120,13 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas unavailable");
   context.drawImage(tile, 0, 0, 1024, 1024);
+  const ramp = skyIconRamp(phase, weather);
+  if (ramp === null) {
+    if (overlay) context.drawImage(overlay, 0, 0, 1024, 1024);
+    return canvas.toDataURL("image/png");
+  }
   const frame = context.getImageData(0, 0, 1024, 1024);
-  // The edge needs the tile as it was, and the loop below overwrites as it goes.
-  const origin = new Uint8ClampedArray(frame.data);
-  const table = rampLookup(skyIconRamp(phase, weather));
+  const table = rampLookup(ramp);
   // Daylight and overcast skies show no stars: the tile's specks take the tone
   // of what they sit on, so they vanish into the repainted sky.
   const hidden = skyHidesStars(phase, weather) ? starLevels() : null;
@@ -147,31 +151,15 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
     let red2 = table[level * 3]!;
     let green2 = table[level * 3 + 1]!;
     let blue2 = table[level * 3 + 2]!;
-    // The glass edge is lighting, not colour. Repainting it outright turns the
-    // highlight into a bright ring of sky colour, and pasting the original back
-    // drags the tile's navy edge onto a bright sky; so the edge is re-applied
-    // as the shading it is — how much darker or lighter the tile is there than
-    // just inside — multiplied into whatever the scene paints.
+    // The glass edge belongs to the tile, not to the weather: the outermost
+    // pixels stay exactly as they ship, fading into the repaint just inside, so
+    // every scene carries the edge the default icon has.
     const inset = edgeInset(x, y);
-    if (inset < EDGE_REACH) {
-      const toCenterX = 511.5 - x;
-      const toCenterY = 511.5 - y;
-      const span = Math.hypot(toCenterX, toCenterY) || 1;
-      const innerPixel =
-        (Math.round(y + (toCenterY / span) * EDGE_REACH) * 1024 +
-          Math.round(x + (toCenterX / span) * EDGE_REACH)) <<
-        2;
-      const innerLevel =
-        origin[innerPixel]! * 0.2126 +
-        origin[innerPixel + 1]! * 0.7152 +
-        origin[innerPixel + 2]! * 0.0722;
-      // Brightening is held well below darkening: the highlight only has to
-      // read as glass, while an unclamped one becomes a lit ring of sky colour.
-      const shade = Math.min(1.28, Math.max(0.5, (level + 10) / (innerLevel + 10)));
-      const applied = 1 + (shade - 1) * (1 - inset / EDGE_REACH);
-      red2 = Math.min(255, Math.round(red2 * applied));
-      green2 = Math.min(255, Math.round(green2 * applied));
-      blue2 = Math.min(255, Math.round(blue2 * applied));
+    if (inset < EDGE_BAND) {
+      const hold = inset < EDGE_BAND - EDGE_FEATHER ? 1 : (EDGE_BAND - inset) / EDGE_FEATHER;
+      red2 = Math.round(red2 + (red - red2) * hold);
+      green2 = Math.round(green2 + (green - green2) * hold);
+      blue2 = Math.round(blue2 + (blue - blue2) * hold);
     }
     frame.data[pixel] = red2;
     frame.data[pixel + 1] = green2;

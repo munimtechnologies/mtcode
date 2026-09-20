@@ -331,7 +331,9 @@ const luminance = (color: string) =>
     Number.parseInt(color.slice(5, 7), 16) * 0.0722) /
   255;
 
-export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly string[] {
+export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly string[] | null {
+  // The shipped tile already is a cloudy night, so that scene ships untouched.
+  if (phase === "night" && weather === "cloudy") return null;
   const [rawBottom, mid, top, , cloudA, cloudB] = scenes[phase][weather];
   // The mark's drop shadow is only a little darker than the tile's night sky.
   // A bright scene would drop it all the way to that scene's darkest colour,
@@ -369,6 +371,7 @@ const RAMP_SAMPLES = 64;
 /** Evenly spaced channel tables for an SVG `feComponentTransfer`. */
 export const skyIconTables = (phase: SkyPhase, weather: SkyWeather) => {
   const ramp = skyIconRamp(phase, weather);
+  if (ramp === null) return null;
   const samples = Array.from({ length: RAMP_SAMPLES }, (_, index) =>
     sampleSkyRamp(ramp, index / (RAMP_SAMPLES - 1)),
   );
@@ -406,7 +409,9 @@ export const skyHidesStars = (phase: SkyPhase, weather: SkyWeather) =>
 /** Transparent 1024 overlay: what a repaint alone cannot say. */
 export function skyIconOverlaySvg(phase: SkyPhase, weather: SkyWeather): string {
   const tint = scenes[phase][weather][4];
-  const ramp = skyIconRamp(phase, weather);
+  // night/cloudy ships untouched, so borrow the clear night's ramp to colour
+  // anything the overlay needs to paint over.
+  const ramp = skyIconRamp(phase, weather) ?? skyIconRamp("night", "clear")!;
   let body = skyHidesStars(phase, weather)
     ? `<g filter="url(#iconBlur2)">${TILE_STARS.map(([x, y, radius, level]) => `<circle cx="${x}" cy="${y}" r="${radius + 7}" fill="${sampleSkyRamp(ramp, level)}"/>`).join("")}</g>`
     : "";
