@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off
 // This Promise adapter owns a JSON-RPC child and its timers; the enclosing Effect scope closes it.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -27,6 +27,16 @@ const CODEX_VOICE_INSTRUCTIONS =
   "owns reasoning, tools, files, and approvals. Never do its work yourself or use other tools. " +
   "Return its result faithfully and concisely. Never claim work succeeded when the tool failed.";
 
+/**
+ * How long to hold GPT-Live's ping before answering it. A quick agent reply
+ * rides back on the tool call; anything slower gets an immediate "working on
+ * it" so the call stays conversational, and the reply follows as context.
+ */
+const ANSWER_INLINE_MS = 8_000;
+
+/** How long a fresh ping is treated as a repeat of the question just answered. */
+const REPEAT_PING_MS = 30_000;
+
 export interface CodexVoiceOptions {
   readonly command: string;
   readonly args: readonly string[];
@@ -34,6 +44,8 @@ export interface CodexVoiceOptions {
   readonly shell?: boolean;
   readonly cwd: string;
   readonly askAgent: (prompt: string, signal: AbortSignal) => Promise<string>;
+  /** Overridable so tests do not wait out the real threshold. */
+  readonly speakInlineMs?: number;
 }
 
 /** Owns only the child it starts. Credentials stay inside the authenticated Codex runtime. */
@@ -47,6 +59,9 @@ export class CodexVoiceSession {
   private failure: string | undefined;
   private lease: ReturnType<typeof setTimeout> | undefined;
   private delegation: Promise<string> | undefined;
+  private notices: string[] = [];
+  private delivered: string | undefined;
+  private deliveredAt = 0;
   private ready: { resolve: (sdp: string) => void; reject: (error: Error) => void } | undefined;
   private readonly pending = new Map<
     number,
@@ -140,6 +155,36 @@ export class CodexVoiceSession {
     return delegation;
   }
 
+  /**
+   * Hand the agent's reply back into the conversation. GPT-Live will not hold a
+   * tool call for the minute an agent turn can take, so a late answer comes back
+   * as conversation context and GPT-Live tells the user in its own words.
+   */
+  private deliver(text: string): void {
+    if (this.closed || !this.threadId || text.trim().length === 0) return;
+    // One reply per answer: GPT-Live raises several pings for one question and
+    // each waits on the same turn, so without this it would say it twice.
+    if (this.delivered === text) return;
+    this.delivered = text;
+    this.deliveredAt = Date.now();
+    this.notices.push("Agent replied; telling you now");
+    // A beat first: pushing speech while GPT-Live is still finishing its own
+    // line gets swallowed.
+    const send = setTimeout(() => {
+      if (this.closed || !this.threadId) return;
+      void this.request("thread/realtime/appendSpeech", {
+        threadId: this.threadId,
+        text,
+      }).catch((error: unknown) => {
+        // The answer is already in the task, so a failed read-out is not fatal.
+        this.notices.push(
+          `Could not deliver the answer: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }, 2_500);
+    send.unref?.();
+  }
+
   private async handleRequest(id: string | number, method: string, params: unknown) {
     try {
       if (method !== "item/tool/call")
@@ -151,10 +196,41 @@ export class CodexVoiceSession {
       const { prompt } = Schema.decodeUnknownSync(Prompt)(call.arguments);
       if (!prompt.trim() || prompt.length > 32_000)
         throw new Error("The voice request is empty or too long.");
-      const text = await this.ask(prompt);
-      this.send({ id, result: { success: true, contentItems: [{ type: "inputText", text }] } });
+      // GPT-Live raises the same question two or three times in a row, and the
+      // answer never rides back on the tool call — it does not reliably speak a
+      // tool result here. So: answer the first ping with a line to say, keep the
+      // duplicates quiet, and hand the agent's reply back as conversation, which
+      // it does speak.
+      const reply = (text: string) =>
+        this.send({ id, result: { success: true, contentItems: [{ type: "inputText", text }] } });
+
+      if (this.delivered !== undefined && Date.now() - this.deliveredAt < REPEAT_PING_MS) {
+        this.notices.push("Repeat ping; reused the answer already given");
+        reply(`The agent already answered: ${this.delivered}`);
+        return;
+      }
+      if (this.delegation) {
+        this.notices.push("Repeat ping while the agent works; ignored");
+        reply(
+          "Already asked, still waiting. Say nothing more; the answer will arrive as a message.",
+        );
+        return;
+      }
+      reply(
+        "Asked the agent. Say one short line telling the user you are on it. Their answer will arrive as a message; tell them then.",
+      );
+      this.notices.push("Asked the agent; waiting for its reply");
+      void this.ask(prompt).then(
+        (text) => this.deliver(text),
+        (error) =>
+          this.deliver(
+            `It could not finish: ${error instanceof Error ? error.message : "unknown error"}`,
+          ),
+      );
     } catch (error) {
       const text = error instanceof Error ? error.message : "The selected agent could not answer.";
+      // Say why in the panel: a tool failure is otherwise invisible to the user.
+      this.notices.push(text);
       this.send(
         method === "item/tool/call"
           ? { id, result: { success: false, contentItems: [{ type: "inputText", text }] } }
@@ -163,7 +239,7 @@ export class CodexVoiceSession {
     }
   }
 
-  async start(sdp: string): Promise<string> {
+  async start(sdp: string, voice?: string): Promise<string> {
     try {
       await this.request("initialize", {
         clientInfo: { name: "mt_code_voice", version: "1.0.0" },
@@ -218,9 +294,15 @@ export class CodexVoiceSession {
             transport: { type: "webrtc", sdp },
             includeStartupContext: false,
             clientManagedHandoffs: false,
+            // Off on purpose: with the filler on, GPT-Live says "asking now" and
+            // then ignores the tool's result. Off, it speaks the result it gets
+            // back, and a slow answer is handed to it as conversation instead.
             delegationAckFiller: false,
+            ...(voice ? { voice } : {}),
+            // Keep this plain. Telling it to speak while it waits makes it treat
+            // the call as fire-and-forget and never report what came back.
             prompt:
-              "You are the voice for the user's selected MT Code agent. Delegate every question and work request to the backend. Speak its result concisely. Never invent its answer or claim work before it finishes.",
+              "You are the voice for the user's selected MT Code agent. Delegate every question and work request to ask_selected_agent. Speak its result concisely. Never invent its answer or claim work before it finishes.",
           }),
           answer,
         ]);
@@ -233,6 +315,11 @@ export class CodexVoiceSession {
       this.close();
       throw error;
     }
+  }
+
+  /** Progress worth showing in the panel, drained by the client's heartbeat. */
+  takeNotices(): ReadonlyArray<string> {
+    return this.notices.splice(0);
   }
 
   renew(): string | undefined {

@@ -2763,7 +2763,12 @@ const makeWsRpcLayer = (
                 }
                 const error = session ? session.renew() : "Voice session ended. Start voice again.";
                 if (error) codexVoiceSessions.delete(input.sessionId);
-                return { sessionId: input.sessionId, ...(error ? { error } : {}) };
+                const notices = session?.takeNotices() ?? [];
+                return {
+                  sessionId: input.sessionId,
+                  ...(error ? { error } : {}),
+                  ...(notices.length > 0 ? { notices } : {}),
+                };
               }
               const thread = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
               if (Option.isNone(thread) || thread.value.archivedAt !== null) {
@@ -2814,7 +2819,7 @@ const makeWsRpcLayer = (
               });
               codexVoiceSessions.set(session.id, session);
               const sdp = yield* Effect.tryPromise({
-                try: () => session.start(input.sdp),
+                try: () => session.start(input.sdp, input.voice),
                 catch: (error) =>
                   new VoiceApiError({
                     reason: "upstream_unavailable",

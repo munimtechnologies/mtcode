@@ -94,6 +94,7 @@ export const CodexVoiceSessionInput = Schema.Union([
     action: Schema.Literal("start"),
     threadId: ThreadId,
     sdp: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(64_000)),
+    voice: Schema.optionalKey(TrimmedNonEmptyString),
   }),
   Schema.Struct({
     action: Schema.Literals(["stop", "heartbeat"]),
@@ -105,5 +106,7 @@ export const CodexVoiceSessionResult = Schema.Struct({
   sessionId: Schema.String,
   sdp: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
+  /** Progress lines for the voice panel, drained as the call runs. */
+  notices: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type CodexVoiceSessionResult = typeof CodexVoiceSessionResult.Type;

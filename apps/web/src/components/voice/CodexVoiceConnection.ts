@@ -19,15 +19,23 @@ export class CodexVoiceConnection {
   async connect(input: {
     threadId: ThreadId;
     inputDeviceId?: string | undefined;
+    voice?: string | undefined;
     onEvent: (event: unknown) => void;
     onConnectionStateChange: (state: RTCPeerConnectionState) => void;
+    onRemoteStream?: (stream: MediaStream) => void;
   }): Promise<OpenAIRealtimeDiagnostics> {
     const diagnostics = await this.connection.connect({
       onConnectionStateChange: input.onConnectionStateChange,
       onEvent: input.onEvent,
       inputDeviceId: input.inputDeviceId,
+      ...(input.onRemoteStream ? { onRemoteStream: input.onRemoteStream } : {}),
       exchangeSdp: async (sdp) => {
-        const result = await this.rpc({ action: "start", threadId: input.threadId, sdp });
+        const result = await this.rpc({
+          action: "start",
+          threadId: input.threadId,
+          sdp,
+          ...(input.voice ? { voice: input.voice } : {}),
+        });
         this.sessionId = result.sessionId;
         if (this.stopped) {
           await this.rpc({ action: "stop", sessionId: result.sessionId }).catch(() => {});
@@ -42,6 +50,7 @@ export class CodexVoiceConnection {
       if (this.stopped || !this.sessionId) return;
       try {
         const result = await this.rpc({ action: "heartbeat", sessionId: this.sessionId });
+        for (const notice of result.notices ?? []) input.onEvent({ type: "voice.notice", notice });
         if (result.error) throw new Error(result.error);
         if (!this.stopped) this.heartbeat = setTimeout(() => void renew(), 15_000);
       } catch (error) {
@@ -56,6 +65,13 @@ export class CodexVoiceConnection {
     };
     void renew();
     return diagnostics;
+  }
+
+  get microphoneStream(): MediaStream | null {
+    return this.connection.microphoneStream;
+  }
+  get speakerStream(): MediaStream | null {
+    return this.connection.speakerStream;
   }
 
   // Codex owns GPT-Live's session configuration and backend handoffs.

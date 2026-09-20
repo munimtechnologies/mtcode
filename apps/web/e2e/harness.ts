@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - e2e harness: spawns and drives the dev server as a child process.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -33,6 +34,8 @@ export interface IsolatedWebAppOptions {
   readonly headed?: boolean;
   /** Extra Chromium switches, e.g. the fake media-stream flags a microphone flow needs. */
   readonly chromiumArgs?: ReadonlyArray<string>;
+  /** Tee the dev server's output here, for suites that need to read server logs. */
+  readonly devLogPath?: string;
 }
 
 export interface IsolatedWebApp {
@@ -117,6 +120,11 @@ async function startIsolatedWebAppUnsafe(
   resources.unregisterExitKill = registerExitKill(child.pid);
 
   const output = { text: "" };
+  if (options.devLogPath !== undefined) {
+    const devLog = NodeFS.createWriteStream(options.devLogPath, { flags: "a" });
+    child.stdout?.pipe(devLog);
+    child.stderr?.pipe(devLog);
+  }
   const ready = waitForDevReady(child, output);
   const startup = { timedOut: true };
 

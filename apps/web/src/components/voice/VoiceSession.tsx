@@ -22,6 +22,8 @@ import { Button } from "../ui/button";
 import type { ChatComposerHandle } from "../chat/ChatComposer";
 import { CodexVoiceConnection } from "./CodexVoiceConnection";
 import { OpenAIRealtimeConnection } from "./OpenAIRealtimeConnection";
+import { useAudioLevel } from "./useAudioLevel";
+import { VoiceOrb, type VoiceOrbState } from "./VoiceOrb";
 import { VoiceTraceTimeline } from "./VoiceTraceTimeline";
 import { type ResizeEdge, useVoicePanelGeometry } from "./useVoicePanelGeometry";
 import { createOpenAIRealtimeSessionConfig, useVoiceSettingsStore } from "./voiceSettingsStore";
@@ -54,6 +56,7 @@ interface VoiceSessionContextValue {
 const VoiceSessionContext = createContext<VoiceSessionContextValue | null>(null);
 
 interface VoiceEvent {
+  readonly notice?: string;
   readonly turn?: { id?: string; role?: string; transcript?: string };
   readonly turn_id?: string;
   readonly type?: string;
@@ -384,6 +387,10 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const [currentTitle, setCurrentTitle] = useState("Current task");
   const [assistantTranscript, setAssistantTranscript] = useState("");
   const [displayTraceSessionId, setDisplayTraceSessionId] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [userTranscript, setUserTranscript] = useState("");
+  const [notice, setNotice] = useState("");
+  const [callStreams, setCallStreams] = useState<ReadonlyArray<MediaStream | null>>([]);
   const voiceSpeed = useVoiceSettingsStore((state) => state.speed);
   const voiceLanguage = useVoiceSettingsStore((state) => state.language);
   const voiceReasoningEffort = useVoiceSettingsStore((state) => state.reasoningEffort);
@@ -425,6 +432,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const upsertUserTrace = useCallback((transcript: string) => {
     const sessionId = traceSessionIdRef.current;
     const text = transcript.trim();
+    if (text.length > 0) setUserTranscript(text);
     if (!sessionId || text.length === 0) return;
     activeUserTraceEntryIdRef.current ??= `user-turn-${Date.now().toString(36)}-${(++userTraceSequenceRef.current).toString(36)}`;
     useVoiceTraceStore.getState().upsertEntry(sessionId, activeUserTraceEntryIdRef.current, {
@@ -693,6 +701,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     const connection = connectionRef.current;
     connectionRef.current = null;
     connection?.close();
+    setCallStreams([]);
     appendTrace({ kind: "system", title: "Session ended" });
     completeTrace();
     originComposerRef.current = null;
@@ -701,6 +710,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     setPanelOpen(false);
     setErrorText(null);
     setAssistantTranscript("");
+    setNotice("");
     activeUserTraceEntryIdRef.current = null;
     assistantTranscriptRef.current = "";
   }, [appendTrace, completeTrace]);
@@ -773,6 +783,16 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
             sessionReadyRef.current = true;
             setStatus("listening");
             break;
+          case "voice.notice":
+            if (event.notice) {
+              appendTrace({ kind: "system", title: event.notice });
+              // The notice is the newest thing that happened; let it show.
+              assistantTranscriptRef.current = "";
+              setAssistantTranscript("");
+              setNotice(event.notice);
+            }
+            if (event.notice?.startsWith("Reading")) setStatus("speaking");
+            break;
           case "delegation.created":
             setStatus("thinking");
             appendTrace({ kind: "tool_call", title: "Asking selected agent" });
@@ -787,6 +807,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
             } else {
               assistantTranscriptRef.current = text;
               setAssistantTranscript(text);
+              setNotice("");
               setStatus("speaking");
             }
             break;
@@ -934,6 +955,8 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
 
       const callbacks = {
         inputDeviceId: voiceSettings.inputDeviceId || undefined,
+        onRemoteStream: (stream: MediaStream) =>
+          setCallStreams((current) => [current[0] ?? null, stream]),
         onEvent: handleEvent,
         onConnectionStateChange: (connectionState: RTCPeerConnectionState) => {
           if (
@@ -956,7 +979,11 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       };
       const diagnostics =
         connection instanceof CodexVoiceConnection
-          ? await connection.connect({ ...callbacks, threadId: registration.threadRef.threadId })
+          ? await connection.connect({
+              ...callbacks,
+              threadId: registration.threadRef.threadId,
+              ...(voiceSettings.codexVoice ? { voice: voiceSettings.codexVoice } : {}),
+            })
           : await connection.connect({ ...callbacks, ...access });
       if (!activeRef.current || connectionRef.current !== connection) {
         connection.close();
@@ -971,6 +998,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
           tool_choice: "auto",
         },
       });
+      setCallStreams([connection.microphoneStream, connection.speakerStream]);
       appendTrace({
         kind: "system",
         title: accountVoice
@@ -1046,6 +1074,21 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   useEffect(() => end, [end]);
 
   const active = status !== "idle" && status !== "error";
+  const audioLevel = useAudioLevel(callStreams);
+  const orbState: VoiceOrbState =
+    status === "error"
+      ? "error"
+      : muted
+        ? "muted"
+        : status === "connecting" || status === "idle"
+          ? "connecting"
+          : status;
+  // The panel says one thing at a time: what the agent is being asked, then
+  // what came back. The whole exchange stays in Details.
+  const caption =
+    status === "speaking" || status === "thinking"
+      ? assistantTranscript || notice || userTranscript
+      : notice || userTranscript;
   const displayTraceSession = traceSessions.find((session) => session.id === displayTraceSessionId);
   const value = useMemo<VoiceSessionContextValue>(
     () => ({
@@ -1069,9 +1112,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       {status !== "idle" ? (
         panelOpen ? (
           <aside
-            className="fixed z-[90] flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/95 text-card-foreground shadow-xl backdrop-blur-xl"
+            className="fixed z-[90] flex min-h-0 flex-col overflow-hidden rounded-3xl border border-border/60 bg-card/95 text-card-foreground shadow-2xl backdrop-blur-xl"
             style={panelGeometry.style}
-            aria-label="OpenAI voice panel"
+            aria-label="Voice panel"
           >
             {RESIZE_HANDLES.map(({ edge, className }) => (
               <div
@@ -1082,25 +1125,10 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
               />
             ))}
             <div
-              className="flex shrink-0 cursor-grab touch-none items-start justify-between gap-3 border-b border-border/55 px-3.5 py-3 active:cursor-grabbing"
+              className="flex shrink-0 cursor-grab touch-none items-center justify-between gap-2 px-4 pt-3 active:cursor-grabbing"
               {...panelGeometry.moveHandlers}
             >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <span
-                    className={cn(
-                      "flex size-7 items-center justify-center rounded-full",
-                      status === "error"
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-primary/10 text-primary",
-                    )}
-                  >
-                    <AudioLinesIcon className="size-4" />
-                  </span>
-                  OpenAI voice
-                </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">{currentTitle}</p>
-              </div>
+              <p className="min-w-0 truncate text-xs text-muted-foreground">{currentTitle}</p>
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -1110,44 +1138,60 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
                 <MinusIcon className="size-3.5" />
               </Button>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col bg-muted/10">
-              <div className="flex shrink-0 items-center gap-2 border-b border-border/55 px-3.5 py-2.5 text-xs font-medium">
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    status === "error" ? "bg-destructive" : "bg-emerald-500",
-                  )}
-                />
-                {statusLabel(status, muted)}
-                {errorText ? (
-                  <span className="ml-auto truncate text-destructive">{errorText}</span>
+
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 py-2">
+              <VoiceOrb state={orbState} level={audioLevel} />
+              <div className="flex w-full min-w-0 flex-col items-center gap-1.5 text-center">
+                <p className="text-sm font-medium">{statusLabel(status, muted)}</p>
+                {caption ? (
+                  <p className="line-clamp-3 text-sm text-muted-foreground">{caption}</p>
                 ) : null}
+                {errorText ? <p className="text-sm text-destructive">{errorText}</p> : null}
               </div>
-              <VoiceTraceTimeline
-                className="flex-1"
-                entries={displayTraceSession?.entries ?? []}
-                streamingAssistantText={
-                  assistantTranscript === lastCommittedAssistantTranscriptRef.current
-                    ? undefined
-                    : assistantTranscript
-                }
-              />
             </div>
-            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/55 px-3.5 py-3">
+
+            <div className="flex shrink-0 items-center justify-center gap-3 px-4 pb-3">
               <Button
-                size="sm"
-                variant="outline"
+                size="icon-lg"
+                variant={muted ? "default" : "outline"}
+                className="rounded-full"
                 onClick={toggleMuted}
                 disabled={!active}
                 aria-label={muted ? "Unmute microphone" : "Mute microphone"}
               >
-                {muted ? <MicOffIcon className="size-3.5" /> : <MicIcon className="size-3.5" />}
-                {muted ? "Unmute" : "Mute"}
+                {muted ? <MicOffIcon className="size-4.5" /> : <MicIcon className="size-4.5" />}
               </Button>
-              <Button size="sm" variant="destructive" onClick={end}>
-                <PhoneOffIcon className="size-3.5" />
-                End
+              <Button
+                size="icon-lg"
+                variant="destructive"
+                className="rounded-full"
+                onClick={end}
+                aria-label="End voice session"
+              >
+                <PhoneOffIcon className="size-4.5" />
               </Button>
+            </div>
+
+            <div className="shrink-0 border-t border-border/50">
+              <button
+                type="button"
+                className="flex w-full items-center justify-center gap-1 px-4 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => setDetailsOpen((open) => !open)}
+                aria-expanded={detailsOpen}
+              >
+                {detailsOpen ? "Hide details" : "Details"}
+              </button>
+              {detailsOpen ? (
+                <VoiceTraceTimeline
+                  className="h-48 border-t border-border/50"
+                  entries={displayTraceSession?.entries ?? []}
+                  streamingAssistantText={
+                    assistantTranscript === lastCommittedAssistantTranscriptRef.current
+                      ? undefined
+                      : assistantTranscript
+                  }
+                />
+              ) : null}
             </div>
           </aside>
         ) : (

@@ -39,6 +39,28 @@ export const VOICE_OPTIONS = [
   { value: "verse", label: "Verse" },
 ] as const;
 
+/**
+ * GPT-Live (realtime v3) ships its own voices and rejects the v1/v2 names the
+ * Realtime API accepts, so the account connection picks from this list.
+ */
+export const CODEX_VOICE_OPTIONS = [
+  { value: "", label: "Codex default" },
+  { value: "juniper", label: "Juniper" },
+  { value: "maple", label: "Maple" },
+  { value: "spruce", label: "Spruce" },
+  { value: "ember", label: "Ember" },
+  { value: "vale", label: "Vale" },
+  { value: "breeze", label: "Breeze" },
+  { value: "arbor", label: "Arbor" },
+  { value: "sol", label: "Sol" },
+  { value: "cove", label: "Cove" },
+] as const;
+
+export type CodexVoiceName = (typeof CODEX_VOICE_OPTIONS)[number]["value"];
+
+export const isCodexVoiceName = (value: unknown): value is CodexVoiceName =>
+  CODEX_VOICE_OPTIONS.some((option) => option.value === value);
+
 export const VOICE_LANGUAGE_OPTIONS = [
   { value: "auto", label: "Auto (recommended)" },
   { value: "en", label: "English" },
@@ -91,6 +113,9 @@ export interface VoiceSettingsState {
   /** Empty means the system default input device. */
   readonly inputDeviceId: string;
   readonly setInputDeviceId: (inputDeviceId: string) => void;
+  /** Empty means whichever voice Codex defaults to. */
+  readonly codexVoice: CodexVoiceName;
+  readonly setCodexVoice: (codexVoice: CodexVoiceName) => void;
   readonly model: VoiceRealtimeModel;
   readonly voice: VoiceName;
   readonly speed: number;
@@ -180,6 +205,7 @@ if (typeof window !== "undefined") {
 const defaults = {
   provider: "codex-account",
   inputDeviceId: "",
+  codexVoice: "",
   model: "gpt-realtime-2.1-mini",
   voice: "marin",
   speed: DEFAULT_VOICE_SPEED,
@@ -195,6 +221,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
       ...defaults,
       setProvider: (provider) => set({ provider }),
       setInputDeviceId: (inputDeviceId) => set({ inputDeviceId }),
+      setCodexVoice: (codexVoice) => set({ codexVoice }),
       setModel: (model) => set({ model }),
       setVoice: (voice) => set({ voice }),
       setSpeed: (speed) => set({ speed: normalizeVoiceSpeed(speed) }),
@@ -212,6 +239,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
       partialize: (state) => ({
         provider: state.provider,
         inputDeviceId: state.inputDeviceId,
+        codexVoice: state.codexVoice,
         model: state.model,
         voice: state.voice,
         speed: state.speed,
@@ -226,6 +254,7 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
           ...current,
           provider: value?.provider === "openai-api" ? "openai-api" : "codex-account",
           inputDeviceId: typeof value?.inputDeviceId === "string" ? value.inputDeviceId : "",
+          codexVoice: isCodexVoiceName(value?.codexVoice) ? value.codexVoice : "",
           model: isVoiceRealtimeModel(value?.model) ? value.model : defaults.model,
           voice: isVoiceName(value?.voice) ? value.voice : defaults.voice,
           speed: normalizeVoiceSpeed(value?.speed ?? defaults.speed),

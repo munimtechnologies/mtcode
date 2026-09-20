@@ -33,8 +33,8 @@ Changing any of these applies to the next voice session.
 
 - Spoken requests run as turns in the selected task. Approval prompts and results
   appear in that task, not in the voice panel.
-- Voice waits for the agent's answer and reads it out. While the agent is still
-  working, voice will not start a second request.
+- Voice says it is asking, then reads the agent's answer out when it arrives.
+  Asking the same thing again while the agent works does not start a second turn.
 - With **OpenAI API · Realtime**, voice can also page through earlier messages,
   search the web through Parallel, and edit unsent composer text. The Codex
   account connection only routes requests to the selected agent.

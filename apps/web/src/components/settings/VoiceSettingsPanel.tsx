@@ -41,6 +41,8 @@ import {
   VOICE_TURN_EAGERNESS_OPTIONS,
   voiceLanguageLabel,
   useVoiceSettingsStore,
+  CODEX_VOICE_OPTIONS,
+  isCodexVoiceName,
 } from "../voice/voiceSettingsStore";
 import { useAudioInputDevices } from "../voice/useAudioInputDevices";
 import { useVoiceTraceStore } from "../voice/voiceTraceStore";
@@ -49,6 +51,8 @@ import { APP_DISPLAY_NAME } from "~/branding";
 
 /** Sentinel for the select: an empty stored id means the system default. */
 const SYSTEM_DEFAULT_MIC = "system-default";
+/** Same idea for the voice: empty means whatever Codex picks. */
+const CODEX_DEFAULT_VOICE = "codex-default";
 
 function messageFromError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -97,6 +101,8 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const clearTraceHistory = useVoiceTraceStore((state) => state.clearHistory);
   const voiceProvider = useVoiceSettingsStore((state) => state.provider);
   const setVoiceProvider = useVoiceSettingsStore((state) => state.setProvider);
+  const codexVoice = useVoiceSettingsStore((state) => state.codexVoice);
+  const setCodexVoice = useVoiceSettingsStore((state) => state.setCodexVoice);
   const voiceInputDeviceId = useVoiceSettingsStore((state) => state.inputDeviceId);
   const setVoiceInputDeviceId = useVoiceSettingsStore((state) => state.setInputDeviceId);
   const audioInputDevices = useAudioInputDevices();
@@ -290,6 +296,38 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
             </Select>
           }
         />
+        {voiceProvider === "codex-account" ? (
+          <SettingsRow
+            title="Voice"
+            description="Which GPT-Live voice speaks. Applies to the next voice session."
+            control={
+              <Select
+                value={codexVoice || CODEX_DEFAULT_VOICE}
+                onValueChange={(value) => {
+                  const next = value === CODEX_DEFAULT_VOICE ? "" : value;
+                  if (isCodexVoiceName(next)) setCodexVoice(next);
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-72" aria-label="Codex voice">
+                  <SelectValue>
+                    {CODEX_VOICE_OPTIONS.find((option) => option.value === codexVoice)?.label ??
+                      "Codex default"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {CODEX_VOICE_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option.value || CODEX_DEFAULT_VOICE}
+                      value={option.value || CODEX_DEFAULT_VOICE}
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        ) : null}
         {voiceProvider === "codex-account" ? (
           <SettingsRow
             title="ChatGPT account"

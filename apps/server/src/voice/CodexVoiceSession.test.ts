@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off - drives a real Codex-shaped child process from a temp dir.
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "@effect/vitest";
@@ -17,10 +17,12 @@ async function fixture(
   const dir = await mkdtemp(join(tmpdir(), "codex-voice-test-"));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const script = join(dir, "app-server");
+  const spokenPath = join(dir, "spoken.json");
   await writeFile(
     script,
     `
 import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
 const send = (v) => process.stdout.write(JSON.stringify(v)+'\\n');
 createInterface({input:process.stdin}).on('line', l => {
   const m=JSON.parse(l);
@@ -40,6 +42,7 @@ createInterface({input:process.stdin}).on('line', l => {
       }
     }
   }
+  if(m.method==='thread/realtime/appendSpeech') { send({id:m.id,result:{}}); writeFileSync(${JSON.stringify(spokenPath)}, JSON.stringify(m.params)); }
   if(m.method==='thread/realtime/stop') process.exit(0);
 });
 process.stdin.on('end',()=>process.exit(0));
@@ -53,7 +56,7 @@ process.stdin.on('end',()=>process.exit(0));
     askAgent,
   });
   cleanups.push(() => session.close());
-  return session;
+  return { session, spokenPath };
 }
 
 it("waits for the SDP notification and routes a tool request to the selected agent", async () => {
@@ -61,7 +64,7 @@ it("waits for the SDP notification and routes a tool request to the selected age
   const asked = new Promise<string>((resolve) => {
     complete = resolve;
   });
-  const session = await fixture("ok", async (prompt) => {
+  const { session } = await fixture("ok", async (prompt) => {
     complete(prompt);
     return "Claude's answer";
   });
@@ -72,13 +75,24 @@ it("waits for the SDP notification and routes a tool request to the selected age
   expect(session.renew()).toBe("Voice session ended.");
 });
 
+it("keeps a repeat ping quiet instead of asking the agent twice", async () => {
+  const asked: string[] = [];
+  const { session } = await fixture("repeat", async (prompt) => {
+    asked.push(prompt);
+    return "Claude's answer";
+  });
+  await session.start("offer-sdp");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(asked).toHaveLength(1);
+});
+
 it("runs one turn when GPT-Live repeats a handoff for the same request", async () => {
   let asked = 0;
   let release!: (value: string) => void;
   const answer = new Promise<string>((resolve) => {
     release = resolve;
   });
-  const session = await fixture("repeat", async () => {
+  const { session } = await fixture("repeat", async () => {
     asked += 1;
     return answer;
   });
@@ -89,13 +103,29 @@ it("runs one turn when GPT-Live repeats a handoff for the same request", async (
   expect(asked).toBe(1);
 });
 
+it("hands the agent reply back into the conversation", async () => {
+  let release!: (value: string) => void;
+  const answer = new Promise<string>((resolve) => {
+    release = resolve;
+  });
+  const { session, spokenPath } = await fixture("ok", () => answer);
+  await session.start("offer-sdp");
+  // Past the inline window: the call is told to wait, not handed the answer.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  release("17 times 23 is 391.");
+  await answer;
+  await expect
+    .poll(async () => JSON.parse(await readFile(spokenPath, "utf8")).text, { timeout: 8_000 })
+    .toContain("17 times 23 is 391.");
+});
+
 it("does not mistake an RPC acknowledgement for a working voice connection", async () => {
-  const session = await fixture("error", async () => "unused");
+  const { session } = await fixture("error", async () => "unused");
   await expect(session.start("offer-sdp")).rejects.toThrow("Voice entitlement unavailable");
 });
 
 it("requires ChatGPT login and never silently falls back to paid API authentication", async () => {
-  const session = await fixture("apikey", async () => "unused");
+  const { session } = await fixture("apikey", async () => "unused");
   await expect(session.start("offer-sdp")).rejects.toThrow(
     "Sign in to Codex with your ChatGPT account",
   );
@@ -106,7 +136,7 @@ it("aborts pending handoff waits when voice closes", async () => {
   const asked = new Promise<AbortSignal>((resolve) => {
     received = resolve;
   });
-  const session = await fixture("ok", async (_prompt, signal) => {
+  const { session } = await fixture("ok", async (_prompt, signal) => {
     received(signal);
     return new Promise((resolve) =>
       signal.addEventListener("abort", () => resolve("ended"), { once: true }),

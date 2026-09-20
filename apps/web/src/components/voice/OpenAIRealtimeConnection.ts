@@ -22,6 +22,8 @@ export interface OpenAIRealtimeConnectInput {
   readonly inputDeviceId?: string | undefined;
   readonly onEvent: (event: unknown) => void;
   readonly onConnectionStateChange: (state: RTCPeerConnectionState) => void;
+  /** Fires when the far side's audio track arrives, which is after connect resolves. */
+  readonly onRemoteStream?: (stream: MediaStream) => void;
 }
 
 function waitForDataChannel(channel: RTCDataChannel): Promise<void> {
@@ -54,6 +56,15 @@ export class OpenAIRealtimeConnection {
   private dataChannel: RTCDataChannel | null = null;
   private inputStream: MediaStream | null = null;
   private outputAudio: HTMLAudioElement | null = null;
+  private outputStream: MediaStream | null = null;
+
+  /** Live streams, so the panel can show who is talking. */
+  get microphoneStream(): MediaStream | null {
+    return this.inputStream;
+  }
+  get speakerStream(): MediaStream | null {
+    return this.outputStream;
+  }
 
   async connect(input: OpenAIRealtimeConnectInput): Promise<OpenAIRealtimeDiagnostics> {
     if (this.peerConnection) throw new Error("OpenAI Realtime is already connected.");
@@ -69,7 +80,10 @@ export class OpenAIRealtimeConnection {
       input.onConnectionStateChange(peerConnection.connectionState);
     });
     peerConnection.addEventListener("track", (event) => {
-      outputAudio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
+      this.outputStream = stream;
+      outputAudio.srcObject = stream;
+      input.onRemoteStream?.(stream);
       void outputAudio.play().catch(() => {
         // Autoplay can be delayed until the user interacts with the app. The
         // media element remains attached and the browser retries on later audio.
@@ -170,5 +184,6 @@ export class OpenAIRealtimeConnection {
       this.outputAudio.srcObject = null;
     }
     this.outputAudio = null;
+    this.outputStream = null;
   }
 }

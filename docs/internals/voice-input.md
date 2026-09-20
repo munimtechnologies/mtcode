@@ -32,11 +32,16 @@ provider can still be flushing the previous turn when the new one starts, and an
 empty-text `thread.message-sent` is a streamed message's final marker, not its
 body — overwriting the collected text with it loses the answer.
 
-GPT-Live raises several handoffs for one spoken request, each worded slightly
-differently and delivered one at a time. One that lands while the agent is still
-answering joins that turn; refusing it as "already working" only makes GPT-Live
-retry harder. A handoff delivered after an answer runs as a new turn, because by
-then the words can belong to a new question.
+GPT-Live raises the same question two or three times, worded slightly
+differently and delivered one at a time. Only the first starts a turn: a ping
+that lands mid-turn is told to wait, and one that lands just after an answer is
+handed that answer back. Refusing them as "already working" only made GPT-Live
+retry harder.
+
+The answer does not ride back on the tool call — GPT-Live does not reliably
+speak a tool result in this mode, with or without its own `delegationAckFiller`.
+The tool call is acknowledged immediately and the agent's reply is pushed into
+the live call with `thread/realtime/appendSpeech`, which it does speak.
 
 With the Codex account connection the browser never holds a credential: the
 offer/answer exchange goes through the server, which runs
