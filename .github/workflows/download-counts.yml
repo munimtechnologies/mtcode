@@ -116,17 +116,14 @@ jobs:
               else . end
           ' history.json > window.json
 
+          # Until 30 days of snapshots exist this is the delta over however
+          # much history there is, which is the most the API can support --
+          # GitHub keeps no download history to backfill from.
           monthly=$(jq -r '.downloads' window.json)
-          measured=$(jq -r '.measured' window.json)
-          if [ "$measured" = "true" ]; then
-            label="Downloads / Month"
-          else
-            label="Downloads since $(jq -r '.since' window.json)"
-          fi
 
-          jq -n --arg label "$label" --argjson monthly "$monthly" '
-            { schemaVersion: 1, label: $label, message: ($monthly | tostring),
-              color: "33CC12", labelColor: "gray" }
+          jq -n --argjson monthly "$monthly" '
+            { schemaVersion: 1, label: "Monthly Downloads",
+              message: ($monthly | tostring), color: "33CC12", labelColor: "gray" }
           ' > downloads-monthly.json
 
           jq -n --argjson total "$total" '
@@ -173,7 +170,7 @@ jobs:
           echo "active installs: worker=$worker_active github-estimate=$installs"
 
           jq -n --argjson combined "$combined" --argjson exact "$worker_active" '
-            { schemaVersion: 1, label: "Active Installs",
+            { schemaVersion: 1, label: "Daily Active Users",
               message: (if $combined == $exact
                         then ($combined | tostring)
                         else "~" + ($combined | round | tostring) end),

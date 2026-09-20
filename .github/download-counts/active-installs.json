@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "label": "Active Installs",
+  "label": "Daily Active Users",
   "message": "~1",
   "color": "9966CC",
   "labelColor": "gray"
