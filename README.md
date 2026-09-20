@@ -14,14 +14,14 @@
   <a aria-label="App is free to use" href="https://github.com/munimtechnologies/mtcode/blob/main/LICENSE" target="_blank">
     <img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache%202.0-success.svg?style=flat-square&color=33CC12" />
   </a>
-  <a aria-label="total downloads" href="https://github.com/munimtechnologies/mtcode/releases" target="_blank">
-    <img alt="Total Downloads" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Fdownloads-total.json" />
+  <a aria-label="daily active users" href="https://github.com/munimtechnologies/mtcode/blob/main/.github/workflows/download-counts.yml" target="_blank">
+    <img alt="Daily Active Users" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Factive-installs.json" />
   </a>
   <a aria-label="monthly downloads" href="https://github.com/munimtechnologies/mtcode/releases" target="_blank">
     <img alt="Monthly Downloads" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Fdownloads-monthly.json" />
   </a>
-  <a aria-label="daily active users" href="https://github.com/munimtechnologies/mtcode/blob/main/.github/workflows/download-counts.yml" target="_blank">
-    <img alt="Daily Active Users" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Factive-installs.json" />
+  <a aria-label="total downloads" href="https://github.com/munimtechnologies/mtcode/releases" target="_blank">
+    <img alt="Total Downloads" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Fdownloads-total.json" />
   </a>
 </p>
 
