@@ -4,6 +4,13 @@ name: Download counts
 # history, so "downloads this month" cannot be read from the API. This job
 # snapshots the running total once a day under `.github/download-counts` on `main` and serves
 # the 30-day delta between snapshots as a shields.io endpoint.
+#
+# Only app artifacts count. Summing *every* asset counts the update feed, and
+# electron-updater re-fetches latest-mac.yml off the newest release every four
+# minutes: a single running install produced ~1000 of those per long-lived
+# release, and 7396 of the first 7430 "downloads" were feed and blockmap
+# fetches rather than anyone getting the app. That is why shields.io's own
+# github/downloads/:repo/total badge cannot be used here.
 on:
   schedule:
     # 07:11 UTC, off the hour so it does not queue behind the rush.
@@ -37,8 +44,13 @@ jobs:
           mkdir -p .github/download-counts
           cd .github/download-counts
 
-          total=$(gh api "repos/$REPO/releases" --paginate \
-            --jq '[.[].assets[].download_count] | add // 0')
+          # `gh --paginate` with `--jq` runs the filter once per page, so the
+          # sum has to be folded here rather than inside jq.
+          total=$(gh api "repos/$REPO/releases?per_page=100" --paginate \
+            --jq '[.[].assets[]
+                   | select(.name | test("\\.(dmg|zip|exe|AppImage|deb|rpm)$"))
+                   | .download_count] | add // 0' \
+            | awk '{ sum += $1 } END { print sum + 0 }')
           today=$(date -u +%Y-%m-%d)
           echo "total=$total on $today"
 
@@ -56,15 +68,24 @@ jobs:
           # The oldest snapshot at least 30 days old is the baseline; before one
           # exists the window is short, so the badge says so rather than
           # reporting a month it has not measured yet.
+          #
+          # A negative delta means the snapshots on either side of the window
+          # were not counting the same thing -- change which assets `total`
+          # selects and every older entry becomes incomparable. Reset
+          # history.json in the same commit when that happens; the clamp below
+          # only keeps the badge from publishing a nonsense number meanwhile.
           cutoff=$(date -u -d '30 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-30d +%Y-%m-%d)
-          jq -r --arg cutoff "$cutoff" --argjson total "$total" '
+          jq -r --arg cutoff "$cutoff" --arg today "$today" --argjson total "$total" '
             (map(select(.date <= $cutoff)) | last) as $baseline
             | if $baseline then
                 { measured: true, downloads: ($total - $baseline.total) }
               else
                 { measured: false, downloads: ($total - (.[0].total // $total)),
-                  since: (.[0].date // "today") }
+                  since: (.[0].date // $today) }
               end
+            | if .downloads < 0 then
+                { measured: false, downloads: 0, since: $today }
+              else . end
           ' history.json > window.json
 
           monthly=$(jq -r '.downloads' window.json)
@@ -81,7 +102,7 @@ jobs:
           ' > downloads-monthly.json
 
           jq -n --argjson total "$total" '
-            { schemaVersion: 1, label: "total downloads",
+            { schemaVersion: 1, label: "Total Downloads",
               message: ($total | tostring), color: "0066CC", labelColor: "gray" }
           ' > downloads-total.json
 
