@@ -165,15 +165,13 @@ jobs:
           # Installs on the Worker feed are counted exactly; only the ones
           # still reading GitHub have to be estimated. Once every client has
           # updated past the feed switch, the estimate term goes to zero and
-          # this badge is a measurement.
+          # this badge is a measurement rather than a mix of the two.
           combined=$(jq -n --argjson w "$worker_active" --argjson e "$installs" '$w + $e')
           echo "active installs: worker=$worker_active github-estimate=$installs"
 
-          jq -n --argjson combined "$combined" --argjson exact "$worker_active" '
+          jq -n --argjson combined "$combined" '
             { schemaVersion: 1, label: "Daily Active Users",
-              message: (if $combined == $exact
-                        then ($combined | tostring)
-                        else "~" + ($combined | round | tostring) end),
+              message: ($combined | round | tostring),
               color: "9966CC", labelColor: "gray" }
           ' > active-installs.json
 
