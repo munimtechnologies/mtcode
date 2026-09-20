@@ -325,6 +325,9 @@ const cloudLift: Record<SkyWeather, number> = {
  */
 const RAMP_POSITIONS = [0, 0.12, 0.26, 0.52, 0.74, 1] as const;
 
+/** The mark's outline sits near 0.89; the sky stays clear of it. */
+const SKY_CEILING = 0.76;
+
 const luminance = (color: string) =>
   (Number.parseInt(color.slice(1, 3), 16) * 0.2126 +
     Number.parseInt(color.slice(3, 5), 16) * 0.7152 +
@@ -353,7 +356,18 @@ export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly stri
   // order those stops invert the tile's own shading: a shadow lands lighter
   // than what it falls on, which is what makes the mark look cut out.
   const stops = [bottom, mid, top, mix(cloudB, toward, amount), mix(cloudA, toward, amount)];
-  return [...stops.sort((a, b) => luminance(a) - luminance(b)), "#ffffff"];
+  return [
+    ...stops
+      .sort((a, b) => luminance(a) - luminance(b))
+      // Nothing in the sky may outshine the mark's outline. A bright palette
+      // otherwise lifts the tile's clouds past it, the outline stops reading as
+      // the lighter edge it is, and the mark ends up drawn in dashes.
+      .map((color) => {
+        const level = luminance(color);
+        return level <= SKY_CEILING ? color : mix("#000000", color, SKY_CEILING / level);
+      }),
+    "#ffffff",
+  ];
 }
 
 /** The ramp colour for a 0..1 tone, honouring where each stop sits. */
