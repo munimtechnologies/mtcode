@@ -13,6 +13,7 @@
 - [Appearance and themes](./user/appearance.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Messaging between threads](./user/thread-messaging.md)
+- [Voice](./user/voice.md)
 - [Voice dictation](./user/voice-dictation.md)
 - [SnapShots](./user/snap-shot.md)
 - [Import browser sessions](./user/browser-import.md)

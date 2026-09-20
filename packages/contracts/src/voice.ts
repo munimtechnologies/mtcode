@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { ThreadId } from "./baseSchemas.ts";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const VoiceCredentialStatus = Schema.Struct({
@@ -85,3 +86,24 @@ export class VoiceApiError extends Schema.TaggedError<VoiceApiError>()("VoiceApi
   reason: VoiceApiErrorReason,
   message: Schema.String,
 }) {}
+
+export const CodexVoiceSessionInput = Schema.Union([
+  // The WebRTC offer is carried verbatim: trimming it strips the trailing CRLF
+  // that closes the last SDP line, and the answering server rejects the body.
+  Schema.Struct({
+    action: Schema.Literal("start"),
+    threadId: ThreadId,
+    sdp: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(64_000)),
+  }),
+  Schema.Struct({
+    action: Schema.Literals(["stop", "heartbeat"]),
+    sessionId: TrimmedNonEmptyString,
+  }),
+]);
+export type CodexVoiceSessionInput = typeof CodexVoiceSessionInput.Type;
+export const CodexVoiceSessionResult = Schema.Struct({
+  sessionId: Schema.String,
+  sdp: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+export type CodexVoiceSessionResult = typeof CodexVoiceSessionResult.Type;

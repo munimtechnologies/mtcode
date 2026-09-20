@@ -18,3 +18,30 @@ fires would race that work. The [transcription contract](../../packages/client-r
 therefore requires implementations to settle only after their work has stopped;
 the [Apple binding](../../apps/mobile/src/native/voiceTranscription.ios.ts) checks
 cancellation between native calls and discards late results.
+
+## Realtime voice sessions
+
+The voice panel is a second, separate path: it holds a live GPT-Live call and
+submits agent turns. Spoken requests never reach a provider directly. The
+session's only tool hands the request to
+[`delegateVoiceRequest`](../../apps/server/src/voice/voiceDelegation.ts), which
+dispatches `thread.turn.start` on the task voice started in and waits for that
+turn's assistant messages, so the task's own model selection, runtime mode and
+approvals decide what happens. Messages are collected per turn id because a
+provider can still be flushing the previous turn when the new one starts, and an
+empty-text `thread.message-sent` is a streamed message's final marker, not its
+body — overwriting the collected text with it loses the answer.
+
+GPT-Live raises several handoffs for one spoken request, each worded slightly
+differently and delivered one at a time. One that lands while the agent is still
+answering joins that turn; refusing it as "already working" only makes GPT-Live
+retry harder. A handoff delivered after an answer runs as a new turn, because by
+then the words can belong to a new question.
+
+With the Codex account connection the browser never holds a credential: the
+offer/answer exchange goes through the server, which runs
+[`CodexVoiceSession`](../../apps/server/src/voice/CodexVoiceSession.ts) against
+the user's authenticated Codex install and refuses anything but a ChatGPT login,
+so voice cannot silently fall back to a billed API key. Carry the SDP verbatim
+over the wire — trimming it strips the CRLF that closes the last line, and the
+answering server rejects the body as truncated.

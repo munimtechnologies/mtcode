@@ -312,6 +312,8 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import {
+  CodexVoiceSessionInput,
+  CodexVoiceSessionResult,
   VoiceApiError,
   VoiceCredentialInput,
   VoiceCredentialStatus,
@@ -458,6 +460,7 @@ export const WS_METHODS = {
   voiceSetCredential: "voice.setCredential",
   voiceRemoveCredential: "voice.removeCredential",
   voiceCreateSession: "voice.createSession",
+  voiceCodexSession: "voice.codexSession",
   voiceGetParallelCredentialStatus: "voice.getParallelCredentialStatus",
   voiceSetParallelCredential: "voice.setParallelCredential",
   voiceRemoveParallelCredential: "voice.removeParallelCredential",
@@ -797,6 +800,12 @@ export const WsVoiceRemoveCredentialRpc = Rpc.make(WS_METHODS.voiceRemoveCredent
 export const WsVoiceCreateSessionRpc = Rpc.make(WS_METHODS.voiceCreateSession, {
   payload: VoiceSessionInput,
   success: VoiceSessionAccess,
+  error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
+});
+
+export const WsVoiceCodexSessionRpc = Rpc.make(WS_METHODS.voiceCodexSession, {
+  payload: CodexVoiceSessionInput,
+  success: CodexVoiceSessionResult,
   error: Schema.Union([VoiceApiError, EnvironmentAuthorizationError]),
 });
 
@@ -1770,6 +1779,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVoiceSetCredentialRpc,
   WsVoiceRemoveCredentialRpc,
   WsVoiceCreateSessionRpc,
+  WsVoiceCodexSessionRpc,
   WsVoiceGetParallelCredentialStatusRpc,
   WsVoiceSetParallelCredentialRpc,
   WsVoiceRemoveParallelCredentialRpc,

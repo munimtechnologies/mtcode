@@ -29,6 +29,7 @@ import {
   ClientSurface,
   ClientWebDeployment,
   CommandId,
+  VoiceApiError,
   type DiscoveredLocalServerList,
   EventId,
   type EditorId,
@@ -90,6 +91,7 @@ import {
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { SshPasswordPrompt } from "@t3tools/ssh/auth";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -131,6 +133,9 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
+import { CodexVoiceSession } from "./voice/CodexVoiceSession.ts";
+import { resolveCodexVoiceCommand } from "./voice/codexVoiceCommand.ts";
+import { delegateVoiceRequest } from "./voice/voiceDelegation.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -609,6 +614,13 @@ const makeWsRpcLayer = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const voiceSessionService = yield* VoiceSessionService.VoiceSessionService;
+      const codexVoiceSessions = new Map<string, CodexVoiceSession>();
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const session of codexVoiceSessions.values()) session.close();
+          codexVoiceSessions.clear();
+        }),
+      );
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2738,6 +2750,97 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.voiceRemoveCredential, voiceSessionService.removeCredential, {
             "rpc.aggregate": "voice",
           }),
+        [WS_METHODS.voiceCodexSession]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.voiceCodexSession,
+            Effect.gen(function* () {
+              if (input.action !== "start") {
+                const session = codexVoiceSessions.get(input.sessionId);
+                if (input.action === "stop") {
+                  session?.close();
+                  codexVoiceSessions.delete(input.sessionId);
+                  return { sessionId: input.sessionId };
+                }
+                const error = session ? session.renew() : "Voice session ended. Start voice again.";
+                if (error) codexVoiceSessions.delete(input.sessionId);
+                return { sessionId: input.sessionId, ...(error ? { error } : {}) };
+              }
+              const thread = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
+              if (Option.isNone(thread) || thread.value.archivedAt !== null) {
+                return yield* Effect.fail(
+                  new VoiceApiError({
+                    reason: "upstream_unavailable",
+                    message: "Open an existing task before starting Codex account voice.",
+                  }),
+                );
+              }
+              const settings = yield* serverSettings.getSettings;
+              const codex = yield* resolveCodexVoiceCommand(settings);
+              if (Option.isNone(codex)) {
+                return yield* Effect.fail(
+                  new VoiceApiError({
+                    reason: "upstream_unavailable",
+                    message:
+                      "Enable the Codex provider and sign in with your ChatGPT account to use account voice.",
+                  }),
+                );
+              }
+              const spawnCommand = yield* resolveSpawnCommand(
+                codex.value.command,
+                codex.value.args,
+                {
+                  env: codex.value.env,
+                },
+              );
+              // One voice session per server: the microphone and GPT-Live call are singular.
+              for (const session of codexVoiceSessions.values()) session.close();
+              codexVoiceSessions.clear();
+              const session = new CodexVoiceSession({
+                command: spawnCommand.command,
+                args: spawnCommand.args,
+                shell: spawnCommand.shell,
+                env: codex.value.env,
+                cwd: config.cwd,
+                askAgent: (prompt, signal) =>
+                  Effect.runPromise(
+                    delegateVoiceRequest(
+                      orchestrationEngine,
+                      projectionSnapshotQuery,
+                      input.threadId,
+                      prompt,
+                    ),
+                    { signal },
+                  ),
+              });
+              codexVoiceSessions.set(session.id, session);
+              const sdp = yield* Effect.tryPromise({
+                try: () => session.start(input.sdp),
+                catch: (error) =>
+                  new VoiceApiError({
+                    reason: "upstream_unavailable",
+                    message: error instanceof Error ? error.message : "Codex voice failed.",
+                  }),
+              }).pipe(
+                Effect.onError(() =>
+                  Effect.sync(() => {
+                    session.close();
+                    codexVoiceSessions.delete(session.id);
+                  }),
+                ),
+              );
+              return { sessionId: session.id, sdp };
+            }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new VoiceApiError({
+                    reason: "upstream_unavailable",
+                    message:
+                      error instanceof Error ? error.message : "Codex voice could not connect.",
+                  }),
+              ),
+            ),
+            {},
+          ),
         [WS_METHODS.voiceCreateSession]: ({ model }) =>
           observeRpcEffect(
             WS_METHODS.voiceCreateSession,

@@ -31,6 +31,8 @@ export interface IsolatedWebAppOptions {
   /** Skip adding the fixture git repo as a Project. Default: add it. */
   readonly addFixtureProject?: boolean;
   readonly headed?: boolean;
+  /** Extra Chromium switches, e.g. the fake media-stream flags a microphone flow needs. */
+  readonly chromiumArgs?: ReadonlyArray<string>;
 }
 
 export interface IsolatedWebApp {
@@ -154,7 +156,10 @@ async function startIsolatedWebAppUnsafe(
     );
   }
 
-  const browser = await launchChromium(options.headed === true || process.env.E2E_HEADED === "1");
+  const browser = await launchChromium(
+    options.headed === true || process.env.E2E_HEADED === "1",
+    options.chromiumArgs,
+  );
   resources.browser = browser;
   const context = await browser.newContext({
     viewport: { width: 1400, height: 900 },
@@ -249,9 +254,10 @@ async function waitForHttp(origin: string, timeoutMs: number): Promise<void> {
   );
 }
 
-async function launchChromium(headed: boolean): Promise<Browser> {
+async function launchChromium(headed: boolean, args: ReadonlyArray<string> = []): Promise<Browser> {
+  const launchOptions = { headless: !headed, args: [...args] };
   try {
-    return await chromium.launch({ headless: !headed });
+    return await chromium.launch(launchOptions);
   } catch (error) {
     if (!isMissingBrowserError(error)) {
       throw error;
@@ -260,7 +266,7 @@ async function launchChromium(headed: boolean): Promise<Browser> {
       cwd: WEB_ROOT,
       stdio: "inherit",
     });
-    return await chromium.launch({ headless: !headed });
+    return await chromium.launch(launchOptions);
   }
 }
 

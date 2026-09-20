@@ -76,6 +76,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.voiceSetCredential]: AuthOrchestrationOperateScope,
   [WS_METHODS.voiceRemoveCredential]: AuthOrchestrationOperateScope,
   [WS_METHODS.voiceCreateSession]: AuthOrchestrationOperateScope,
+  [WS_METHODS.voiceCodexSession]: AuthOrchestrationOperateScope,
   [WS_METHODS.voiceGetParallelCredentialStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.voiceSetParallelCredential]: AuthOrchestrationOperateScope,
   [WS_METHODS.voiceRemoveParallelCredential]: AuthOrchestrationOperateScope,

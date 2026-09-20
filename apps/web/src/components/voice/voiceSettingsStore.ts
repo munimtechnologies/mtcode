@@ -86,6 +86,11 @@ export type VoiceTurnEagerness = (typeof VOICE_TURN_EAGERNESS_OPTIONS)[number]["
 export type VoiceNoiseReduction = (typeof VOICE_NOISE_REDUCTION_OPTIONS)[number]["value"];
 
 export interface VoiceSettingsState {
+  readonly provider: "codex-account" | "openai-api";
+  readonly setProvider: (provider: "codex-account" | "openai-api") => void;
+  /** Empty means the system default input device. */
+  readonly inputDeviceId: string;
+  readonly setInputDeviceId: (inputDeviceId: string) => void;
   readonly model: VoiceRealtimeModel;
   readonly voice: VoiceName;
   readonly speed: number;
@@ -173,6 +178,8 @@ if (typeof window !== "undefined") {
 }
 
 const defaults = {
+  provider: "codex-account",
+  inputDeviceId: "",
   model: "gpt-realtime-2.1-mini",
   voice: "marin",
   speed: DEFAULT_VOICE_SPEED,
@@ -186,6 +193,8 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
   persist(
     (set) => ({
       ...defaults,
+      setProvider: (provider) => set({ provider }),
+      setInputDeviceId: (inputDeviceId) => set({ inputDeviceId }),
       setModel: (model) => set({ model }),
       setVoice: (voice) => set({ voice }),
       setSpeed: (speed) => set({ speed: normalizeVoiceSpeed(speed) }),
@@ -201,6 +210,8 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
         resolveStorage(typeof window === "undefined" ? undefined : window.localStorage),
       ),
       partialize: (state) => ({
+        provider: state.provider,
+        inputDeviceId: state.inputDeviceId,
         model: state.model,
         voice: state.voice,
         speed: state.speed,
@@ -213,6 +224,8 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>()(
         const value = persisted as Partial<VoiceSettingsState> | undefined;
         return {
           ...current,
+          provider: value?.provider === "openai-api" ? "openai-api" : "codex-account",
+          inputDeviceId: typeof value?.inputDeviceId === "string" ? value.inputDeviceId : "",
           model: isVoiceRealtimeModel(value?.model) ? value.model : defaults.model,
           voice: isVoiceName(value?.voice) ? value.voice : defaults.voice,
           speed: normalizeVoiceSpeed(value?.speed ?? defaults.speed),

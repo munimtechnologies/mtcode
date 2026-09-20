@@ -15,8 +15,11 @@ export interface OpenAIRealtimeDiagnostics {
 }
 
 export interface OpenAIRealtimeConnectInput {
-  readonly clientSecret: string;
-  readonly realtimeUrl: string;
+  readonly clientSecret?: string;
+  readonly realtimeUrl?: string;
+  readonly exchangeSdp?: (offer: string) => Promise<string>;
+  /** Microphone to capture from; the system default when unset. */
+  readonly inputDeviceId?: string | undefined;
   readonly onEvent: (event: unknown) => void;
   readonly onConnectionStateChange: (state: RTCPeerConnectionState) => void;
 }
@@ -73,13 +76,22 @@ export class OpenAIRealtimeConnection {
       });
     });
 
-    const inputStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    const processing = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    // A chosen microphone can be unplugged between sessions, and an exact
+    // constraint would then fail the whole call instead of using the default.
+    const inputStream = input.inputDeviceId
+      ? await navigator.mediaDevices
+          .getUserMedia({ audio: { ...processing, deviceId: { exact: input.inputDeviceId } } })
+          .catch(() => navigator.mediaDevices.getUserMedia({ audio: processing }))
+      : await navigator.mediaDevices.getUserMedia({ audio: processing });
+    if (this.peerConnection !== peerConnection) {
+      for (const track of inputStream.getTracks()) track.stop();
+      throw new Error("Voice session ended.");
+    }
     this.inputStream = inputStream;
     const inputTrack = inputStream.getAudioTracks()[0];
     if (!inputTrack) throw new Error("No microphone audio track was available.");
@@ -99,18 +111,27 @@ export class OpenAIRealtimeConnection {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     if (!offer.sdp) throw new Error("OpenAI Realtime could not create a local audio offer.");
-    const response = await fetch(input.realtimeUrl, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${input.clientSecret}`,
-        "content-type": "application/sdp",
-      },
-      body: offer.sdp,
-    });
-    if (!response.ok) {
-      throw new Error(`OpenAI could not establish the Realtime call (HTTP ${response.status}).`);
-    }
-    const answerSdp = await response.text();
+    const offerSdp = offer.sdp;
+    const answerSdp = input.exchangeSdp
+      ? await input.exchangeSdp(offerSdp)
+      : await (async () => {
+          if (!input.realtimeUrl || !input.clientSecret)
+            throw new Error("Missing Realtime credentials.");
+          const response = await fetch(input.realtimeUrl, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${input.clientSecret}`,
+              "content-type": "application/sdp",
+            },
+            body: offerSdp,
+          });
+          if (!response.ok)
+            throw new Error(
+              `OpenAI could not establish the Realtime call (HTTP ${response.status}).`,
+            );
+          return response.text();
+        })();
+    if (this.peerConnection !== peerConnection) throw new Error("Voice session ended.");
     await peerConnection.setRemoteDescription({ type: "answer", sdp: answerSdp });
     await waitForDataChannel(dataChannel);
 

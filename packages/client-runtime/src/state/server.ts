@@ -1208,6 +1208,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.voiceRemoveCredential,
       concurrency: configConcurrency,
     }),
+    codexVoiceSession: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:voice:codex-session",
+      tag: WS_METHODS.voiceCodexSession,
+    }),
     createVoiceSession: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:voice:create-session",
       tag: WS_METHODS.voiceCreateSession,

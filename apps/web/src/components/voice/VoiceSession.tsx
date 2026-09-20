@@ -20,6 +20,7 @@ import { serverEnvironment } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import type { ChatComposerHandle } from "../chat/ChatComposer";
+import { CodexVoiceConnection } from "./CodexVoiceConnection";
 import { OpenAIRealtimeConnection } from "./OpenAIRealtimeConnection";
 import { VoiceTraceTimeline } from "./VoiceTraceTimeline";
 import { type ResizeEdge, useVoicePanelGeometry } from "./useVoicePanelGeometry";
@@ -53,6 +54,8 @@ interface VoiceSessionContextValue {
 const VoiceSessionContext = createContext<VoiceSessionContextValue | null>(null);
 
 interface VoiceEvent {
+  readonly turn?: { id?: string; role?: string; transcript?: string };
+  readonly turn_id?: string;
   readonly type?: string;
   readonly delta?: string;
   readonly transcript?: string;
@@ -255,7 +258,10 @@ export function applyExactComposerEdits(
   return { ok: true, text };
 }
 
-function sendJson(connection: OpenAIRealtimeConnection, value: unknown): void {
+function sendJson(
+  connection: OpenAIRealtimeConnection | CodexVoiceConnection,
+  value: unknown,
+): void {
   connection.send(value);
 }
 
@@ -359,6 +365,9 @@ const RESIZE_HANDLES: readonly { readonly edge: ResizeEdge; readonly className: 
 ];
 
 export function VoiceSessionProvider({ children }: { readonly children: ReactNode }) {
+  const codexVoiceSession = useAtomCommand(serverEnvironment.codexVoiceSession, {
+    reportFailure: false,
+  });
   const createVoiceSession = useAtomCommand(serverEnvironment.createVoiceSession, {
     reportFailure: false,
   });
@@ -384,7 +393,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const currentComposerRef = useRef<VoiceComposerRegistration | null>(null);
   const lastComposerRef = useRef<VoiceComposerRegistration | null>(null);
   const originComposerRef = useRef<VoiceComposerRegistration | null>(null);
-  const connectionRef = useRef<OpenAIRealtimeConnection | null>(null);
+  const connectionRef = useRef<OpenAIRealtimeConnection | CodexVoiceConnection | null>(null);
   const activeRef = useRef(false);
   const toolQueueRef = useRef<VoiceEvent[]>([]);
   const toolTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -730,22 +739,27 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
 
     void (async () => {
       const voiceSettings = useVoiceSettingsStore.getState();
-      const accessResult = await createVoiceSession({
-        environmentId: registration.environmentId,
-        input: { model: voiceSettings.model },
-      });
-      if (accessResult._tag === "Failure") {
-        activeRef.current = false;
-        setStatus("error");
-        const message = errorMessage(squashAtomCommandFailure(accessResult));
-        setErrorText(message);
-        appendTrace({ kind: "error", title: "Could not create voice session", text: message });
-        completeTrace("error");
-        return;
+      const accountVoice = voiceSettings.provider === "codex-account";
+      let access: { clientSecret: string; realtimeUrl: string } | undefined;
+      if (!accountVoice) {
+        const accessResult = await createVoiceSession({
+          environmentId: registration.environmentId,
+          input: { model: voiceSettings.model },
+        });
+        if (accessResult._tag === "Failure") throw squashAtomCommandFailure(accessResult);
+        access = accessResult.value;
       }
       if (!activeRef.current) return;
-      const access = accessResult.value;
-      const connection = new OpenAIRealtimeConnection();
+      const connection = accountVoice
+        ? new CodexVoiceConnection(async (input) => {
+            const result = await codexVoiceSession({
+              environmentId: registration.environmentId,
+              input,
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+            return result.value;
+          })
+        : new OpenAIRealtimeConnection();
       connectionRef.current = connection;
       const latestAssistantMessage =
         [...(readThreadDetail(registration.threadRef)?.messages ?? [])]
@@ -755,6 +769,53 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       const handleEvent = (rawEvent: unknown) => {
         const event = rawEvent as VoiceEvent;
         switch (event.type) {
+          case "session.started":
+            sessionReadyRef.current = true;
+            setStatus("listening");
+            break;
+          case "delegation.created":
+            setStatus("thinking");
+            appendTrace({ kind: "tool_call", title: "Asking selected agent" });
+            break;
+          case "turn.created": {
+            const text = event.turn?.transcript ?? "";
+            if (event.turn?.role === "user") {
+              activeUserTraceEntryIdRef.current = null;
+              userTranscriptDeltasRef.current.set(event.turn.id ?? "live", text);
+              upsertUserTrace(text);
+              setStatus("listening");
+            } else {
+              assistantTranscriptRef.current = text;
+              setAssistantTranscript(text);
+              setStatus("speaking");
+            }
+            break;
+          }
+          case "turn.delta": {
+            const id = event.turn_id ?? "live";
+            if (userTranscriptDeltasRef.current.has(id)) {
+              const text = (userTranscriptDeltasRef.current.get(id) ?? "") + (event.delta ?? "");
+              userTranscriptDeltasRef.current.set(id, text);
+              upsertUserTrace(text);
+            } else {
+              assistantTranscriptRef.current += event.delta ?? "";
+              setAssistantTranscript(assistantTranscriptRef.current);
+            }
+            break;
+          }
+          case "turn.done":
+            if (event.turn?.role === "user") {
+              upsertUserTrace(event.turn.transcript ?? "");
+              if (event.turn.id) userTranscriptDeltasRef.current.delete(event.turn.id);
+            } else {
+              appendTrace({
+                kind: "assistant",
+                title: "GPT-Live",
+                text: event.turn?.transcript ?? assistantTranscriptRef.current,
+              });
+              setStatus("listening");
+            }
+            break;
           case "session.updated":
             if (!sessionReadyRef.current) {
               sessionReadyRef.current = true;
@@ -871,11 +932,10 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         }
       };
 
-      const diagnostics = await connection.connect({
-        clientSecret: access.clientSecret,
-        realtimeUrl: access.realtimeUrl,
+      const callbacks = {
+        inputDeviceId: voiceSettings.inputDeviceId || undefined,
         onEvent: handleEvent,
-        onConnectionStateChange: (connectionState) => {
+        onConnectionStateChange: (connectionState: RTCPeerConnectionState) => {
           if (
             connectionState !== "failed" ||
             !activeRef.current ||
@@ -893,7 +953,11 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
           appendTrace({ kind: "error", title: "Connection failed", text: message });
           completeTrace("error");
         },
-      });
+      };
+      const diagnostics =
+        connection instanceof CodexVoiceConnection
+          ? await connection.connect({ ...callbacks, threadId: registration.threadRef.threadId })
+          : await connection.connect({ ...callbacks, ...access });
       if (!activeRef.current || connectionRef.current !== connection) {
         connection.close();
         return;
@@ -909,7 +973,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       });
       appendTrace({
         kind: "system",
-        title: `OpenAI WebRTC connected · ${voiceSettings.model}`,
+        title: accountVoice
+          ? "Codex account voice connected · GPT-Live"
+          : `OpenAI WebRTC connected · ${voiceSettings.model}`,
         details: stringifyTraceDetails(diagnostics),
       });
     })().catch((error: unknown) => {
@@ -929,6 +995,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     appendTrace,
     completeTrace,
     createVoiceSession,
+    codexVoiceSession,
     flushToolCalls,
     resolveComposer,
     upsertUserTrace,
@@ -944,7 +1011,12 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
 
   useEffect(() => {
     const connection = connectionRef.current;
-    if (!connection || !sessionReadyRef.current || status !== "listening") return;
+    if (
+      !(connection instanceof OpenAIRealtimeConnection) ||
+      !sessionReadyRef.current ||
+      status !== "listening"
+    )
+      return;
 
     const timer = setTimeout(() => {
       const config = createOpenAIRealtimeSessionConfig(useVoiceSettingsStore.getState());

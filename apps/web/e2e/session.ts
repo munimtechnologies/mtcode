@@ -132,7 +132,9 @@ export async function waitForAppReady(page: Page): Promise<"empty" | "composer">
   const empty = addProjectButton(page);
   const composer = composerEditor(page);
   const hero = page.getByText("What should we work on?");
-  await empty.or(composer).or(hero).waitFor({ state: "visible", timeout: 120_000 });
+  // The empty state renders the hero and the sidebar button together, so match
+  // the first of the three rather than tripping strict mode on a two-way tie.
+  await empty.or(composer).or(hero).first().waitFor({ state: "visible", timeout: 120_000 });
   if (await composer.isVisible()) {
     return "composer";
   }

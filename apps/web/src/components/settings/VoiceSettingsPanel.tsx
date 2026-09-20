@@ -42,9 +42,13 @@ import {
   voiceLanguageLabel,
   useVoiceSettingsStore,
 } from "../voice/voiceSettingsStore";
+import { useAudioInputDevices } from "../voice/useAudioInputDevices";
 import { useVoiceTraceStore } from "../voice/voiceTraceStore";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { APP_DISPLAY_NAME } from "~/branding";
+
+/** Sentinel for the select: an empty stored id means the system default. */
+const SYSTEM_DEFAULT_MIC = "system-default";
 
 function messageFromError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -91,6 +95,19 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const [parallelFeedback, setParallelFeedback] = useState<string | null>(null);
   const traceSessions = useVoiceTraceStore((state) => state.sessions);
   const clearTraceHistory = useVoiceTraceStore((state) => state.clearHistory);
+  const voiceProvider = useVoiceSettingsStore((state) => state.provider);
+  const setVoiceProvider = useVoiceSettingsStore((state) => state.setProvider);
+  const voiceInputDeviceId = useVoiceSettingsStore((state) => state.inputDeviceId);
+  const setVoiceInputDeviceId = useVoiceSettingsStore((state) => state.setInputDeviceId);
+  const audioInputDevices = useAudioInputDevices();
+  const selectedInputDevice = audioInputDevices.find(
+    (device) => device.deviceId === voiceInputDeviceId,
+  );
+  // A microphone chosen on another machine, or one that is unplugged, keeps its
+  // stored id: show the default rather than an empty trigger, and fall back to
+  // the default device when the session starts.
+  const selectedInputDeviceId = selectedInputDevice?.deviceId ?? SYSTEM_DEFAULT_MIC;
+  const selectedInputDeviceLabel = selectedInputDevice?.label ?? "System default";
   const voiceModel = useVoiceSettingsStore((state) => state.model);
   const voiceName = useVoiceSettingsStore((state) => state.voice);
   const voiceSpeed = useVoiceSettingsStore((state) => state.speed);
@@ -214,351 +231,427 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
       <div>
         <h1 className="text-xl font-semibold tracking-[-0.02em]">Voice</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configure the global OpenAI Realtime voice layer for ${APP_DISPLAY_NAME}.
+          Choose how voice connects to {APP_DISPLAY_NAME}.
         </p>
       </div>
 
-      <SettingsSection title="OpenAI Realtime" icon={<Mic2Icon className="size-3.5" />}>
+      <SettingsSection title="Voice connection" icon={<Mic2Icon className="size-3.5" />}>
         <SettingsRow
-          title="API key"
-          description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The app uses it to mint short-lived browser credentials.`}
-          status={
-            <span className={configured ? "text-emerald-600 dark:text-emerald-400" : undefined}>
-              {configured ? "Configured" : "Not configured"}
-            </span>
-          }
-        >
-          <div className="mt-3 flex flex-col gap-2 pb-4 sm:flex-row">
-            <Input
-              nativeInput
-              type="password"
-              autoComplete="off"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.currentTarget.value)}
-              placeholder={configured ? "Enter a replacement OpenAI API key" : "sk-…"}
-              aria-label="OpenAI API key"
-            />
-            <Button
-              className="shrink-0"
-              size="sm"
-              onClick={() => void save()}
-              disabled={!environmentId || apiKey.trim().length === 0 || busy !== null}
-            >
-              {busy === "save" ? (
-                <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-              ) : (
-                <KeyRoundIcon className="size-3.5" />
-              )}
-              Save key
-            </Button>
-          </div>
-        </SettingsRow>
-        <SettingsRow
-          title="Connection"
-          description="Validate the saved key by requesting a short-lived OpenAI Realtime client secret."
-          status={feedback}
+          title="Provider"
+          description="Codex account uses your ChatGPT sign-in on this environment. Spoken requests go to the selected model in the task where voice started. Changes apply to the next voice session."
           control={
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void test()}
-                disabled={!environmentId || !configured || busy !== null}
-              >
-                {busy === "test" ? (
-                  <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <CheckCircle2Icon className="size-3.5" />
-                )}
-                Test
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => void remove()}
-                disabled={!environmentId || !configured || busy !== null}
-              >
-                {busy === "remove" ? (
-                  <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <Trash2Icon className="size-3.5" />
-                )}
-                Remove
-              </Button>
-            </div>
+            <Select
+              value={voiceProvider}
+              onValueChange={(value) => {
+                if (value === "codex-account" || value === "openai-api") setVoiceProvider(value);
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-72" aria-label="Voice provider">
+                <SelectValue>
+                  {voiceProvider === "codex-account"
+                    ? "Codex account · GPT-Live"
+                    : "OpenAI API · Realtime"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="codex-account">Codex account · GPT-Live</SelectItem>
+                <SelectItem value="openai-api">OpenAI API · Realtime</SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
-      </SettingsSection>
-
-      <SettingsSection title="Parallel Web" icon={<Globe2Icon className="size-3.5" />}>
         <SettingsRow
-          title="API key"
-          description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The voice agent uses Parallel Search and Extract through server-side tools.`}
-          status={
-            <span
-              className={parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined}
-            >
-              {parallelConfigured ? "Configured" : "Not configured"}
-            </span>
+          title="Microphone"
+          description={
+            audioInputDevices.length > 0
+              ? "Input device voice captures from. Applies to the next voice session."
+              : "Input device voice captures from. Start a voice session once to let the browser list your microphones."
           }
-        >
-          <div className="mt-3 flex flex-col gap-2 pb-4 sm:flex-row">
-            <Input
-              nativeInput
-              type="password"
-              autoComplete="off"
-              value={parallelApiKey}
-              onChange={(event) => setParallelApiKey(event.currentTarget.value)}
-              placeholder={
-                parallelConfigured ? "Enter a replacement Parallel API key" : "Parallel API key"
-              }
-              aria-label="Parallel API key"
-            />
-            <Button
-              className="shrink-0"
-              size="sm"
-              onClick={() => void saveParallel()}
-              disabled={
-                !environmentId || parallelApiKey.trim().length === 0 || parallelBusy !== null
+          control={
+            <Select
+              value={selectedInputDeviceId}
+              onValueChange={(value) =>
+                setVoiceInputDeviceId(
+                  typeof value === "string" && value !== SYSTEM_DEFAULT_MIC ? value : "",
+                )
               }
             >
-              {parallelBusy === "save" ? (
-                <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-              ) : (
-                <KeyRoundIcon className="size-3.5" />
-              )}
-              Save key
-            </Button>
-          </div>
-        </SettingsRow>
-        <SettingsRow
-          title="Search and Extract"
-          description="Validate the saved key with a small live Search request. Extract is used only when ranked search excerpts are insufficient."
-          status={parallelFeedback}
-          control={
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void testParallel()}
-                disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
-              >
-                {parallelBusy === "test" ? (
-                  <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <CheckCircle2Icon className="size-3.5" />
-                )}
-                Test
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => void removeParallel()}
-                disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
-              >
-                {parallelBusy === "remove" ? (
-                  <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <Trash2Icon className="size-3.5" />
-                )}
-                Remove
-              </Button>
-            </div>
+              <SelectTrigger className="w-full sm:w-72" aria-label="Voice microphone">
+                <SelectValue>{selectedInputDeviceLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value={SYSTEM_DEFAULT_MIC}>System default</SelectItem>
+                {audioInputDevices.map((device) => (
+                  <SelectItem key={device.deviceId} value={device.deviceId}>
+                    {device.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
+        {voiceProvider === "codex-account" ? (
+          <SettingsRow
+            title="ChatGPT account"
+            description="Uses the Codex sign-in in Settings → Providers. No OpenAI API key is needed. Requires Codex with GPT-Live support and an eligible ChatGPT account. Claude and other agents keep using their own provider sign-ins. Voice and delegated work use your accounts' normal limits."
+          />
+        ) : null}
       </SettingsSection>
 
-      <SettingsSection title="Voice preferences" icon={<GaugeIcon className="size-3.5" />}>
-        <SettingsRow
-          title="Model"
-          description="Mini is the recommended default for conversational speed and cost. The full model is stronger for difficult explanations and tool decisions. Changes apply to the next session."
-          control={
-            <Select
-              value={voiceModel}
-              onValueChange={(value) => {
-                if (isVoiceRealtimeModel(value)) setVoiceModel(value);
-              }}
+      {voiceProvider === "openai-api" ? (
+        <>
+          <SettingsSection title="OpenAI Realtime" icon={<Mic2Icon className="size-3.5" />}>
+            <SettingsRow
+              title="API key"
+              description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The app uses it to mint short-lived browser credentials.`}
+              status={
+                <span className={configured ? "text-emerald-600 dark:text-emerald-400" : undefined}>
+                  {configured ? "Configured" : "Not configured"}
+                </span>
+              }
             >
-              <SelectTrigger className="w-full sm:w-72" aria-label="Realtime model">
-                <SelectValue>
-                  {VOICE_MODEL_OPTIONS.find((option) => option.value === voiceModel)?.label}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {VOICE_MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    <div>
-                      <div>{option.label}</div>
-                      <div className="text-[11px] text-muted-foreground">{option.description}</div>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          title="Voice"
-          description="Choose the generated voice. OpenAI recommends Marin or Cedar. The voice is fixed after a session first speaks."
-          control={
-            <Select
-              value={voiceName}
-              onValueChange={(value) => {
-                if (isVoiceName(value)) setVoiceName(value);
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-72" aria-label="OpenAI voice">
-                <SelectValue>
-                  {VOICE_OPTIONS.find((option) => option.value === voiceName)?.label}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {VOICE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          title="Speech pace"
-          description="Adjust OpenAI's post-processing playback speed. Changes are applied between model turns."
-          status={`${VOICE_SPEED_MIN.toFixed(2)}× minimum · ${DEFAULT_VOICE_SPEED.toFixed(1)}× recommended · ${VOICE_SPEED_MAX.toFixed(1)}× maximum`}
-          control={
-            <div className="flex w-full items-center gap-3 sm:w-64">
-              <input
-                id="voice-speech-pace"
-                className="h-5 min-w-0 flex-1 cursor-pointer accent-primary"
-                type="range"
-                min={VOICE_SPEED_MIN}
-                max={VOICE_SPEED_MAX}
-                step={VOICE_SPEED_STEP}
-                value={voiceSpeed}
-                aria-label="OpenAI speech pace"
-                aria-valuetext={`${voiceSpeed.toFixed(2)} times speed`}
-                onChange={(event) => setVoiceSpeed(event.currentTarget.valueAsNumber)}
-              />
-              <output
-                htmlFor="voice-speech-pace"
-                className="w-11 shrink-0 text-right font-mono text-xs font-medium tabular-nums"
-              >
-                {voiceSpeed.toFixed(2)}×
-              </output>
-            </div>
-          }
-        />
-        <SettingsRow
-          title="Input language"
-          description="Optionally bias input transcription with an ISO-639-1 language code. Auto is recommended for multilingual conversations and does not restrict the language OpenAI speaks."
-          control={
-            <Select
-              value={voiceLanguage}
-              onValueChange={(value) => {
-                if (isVoiceLanguage(value)) setVoiceLanguage(value);
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-72" aria-label="Input transcription language">
-                <SelectValue>{voiceLanguageLabel(voiceLanguage)}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {VOICE_LANGUAGE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          title="Reasoning effort"
-          description="Controls the latency and depth tradeoff. OpenAI recommends Low for most production voice agents."
-          control={
-            <Select
-              value={reasoningEffort}
-              onValueChange={(value) => {
-                if (isVoiceReasoningEffort(value)) setReasoningEffort(value);
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-72" aria-label="Reasoning effort">
-                <SelectValue>
-                  {
-                    VOICE_REASONING_OPTIONS.find((option) => option.value === reasoningEffort)
-                      ?.label
+              <div className="mt-3 flex flex-col gap-2 pb-4 sm:flex-row">
+                <Input
+                  nativeInput
+                  type="password"
+                  autoComplete="off"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.currentTarget.value)}
+                  placeholder={configured ? "Enter a replacement OpenAI API key" : "sk-…"}
+                  aria-label="OpenAI API key"
+                />
+                <Button
+                  className="shrink-0"
+                  size="sm"
+                  onClick={() => void save()}
+                  disabled={!environmentId || apiKey.trim().length === 0 || busy !== null}
+                >
+                  {busy === "save" ? (
+                    <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                  ) : (
+                    <KeyRoundIcon className="size-3.5" />
+                  )}
+                  Save key
+                </Button>
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title="Connection"
+              description="Validate the saved key by requesting a short-lived OpenAI Realtime client secret."
+              status={feedback}
+              control={
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void test()}
+                    disabled={!environmentId || !configured || busy !== null}
+                  >
+                    {busy === "test" ? (
+                      <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <CheckCircle2Icon className="size-3.5" />
+                    )}
+                    Test
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => void remove()}
+                    disabled={!environmentId || !configured || busy !== null}
+                  >
+                    {busy === "remove" ? (
+                      <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <Trash2Icon className="size-3.5" />
+                    )}
+                    Remove
+                  </Button>
+                </div>
+              }
+            />
+          </SettingsSection>
+
+          <SettingsSection title="Parallel Web" icon={<Globe2Icon className="size-3.5" />}>
+            <SettingsRow
+              title="API key"
+              description={`Stored only by the selected ${APP_DISPLAY_NAME} server. The voice agent uses Parallel Search and Extract through server-side tools.`}
+              status={
+                <span
+                  className={
+                    parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined
                   }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {VOICE_REASONING_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          title="Turn taking"
-          description="Semantic VAD waits for the meaning of your sentence, not only a fixed silence. Patient waits longer; Quick responds sooner."
-          control={
-            <Select
-              value={turnEagerness}
-              onValueChange={(value) => {
-                if (isVoiceTurnEagerness(value)) setTurnEagerness(value);
-              }}
+                >
+                  {parallelConfigured ? "Configured" : "Not configured"}
+                </span>
+              }
             >
-              <SelectTrigger className="w-full sm:w-72" aria-label="Turn-taking eagerness">
-                <SelectValue>
-                  {
-                    VOICE_TURN_EAGERNESS_OPTIONS.find((option) => option.value === turnEagerness)
-                      ?.label
+              <div className="mt-3 flex flex-col gap-2 pb-4 sm:flex-row">
+                <Input
+                  nativeInput
+                  type="password"
+                  autoComplete="off"
+                  value={parallelApiKey}
+                  onChange={(event) => setParallelApiKey(event.currentTarget.value)}
+                  placeholder={
+                    parallelConfigured ? "Enter a replacement Parallel API key" : "Parallel API key"
                   }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {VOICE_TURN_EAGERNESS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          title="Microphone profile"
-          description="OpenAI filters audio before turn detection and model input. Choose the profile matching the microphone distance."
-          control={
-            <Select
-              value={noiseReduction}
-              onValueChange={(value) => {
-                if (isVoiceNoiseReduction(value)) setNoiseReduction(value);
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-72" aria-label="Microphone noise profile">
-                <SelectValue>
-                  {
-                    VOICE_NOISE_REDUCTION_OPTIONS.find((option) => option.value === noiseReduction)
-                      ?.label
+                  aria-label="Parallel API key"
+                />
+                <Button
+                  className="shrink-0"
+                  size="sm"
+                  onClick={() => void saveParallel()}
+                  disabled={
+                    !environmentId || parallelApiKey.trim().length === 0 || parallelBusy !== null
                   }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {VOICE_NOISE_REDUCTION_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-      </SettingsSection>
+                >
+                  {parallelBusy === "save" ? (
+                    <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                  ) : (
+                    <KeyRoundIcon className="size-3.5" />
+                  )}
+                  Save key
+                </Button>
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title="Search and Extract"
+              description="Validate the saved key with a small live Search request. Extract is used only when ranked search excerpts are insufficient."
+              status={parallelFeedback}
+              control={
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void testParallel()}
+                    disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
+                  >
+                    {parallelBusy === "test" ? (
+                      <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <CheckCircle2Icon className="size-3.5" />
+                    )}
+                    Test
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => void removeParallel()}
+                    disabled={!environmentId || !parallelConfigured || parallelBusy !== null}
+                  >
+                    {parallelBusy === "remove" ? (
+                      <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <Trash2Icon className="size-3.5" />
+                    )}
+                    Remove
+                  </Button>
+                </div>
+              }
+            />
+          </SettingsSection>
+
+          <SettingsSection title="Voice preferences" icon={<GaugeIcon className="size-3.5" />}>
+            <SettingsRow
+              title="Model"
+              description="Mini is the recommended default for conversational speed and cost. The full model is stronger for difficult explanations and tool decisions. Changes apply to the next session."
+              control={
+                <Select
+                  value={voiceModel}
+                  onValueChange={(value) => {
+                    if (isVoiceRealtimeModel(value)) setVoiceModel(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-72" aria-label="Realtime model">
+                    <SelectValue>
+                      {VOICE_MODEL_OPTIONS.find((option) => option.value === voiceModel)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {VOICE_MODEL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div>
+                          <div>{option.label}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {option.description}
+                          </div>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+            <SettingsRow
+              title="Voice"
+              description="Choose the generated voice. OpenAI recommends Marin or Cedar. The voice is fixed after a session first speaks."
+              control={
+                <Select
+                  value={voiceName}
+                  onValueChange={(value) => {
+                    if (isVoiceName(value)) setVoiceName(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-72" aria-label="OpenAI voice">
+                    <SelectValue>
+                      {VOICE_OPTIONS.find((option) => option.value === voiceName)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {VOICE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+            <SettingsRow
+              title="Speech pace"
+              description="Adjust OpenAI's post-processing playback speed. Changes are applied between model turns."
+              status={`${VOICE_SPEED_MIN.toFixed(2)}× minimum · ${DEFAULT_VOICE_SPEED.toFixed(1)}× recommended · ${VOICE_SPEED_MAX.toFixed(1)}× maximum`}
+              control={
+                <div className="flex w-full items-center gap-3 sm:w-64">
+                  <input
+                    id="voice-speech-pace"
+                    className="h-5 min-w-0 flex-1 cursor-pointer accent-primary"
+                    type="range"
+                    min={VOICE_SPEED_MIN}
+                    max={VOICE_SPEED_MAX}
+                    step={VOICE_SPEED_STEP}
+                    value={voiceSpeed}
+                    aria-label="OpenAI speech pace"
+                    aria-valuetext={`${voiceSpeed.toFixed(2)} times speed`}
+                    onChange={(event) => setVoiceSpeed(event.currentTarget.valueAsNumber)}
+                  />
+                  <output
+                    htmlFor="voice-speech-pace"
+                    className="w-11 shrink-0 text-right font-mono text-xs font-medium tabular-nums"
+                  >
+                    {voiceSpeed.toFixed(2)}×
+                  </output>
+                </div>
+              }
+            />
+            <SettingsRow
+              title="Input language"
+              description="Optionally bias input transcription with an ISO-639-1 language code. Auto is recommended for multilingual conversations and does not restrict the language OpenAI speaks."
+              control={
+                <Select
+                  value={voiceLanguage}
+                  onValueChange={(value) => {
+                    if (isVoiceLanguage(value)) setVoiceLanguage(value);
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full sm:w-72"
+                    aria-label="Input transcription language"
+                  >
+                    <SelectValue>{voiceLanguageLabel(voiceLanguage)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {VOICE_LANGUAGE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+            <SettingsRow
+              title="Reasoning effort"
+              description="Controls the latency and depth tradeoff. OpenAI recommends Low for most production voice agents."
+              control={
+                <Select
+                  value={reasoningEffort}
+                  onValueChange={(value) => {
+                    if (isVoiceReasoningEffort(value)) setReasoningEffort(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-72" aria-label="Reasoning effort">
+                    <SelectValue>
+                      {
+                        VOICE_REASONING_OPTIONS.find((option) => option.value === reasoningEffort)
+                          ?.label
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {VOICE_REASONING_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+            <SettingsRow
+              title="Turn taking"
+              description="Semantic VAD waits for the meaning of your sentence, not only a fixed silence. Patient waits longer; Quick responds sooner."
+              control={
+                <Select
+                  value={turnEagerness}
+                  onValueChange={(value) => {
+                    if (isVoiceTurnEagerness(value)) setTurnEagerness(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-72" aria-label="Turn-taking eagerness">
+                    <SelectValue>
+                      {
+                        VOICE_TURN_EAGERNESS_OPTIONS.find(
+                          (option) => option.value === turnEagerness,
+                        )?.label
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {VOICE_TURN_EAGERNESS_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+            <SettingsRow
+              title="Microphone profile"
+              description="OpenAI filters audio before turn detection and model input. Choose the profile matching the microphone distance."
+              control={
+                <Select
+                  value={noiseReduction}
+                  onValueChange={(value) => {
+                    if (isVoiceNoiseReduction(value)) setNoiseReduction(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-72" aria-label="Microphone noise profile">
+                    <SelectValue>
+                      {
+                        VOICE_NOISE_REDUCTION_OPTIONS.find(
+                          (option) => option.value === noiseReduction,
+                        )?.label
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {VOICE_NOISE_REDUCTION_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+          </SettingsSection>
+        </>
+      ) : null}
 
       <SettingsSection title="Behavior">
         <SettingsRow
@@ -567,7 +660,11 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
         />
         <SettingsRow
           title="Context and composer access"
-          description="The latest AI message is shared initially. OpenAI can page older messages from that task, search and extract web sources through Parallel, and edit unsent composer text, but it cannot send prompts."
+          description={
+            voiceProvider === "codex-account"
+              ? "Voice sends requests to the model selected in the task where you started voice and speaks its answer. Work and approval requests appear in that task. End voice to switch tasks. Ending voice leaves already-started agent work running."
+              : "The latest AI message is shared initially. OpenAI can page older messages, search web sources through Parallel, and edit unsent composer text, but cannot send prompts."
+          }
         />
       </SettingsSection>
 
