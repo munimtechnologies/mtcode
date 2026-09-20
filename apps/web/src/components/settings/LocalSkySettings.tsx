@@ -2,6 +2,73 @@ import { useEffect, useRef, useState } from "react";
 import { setSkyLocation, useLocalSky, type SkyLocation } from "../../artwork/localSky";
 import { Button } from "../ui/button";
 
+/** Coordinates from a provider's payload, or null when it did not supply any. */
+function toSkyLocation(
+  latitude: unknown,
+  longitude: unknown,
+  parts: ReadonlyArray<unknown>,
+): SkyLocation | null {
+  const lat = typeof latitude === "string" ? Number(latitude) : latitude;
+  const lon = typeof longitude === "string" ? Number(longitude) : longitude;
+  if (typeof lat !== "number" || !Number.isFinite(lat) || Math.abs(lat) > 90) return null;
+  if (typeof lon !== "number" || !Number.isFinite(lon) || Math.abs(lon) > 180) return null;
+  const name = parts.find(
+    (part): part is string => typeof part === "string" && part.trim().length > 0,
+  );
+  return { latitude: lat, longitude: lon, name: name?.trim() ?? "Approximate location" };
+}
+
+/** Keyless, CORS-enabled IP geolocation, in the order they are tried. */
+export const NETWORK_LOCATION_PROVIDERS: ReadonlyArray<{
+  readonly url: string;
+  readonly parse: (body: unknown) => SkyLocation | null;
+}> = [
+  {
+    url: "https://ipwho.is/",
+    parse: (body) => {
+      const data = body as {
+        latitude?: unknown;
+        longitude?: unknown;
+        city?: unknown;
+        region?: unknown;
+        country?: unknown;
+        success?: unknown;
+      };
+      if (data?.success === false) return null;
+      return toSkyLocation(data?.latitude, data?.longitude, [
+        data?.city,
+        data?.region,
+        data?.country,
+      ]);
+    },
+  },
+  {
+    url: "https://get.geojs.io/v1/ip/geo.json",
+    parse: (body) => {
+      const data = body as {
+        latitude?: unknown;
+        longitude?: unknown;
+        city?: unknown;
+        region?: unknown;
+        country?: unknown;
+      };
+      return toSkyLocation(data?.latitude, data?.longitude, [
+        data?.city,
+        data?.region,
+        data?.country,
+      ]);
+    },
+  },
+  {
+    url: "https://ipinfo.io/json",
+    parse: (body) => {
+      const data = body as { loc?: unknown; city?: unknown; region?: unknown; country?: unknown };
+      const [latitude, longitude] = typeof data?.loc === "string" ? data.loc.split(",") : [];
+      return toSkyLocation(latitude, longitude, [data?.city, data?.region, data?.country]);
+    },
+  },
+];
+
 export function LocalSkySettings() {
   const sky = useLocalSky(true);
   const [city, setCity] = useState("");
@@ -69,39 +136,34 @@ export function LocalSkySettings() {
    * Approximate location from the IP address, for when the device's own
    * location service is unavailable or refused. City-level is all this
    * artwork needs: it decides which sky to paint, not where you are.
+   *
+   * Several providers, tried in order, because the free tiers here are
+   * rate-limited per address and a single one goes silent without warning --
+   * the first attempt at this shipped with one and it was already returning
+   * 429 for a home connection.
    */
   const locateByNetwork = async (): Promise<SkyLocation | null> => {
     const controller = new AbortController();
     pending.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), 12_000);
     try {
-      const response = await fetch("https://ipapi.co/json/", {
-        signal: controller.signal,
-        credentials: "omit",
-        referrerPolicy: "no-referrer",
-      });
-      if (!response.ok) return null;
-      const data = (await response.json()) as {
-        latitude?: unknown;
-        longitude?: unknown;
-        city?: unknown;
-        region?: unknown;
-        country_name?: unknown;
-      };
-      if (
-        typeof data.latitude !== "number" ||
-        !Number.isFinite(data.latitude) ||
-        typeof data.longitude !== "number" ||
-        !Number.isFinite(data.longitude)
-      ) {
-        return null;
+      for (const provider of NETWORK_LOCATION_PROVIDERS) {
+        if (controller.signal.aborted) return null;
+        try {
+          const response = await fetch(provider.url, {
+            signal: controller.signal,
+            credentials: "omit",
+            referrerPolicy: "no-referrer",
+          });
+          // A rate-limited provider answers 429 with a JSON body, so status is
+          // what separates "no answer" from "an answer with no coordinates".
+          if (!response.ok) continue;
+          const place = provider.parse(await response.json());
+          if (place !== null) return place;
+        } catch {
+          // Network error or malformed body: try the next provider.
+        }
       }
-      const name =
-        [data.city, data.region, data.country_name].filter(
-          (part): part is string => typeof part === "string" && part.length > 0,
-        )[0] ?? "Approximate location";
-      return { latitude: data.latitude, longitude: data.longitude, name };
-    } catch {
       return null;
     } finally {
       clearTimeout(timeout);
