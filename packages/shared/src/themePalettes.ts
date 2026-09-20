@@ -892,9 +892,10 @@ export const IRIS_THEME: ThemeDefinition = {
 };
 
 /**
- * The dark half MT Code wears out of the box: a raised-charcoal palette
- * (lighter than T3's near-black) that keeps the stock light side untouched.
- * Paired with {@link T3_CODE_LIGHT_THEME_COLORS} by {@link MT_CODE_THEME}.
+ * The dark half MT Code wears out of the box: a raised-charcoal ground
+ * (lighter than T3's near-black) carrying a blue accent, with the stock light
+ * side untouched. Paired with {@link MT_CODE_LIGHT_THEME_COLORS} by
+ * {@link MT_CODE_THEME}.
  */
 export const MT_CODE_DARK_THEME_COLORS: ThemeColors = {
   canvas: "oklch(0.209036 0 0)",
@@ -904,7 +905,7 @@ export const MT_CODE_DARK_THEME_COLORS: ThemeColors = {
   toolbarBorder: "oklch(0.349036 0.001465 89.876)",
   toolbarControl: "oklch(0.299036 0.0104 89.876)",
   toolbarControlForeground: "oklch(0.949888 0.001075 17.179)",
-  toolbarControlHover: "oklch(0.349036 0.0128 89.876)",
+  toolbarControlHover: "oklch(0.57951 0 0)",
   surface: "oklch(0.269409 0.003662 286.151)",
   surfaceRaised: "oklch(0.269409 0.003662 286.151)",
   surfaceOverlay: "oklch(0.269409 0.003662 286.151)",
@@ -912,9 +913,9 @@ export const MT_CODE_DARK_THEME_COLORS: ThemeColors = {
   textMuted: "oklch(0.820319 0 0)",
   border: "oklch(0.369036 0.001282 89.876)",
   input: "oklch(0.419036 0.001465 89.876)",
-  focus: "oklch(0.269409 0.003662 286.151)",
-  accent: "oklch(0.269409 0.003662 286.151)",
-  accentForeground: "oklch(0.990339 0.008411 325.64)",
+  focus: "oklch(0.625513 0.188432 259.456)",
+  accent: "oklch(0.625513 0.188432 259.456)",
+  accentForeground: "oklch(0.222003 0.03479 328.979)",
   secondary: "oklch(0.309036 0.001831 89.876)",
   secondaryForeground: "oklch(0.95 0.000915 89.876)",
   muted: "oklch(0.269036 0.001282 89.876)",
@@ -928,11 +929,11 @@ export const MT_CODE_DARK_THEME_COLORS: ThemeColors = {
   warning: "oklch(0.772406 0.172798 65.367)",
   warningForeground: "oklch(0.829017 0.171221 81.038)",
   warningSurface: "oklch(0.308631 0.044837 76.593)",
-  update: "oklch(0.269409 0.003662 286.151)",
-  updateForeground: "oklch(0.95 0.000915 89.876)",
-  updateSurface: "oklch(0.349036 0.002014 89.876)",
-  accentSurface: "oklch(0.339036 0.002014 89.876)",
-  accentSurfaceForeground: "oklch(0.95 0.000915 89.876)",
+  update: "oklch(0.625513 0.188432 259.456)",
+  updateForeground: "oklch(0.723809 0.143791 259.456)",
+  updateSurface: "oklch(0.349695 0.071537 259.303)",
+  accentSurface: "oklch(0.57951 0 0)",
+  accentSurfaceForeground: "oklch(0 0 0)",
   messageSurface: "oklch(0.369036 0.002197 89.876)",
   messageForeground: "oklch(0.95 0.000915 89.876)",
   messageAction: "oklch(0.625513 0.188432 259.456)",
@@ -950,7 +951,7 @@ export const MT_CODE_DARK_THEME_COLORS: ThemeColors = {
   sidebarBorder: "oklch(0.379036 0.001465 89.876)",
   terminalBackground: "oklch(0.209036 0 0)",
   terminalForeground: "oklch(0.949888 0.001075 17.179)",
-  terminalCursor: "oklch(0.269409 0.003662 286.151)",
+  terminalCursor: "oklch(0.625513 0.188432 259.456)",
   terminalSelection: "oklch(0.389036 0.002014 89.876)",
   terminalScrollbar: "oklch(0.429036 0.008 89.876)",
   terminalScrollbarHover: "oklch(0.509036 0.008 89.876)",
