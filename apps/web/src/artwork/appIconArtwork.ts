@@ -81,8 +81,7 @@ function starLevels(): Map<number, number> {
 }
 
 const RIM = 24;
-const SECTORS = 64;
-const SKY_BELOW_RIM = 6;
+const RIM_FEATHER = 8;
 
 /** Distance from every pixel to the tile's edge, from its own silhouette. */
 function edgeDistance(pixels: Uint8ClampedArray): Float32Array {
@@ -118,67 +117,8 @@ function edgeDistance(pixels: Uint8ClampedArray): Float32Array {
   return distance;
 }
 
-const median = (values: number[]) => {
-  if (values.length === 0) return 0;
-  values.sort((a, b) => a - b);
-  return values[values.length >> 1]!;
-};
-
-/**
- * The glass edge measured around the whole perimeter: for each sector and each
- * pixel of depth, how much white the tile lays over its sky, or how much it
- * darkens it. Taking medians per sector and smoothing across them keeps the
- * artwork out of it — probing a single pixel for "the sky under the rim" lands
- * on a cloud or a star and leaves a blot.
- */
-function rimProfile(pixels: Uint8ClampedArray, distance: Float32Array) {
-  const depths: number[][][] = Array.from({ length: SECTORS }, () =>
-    Array.from({ length: RIM + 1 }, () => [] as number[]),
-  );
-  const skies: number[][] = Array.from({ length: SECTORS }, () => [] as number[]);
-  for (let y = 0; y < 1024; y++)
-    for (let x = 0; x < 1024; x++) {
-      const index = y * 1024 + x;
-      const depth = distance[index]!;
-      if (depth <= 0 || depth > RIM + 16) continue;
-      const pixel = index * 4;
-      if (pixels[pixel + 3]! < 200) continue;
-      const sector =
-        Math.floor(((Math.atan2(y - 511.5, x - 511.5) + Math.PI) / (2 * Math.PI)) * SECTORS) %
-        SECTORS;
-      const level =
-        pixels[pixel]! * 0.2126 + pixels[pixel + 1]! * 0.7152 + pixels[pixel + 2]! * 0.0722;
-      if (depth <= RIM) depths[sector]![Math.floor(depth)]!.push(level);
-      else if (depth >= RIM + SKY_BELOW_RIM) skies[sector]!.push(level);
-    }
-  const raw = skies.map(median);
-  const sky = raw.map((_, sector) =>
-    median([-2, -1, 0, 1, 2].map((offset) => raw[(sector + offset + SECTORS) % SECTORS]!)),
-  );
-  const alpha = depths.map((sectorDepths, sector) =>
-    sectorDepths.map((values) => {
-      const level = values.length ? median(values) : sky[sector]!;
-      const reference = sky[sector]!;
-      return level >= reference
-        ? (level - reference) / Math.max(1, 255 - reference)
-        : -(reference - level) / Math.max(1, reference);
-    }),
-  );
-  const smooth = alpha.map((_, sector) =>
-    alpha[sector]!.map(
-      (_value, depth) =>
-        [-2, -1, 0, 1, 2].reduce(
-          (total, offset) => total + alpha[(sector + offset + SECTORS) % SECTORS]![depth]!,
-          0,
-        ) / 5,
-    ),
-  );
-  return { alpha: smooth, sky };
-}
-
 // The tile never changes, so its edge is measured once.
 let tileDistance: Float32Array | null = null;
-let tileRim: ReturnType<typeof rimProfile> | null = null;
 
 /** 256-entry lookup from the tile's own tones to the scene's palette. */
 function rampLookup(ramp: readonly string[]): Uint8ClampedArray {
@@ -218,7 +158,6 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   // Measured from the tile as it shipped; the loop overwrites as it goes.
   const origin = new Uint8ClampedArray(frame.data);
   const distance = (tileDistance ??= edgeDistance(origin));
-  const rim = (tileRim ??= rimProfile(origin, distance));
   const table = rampLookup(ramp);
   // Daylight and overcast skies show no stars: the tile's specks take the tone
   // of what they sit on, so they vanish into the repainted sky.
@@ -244,35 +183,16 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
     let red2 = table[level * 3]!;
     let green2 = table[level * 3 + 1]!;
     let blue2 = table[level * 3 + 2]!;
-    // The glass edge belongs to the tile, so it is laid over the scene's sky
-    // rather than painted from the rim's own brightness, which would run it
-    // through the palette and come out orange at dusk or white at midday.
+    // The glass edge ships with the tile and stays exactly as it is, feathered
+    // into the repaint just inside. Rebuilding it from the scene's own colours
+    // — however carefully — reads as a rim of that colour rather than as the
+    // app's edge, which is the one part of the tile every icon shares.
     const depth = distance[pixel >> 2]!;
     if (depth > 0 && depth <= RIM) {
-      const position = ((Math.atan2(y - 511.5, x - 511.5) + Math.PI) / (2 * Math.PI)) * SECTORS;
-      const lower = Math.floor(position) % SECTORS;
-      const upper = (lower + 1) % SECTORS;
-      const across = position - Math.floor(position);
-      const shallow = Math.floor(depth);
-      const deeper = Math.min(RIM, shallow + 1);
-      const into = depth - shallow;
-      const sheen =
-        (rim.alpha[lower]![shallow]! * (1 - into) + rim.alpha[lower]![deeper]! * into) *
-          (1 - across) +
-        (rim.alpha[upper]![shallow]! * (1 - into) + rim.alpha[upper]![deeper]! * into) * across;
-      const skyLevel = Math.round(rim.sky[lower]! * (1 - across) + rim.sky[upper]! * across) * 3;
-      red2 = table[skyLevel]!;
-      green2 = table[skyLevel + 1]!;
-      blue2 = table[skyLevel + 2]!;
-      if (sheen > 0) {
-        red2 = Math.round(red2 + (255 - red2) * sheen);
-        green2 = Math.round(green2 + (255 - green2) * sheen);
-        blue2 = Math.round(blue2 + (255 - blue2) * sheen);
-      } else {
-        red2 = Math.round(red2 * (1 + sheen));
-        green2 = Math.round(green2 * (1 + sheen));
-        blue2 = Math.round(blue2 * (1 + sheen));
-      }
+      const hold = depth <= RIM - RIM_FEATHER ? 1 : (RIM - depth) / RIM_FEATHER;
+      red2 = Math.round(red2 + (red - red2) * hold);
+      green2 = Math.round(green2 + (green - green2) * hold);
+      blue2 = Math.round(blue2 + (blue - blue2) * hold);
     }
     frame.data[pixel] = red2;
     frame.data[pixel + 1] = green2;
