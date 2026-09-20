@@ -80,8 +80,7 @@ function starLevels(): Map<number, number> {
   return levels;
 }
 
-const EDGE_BAND = 10;
-const EDGE_FEATHER = 7;
+const EDGE_REACH = 40;
 
 /** How far a point sits inside the tile's squircle, in its own 1024 units. */
 function edgeInset(x: number, y: number): number {
@@ -126,6 +125,8 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
     return canvas.toDataURL("image/png");
   }
   const frame = context.getImageData(0, 0, 1024, 1024);
+  // The edge is read from the tile as it shipped; the loop overwrites as it goes.
+  const origin = new Uint8ClampedArray(frame.data);
   const table = rampLookup(ramp);
   // Daylight and overcast skies show no stars: the tile's specks take the tone
   // of what they sit on, so they vanish into the repainted sky.
@@ -151,15 +152,49 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
     let red2 = table[level * 3]!;
     let green2 = table[level * 3 + 1]!;
     let blue2 = table[level * 3 + 2]!;
-    // The glass edge belongs to the tile, not to the weather: the outermost
-    // pixels stay exactly as they ship, fading into the repaint just inside, so
-    // every scene carries the edge the default icon has.
+    // The glass edge is a white sheen and a dark outline laid over the sky, and
+    // the tile encodes exactly how strong each is. Reading that strength off and
+    // laying it over the new sky gives every scene the edge the default has,
+    // instead of running the rim's own brightness through the palette — which
+    // is what turned it orange at dusk and near-white at midday.
     const inset = edgeInset(x, y);
-    if (inset < EDGE_BAND) {
-      const hold = inset < EDGE_BAND - EDGE_FEATHER ? 1 : (EDGE_BAND - inset) / EDGE_FEATHER;
-      red2 = Math.round(red2 + (red - red2) * hold);
-      green2 = Math.round(green2 + (green - green2) * hold);
-      blue2 = Math.round(blue2 + (blue - blue2) * hold);
+    if (inset < EDGE_REACH) {
+      const toCenterX = 511.5 - x;
+      const toCenterY = 511.5 - y;
+      const span = Math.hypot(toCenterX, toCenterY) || 1;
+      // Three samples, middle one wins: a single probe can land on one of the
+      // tile's stars and read the sky as ten times brighter than it is, which
+      // painted a black blot into the corner.
+      let first = 0;
+      let second = 0;
+      let third = 0;
+      for (const reach of [28, 40, 52]) {
+        const sampled =
+          (Math.round(y + (toCenterY / span) * reach) * 1024 +
+            Math.round(x + (toCenterX / span) * reach)) <<
+          2;
+        const sampledLevel =
+          origin[sampled]! * 0.2126 + origin[sampled + 1]! * 0.7152 + origin[sampled + 2]! * 0.0722;
+        if (reach === 28) first = sampledLevel;
+        else if (reach === 40) second = sampledLevel;
+        else third = sampledLevel;
+      }
+      const skyLevel = Math.max(Math.min(first, second), Math.min(Math.max(first, second), third));
+      const sky = Math.round(skyLevel) * 3;
+      const skyRed = table[sky]!;
+      const skyGreen = table[sky + 1]!;
+      const skyBlue = table[sky + 2]!;
+      if (level >= skyLevel) {
+        const sheen = (level - skyLevel) / Math.max(1, 255 - skyLevel);
+        red2 = Math.round(skyRed + (255 - skyRed) * sheen);
+        green2 = Math.round(skyGreen + (255 - skyGreen) * sheen);
+        blue2 = Math.round(skyBlue + (255 - skyBlue) * sheen);
+      } else {
+        const shade = 1 - (skyLevel - level) / Math.max(1, skyLevel);
+        red2 = Math.round(skyRed * shade);
+        green2 = Math.round(skyGreen * shade);
+        blue2 = Math.round(skyBlue * shade);
+      }
     }
     frame.data[pixel] = red2;
     frame.data[pixel + 1] = green2;
