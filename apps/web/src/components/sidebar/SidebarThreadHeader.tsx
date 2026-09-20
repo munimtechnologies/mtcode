@@ -10,7 +10,7 @@
  * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
  * the picker's popup can anchor to that width rather than to its 28px trigger.
  */
-import { FolderPlusIcon, ImportIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -35,7 +35,6 @@ export interface SidebarThreadHeaderProps {
   onNewProject: () => void;
   /** Present only when some project's server can import Claude Code / Codex
       history; the button stays out otherwise. */
-  onImportConversation?: (() => void) | undefined;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
@@ -58,7 +57,6 @@ export function SidebarThreadHeader({
   hasProjects,
   projectScope,
   onNewProject,
-  onImportConversation,
   onNewThread,
   newThreadDisabled,
   newThreadShortcutLabel,
@@ -136,15 +134,6 @@ export function SidebarThreadHeader({
             <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
               <FolderPlusIcon />
             </SidebarHeaderIconButton>
-            {onImportConversation ? (
-              <SidebarHeaderIconButton
-                label="Import conversation"
-                tooltip="Import Claude Code or Codex conversation"
-                onClick={onImportConversation}
-              >
-                <ImportIcon />
-              </SidebarHeaderIconButton>
-            ) : null}
           </>
         ) : null}
         <SidebarHeaderIconButton
