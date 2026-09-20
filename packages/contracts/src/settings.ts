@@ -159,10 +159,21 @@ const DEFAULT_TERMINAL_FONT_SIZE: TerminalFontSize = 12;
  * release, so the artwork is a plain choice: a named scene, one of your own,
  * or none.
  */
-export const SIDEBAR_ARTWORK_BUILT_IN_IDS = ["night", "day", "none"] as const;
+export const SIDEBAR_ARTWORK_BUILT_IN_IDS = [
+  "local-weather",
+  "local-day-night",
+  "night",
+  "day",
+  "none",
+] as const;
 export const SidebarArtworkSelection = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
 export type SidebarArtworkSelection = typeof SidebarArtworkSelection.Type;
-export const DEFAULT_SIDEBAR_ARTWORK_SELECTION = "night";
+/**
+ * The sky over wherever you are, weather and all. It degrades on its own --
+ * with no location stored it paints the plain night scene -- so it is safe as
+ * the shipped default even before anyone opens Settings.
+ */
+export const DEFAULT_SIDEBAR_ARTWORK_SELECTION = "local-weather";
 
 /** Largest artwork a user may store, so settings stay a settings file. */
 export const MAX_CUSTOM_SIDEBAR_ARTWORK_BYTES = 512 * 1024;

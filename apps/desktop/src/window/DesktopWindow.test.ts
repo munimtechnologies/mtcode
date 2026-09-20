@@ -213,6 +213,26 @@ describe("isTrustedRendererPermissionRequest", () => {
     }
   });
 
+  it("allows geolocation from the app renderer origin", () => {
+    assert.isTrue(
+      DesktopWindow.isTrustedRendererPermissionRequest({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "t3code-dev://app/settings",
+        permission: "geolocation",
+      }),
+    );
+  });
+
+  it("rejects geolocation from untrusted origins", () => {
+    assert.isFalse(
+      DesktopWindow.isTrustedRendererPermissionRequest({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "https://example.com/",
+        permission: "geolocation",
+      }),
+    );
+  });
+
   it("rejects clipboard permissions from untrusted origins", () => {
     assert.isFalse(
       DesktopWindow.isTrustedRendererPermissionRequest({

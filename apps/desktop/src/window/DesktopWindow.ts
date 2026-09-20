@@ -262,13 +262,22 @@ const TRUSTED_RENDERER_CLIPBOARD_PERMISSIONS = new Set([
   "clipboard-sanitized-write",
 ]);
 
+// The renderer asks for this when you press "Use my location" for the local
+// sky artwork. Denying it here is indistinguishable from the OS refusing, so
+// the button reported "Could not access location" whatever the system said.
+// Same-origin only, like the clipboard permissions above.
+const TRUSTED_RENDERER_DEVICE_PERMISSIONS = new Set(["geolocation"]);
+
 export function isTrustedRendererPermissionRequest(input: {
   readonly applicationUrl: string;
   readonly requestingUrl: string;
   readonly permission: string;
   readonly mediaTypes?: ReadonlyArray<string> | undefined;
 }): boolean {
-  if (TRUSTED_RENDERER_CLIPBOARD_PERMISSIONS.has(input.permission)) {
+  if (
+    TRUSTED_RENDERER_CLIPBOARD_PERMISSIONS.has(input.permission) ||
+    TRUSTED_RENDERER_DEVICE_PERMISSIONS.has(input.permission)
+  ) {
     return isSameOriginRendererRequest(input);
   }
   return isTrustedAudioPermissionRequest({

@@ -2893,6 +2893,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       extendInfo: {
         NSAppleEventsUsageDescription: `${productName} uses Automation to open project directories in your terminal and to let installed Computer Use plugins control the Mac apps you choose.`,
         NSMicrophoneUsageDescription: `${productName} uses the microphone for voice dictation.`,
+        // Chromium's macOS location provider is CoreLocation, which refuses to
+        // start without this key — "Use my location" for the sidebar sky then
+        // fails before the system ever asks you.
+        NSLocationWhenInUseUsageDescription: `${productName} uses your approximate location to paint the sidebar artwork with your local daylight and weather.`,
         NSScreenCaptureUsageDescription:
           "T3 Code captures the active window when you use the window capture shortcut.",
       },
