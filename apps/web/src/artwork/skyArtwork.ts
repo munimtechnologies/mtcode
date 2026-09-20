@@ -73,8 +73,8 @@ const scenes: Record<SkyPhase, Record<SkyWeather, Scene>> = {
     storm: ["#080d26", "#1b1c44", "#4a3f68", "#5b5390", "#4c74a6", "#4b4b96", "#69479a"],
   },
   day: {
-    clear: ["#0d52ae", "#3379cf", "#bfe3fa", "#ffe9b0", "#ffffff", "#cfe8ff", "#e4d8ff"],
-    cloudy: ["#2a72c0", "#5e9ad6", "#c9e2f4", "#f4fbff", "#ffffff", "#d8ecff", "#e8dcff"],
+    clear: ["#0d52ae", "#3379cf", "#bfe3fa", "#ffe9b0", "#ffffff", "#8bbfee", "#e4d8ff"],
+    cloudy: ["#2a72c0", "#5e9ad6", "#c9e2f4", "#f4fbff", "#ffffff", "#9ccbf2", "#e8dcff"],
     rain: ["#26415e", "#46637f", "#8ea4b8", "#a9bdd0", "#c6dbee", "#b8c4de", "#c1b4de"],
     snow: ["#4a6684", "#7691ad", "#cfe0ec", "#eaf4ff", "#ffffff", "#e2ecff", "#efe4ff"],
     fog: ["#465a6b", "#78909f", "#cfdadf", "#e6eef2", "#e2ecf4", "#d8dcec", "#ded0ee"],
@@ -325,6 +325,9 @@ const cloudLift: Record<SkyWeather, number> = {
  */
 const RAMP_POSITIONS = [0, 0.1, 0.26, 0.5, 0.74, 1] as const;
 
+/** The least each stop may sit below the next, from darkest to brightest. */
+const CROWDING = [0.02, 0.02, 0.18, 0.1] as const;
+
 /** The sky's brightest tone; the mark's outline is lifted above it. */
 const SKY_CEILING = 0.84;
 
@@ -365,16 +368,27 @@ export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly stri
   // order those stops invert the tile's own shading: a shadow lands lighter
   // than what it falls on, which is what makes the mark look cut out.
   const stops = [bottom, mid, top, mix(cloudB, toward, amount), mix(cloudA, toward, amount)];
-  // Nothing in the sky may outshine the mark's outline, or the outline stops
-  // reading as an edge and the mark comes out in dashes. Clamping each stop to
-  // that limit flattened the clouds — a bright palette's top three stops all
-  // landed on it — so the whole range is compressed into place instead, which
-  // keeps the spacing between them and so keeps the cloud layers apart.
   // Ordered by their own brightness, never by their role in the sky. A dusk or
   // midday palette can have a lit horizon brighter than its clouds, and out of
   // order those stops invert the tile's shading: a shadow lands lighter than
   // what it falls on, which is what makes the mark look cut out.
-  return [...stops.sort((a, b) => luminance(a) - luminance(b)), "#ffffff"];
+  const ordered = stops.sort((a, b) => luminance(a) - luminance(b));
+  const levels = ordered.map(luminance);
+  // Then pulled apart where they crowd. The tile's cloud layers live between
+  // the third and fourth stops, so a palette whose top tones sit within a hair
+  // of one another — midday's were 0.01 apart — paints every layer the same
+  // colour. The lower stop gives way, since the brightest has to stay near
+  // white for cloud to read as cloud.
+  for (let index = levels.length - 2; index >= 0; index--)
+    levels[index] = Math.min(levels[index]!, levels[index + 1]! - CROWDING[index]!);
+  return [
+    ...ordered.map((color, index) => {
+      const shade = luminance(color);
+      const target = Math.max(0.02, levels[index]!);
+      return shade <= 0 ? color : mix("#000000", color, Math.min(1, target / shade));
+    }),
+    "#ffffff",
+  ];
 }
 
 /** The ramp colour for a 0..1 tone, honouring where each stop sits. */
@@ -407,17 +421,18 @@ const ICON_SHAPE = { x: 104, y: 104, size: 816, radius: 190 };
 const iconStrike = trace(filament(11, 620, 150, 760));
 
 /**
- * The tile's stars and sparkles, as [x, y, radius, the tone of what they sit
- * on]. Daylight and overcast skies have none, so they are painted out with
- * whatever that spot repaints to; a clear or lightly clouded sky keeps them.
+ * Where the tile's stars and sparkles sit. Daylight and overcast skies have
+ * none, so those spots take the tone of the sky around them before the repaint
+ * and vanish into it; a clear or lightly clouded sky keeps them.
  */
-export const TILE_STARS: ReadonlyArray<readonly [number, number, number, number]> = [
-  [159, 547, 2, 0.194],
-  [204, 207, 4, 0.079],
-  [295, 239, 4, 0.102],
-  [445, 182, 4, 0.1],
-  [850, 364, 3, 0.534],
-  [856, 664, 3, 0.105],
+export const TILE_STARS: ReadonlyArray<readonly [number, number]> = [
+  [159, 547],
+  [203, 207],
+  [295, 237],
+  [446, 181],
+  [817, 471],
+  [849, 364],
+  [856, 664],
 ];
 
 export const skyHidesStars = (phase: SkyPhase, weather: SkyWeather) =>
@@ -428,10 +443,7 @@ export function skyIconOverlaySvg(phase: SkyPhase, weather: SkyWeather): string 
   const tint = scenes[phase][weather][4];
   // night/cloudy ships untouched, so borrow the clear night's ramp to colour
   // anything the overlay needs to paint over.
-  const tones = skyIconLookup(phase, weather) ?? skyIconLookup("night", "clear")!;
-  let body = skyHidesStars(phase, weather)
-    ? `<g filter="url(#iconBlur2)">${TILE_STARS.map(([x, y, radius, level]) => `<circle cx="${x}" cy="${y}" r="${radius + 7}" fill="${tones[Math.round(level * 255)]}"/>`).join("")}</g>`
-    : "";
+  let body = "";
   if (weather === "rain" || weather === "snow" || weather === "storm") {
     const count = weather === "storm" ? 46 : weather === "rain" ? 40 : 34;
     body += Array.from({ length: count }, (_, index) => {

@@ -67,15 +67,31 @@ export async function renderArtworkAppIcon(background: string): Promise<string> 
   return canvas.toDataURL("image/png");
 }
 
-/** Tones to substitute where the tile's stars sit, keyed by pixel index. */
-function starLevels(): Map<number, number> {
+/**
+ * Tones to substitute where the tile's stars sit, keyed by pixel index. The
+ * replacement is read from a ring around each star rather than recorded per
+ * star, so a star sitting on a cloud is filled with that cloud.
+ */
+function starLevels(pixels: Uint8ClampedArray): Map<number, number> {
   const levels = new Map<number, number>();
-  for (const [starX, starY, radius, level] of TILE_STARS) {
-    const reach = radius + 7;
-    const tone = Math.round(level * 255);
-    for (let y = starY - reach; y <= starY + reach; y++)
-      for (let x = starX - reach; x <= starX + reach; x++)
-        if ((x - starX) ** 2 + (y - starY) ** 2 <= reach ** 2) levels.set(y * 1024 + x, tone);
+  const STAR_REACH = 9;
+  for (const [starX, starY] of TILE_STARS) {
+    const ring: number[] = [];
+    for (let angle = 0; angle < 16; angle++) {
+      const radians = (angle / 16) * Math.PI * 2;
+      const pixel =
+        (Math.round(starY + Math.sin(radians) * (STAR_REACH + 1)) * 1024 +
+          Math.round(starX + Math.cos(radians) * (STAR_REACH + 1))) <<
+        2;
+      ring.push(
+        pixels[pixel]! * 0.2126 + pixels[pixel + 1]! * 0.7152 + pixels[pixel + 2]! * 0.0722,
+      );
+    }
+    ring.sort((a, b) => a - b);
+    const tone = Math.round(ring[ring.length >> 1]!);
+    for (let y = starY - STAR_REACH; y <= starY + STAR_REACH; y++)
+      for (let x = starX - STAR_REACH; x <= starX + STAR_REACH; x++)
+        if ((x - starX) ** 2 + (y - starY) ** 2 <= STAR_REACH ** 2) levels.set(y * 1024 + x, tone);
   }
   return levels;
 }
@@ -222,7 +238,7 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   const table = rampLookup(colors);
   // Daylight and overcast skies show no stars: the tile's specks take the tone
   // of what they sit on, so they vanish into the repainted sky.
-  const hidden = skyHidesStars(phase, weather) ? starLevels() : null;
+  const hidden = skyHidesStars(phase, weather) ? starLevels(origin) : null;
   for (let pixel = 0; pixel < frame.data.length; pixel += 4) {
     if (frame.data[pixel + 3] === 0) continue;
     const red = frame.data[pixel]!;
