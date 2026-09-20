@@ -1,7 +1,8 @@
 # Build public Munim Windows installer (appId com.munim.mtcode) on a Windows build host.
 param(
   [Parameter(Mandatory = $true)][string]$DesktopVersion,
-  [string]$UpdateRepository = "munimtechnologies/mtcode"
+  [string]$UpdateRepository = "munimtechnologies/mtcode",
+  [string]$UpdateUrl = "https://updates.munimtech.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,7 +23,7 @@ function Log($msg) {
 }
 
 Log "munim win publish start"
-Log "DesktopVersion=$DesktopVersion UpdateRepository=$UpdateRepository"
+Log "DesktopVersion=$DesktopVersion UpdateRepository=$UpdateRepository UpdateUrl=$UpdateUrl"
 
 if (-not (Test-Path $repo)) {
   git clone --branch main --single-branch https://github.com/munimtechnologies/mtcode.git $repo
@@ -39,6 +40,8 @@ if (-not (Test-Path ".env")) {
 
 $env:T3CODE_DESKTOP_DISTRO = "munim"
 $env:T3CODE_DESKTOP_UPDATE_REPOSITORY = $UpdateRepository
+# Counted feed in front of the releases; see infra/updates.
+$env:T3CODE_DESKTOP_UPDATE_URL = $UpdateUrl
 $env:GITHUB_REPOSITORY = $UpdateRepository
 $env:T3CODE_DESKTOP_VERSION = $DesktopVersion -replace '-nightly\.\d{8}\.\d+$', ''
 Remove-Item Env:T3CODE_DESKTOP_SIGNED -ErrorAction SilentlyContinue

@@ -51,6 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          UPDATES_ORIGIN: https://updates.munimtech.com
         run: |
           set -euo pipefail
 
@@ -62,11 +63,24 @@ jobs:
           gh api "repos/$REPO/releases?per_page=100" --paginate --jq '.[]' \
             | jq -s '.' > releases.json
 
-          total=$(jq '[.[].assets[]
-                       | select(.name | test("\\.(dmg|zip|exe|AppImage|deb|rpm)$"))
-                       | .download_count] | add // 0' releases.json)
+          github_total=$(jq '[.[].assets[]
+                              | select(.name | test("\\.(dmg|zip|exe|AppImage|deb|rpm)$"))
+                              | .download_count] | add // 0' releases.json)
+
+          # infra/updates counts what GitHub cannot see. The two populations do
+          # not overlap: a client reads exactly one feed, so installs that still
+          # point at GitHub are counted there and everything on the Worker feed
+          # is counted here. Summing is correct, including mid-migration. A
+          # Worker that cannot be reached contributes zero rather than failing
+          # the badge.
+          curl -fsS --max-time 20 "$UPDATES_ORIGIN/stats" > worker-stats.json \
+            || echo '{"deliveries":0,"deliveriesLast30Days":0,"activeInstalls":0}' > worker-stats.json
+          worker_deliveries=$(jq '.deliveries // 0' worker-stats.json)
+          worker_active=$(jq '.activeInstalls // 0' worker-stats.json)
+
+          total=$((github_total + worker_deliveries))
           today=$(date -u +%Y-%m-%d)
-          echo "total=$total on $today"
+          echo "github=$github_total worker=$worker_deliveries total=$total on $today"
 
           [ -f history.json ] || echo '[]' > history.json
 
@@ -151,13 +165,22 @@ jobs:
           ' releases.json)
           echo "active installs=$installs"
 
-          jq -n --argjson installs "$installs" '
+          # Installs on the Worker feed are counted exactly; only the ones
+          # still reading GitHub have to be estimated. Once every client has
+          # updated past the feed switch, the estimate term goes to zero and
+          # this badge is a measurement.
+          combined=$(jq -n --argjson w "$worker_active" --argjson e "$installs" '$w + $e')
+          echo "active installs: worker=$worker_active github-estimate=$installs"
+
+          jq -n --argjson combined "$combined" --argjson exact "$worker_active" '
             { schemaVersion: 1, label: "Active Installs",
-              message: ("~" + ($installs | round | tostring)),
+              message: (if $combined == $exact
+                        then ($combined | tostring)
+                        else "~" + ($combined | round | tostring) end),
               color: "9966CC", labelColor: "gray" }
           ' > active-installs.json
 
-          rm -f releases.json window.json
+          rm -f releases.json window.json worker-stats.json
           git add history.json downloads-monthly.json downloads-total.json active-installs.json
           if git diff --cached --quiet; then
             echo "no change"

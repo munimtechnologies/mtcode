@@ -1,0 +1,10 @@
+{
+  "name": "@t3tools/updates-worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply mtcode-updates --remote",
+    "tail": "wrangler tail mtcode-updates"
+  }
+}

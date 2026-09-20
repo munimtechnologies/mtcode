@@ -29,6 +29,12 @@ TAG="munim-v${T3CODE_DESKTOP_VERSION}"
 export T3CODE_DESKTOP_DISTRO=munim
 export T3CODE_DESKTOP_UPDATE_REPOSITORY="$RELEASE_REPO"
 export GITHUB_REPOSITORY="$RELEASE_REPO"
+# Ship the feed behind infra/updates so updates can be counted: GitHub's
+# download counter ignores the range requests a differential update is made of,
+# so publishing straight at the repo hides every auto-update. The Worker serves
+# the same yml and redirects to the same assets on this release.
+UPDATE_URL="${T3_MUNIM_UPDATE_URL:-https://updates.munimtech.com}"
+export T3CODE_DESKTOP_UPDATE_URL="$UPDATE_URL"
 
 # Never publish a build whose upstream merge dropped fork features (kept
 # modules, lost call sites). Checks live in personal-verify-fork-features.sh.
@@ -44,6 +50,7 @@ echo "building Munim Mac (post-codesign with Developer ID: ${SIGN_IDENTITY:-none
 echo "T3CODE_DESKTOP_VERSION=$T3CODE_DESKTOP_VERSION"
 echo "T3CODE_DESKTOP_DISTRO=$T3CODE_DESKTOP_DISTRO"
 echo "UPDATE_REPO=$T3CODE_DESKTOP_UPDATE_REPOSITORY"
+echo "UPDATE_URL=$T3CODE_DESKTOP_UPDATE_URL"
 
 # --- Windows x64 via the Windows build host, started first so it overlaps the Mac build ---
 # Host/user are overridable so a second Windows box can cover for Blade when it
@@ -59,7 +66,8 @@ build_windows() {
   ssh -o BatchMode=yes "$WIN_HOST" powershell.exe -NoProfile -ExecutionPolicy Bypass \
     -File "$WIN_HOME/dev/personal-publish-munim-win.ps1" \
     -DesktopVersion "$T3CODE_DESKTOP_VERSION" \
-    -UpdateRepository "$RELEASE_REPO"
+    -UpdateRepository "$RELEASE_REPO" \
+    -UpdateUrl "$UPDATE_URL"
 }
 if [[ "${T3_MUNIM_SKIP_WIN:-}" == "1" ]]; then
   echo "-- skipping Windows build (T3_MUNIM_SKIP_WIN=1) --"

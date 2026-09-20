@@ -2710,9 +2710,27 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   distro: DesktopDistroIdentity = resolveDesktopDistroIdentity(),
 ) {
   const env = yield* Config.all({
+    updateUrl: Config.String("T3CODE_DESKTOP_UPDATE_URL").pipe(Config.option),
     updateRepository: Config.String("T3CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
     githubRepository: Config.String("GITHUB_REPOSITORY").pipe(Config.option),
   });
+
+  // A generic feed in front of the releases, so updates can be counted.
+  // GitHub's download counter only moves for a full-file request, and the
+  // updater range-requests the archive whenever a .blockmap exists, so
+  // publishing straight to GitHub makes every auto-update invisible. The
+  // host serves the same yml and redirects to the same release assets;
+  // `github` stays the default so a plain build needs no extra service.
+  const updateUrl = Option.getOrUndefined(env.updateUrl)?.trim();
+  if (updateUrl) {
+    return {
+      provider: "generic",
+      url: updateUrl.replace(/\/+$/, ""),
+      channel: updateChannel,
+      useMultipleRangeRequest: false,
+    };
+  }
+
   const rawRepo = (
     Option.getOrUndefined(env.updateRepository)?.trim() ||
     distro.updateRepository ||

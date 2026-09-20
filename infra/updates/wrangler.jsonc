@@ -1,0 +1,16 @@
+{
+  "name": "mtcode-updates",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-20",
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "routes": [{ "pattern": "updates.munimtech.com", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mtcode-updates",
+      "database_id": "5c844823-876e-449a-b1bb-daf10f127f1e",
+      "migrations_dir": "migrations",
+    },
+  ],
+}

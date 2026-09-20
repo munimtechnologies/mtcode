@@ -294,6 +294,35 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
   });
 
+  it.effect("prefers a counted generic feed over the GitHub provider", () =>
+    Effect.gen(function* () {
+      const config = yield* resolveGitHubPublishConfig("latest").pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                T3CODE_DESKTOP_UPDATE_URL: "https://updates.munimtech.com/",
+                T3CODE_DESKTOP_UPDATE_REPOSITORY: "munimtechnologies/mtcode",
+              },
+            }),
+          ),
+        ),
+      );
+
+      // The trailing slash has to go: electron-updater joins the channel file
+      // onto this string, and a doubled slash 404s against the Worker.
+      // useMultipleRangeRequest must stay false -- the bytes come from GitHub's
+      // release storage, which answers a multi-range request with 501, and the
+      // generic provider turns it on by default.
+      assert.deepStrictEqual(config, {
+        provider: "generic",
+        url: "https://updates.munimtech.com",
+        channel: "latest",
+        useMultipleRangeRequest: false,
+      });
+    }),
+  );
+
   it.effect("resolves GitHub desktop publish config from Effect config", () =>
     Effect.gen(function* () {
       const latestConfig = yield* resolveGitHubPublishConfig("latest").pipe(
