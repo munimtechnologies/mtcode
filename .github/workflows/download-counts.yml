@@ -1,5 +1,8 @@
 name: Download counts
 
+# Renders the three README badges: total downloads, downloads this month, and
+# roughly how many installs are running.
+#
 # GitHub reports one cumulative download counter per release asset and no
 # history, so "downloads this month" cannot be read from the API. This job
 # snapshots the running total once a day under `.github/download-counts` on `main` and serves
@@ -44,13 +47,14 @@ jobs:
           mkdir -p .github/download-counts
           cd .github/download-counts
 
-          # `gh --paginate` with `--jq` runs the filter once per page, so the
-          # sum has to be folded here rather than inside jq.
-          total=$(gh api "repos/$REPO/releases?per_page=100" --paginate \
-            --jq '[.[].assets[]
-                   | select(.name | test("\\.(dmg|zip|exe|AppImage|deb|rpm)$"))
-                   | .download_count] | add // 0' \
-            | awk '{ sum += $1 } END { print sum + 0 }')
+          # `gh --paginate` with `--jq` runs the filter once per page, so emit
+          # one release per line and slurp the pages back into one array.
+          gh api "repos/$REPO/releases?per_page=100" --paginate --jq '.[]' \
+            | jq -s '.' > releases.json
+
+          total=$(jq '[.[].assets[]
+                       | select(.name | test("\\.(dmg|zip|exe|AppImage|deb|rpm)$"))
+                       | .download_count] | add // 0' releases.json)
           today=$(date -u +%Y-%m-%d)
           echo "total=$total on $today"
 
@@ -91,9 +95,9 @@ jobs:
           monthly=$(jq -r '.downloads' window.json)
           measured=$(jq -r '.measured' window.json)
           if [ "$measured" = "true" ]; then
-            label="downloads / month"
+            label="Downloads / Month"
           else
-            label="downloads since $(jq -r '.since' window.json)"
+            label="Downloads since $(jq -r '.since' window.json)"
           fi
 
           jq -n --arg label "$label" --argjson monthly "$monthly" '
@@ -106,7 +110,45 @@ jobs:
               message: ($total | tostring), color: "0066CC", labelColor: "gray" }
           ' > downloads-total.json
 
-          git add history.json downloads-monthly.json downloads-total.json
+          # How many copies are actually running. Nothing reports that, but the
+          # updater polls the feed on the newest release every four minutes, so
+          # a release's latest-mac.yml fetches divided by (hours it stayed
+          # newest x 15) is how many installs were running in that window.
+          # Take the median of the last ten releases that stayed newest long
+          # enough to measure -- under about two hours a single stray fetch
+          # invents a whole install. Ordering is by published_at: created_at is
+          # the tagged commit's date, so two releases cut from one commit tie.
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          installs=$(jq --arg now "$now" '
+            def at: (.published_at // .created_at) | fromdateiso8601;
+            ([ .[] | select(.tag_name | startswith("munim-v")) ] | sort_by(at)) as $r
+            | ($now | fromdateiso8601) as $nowSec
+            | [ range(0; ($r | length)) as $i
+                | $r[$i] as $rel
+                | (if $i + 1 < ($r | length) then ($r[$i + 1] | at) else $nowSec end) as $end
+                | (($end - ($rel | at)) / 3600) as $hours
+                | select($hours >= 2)
+                | ([ $rel.assets[] | select(.name == "latest-mac.yml") | .download_count ] | first) as $polls
+                | select($polls != null)
+                | $polls / ($hours * 15)
+              ]
+            | .[-10:] | sort
+            | if length == 0 then 0
+              elif (length % 2) == 1 then .[(length / 2) | floor]
+              else ((.[(length / 2) - 1] + .[length / 2]) / 2)
+              end
+            | . * 10 | round / 10
+          ' releases.json)
+          echo "active installs=$installs"
+
+          jq -n --argjson installs "$installs" '
+            { schemaVersion: 1, label: "Active Installs",
+              message: ("~" + ($installs | round | tostring)),
+              color: "9966CC", labelColor: "gray" }
+          ' > active-installs.json
+
+          rm -f releases.json window.json
+          git add history.json downloads-monthly.json downloads-total.json active-installs.json
           if git diff --cached --quiet; then
             echo "no change"
             exit 0

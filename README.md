@@ -17,6 +17,12 @@
   <a aria-label="total downloads" href="https://github.com/munimtechnologies/mtcode/releases" target="_blank">
     <img alt="Total Downloads" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Fdownloads-total.json" />
   </a>
+  <a aria-label="downloads this month" href="https://github.com/munimtechnologies/mtcode/releases" target="_blank">
+    <img alt="Downloads this month" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Fdownloads-monthly.json" />
+  </a>
+  <a aria-label="active installs" href="https://github.com/munimtechnologies/mtcode/blob/main/.github/workflows/download-counts.yml" target="_blank">
+    <img alt="Active Installs" src="https://img.shields.io/endpoint?style=flat-square&url=https%3A%2F%2Fraw.githubusercontent.com%2Fmunimtechnologies%2Fmtcode%2Fmain%2F.github%2Fdownload-counts%2Factive-installs.json" />
+  </a>
 </p>
 
 <p align="center">
