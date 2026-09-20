@@ -1,5 +1,9 @@
 # Appearance and themes
 
+MT Code ships wearing its own theme, first in the library: the stock light palette paired with a
+charcoal-and-blue dark one. The card next to it, **T3 Code**, is the palette the app wears with no
+theme installed — T3's own light and dark pair — so the original look is one click away.
+
 On web and desktop, open **Settings → Appearance** to choose a theme and follow the system
 appearance or stay in light or dark mode. To use different themes for light and dark mode, select
 the corresponding preview within each theme. Appearance preferences are saved separately on each
@@ -23,13 +27,15 @@ of the selected theme.
 
 ## Sidebar sky and app icon
 
-On web and desktop, choose **Sidebar artwork** in Appearance for a fixed sky, or choose
-**Local day & night** to follow sunrise and sunset. **Local day, night & weather** also follows
-clouds, rain, snow, fog, and storms. Both modes include dawn and dusk, and use the same soft cloud
+**Local day, night & weather** is the shipped default. Choose **Sidebar artwork** in Appearance for
+a fixed sky instead, or **Local day & night** to follow only sunrise and sunset. The weather mode
+also follows clouds, rain, snow, fog, and storms. Both modes include dawn and dusk, and use the same soft cloud
 and star style as Night sky. The send button follows the selected artwork.
 
-Search for a city or choose **Use my location**. Approximate coordinates are stored only on that
-device and sent to [Open-Meteo](https://open-meteo.com/) for daylight and weather. Set a location
+Search for a city or choose **Use my location**, which asks the device first and falls back to a
+lookup of your network address when the device will not say — so it still works on a machine with
+location services off. Approximate coordinates are stored only on that device and sent to
+[Open-Meteo](https://open-meteo.com/) for daylight and weather. Set a location
 on each device where you use an automatic mode. Weather refreshes every 15 minutes while the app
 is visible. If location or weather is unavailable, the app keeps the last sky or shows Night sky
 until it can update. **Clear location** removes the saved coordinates.
