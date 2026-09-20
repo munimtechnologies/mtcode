@@ -1,11 +1,11 @@
 import mark from "../../../../assets/munim/app-icon.icon/Assets/text.svg?raw";
 import munimIcon from "../../../../assets/munim/munim-macos-1024.png";
 import {
-  sampleSkyRamp,
+  markTone,
   skyHidesStars,
   TILE_STARS,
+  skyIconLookup,
   skyIconOverlayImage,
-  skyIconRamp,
   type SkyPhase,
   type SkyWeather,
 } from "./skyArtwork";
@@ -180,11 +180,11 @@ function rimProfile(pixels: Uint8ClampedArray, distance: Float32Array) {
 let tileDistance: Float32Array | null = null;
 let tileRim: ReturnType<typeof rimProfile> | null = null;
 
-/** 256-entry lookup from the tile's own tones to the scene's palette. */
-function rampLookup(ramp: readonly string[]): Uint8ClampedArray {
+/** The scene's 256 tones, as channels ready for the canvas. */
+function rampLookup(colors: readonly string[]): Uint8ClampedArray {
   const table = new Uint8ClampedArray(768);
   for (let level = 0; level < 256; level++) {
-    const color = sampleSkyRamp(ramp, level / 255);
+    const color = colors[level]!;
     table[level * 3] = Number.parseInt(color.slice(1, 3), 16);
     table[level * 3 + 1] = Number.parseInt(color.slice(3, 5), 16);
     table[level * 3 + 2] = Number.parseInt(color.slice(5, 7), 16);
@@ -209,8 +209,8 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas unavailable");
   context.drawImage(tile, 0, 0, 1024, 1024);
-  const ramp = skyIconRamp(phase, weather);
-  if (ramp === null) {
+  const colors = skyIconLookup(phase, weather);
+  if (colors === null) {
     if (overlay) context.drawImage(overlay, 0, 0, 1024, 1024);
     return canvas.toDataURL("image/png");
   }
@@ -219,7 +219,7 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
   const origin = new Uint8ClampedArray(frame.data);
   const distance = (tileDistance ??= edgeDistance(origin));
   const rim = (tileRim ??= rimProfile(origin, distance));
-  const table = rampLookup(ramp);
+  const table = rampLookup(colors);
   // Daylight and overcast skies show no stars: the tile's specks take the tone
   // of what they sit on, so they vanish into the repainted sky.
   const hidden = skyHidesStars(phase, weather) ? starLevels() : null;
@@ -230,20 +230,31 @@ export async function renderSkyAppIcon(phase: SkyPhase, weather: SkyWeather): Pr
     const blue = frame.data[pixel + 2]!;
     const painted = hidden?.get(pixel >> 2);
     const level = painted ?? (red * 0.2126 + green * 0.7152 + blue * 0.0722) | 0;
-    // The mark and its grey outline keep the tile's own pixels: repainting them
-    // tints the mark and turns the outline into a coloured glow. Only the mark,
-    // though — the glass edge has to repaint with the sky or it reads as a ring
-    // of the old artwork drawn around the new one.
+    // The mark and its outline are the app's, not the weather's: they stay
+    // neutral, and they are lifted clear of the sky so a bright scene cannot
+    // raise its clouds past the outline and break the mark into dashes.
     const x = (pixel >> 2) % 1024;
     const y = (pixel >> 2) / 1024;
-    if (painted === undefined && x > 218 && x < 805 && y > 245 && y < 777) {
+    let marked = 0;
+    if (x > 218 && x < 805 && y > 245 && y < 777) {
       const highest = red > green ? (red > blue ? red : blue) : green > blue ? green : blue;
       const lowest = red < green ? (red < blue ? red : blue) : green < blue ? green : blue;
-      if (level > 133 && highest > 0 && (highest - lowest) / highest < 0.16) continue;
+      const neutral = Math.max(
+        0,
+        Math.min(1, (0.24 - (highest ? (highest - lowest) / highest : 0)) / 0.12),
+      );
+      const bright = Math.max(0, Math.min(1, (level - 118) / 44));
+      marked = neutral * bright;
     }
     let red2 = table[level * 3]!;
     let green2 = table[level * 3 + 1]!;
     let blue2 = table[level * 3 + 2]!;
+    if (marked > 0) {
+      const tone = Math.round(markTone(level / 255) * 255);
+      red2 = Math.round(red2 + (tone - red2) * marked);
+      green2 = Math.round(green2 + (tone - green2) * marked);
+      blue2 = Math.round(blue2 + (tone - blue2) * marked);
+    }
     // The glass edge ships with the tile and every icon wears the same one, but
     // it has to end up in the scene's colours without eating the art beneath
     // it. So the sheen is lifted off, whatever it covered is repainted, and the
