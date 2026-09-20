@@ -73,8 +73,8 @@ const scenes: Record<SkyPhase, Record<SkyWeather, Scene>> = {
     storm: ["#080d26", "#1b1c44", "#4a3f68", "#5b5390", "#4c74a6", "#4b4b96", "#69479a"],
   },
   day: {
-    clear: ["#2f7fd4", "#57a0e4", "#bfe3fa", "#ffe9b0", "#ffffff", "#cfe8ff", "#e4d8ff"],
-    cloudy: ["#4389c8", "#6ba6d8", "#c9e2f4", "#f4fbff", "#ffffff", "#d8ecff", "#e8dcff"],
+    clear: ["#0d52ae", "#3379cf", "#bfe3fa", "#ffe9b0", "#ffffff", "#cfe8ff", "#e4d8ff"],
+    cloudy: ["#2a72c0", "#5e9ad6", "#c9e2f4", "#f4fbff", "#ffffff", "#d8ecff", "#e8dcff"],
     rain: ["#26415e", "#46637f", "#8ea4b8", "#a9bdd0", "#c6dbee", "#b8c4de", "#c1b4de"],
     snow: ["#4a6684", "#7691ad", "#cfe0ec", "#eaf4ff", "#ffffff", "#e2ecff", "#efe4ff"],
     fog: ["#465a6b", "#78909f", "#cfdadf", "#e6eef2", "#e2ecf4", "#d8dcec", "#ded0ee"],
@@ -309,7 +309,7 @@ const mix = (from: string, to: string, amount: number) =>
  * clear one lets them sink back into the sky.
  */
 const cloudLift: Record<SkyWeather, number> = {
-  clear: -0.12,
+  clear: -0.08,
   cloudy: 0.26,
   rain: -0.05,
   snow: 0.3,
@@ -325,7 +325,7 @@ const cloudLift: Record<SkyWeather, number> = {
  */
 const RAMP_POSITIONS = [0, 0.1, 0.26, 0.5, 0.74, 1] as const;
 
-/** The sky's brightest tone. The mark's outline is lifted clear of it below. */
+/** The sky's brightest tone; the mark's outline is lifted above it. */
 const SKY_CEILING = 0.84;
 
 /**
@@ -370,24 +370,11 @@ export function skyIconRamp(phase: SkyPhase, weather: SkyWeather): readonly stri
   // that limit flattened the clouds — a bright palette's top three stops all
   // landed on it — so the whole range is compressed into place instead, which
   // keeps the spacing between them and so keeps the cloud layers apart.
-  const ordered = stops.sort((a, b) => luminance(a) - luminance(b));
-  const levels = ordered.map(luminance);
-  const darkest = levels[0]!;
-  const peak = levels[levels.length - 1]!;
-  // Nothing in the sky may outshine the mark's outline, or the outline stops
-  // reading as an edge. Clamping each stop to that limit flattened bright
-  // palettes — day's top three all landed on it — so the range is compressed
-  // into place instead, which keeps the gaps between the tones and so keeps
-  // the tile's cloud layers apart.
-  const squeeze = peak > SKY_CEILING ? (SKY_CEILING - darkest) / (peak - darkest) : 1;
-  return [
-    ...ordered.map((color, index) => {
-      const level = levels[index]!;
-      const target = darkest + (level - darkest) * squeeze;
-      return level <= 0 ? color : mix("#000000", color, target / level);
-    }),
-    "#ffffff",
-  ];
+  // Ordered by their own brightness, never by their role in the sky. A dusk or
+  // midday palette can have a lit horizon brighter than its clouds, and out of
+  // order those stops invert the tile's shading: a shadow lands lighter than
+  // what it falls on, which is what makes the mark look cut out.
+  return [...stops.sort((a, b) => luminance(a) - luminance(b)), "#ffffff"];
 }
 
 /** The ramp colour for a 0..1 tone, honouring where each stop sits. */
@@ -400,35 +387,18 @@ export function sampleSkyRamp(ramp: readonly string[], level: number): string {
   return mix(ramp[index]!, ramp[index + 1]!, Math.min(1, Math.max(0, (level - from) / span)));
 }
 
-/** Where the tile's own sky and the mark's outline sit on its tonal range. */
-const TILE_SKY = 0.09;
-const TILE_OUTLINE = 0.89;
-
 /**
  * The tone the tile's every brightness becomes, as 256 colours.
  *
- * Hue comes from the scene's palette, but brightness is mapped straight: the
- * tile's sky lands on the scene's sky and its outline on the ceiling, evenly
- * in between. Letting the palette's own stops set brightness meant a scene
- * whose tones bunched up flattened the artwork — day's clouds collapsed onto
- * one colour — while one with a gap exaggerated it.
+ * Straight from the scene's palette: its sky colours carry the tile's sky and
+ * its cloud colours carry the clouds, so a daytime sky stays a deep blue under
+ * near-white cloud. The mark rides above all of it — see `markTone` — which is
+ * what lets the sky use its full range without overtaking the mark's outline.
  */
 export function skyIconLookup(phase: SkyPhase, weather: SkyWeather): readonly string[] | null {
   const ramp = skyIconRamp(phase, weather);
   if (ramp === null) return null;
-  const sky = luminance(sampleSkyRamp(ramp, TILE_SKY));
-  const gain = (SKY_CEILING - sky) / (TILE_OUTLINE - TILE_SKY);
-  return Array.from({ length: 256 }, (_, step) => {
-    const level = step / 255;
-    const color = sampleSkyRamp(ramp, level);
-    const shade = luminance(color);
-    const target = Math.min(1, Math.max(0.01, sky + (level - TILE_SKY) * gain));
-    // Darkening scales the colour; brightening blends toward white. Scaling it
-    // up instead clips whichever channel tops out first and swings the hue —
-    // dusk's violets came out olive.
-    if (target <= shade) return shade <= 0 ? color : mix("#000000", color, target / shade);
-    return mix(color, "#ffffff", Math.min(1, (target - shade) / Math.max(0.001, 1 - shade)));
-  });
+  return Array.from({ length: 256 }, (_, step) => sampleSkyRamp(ramp, step / 255));
 }
 
 // The shipped tile is a squircle inset in its 1024 canvas; weather stays inside it.
