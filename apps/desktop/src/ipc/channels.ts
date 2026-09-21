@@ -138,3 +138,4 @@ export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission"
 export const OPEN_TERMINAL_CHANNEL = "desktop:open-terminal";
 
 export const REQUEST_TERMINAL_PERMISSION_CHANNEL = "desktop:request-terminal-permission";
+export const PREVIEW_RECORDING_INPUT_CHANNEL = "desktop:preview-recording-input";
