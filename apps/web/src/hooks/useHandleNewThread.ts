@@ -24,7 +24,6 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -35,7 +34,7 @@ import {
   resolveNewThreadModelSelectionOverride,
   resolveWorkspaceOptionsAfterEnvironmentRetarget,
 } from "../lib/chatThreadActions";
-import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
+import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { shouldReadProjectFileForNewThreadDefaults } from "../session-logic";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
@@ -178,10 +177,6 @@ export function useNewThreadHandler() {
         project,
       );
       const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
-      const projectThreadEnvMode =
-        projectSettings.sources.defaultThreadEnvMode === "project"
-          ? projectSettings.settings.defaultThreadEnvMode
-          : undefined;
       const resolveImplicitRuntimeMode = (destinationDraftId: DraftId) => {
         const destinationDraft = getComposerDraft(destinationDraftId);
         if (destinationDraft?.runtimeMode != null) {
@@ -218,17 +213,19 @@ export function useNewThreadHandler() {
         )?.connection.phase;
         const consultProjectFile =
           project !== undefined &&
-          shouldReadProjectFileForNewThreadDefaults(projectThreadEnvMode, connectionPhase);
-        return resolveDefaultThreadEnvMode({
-          projectSetting: projectThreadEnvMode,
-          projectFile: consultProjectFile
-            ? await readT3ProjectFileDefaultThreadEnvMode(
-                project.environmentId,
-                project.workspaceRoot,
-              )
-            : null,
-          globalDefault: projectSettings.settings.defaultThreadEnvMode,
-        });
+          shouldReadProjectFileForNewThreadDefaults(
+            projectSettings.settings.defaultThreadEnvMode,
+            connectionPhase,
+          );
+        const projectFile = consultProjectFile
+          ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
+          : null;
+        return resolveProjectSettings(
+          targetServerSettings,
+          project?.id ?? null,
+          project,
+          projectFile,
+        ).settings.defaultThreadEnvMode;
       };
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)

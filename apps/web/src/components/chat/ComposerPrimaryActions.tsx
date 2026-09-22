@@ -280,7 +280,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </span>
       ) : null}
       {isConnecting || isSendBusy ? (
-        <Spinner className="size-3.5" aria-hidden="true" />
+        <Spinner size="sm" aria-hidden="true" />
       ) : showContinueInterruptedTurn ? (
         <ChevronRightIcon className="size-4" aria-hidden="true" />
       ) : (
