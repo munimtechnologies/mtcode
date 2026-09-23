@@ -36,11 +36,17 @@ function Log($msg) {
 
 function Install-MtCode {
   param([Parameter(Mandatory = $true)][string]$InstallerPath)
-Log "requesting MT Code close"
-$installedExe = Join-Path $env:LOCALAPPDATA "Programs\mtcode\MT Code.exe"
-Get-Process | Where-Object { $_.Path -eq $installedExe } | ForEach-Object {
-  [void]$_.CloseMainWindow()
+Log "stopping MT Code"
+# Ask the app to close, then force-stop whatever still runs from the MT/T3 Code
+# install folders. CloseMainWindow alone never reaches the server sidecar or a
+# session-0 window over SSH, and a survivor made Dell keep the old build.
+$installDirs = @("mtcode", "t3code") | ForEach-Object { (Join-Path $env:LOCALAPPDATA "Programs\$_") + "\" }
+function Get-InstalledAppProcess {
+  Get-Process | Where-Object { $p = $_.Path; $p -and ($installDirs | Where-Object { $p.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }) }
 }
+Get-InstalledAppProcess | ForEach-Object { [void]$_.CloseMainWindow() }
+for ($i = 0; $i -lt 20 -and (Get-InstalledAppProcess); $i++) { Start-Sleep -Milliseconds 500 }
+Get-InstalledAppProcess | Stop-Process -Force -ErrorAction SilentlyContinue
 
 Log "uninstalling previous installs if present"
 try {

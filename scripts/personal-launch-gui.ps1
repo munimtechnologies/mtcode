@@ -91,9 +91,16 @@ public class T3Windows {
 }
 
 # ---- the half that runs over SSH ----
-# Request a normal close only from the exact installed executable.
-Get-Process | Where-Object { $_.Path -eq $ExePath } |
-  ForEach-Object { [void]$_.CloseMainWindow() }
+# Anything already running from this install is either in session 0 (invisible, and the reason for
+# this script) or a copy of the build being replaced. Ask it to close, then force-stop what is left
+# so the task starts the app rather than handing focus to an instance nobody can see.
+$installDir = (Split-Path -Parent $ExePath) + "\"
+function Get-InstalledAppProcess {
+  Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($installDir, [StringComparison]::OrdinalIgnoreCase) }
+}
+Get-InstalledAppProcess | ForEach-Object { [void]$_.CloseMainWindow() }
+for ($i = 0; $i -lt 10 -and (Get-InstalledAppProcess); $i++) { Start-Sleep -Milliseconds 500 }
+Get-InstalledAppProcess | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
 $resultFile = Join-Path $env:TEMP "t3-launch-result.txt"

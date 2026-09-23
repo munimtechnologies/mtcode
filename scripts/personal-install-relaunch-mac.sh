@@ -10,9 +10,9 @@
 # the parent dies with the app.
 #
 # Overwriting /Applications/MT Code.app while it is still running is what leaves a
-# white window. The worker asks the app to quit, swaps the bundle only after
-# its processes are gone, then opens a new instance. A failed quit leaves the
-# installed bundle intact.
+# white window. The worker asks the app to quit (then TERM/KILLs whatever still
+# runs from the bundle), swaps the bundle only after its processes are gone,
+# then opens a new instance.
 #
 # Usage:
 #   personal-install-relaunch-mac.sh [path-to.dmg]
@@ -134,7 +134,32 @@ APPLESCRIPT
     sleep 0.25
   done
 
-  fail "Mac did not quit cleanly; leaving the installed bundle intact"
+  # A soft quit only reaches the app. Detached children (an orphaned
+  # pi-supervisor from an earlier session, reparented to launchd) never see
+  # it, and one of them blocked the 0.0.90 install. t3_pids only matches
+  # processes running from an MT/T3 Code bundle, so TERM/KILL stays scoped.
+  echo "Mac soft quit timed out — sending TERM to $(t3_pids | tr '\n' ' ')"
+  for pid in $(t3_pids); do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for i in $(seq 1 20); do
+    if ! t3_running; then
+      echo "Mac quit after TERM"
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  echo "Mac still running — sending KILL"
+  for pid in $(t3_pids); do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  sleep 0.5
+
+  if t3_running; then
+    fail "Mac quit failed — processes still held the bundle: $(t3_pids | tr '\n' ' ')"
+  fi
+  echo "Mac quit after KILL"
 }
 
 swap_install() {
