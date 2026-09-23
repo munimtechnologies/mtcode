@@ -91,11 +91,9 @@ public class T3Windows {
 }
 
 # ---- the half that runs over SSH ----
-# Anything already running is either in session 0 (invisible, and the reason for this script) or a
-# copy of the build being replaced. Either way it goes, so the task starts the app rather than
-# handing focus to an instance nobody can see.
-Get-Process -Name $processName -ErrorAction SilentlyContinue |
-  ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+# Request a normal close only from the exact installed executable.
+Get-Process | Where-Object { $_.Path -eq $ExePath } |
+  ForEach-Object { [void]$_.CloseMainWindow() }
 Start-Sleep -Seconds 2
 
 $resultFile = Join-Path $env:TEMP "t3-launch-result.txt"

@@ -483,9 +483,9 @@ export function PluginMarketplace() {
               side="bottom"
               sideOffset={8}
               className="w-72 max-w-[calc(100vw-2rem)]"
-              viewportClassName="p-3"
+              padding="none"
             >
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 p-3">
                 <div className="flex min-w-0 items-center justify-between gap-3">
                   <PopoverTitle className="text-base sm:text-sm">Filters</PopoverTitle>
                   {activeFilterCount > 0 ? (

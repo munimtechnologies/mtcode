@@ -1,10 +1,11 @@
 $ErrorActionPreference = "Stop"
 Write-Output "DELL_INSTALL_START"
 
-Get-Process | Where-Object {
-  $_.ProcessName -like "*T3*" -or $_.ProcessName -like "*MT Code*" -or
-  $_.Path -like "*t3code*" -or $_.Path -like "*mtcode*"
-} | Stop-Process -Force -ErrorAction SilentlyContinue
+$installedExe = Join-Path $env:LOCALAPPDATA "Programs\mtcode\MT Code.exe"
+Get-Process | Where-Object { $_.Path -eq $installedExe } | ForEach-Object {
+  [void]$_.CloseMainWindow()
+}
+
 Start-Sleep -Seconds 2
 
 try {

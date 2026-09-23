@@ -10,9 +10,9 @@
 # the parent dies with the app.
 #
 # Overwriting /Applications/MT Code.app while it is still running is what leaves a
-# white window. The worker kills every MT Code process first (and any legacy
-# T3 Code fleet install), swaps the bundle only after they are gone, then opens
-# a new instance.
+# white window. The worker asks the app to quit, swaps the bundle only after
+# its processes are gone, then opens a new instance. A failed quit leaves the
+# installed bundle intact.
 #
 # Usage:
 #   personal-install-relaunch-mac.sh [path-to.dmg]
@@ -134,28 +134,7 @@ APPLESCRIPT
     sleep 0.25
   done
 
-  echo "Mac soft quit timed out — sending TERM"
-  for pid in $(t3_pids); do
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  for i in $(seq 1 20); do
-    if ! t3_running; then
-      echo "Mac quit after TERM"
-      return 0
-    fi
-    sleep 0.25
-  done
-
-  echo "Mac still running — sending KILL"
-  for pid in $(t3_pids); do
-    kill -KILL "$pid" 2>/dev/null || true
-  done
-  sleep 0.5
-
-  if t3_running; then
-    fail "Mac quit failed — processes still held the bundle: $(t3_pids | tr '\n' ' ')"
-  fi
-  echo "Mac quit after KILL"
+  fail "Mac did not quit cleanly; leaving the installed bundle intact"
 }
 
 swap_install() {

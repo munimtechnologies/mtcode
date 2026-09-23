@@ -96,7 +96,6 @@ export function DirectoryPicker({
             "aria-label": label,
             placeholder: "~/",
             className: "*:data-[slot=autocomplete-input]:pe-32!",
-            wrapperClassName: "[&_[data-slot=autocomplete-start-addon]]:pointer-events-auto",
             startAddon: (
               <Button
                 size="icon-xs"

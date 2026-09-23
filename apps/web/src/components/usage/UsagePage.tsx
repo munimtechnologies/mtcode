@@ -69,6 +69,7 @@ import { UsageLimitsSection } from "./UsageLimits";
 import { makeLimitsFixture } from "./usageLimitsFixture";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
+import { sortModelsByTokens } from "./usageBreakdown";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 import {
   readUsagePagePreferences,
@@ -180,9 +181,7 @@ export function UsagePage() {
   const breakdownModels = useMemo(
     () =>
       breakdown === "model" && metric === "tokens"
-        ? merged.models.toSorted(
-            (left, right) => right.totalTokens - left.totalTokens || right.costUsd - left.costUsd,
-          )
+        ? sortModelsByTokens(merged.models)
         : merged.models,
     [breakdown, merged.models, metric],
   );
@@ -851,7 +850,7 @@ function UsageEnvironmentFilter({
       <Menu>
         <MenuTrigger
           render={<InlineButton />}
-          className="group/usage-environment min-w-0 max-w-full gap-1"
+          className="group/usage-environment min-w-0 max-w-full"
         >
           <span className="min-w-0 truncate">{label}</span>
           <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">

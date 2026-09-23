@@ -396,7 +396,6 @@ function SidebarUpdateControl() {
           <PopoverPopup
             align="center"
             aria-label="Update release notes"
-            className="text-balance shadow-xl shadow-black/25"
             initialFocus={false}
             onKeyDownCapture={(event) => {
               if (

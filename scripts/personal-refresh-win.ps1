@@ -36,9 +36,11 @@ function Log($msg) {
 
 function Install-MtCode {
   param([Parameter(Mandatory = $true)][string]$InstallerPath)
-Log "stopping T3 / MT Code"
-Get-Process | Where-Object { $_.ProcessName -like "*T3*" -or $_.ProcessName -like "*MT Code*" } |
-  Stop-Process -Force -ErrorAction SilentlyContinue
+Log "requesting MT Code close"
+$installedExe = Join-Path $env:LOCALAPPDATA "Programs\mtcode\MT Code.exe"
+Get-Process | Where-Object { $_.Path -eq $installedExe } | ForEach-Object {
+  [void]$_.CloseMainWindow()
+}
 
 Log "uninstalling previous installs if present"
 try {
