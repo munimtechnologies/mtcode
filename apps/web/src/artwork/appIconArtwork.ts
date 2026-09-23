@@ -10,12 +10,8 @@ import {
   type SkyWeather,
 } from "./skyArtwork";
 import blueprint from "../../../../assets/dev/app-icon.icon/Assets/background.svg?raw";
-import night from "../../../../assets/munim/app-icon.icon/Assets/background.svg?raw";
-import leftCloud from "../../../../assets/munim/app-icon.icon/Assets/cloud-lower-left.svg?raw";
-import rightCloud from "../../../../assets/munim/app-icon.icon/Assets/cloud-upper-right.svg?raw";
 
 const svgUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
-export const NIGHT_ICON_BACKGROUND = svgUrl(night);
 export const BLUEPRINT_ICON_BACKGROUND = svgUrl(blueprint);
 
 function loadImage(source: string): Promise<HTMLImageElement> {
@@ -31,13 +27,7 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 
 /** NativeImage needs a raster image. Keep the actual MT vector mark, never regenerate it. */
 export async function renderArtworkAppIcon(background: string): Promise<string> {
-  const images = await Promise.all(
-    [
-      background,
-      svgUrl(mark),
-      ...(background === NIGHT_ICON_BACKGROUND ? [svgUrl(leftCloud), svgUrl(rightCloud)] : []),
-    ].map(loadImage),
-  );
+  const images = await Promise.all([background, svgUrl(mark)].map(loadImage));
   const canvas = document.createElement("canvas");
   canvas.width = 512;
   canvas.height = 512;
@@ -57,7 +47,6 @@ export async function renderArtworkAppIcon(background: string): Promise<string> 
     art.naturalWidth * scale,
     art.naturalHeight * scale,
   );
-  images.slice(2).forEach((cloud) => context.drawImage(cloud, 32, 32, 448, 448));
   context.drawImage(images[1]!, 32, 32, 448, 448);
   context.strokeStyle = "rgba(255,255,255,.2)";
   context.lineWidth = 2;

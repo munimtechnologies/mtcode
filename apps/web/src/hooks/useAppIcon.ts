@@ -5,7 +5,6 @@ import { useSidebarStageBackdropVariant } from "../components/SidebarStageBackdr
 import { isLocalSky, SKY_OPTIONS } from "../artwork/skyArtwork";
 import {
   BLUEPRINT_ICON_BACKGROUND,
-  NIGHT_ICON_BACKGROUND,
   renderArtworkAppIcon,
   renderSkyAppIcon,
 } from "../artwork/appIconArtwork";
@@ -32,14 +31,15 @@ export function useAppIcon(): void {
     selection === "match-artwork" ? undefined : artworkMode ? selection : "none",
   );
   const sky = artwork?.kind === "custom" ? artwork.sky : undefined;
+  // The Nightly scene is the shipped tile itself, so it wears the shipped icon.
+  // It is also where a local sky lands before it has a location or a forecast,
+  // and redrawing it from the raw layers loses the tile's glass and shape.
   const background =
     artwork?.kind === "custom"
       ? artwork.image
       : artwork?.kind === "dev"
         ? BLUEPRINT_ICON_BACKGROUND
-        : artwork?.kind === "nightly"
-          ? NIGHT_ICON_BACKGROUND
-          : null;
+        : null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
