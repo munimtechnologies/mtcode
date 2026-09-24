@@ -2669,13 +2669,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     });
     const indexExists = yield* fileSystem.exists(indexPath);
     if (indexExists) {
-      const sourceStat = yield* fileSystem.stat(indexPath);
+      const { mtime } = yield* fileSystem.stat(indexPath);
       yield* fileSystem.copyFile(indexPath, tempIndexPath);
-      // Git uses the index timestamp to detect same-size edits within its stat
-      // resolution. A fresh copy timestamp can incorrectly mark those edits clean.
-      if (Option.isSome(sourceStat.mtime)) {
-        yield* fileSystem.utimes(tempIndexPath, sourceStat.mtime.value, sourceStat.mtime.value);
-      }
+      // A newer copy timestamp hides racily clean edits. Round down before Git reads or rewrites it.
+      const indexTime = Option.isSome(mtime)
+        ? Math.max(0, Math.floor((mtime.value.getTime() - 1) / 1000))
+        : 0;
+      yield* fileSystem.utimes(tempIndexPath, indexTime, indexTime);
     }
     const env = { GIT_INDEX_FILE: tempIndexPath } satisfies NodeJS.ProcessEnv;
     const tempIndexConfig = TEMP_INDEX_CONFIG_ARGS;

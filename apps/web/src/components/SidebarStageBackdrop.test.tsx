@@ -7,7 +7,6 @@ import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarArtwork,
   resolveSidebarStageBackdropVariant,
-  resolveSidebarStageFocusRingOffsetClass,
   StageBackdropArt,
   StageBackdropButtonArt,
 } from "./SidebarStageBackdrop";
@@ -25,15 +24,6 @@ describe("SidebarStageBackdrop", () => {
     expect(resolveEnvironmentIdentificationPillLabel("nightly")).toBe("Nightly");
     expect(resolveEnvironmentIdentificationPillLabel("Latest")).toBeNull();
     expect(resolveEnvironmentIdentificationPillLabel("Alpha")).toBeNull();
-  });
-
-  it("matches the focus-ring offset to each artwork palette", () => {
-    expect(resolveSidebarStageFocusRingOffsetClass(NIGHTLY_BACKDROP)).toBe(
-      "focus-visible:ring-offset-(--stage-night-bottom)",
-    );
-    expect(resolveSidebarStageFocusRingOffsetClass(DEV_BACKDROP)).toBe(
-      "focus-visible:ring-offset-(--stage-art-bottom)",
-    );
   });
 
   it.each([NIGHTLY_BACKDROP, DEV_BACKDROP] as const)(
@@ -71,7 +61,9 @@ describe("SidebarStageBackdrop", () => {
     const markup = renderToStaticMarkup(<StageBackdropButtonArt variant={variant} />);
 
     expect(markup).toContain(`viewBox="${viewBox}"`);
-    expect(markup).toContain(`stage-${variant.kind === "dev" ? "blueprint" : "nightly"}`);
+    expect(markup).toContain(
+      `data-stage-art="${variant.kind === "dev" ? "blueprint" : "nightly"}"`,
+    );
   });
 });
 

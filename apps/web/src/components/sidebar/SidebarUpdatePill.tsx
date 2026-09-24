@@ -314,7 +314,7 @@ function SidebarUpdateControl() {
               !isInteractionDisabled && "hover:bg-sidebar-row-hover",
             )
           : cn(
-              "text-[var(--sidebar-icon-color)]",
+              "text-(--sidebar-icon-color)",
               !isInteractionDisabled && "hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
             ),
         disabled && !showUpdateIconState && "opacity-60",

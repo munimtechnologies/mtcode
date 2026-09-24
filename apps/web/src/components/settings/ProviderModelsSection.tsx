@@ -313,10 +313,7 @@ function SortableMarker(props: {
 // Integer line height: the list box can be a fractional flex height, and a
 // half-pixel of content overflow makes dnd-kit auto-scroll flash a scrollbar.
 const groupLabelClassName = (isDropTarget: boolean) =>
-  cn(
-    "px-2 pt-5 pb-1.5 text-[11px] leading-4 text-muted-foreground",
-    isDropTarget && "text-primary",
-  );
+  cn("px-2 pt-5 pb-1.5 text-2xs leading-4 text-muted-foreground", isDropTarget && "text-primary");
 
 const emptySlotClassName = (isDropTarget: boolean) =>
   cn(
@@ -624,17 +621,17 @@ export function ProviderModelsSection({
             {model.name}
           </span>
           {model.name !== model.slug ? (
-            <code className="truncate font-mono text-[11px] text-muted-foreground/70">
+            <code className="truncate font-mono text-2xs text-muted-foreground/70">
               {model.slug}
             </code>
           ) : null}
           {model.isCustom ? (
-            <span className="text-[11px] text-muted-foreground/70">custom</span>
+            <span className="text-2xs text-muted-foreground/70">custom</span>
           ) : null}
         </span>
         {/* Always a grid item so the columns line up across rows; the text
             itself drops out on phone widths where it would starve the name. */}
-        <span className="text-[11px] text-muted-foreground/70">
+        <span className="text-2xs text-muted-foreground/70">
           {capLabels.length > 0 ? (
             <span className="hidden sm:inline">{capLabels.join(" · ")}</span>
           ) : null}
@@ -824,7 +821,7 @@ export function ProviderModelsSection({
                 <>
                   <div
                     className={cn(
-                      "px-2 pt-1 pb-1.5 text-[11px] leading-4 text-muted-foreground",
+                      "px-2 pt-1 pb-1.5 text-2xs leading-4 text-muted-foreground",
                       dropTarget === "favorites" && "text-primary",
                     )}
                   >

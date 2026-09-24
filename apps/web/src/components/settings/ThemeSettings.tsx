@@ -235,12 +235,12 @@ function ThemeLibraryCard({
                           </button>
                         </ThemeVariantTooltip>
                         <span
-                          className="pointer-events-none absolute bottom-0 left-1/2 inline-flex max-w-24 -translate-x-1/2 items-center gap-1 text-[11px] font-medium text-foreground"
+                          className="pointer-events-none absolute bottom-0 left-1/2 inline-flex max-w-24 -translate-x-1/2 items-center gap-1 text-2xs font-medium text-foreground"
                           style={{ marginLeft: rootOffsetX }}
                         >
                           <span className="truncate">{selected.option.label}</span>
                           {options.length > 1 ? (
-                            <span className="shrink-0 rounded-full bg-muted px-1 text-[9px] text-muted-foreground">
+                            <span className="shrink-0 rounded-full bg-muted px-1 text-3xs text-muted-foreground">
                               +{options.length - 1}
                             </span>
                           ) : null}
@@ -260,7 +260,7 @@ function ThemeLibraryCard({
                                     aria-label={`Use ${option.label} for ${mode} mode${optionIsActive ? ", currently active" : ""}`}
                                     aria-pressed={optionIsActive}
                                     className={cn(
-                                      "absolute left-1/2 top-1 z-30 flex size-7 items-center justify-center rounded-full bg-background shadow-sm outline-none transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring",
+                                      "absolute left-1/2 top-1 z-30 flex size-7 items-center justify-center rounded-full bg-background shadow-sm outline-none transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring",
                                       optionIsActive ? "ring-2 ring-ring" : "ring-1 ring-border/70",
                                     )}
                                     style={{
@@ -891,12 +891,12 @@ export function ThemeLibrary({
       <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
         Choose how ${APP_DISPLAY_NAME} looks. Use a built-in theme or make your own.
       </p>
-      <h3 className="px-3 text-sm font-normal tracking-[-0.005em] text-foreground/70 sm:px-4">
+      <h3 className="px-3 text-sm font-normal text-foreground/70 sm:px-4">
         {searchableSetting("color-scheme").title}
       </h3>
       {renderModeTiles()}
       <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-3 pt-2 sm:px-4">
-        <h3 className="text-sm font-normal tracking-[-0.005em] text-foreground/70">
+        <h3 className="text-sm font-normal text-foreground/70">
           {searchableSetting("theme").title}
         </h3>
         <div className="flex flex-wrap items-center justify-end gap-2">

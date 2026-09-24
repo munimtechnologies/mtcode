@@ -75,6 +75,7 @@ interface ClientConnection {
   readonly supportedOperations: ReadonlySet<PreviewAutomationOperation>;
   readonly supportsOpenProfile: boolean;
   readonly focused: boolean;
+  readonly liveTabs: NonNullable<PreviewAutomationHostFocus["liveTabs"]>;
   readonly focusOrder: number;
   readonly queue: Queue.Queue<PreviewAutomationStreamEvent, Cause.Done>;
 }
@@ -385,6 +386,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       supportedOperations: new Set(host.supportedOperations ?? PREVIEW_AUTOMATION_V1_OPERATIONS),
       supportsOpenProfile: host.supportsOpenProfile ?? false,
       focused: false,
+      liveTabs: [],
       focusOrder: 0,
       queue,
     };
@@ -441,6 +443,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       clients.set(host.clientId, {
         ...currentHost,
         focused: host.focused,
+        liveTabs: host.liveTabs ?? currentHost.liveTabs,
         focusOrder: host.focused ? focusSequence : currentHost.focusOrder,
       });
       return { ...current, clients, focusSequence };
@@ -501,6 +504,13 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       // operation is not silently moved to a newer client: the caller gets a
       // capability failure and can deliberately start a fresh provider
       // session. A dead lease is pruned above and may fail over.
+      const ownsTargetTab = (host: ClientConnection, visibleOnly = false) =>
+        host.liveTabs.some(
+          (tab) =>
+            tab.threadId === input.scope.threadId &&
+            (!visibleOnly || tab.visible === true) &&
+            (input.tabId === undefined || tab.tabId === input.tabId),
+        );
       const connection =
         hasLiveAssignment && supportsRequest(assignedConnection, input)
           ? assignedConnection
@@ -514,7 +524,8 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
                 )
                 .sort(
                   (left, right) =>
-                    right.supportedOperations.size - left.supportedOperations.size ||
+                    Number(ownsTargetTab(right, true)) - Number(ownsTargetTab(left, true)) ||
+                    Number(ownsTargetTab(right)) - Number(ownsTargetTab(left)) ||
                     Number(right.focused) - Number(left.focused) ||
                     right.focusOrder - left.focusOrder,
                 )[0];
