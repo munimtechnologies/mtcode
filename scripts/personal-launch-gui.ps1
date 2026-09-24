@@ -29,7 +29,10 @@ function Find-T3Exe {
   $found = @("$env:LOCALAPPDATA\Programs", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
     Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
     ForEach-Object {
-      Get-ChildItem -LiteralPath $_ -Include "T3 Code*.exe", "MT Code*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue
+      # Windows PowerShell 5.1 ignores -Include under -LiteralPath and returns every file, so the
+      # newest file anywhere (an updater log, once) got "launched". Filter the names explicitly.
+      Get-ChildItem -LiteralPath $_ -File -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "T3 Code*.exe" -or $_.Name -like "MT Code*.exe" }
     } |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
