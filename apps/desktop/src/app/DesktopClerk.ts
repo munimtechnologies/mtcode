@@ -18,6 +18,7 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import {
   applyPendingDesktopProtocolUrl,
   extractDesktopProtocolUrl,
+  isDesktopClerkOAuthCallback,
   isDesktopProtocolUrl,
   queuePendingDesktopProtocolUrl,
 } from "./desktopProtocolUrl.ts";
@@ -158,6 +159,11 @@ export const make = Effect.gen(function* () {
       const revealAndDispatch = Effect.fn("desktop.clerk.revealAndDispatchProtocolUrl")(function* (
         url: string | null,
       ) {
+        // The SDK resolves its pending OAuth request in the existing renderer.
+        // Reloading that renderer here destroys the flow before session activation.
+        if (url !== null && isDesktopClerkOAuthCallback(url, scheme)) {
+          url = null;
+        }
         // Registered main only. currentMainOrFirst can be the WSL splash.
         const mainWindow = yield* electronWindow.main;
         if (Option.isSome(mainWindow)) {

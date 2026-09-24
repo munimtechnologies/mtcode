@@ -224,6 +224,18 @@ describe("DesktopClerk", () => {
             assert.deepEqual(loadURL.mock.calls, [[url]]);
           }),
         );
+
+        // The SDK owns modern OAuth callbacks. Keep its renderer alive long
+        // enough to exchange the nonce and activate the authenticated session.
+        listeners.get("second-instance")?.({}, [
+          "electron",
+          "t3code-dev://app/?__clerk_status=verified&rotating_token_nonce=test-nonce",
+        ]);
+        yield* Effect.promise(() =>
+          vi.waitFor(() => assert.deepEqual(revealed, [mainWindow, mainWindow])),
+        );
+        assert.deepEqual(loadURL.mock.calls, [[url]]);
+        assert.equal(takePendingDesktopProtocolUrl(), null);
       }),
     ).pipe(
       Effect.provide(makeDesktopClerkLayer()),
