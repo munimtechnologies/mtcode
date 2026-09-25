@@ -55,7 +55,7 @@ import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEn
 import { listProviderHomeCandidates, scanHomePath } from "./usageHomes.ts";
 import { readOpenCodeUsage as readOpenCodeNativeUsage } from "./opencodeUsageReader.ts";
 import { readAntigravityUsage } from "./antigravityUsageReader.ts";
-import { readCursorAccountUsage } from "./cursorUsageReader.ts";
+import { readCursorAccountUsage, cursorAccountKey } from "./cursorUsageReader.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { projectUsageSummaryForClient } from "./usageClientCompat.ts";
 import { loadCursorUsageRecords, type CursorExportLoadResult } from "./usageCursorExport.ts";
@@ -95,15 +95,15 @@ const MAX_HOURLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CACHE_RETENTION_DAYS = 90;
 
 function toCursorUsageSource(result: CursorExportLoadResult, distinctSessions = 0): UsageSource {
-  const resolvedHomePath =
-    result.userId !== null ? `cursor-export:${result.userId}` : "cursor-export";
+  const accountKey = result.userId !== null ? cursorAccountKey(result.userId) : "";
+  const resolvedHomePath = accountKey ? `cursor-account:${accountKey}` : "cursor-export";
   // Cursor export is account-scoped, not host-local. A fixed host/volume keeps
   // the same Cursor login from double-counting across machines.
   const fingerprint = {
-    hostId: "cursor-account",
+    hostId: "cursor.com",
     provider: "cursor" as const,
     resolvedHomePath,
-    volumeId: "",
+    volumeId: accountKey,
   };
   if (result.status === "ok") {
     return {
@@ -464,7 +464,10 @@ export const make = Effect.gen(function* () {
     const openCodeVolumeDir = openCodeDatabasePaths[0]
       ? path.dirname(openCodeDatabasePaths[0])
       : openCodeDataDir;
-    if (!hostEnvironment.OPENCODE_DATA_DIR?.trim() || openCodeDatabaseOverride)
+    if (
+      openCodeDatabaseOverride ||
+      ["1", "true"].includes(disableOpenCodeChannelDatabase?.toLowerCase() ?? "")
+    )
       dirs.push({
         provider: "opencode",
         dir: openCodeVolumeDir,
@@ -697,7 +700,7 @@ export const make = Effect.gen(function* () {
         "opencode",
       ),
     ])) {
-      if (dirs.some((source) => source.kind === "opencodeSqlite" && source.dir === dir)) continue;
+      if (dirs.some((source) => source.kind === "opencodeSqlite")) continue;
       const result = yield* Effect.promise(() => readOpenCodeNativeUsage(dir, windowStartMs));
       scanned.push({
         provider: "opencode",
@@ -1088,7 +1091,10 @@ export const make = Effect.gen(function* () {
     const cursorSessionIds = new Set<string>();
     if (cursorExport.status === "ok") {
       for (const record of cursorExport.records) {
-        if (aggregator.add(record) && record.sessionId.length > 0) {
+        if (
+          aggregator.add(record, toCursorUsageSource(cursorExport).fingerprint.resolvedHomePath) &&
+          record.sessionId.length > 0
+        ) {
           cursorSessionIds.add(record.sessionId);
         }
       }

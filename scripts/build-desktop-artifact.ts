@@ -1361,6 +1361,8 @@ ${associatedDomains}
     </array>`
         : ""
     }
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
     <key>com.apple.security.automation.apple-events</key>
     <true/>
     <key>com.apple.security.cs.allow-jit</key>
@@ -1373,7 +1375,6 @@ ${associatedDomains}
     <true/>`
         : [
             // Preserve @electron/osx-sign's defaults when no passkey profile is used.
-            "device.audio-input",
             "device.bluetooth",
             "device.camera",
             "device.print",

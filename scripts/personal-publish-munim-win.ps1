@@ -48,6 +48,14 @@ Remove-Item Env:T3CODE_DESKTOP_SIGNED -ErrorAction SilentlyContinue
 
 Log "HEAD=$(git rev-parse --short HEAD) T3CODE_DESKTOP_DISTRO=$($env:T3CODE_DESKTOP_DISTRO) VERSION=$($env:T3CODE_DESKTOP_VERSION)"
 
+# Use the supported Node major already provisioned by Vite+ on the build host.
+$node24 = Get-ChildItem (Join-Path $env:USERPROFILE ".vite-plus\js_runtime\node\24*\node.exe") -ErrorAction SilentlyContinue |
+  Sort-Object FullName -Descending | Select-Object -First 1
+if ($node24) { $env:Path = $node24.DirectoryName + ";" + $env:Path }
+$nodeVersion = node --version
+if ($nodeVersion -notmatch '^v24\.') { throw "Windows release requires Node 24; found $nodeVersion" }
+Log "Node=$nodeVersion"
+
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 pnpm install

@@ -245,46 +245,17 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("checks for newer releases after an update has been downloaded", () => {
+  it.effect("does not poll for another update while automatically restarting", () => {
     const harness = makeHarness();
-
     return Effect.scoped(
       Effect.gen(function* () {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
-
-        harness.emit("update-available", {
-          version: "1.2.4",
-          releaseNotes: "## What's changed\n- fix: queued update",
-        });
-        yield* flushCallbacks;
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
-
-        const result = yield* updates.check("poll");
-        assert.isTrue(result.checked);
-
-        harness.emit("update-available", { version: "1.2.4" });
-        yield* flushCallbacks;
-
-        const unchangedState = yield* updates.getState;
-        assert.equal(unchangedState.status, "downloaded");
-        assert.equal(unchangedState.downloadedVersion, "1.2.4");
-        assert.deepEqual(unchangedState.releaseNotes, [
-          { version: "1.2.4", items: ["fix: queued update"], totalItems: 1 },
-        ]);
-        assert.equal(unchangedState.omittedReleaseCount, 0);
-
-        const nextResult = yield* updates.check("poll");
-        assert.isTrue(nextResult.checked);
-
-        harness.emit("update-available", { version: "1.2.5" });
-        yield* flushCallbacks;
-
-        const state = yield* updates.getState;
-        assert.equal(state.status, "available");
-        assert.equal(state.availableVersion, "1.2.5");
-        assert.isNull(state.downloadedVersion);
+        assert.isFalse((yield* updates.check("poll")).checked);
+        assert.equal(harness.quitAndInstalls(), 1);
+        assert.equal((yield* updates.getState).downloadedVersion, "1.2.4");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -371,11 +342,10 @@ describe("DesktopUpdates", () => {
           Effect.gen(function* () {
             const updates = yield* DesktopUpdates.DesktopUpdates;
             yield* updates.configure;
-            harness.emit("update-downloaded", { version: "1.2.4" });
-            yield* flushCallbacks;
-
             const checkFiber = yield* updates.check("manual").pipe(Effect.forkScoped);
             yield* Deferred.await(checkStarted);
+            harness.emit("update-downloaded", { version: "1.2.4" });
+            yield* flushCallbacks;
 
             const installResult = yield* updates.install;
             assert.isFalse(installResult.accepted);
@@ -384,9 +354,8 @@ describe("DesktopUpdates", () => {
             const checkResult = yield* Fiber.join(checkFiber);
             assert.isTrue(checkResult.checked);
 
-            const followUpCheck = yield* updates.check("manual");
-            assert.isTrue(followUpCheck.checked);
-            assert.equal(harness.checkCount(), 2);
+            yield* flushCallbacks;
+            assert.equal(harness.quitAndInstalls(), 1);
           }),
         ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
       }),
@@ -409,7 +378,6 @@ describe("DesktopUpdates", () => {
           harness.emit("update-downloaded", { version: "1.2.4" });
           yield* flushCallbacks;
 
-          const installFiber = yield* updates.install.pipe(Effect.forkScoped);
           yield* Deferred.await(installStarted);
 
           const checkResult = yield* updates.check("manual");
@@ -417,8 +385,8 @@ describe("DesktopUpdates", () => {
           assert.equal(harness.checkCount(), 0);
 
           yield* Deferred.succeed(releaseInstall, undefined);
-          const installResult = yield* Fiber.join(installFiber);
-          assert.isTrue(installResult.accepted);
+          yield* flushCallbacks;
+          assert.equal(harness.quitAndInstalls(), 1);
         }),
       ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     }),
@@ -446,7 +414,7 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("preserves a queued installer after a background updater error", () => {
+  it.effect("ignores background updater errors after automatic restart begins", () => {
     const harness = makeHarness();
 
     return Effect.scoped(
@@ -460,9 +428,9 @@ describe("DesktopUpdates", () => {
         yield* flushCallbacks;
 
         const state = yield* updates.getState;
-        assert.equal(state.status, "error");
+        assert.equal(state.status, "downloaded");
         assert.equal(state.downloadedVersion, "1.2.4");
-        assert.isNull(state.errorContext);
+        assert.equal(state.errorContext, "install");
 
         const result = yield* updates.install;
         assert.isTrue(result.accepted);
@@ -670,7 +638,7 @@ describe("DesktopUpdates", () => {
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
 
-        assert.isTrue((yield* updates.install).accepted);
+        assert.equal(harness.quitAndInstalls(), 1);
         assert.deepEqual(markersAtStop, [
           environment.path.join(environment.baseDir, "runtime", DESKTOP_UPDATE_RESTART_MARKER_FILE),
         ]);
@@ -678,30 +646,24 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("drops the update restart marker when an install is interrupted", () =>
-    Effect.gen(function* () {
-      const stopping = yield* Deferred.make<void>();
-      const harness = makeHarness({
-        stopBackend: Deferred.succeed(stopping, undefined).pipe(Effect.andThen(Effect.never)),
-      });
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const updates = yield* DesktopUpdates.DesktopUpdates;
-          yield* updates.configure;
-          harness.emit("update-downloaded", { version: "1.2.4" });
-          yield* flushCallbacks;
-
-          const installFiber = yield* updates.install.pipe(Effect.forkScoped);
-          yield* Deferred.await(stopping);
-          assert.equal(harness.updateRestartMarkers.size, 1);
-
-          yield* Fiber.interrupt(installFiber);
-          assert.equal(harness.updateRestartMarkers.size, 0);
-        }),
-      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
-    }),
-  );
+  it.effect("drops the update restart marker when an install is interrupted", () => {
+    let markerPresentAtStop = false;
+    const harness = makeHarness({
+      stopBackend: Effect.sync(() => {
+        markerPresentAtStop = harness.updateRestartMarkers.size === 1;
+      }).pipe(Effect.andThen(Effect.interrupt)),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+        assert.isTrue(markerPresentAtStop);
+        assert.equal(harness.updateRestartMarkers.size, 0);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
 
   it.effect("keeps windows and restarts backends when quitAndInstall fails", () => {
     const harness = makeHarness({
@@ -848,7 +810,7 @@ describe("DesktopUpdates", () => {
   });
 
   it.effect("persists channel changes through the settings service", () => {
-    const harness = makeHarness();
+    const harness = makeHarness({ beforeSetUpdateChannel: Effect.void });
 
     return Effect.scoped(
       Effect.gen(function* () {

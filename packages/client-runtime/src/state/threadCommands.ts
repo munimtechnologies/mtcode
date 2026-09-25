@@ -95,6 +95,9 @@ import {
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
+  ContinueThreadTurnInput,
+  ArmThreadUsageResumeInput,
+  DisarmThreadUsageResumeInput,
   ArchiveThreadInput,
   BranchThreadInput,
   CreateThreadInput,

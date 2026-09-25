@@ -253,7 +253,12 @@ describe("lookupRate", () => {
   });
 
   it("prefers provider-reported dollars when present", () => {
-    const priced = priceUsage(table, "auto", EMPTY_TOTALS, 0.19);
+    const priced = priceUsage(table, {
+      model: "auto",
+      totals: EMPTY_TOTALS,
+      fast: false,
+      reportedCostUsd: 0.19,
+    });
     expect(priced).toEqual({ costUsd: 0.19, costSource: "providerReported" });
   });
 

@@ -94,6 +94,9 @@ const collectorLayer = (requests: Array<ExportedRequest>) =>
     ),
   );
 
+// A developer's own OTEL_* variables would otherwise pick the endpoints.
+const emptyEnv = ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }));
+
 const encodeObservabilitySettingsFile = Schema.encodeSync(
   Schema.fromJsonString(
     Schema.Struct({ observability: Schema.Record(Schema.String, Schema.String) }),
@@ -183,7 +186,7 @@ describe("DesktopObservability", () => {
       assert.isFalse(yield* fileSystem.exists(logPath));
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, emptyEnv)),
     ),
   );
 
@@ -261,7 +264,7 @@ describe("DesktopObservability", () => {
       );
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, emptyEnv)),
     ),
   );
 
@@ -301,7 +304,7 @@ describe("DesktopObservability", () => {
       assert.equal(records.at(-1)?.annotations.details, "code=1");
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, emptyEnv)),
     ),
   );
 
@@ -345,7 +348,7 @@ describe("DesktopObservability", () => {
       assert.isFalse(text.includes("y"));
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, emptyEnv)),
     ),
   );
 
@@ -379,7 +382,7 @@ describe("DesktopObservability", () => {
       assert.equal(lines.length, 258);
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, emptyEnv)),
     ),
   );
 
@@ -425,7 +428,93 @@ describe("DesktopObservability", () => {
       assert.lengthOf(record?.events ?? [], 0);
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, collectorLayer(requests))),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, collectorLayer(requests), emptyEnv)),
+    );
+  });
+
+  it.effect("exports to an OTEL endpoint over Settings, with its own headers and protocol", () => {
+    const requests: Array<ExportedRequest> = [];
+    return Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-observability-test-",
+      });
+      const environmentLayer = makeEnvironmentLayer(baseDir, true, {
+        T3CODE_OTLP_HEADERS: "x-scope=desktop",
+      });
+      yield* writeObservabilitySettings(environmentLayer, {
+        otlpLogsUrl: "https://settings.example.com/v1/logs",
+      });
+
+      yield* Effect.scoped(
+        Effect.logInfo("desktop otel export").pipe(
+          Effect.provide(DesktopObservability.layer.pipe(Layer.provideMerge(environmentLayer))),
+        ),
+      );
+
+      assert.lengthOf(requests, 1);
+      const [request] = requests;
+      assert.strictEqual(request?.url, "https://collector.example.com/v1/logs");
+      assert.strictEqual(request?.headers["x-otel"], "desktop");
+      assert.strictEqual(request?.headers["x-scope"], undefined);
+      assert.strictEqual(request?.headers["content-type"], "application/json");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          collectorLayer(requests),
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com",
+                OTEL_EXPORTER_OTLP_HEADERS: "x-otel=desktop",
+                OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it.effect("exports nothing to Settings for logs an unusable OTEL endpoint claimed", () => {
+    const requests: Array<ExportedRequest> = [];
+    return Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-observability-test-",
+      });
+      const environmentLayer = makeEnvironmentLayer(baseDir, true, {
+        T3CODE_OTLP_HEADERS: "x-scope=desktop",
+      });
+      yield* writeObservabilitySettings(environmentLayer, {
+        otlpLogsUrl: "https://settings.example.com/v1/logs",
+      });
+
+      yield* Effect.scoped(
+        Effect.logInfo("desktop otel off").pipe(
+          Effect.provide(DesktopObservability.layer.pipe(Layer.provideMerge(environmentLayer))),
+        ),
+      );
+
+      assert.lengthOf(requests, 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          collectorLayer(requests),
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.com",
+                OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "grpc",
+              },
+            }),
+          ),
+        ),
+      ),
     );
   });
 
@@ -496,7 +585,7 @@ describe("DesktopObservability", () => {
       );
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, collectorLayer(requests))),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, collectorLayer(requests), emptyEnv)),
     );
   });
 
@@ -520,7 +609,7 @@ describe("DesktopObservability", () => {
       assert.lengthOf(requests, 0);
     }).pipe(
       Effect.scoped,
-      Effect.provide(Layer.mergeAll(NodeServices.layer, collectorLayer(requests))),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, collectorLayer(requests), emptyEnv)),
     );
   });
 

@@ -78,6 +78,7 @@ function ratePerMillion(
   cacheWrite: number = input,
 ): ModelRate {
   return {
+    fastMultiplier: 1,
     inputCostPerToken: input / 1_000_000,
     outputCostPerToken: output / 1_000_000,
     cacheReadCostPerToken: cacheRead / 1_000_000,

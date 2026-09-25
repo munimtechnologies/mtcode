@@ -24,7 +24,8 @@ export interface CursorAccountUsageReadResult {
   readonly error: string | null;
 }
 
-const accountHash = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
+export const cursorAccountKey = (value: string) =>
+  NodeCrypto.createHash("sha256").update(value).digest("hex");
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -97,7 +98,7 @@ export async function readCursorAccountUsage(
     if (typeof subject !== "string" || !subject) throw new Error("Invalid authentication");
     const userId = subject.split("|").at(-1);
     if (!userId) throw new Error("Invalid authentication");
-    accountKey = accountHash(subject);
+    accountKey = cursorAccountKey(userId);
     if (!Number.isFinite(sinceMs) || !Number.isFinite(endDate) || sinceMs < 0 || sinceMs > endDate)
       throw new Error("Invalid date window");
     const deadline = AbortSignal.timeout(60_000);
@@ -177,7 +178,7 @@ export async function readCursorAccountUsage(
     let previousKeys: string[] = [];
     for (const events of pages) {
       const eventKeys =
-        removalsRemaining > 0 ? events.map((event) => accountHash(canonicalJson(event))) : [];
+        removalsRemaining > 0 ? events.map((event) => cursorAccountKey(canonicalJson(event))) : [];
       const removalCount = Math.min(removalsRemaining, boundaryOverlap(previousKeys, eventKeys));
       removalsRemaining -= removalCount;
       previousKeys = eventKeys;
@@ -223,7 +224,7 @@ export async function readCursorAccountUsage(
           typeof usage.totalCents === "number" ? usage.totalCents / 100 : null;
         const sessionId = typeof event.conversationId === "string" ? event.conversationId : "";
         // No event ID is provided. Preserve identical billed rows with an occurrence index.
-        const key = accountHash(
+        const key = cursorAccountKey(
           JSON.stringify([timestampMs, event.model, sessionId, totals, reportedCostUsd]),
         );
         const occurrence = occurrences.get(key) ?? 0;

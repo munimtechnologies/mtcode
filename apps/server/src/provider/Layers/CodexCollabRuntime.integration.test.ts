@@ -1153,13 +1153,17 @@ describe("CodexSessionRuntime compaction", () => {
         assert.equal(item.role, "developer");
         return item.content[0].text;
       });
-      assert.lengthOf(texts, 1);
+      assert.isTrue(texts.some((text) => text.includes("<t3_code_chat_history>")));
+      assert.isTrue(texts.some((text) => text.includes("computer_list")));
       assert.match(
         texts[0] ?? "",
         /^<t3_code_runtime><runtime_info>.*as GPT-5\.6 Sol \(model slug: gpt-5\.6-sol\).*<\/t3_code_runtime>$/s,
       );
 
       yield* runtime.close;
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, MonitorSession.layer)),
+    ),
   );
 });

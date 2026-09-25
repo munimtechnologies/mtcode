@@ -12,6 +12,7 @@ function thread(id: string, parent: string | null, count = 1): V2ThreadReadRespo
   return {
     thread: {
       id,
+      projectId: null,
       cliVersion: "test",
       createdAt: 0,
       updatedAt: 0,

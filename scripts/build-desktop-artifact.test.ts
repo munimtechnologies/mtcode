@@ -717,7 +717,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).extendInfo, {
         NSAppleEventsUsageDescription:
-          "T3 Code uses Automation to let installed Computer Use plugins control the Mac apps you choose.",
+          "T3 Code uses Automation to open project directories in your terminal and to let installed Computer Use plugins control the Mac apps you choose.",
+        NSLocationWhenInUseUsageDescription:
+          "T3 Code uses your approximate location to paint the sidebar artwork with your local daylight and weather.",
         NSMicrophoneUsageDescription: "T3 Code uses the microphone for voice dictation.",
         NSScreenCaptureUsageDescription:
           "T3 Code captures the active window when you use the window capture shortcut.",
