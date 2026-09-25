@@ -80,7 +80,7 @@ describe("buildThreadActionMenuItems", () => {
     const filterIndex = items.findIndex((candidate) => candidate.id === "filter-by-project");
     expect(items[filterIndex]).toMatchObject({ label: "Show all projects", icon: "folder-tree" });
     expect(items[filterIndex - 1]?.id).toBe("mark-unread");
-    expect(items[filterIndex + 1]?.id).toBe("copy");
+    expect(items[filterIndex + 1]?.id).toBe("auto-settle");
   });
 
   it("includes branch items only for threads with a branch", () => {

@@ -303,6 +303,7 @@ interface TimelineRowSharedState {
   onForkAssistantMessage: (messageId: MessageId) => void;
   canForkThread: boolean;
   isForkingThread: boolean;
+  onRunShellCommand: ((command: string) => void) | undefined;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
@@ -467,6 +468,7 @@ interface MessagesTimelineProps {
   onForkAssistantMessage?: (messageId: MessageId) => void;
   canForkThread?: boolean;
   isForkingThread?: boolean;
+  onRunShellCommand?: (command: string) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen?: (attachment: ChatFileAttachment) => void;
@@ -552,6 +554,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onForkAssistantMessage = NOOP_FORK_ASSISTANT_MESSAGE,
   canForkThread = false,
   isForkingThread = false,
+  onRunShellCommand,
   isRevertingCheckpoint,
   onImageExpand,
   onFileOpen = NOOP_OPEN_ATTACHMENT,
@@ -1234,6 +1237,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onForkAssistantMessage,
       canForkThread,
       isForkingThread,
+      onRunShellCommand,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -1284,6 +1288,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onForkAssistantMessage,
       canForkThread,
       isForkingThread,
+      onRunShellCommand,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -2612,6 +2617,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                     skills={ctx.skills}
                     headingLevelOffset={MESSAGE_HEADING_LEVEL}
                     onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+                    onRunShellCommand={ctx.onRunShellCommand}
                     onImageExpand={ctx.onImageExpand}
                   />
                 ),
@@ -2627,6 +2633,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
               skills={ctx.skills}
               headingLevelOffset={MESSAGE_HEADING_LEVEL}
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+              onRunShellCommand={ctx.onRunShellCommand}
               onImageExpand={ctx.onImageExpand}
             />
           )}

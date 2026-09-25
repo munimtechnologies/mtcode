@@ -21,7 +21,8 @@ import type { CodexScanState, TranscriptProviderKind, UsageRecord } from "./usag
 // entries would keep serving double-counted records forever.
 // v3: entries carry the parse position and reducer state so a grown file
 // re-parses only its appended bytes instead of starting over.
-const USAGE_SCAN_CACHE_VERSION = 3 as const;
+// v4: records carry Claude fast mode, which v3 rows never captured.
+const USAGE_SCAN_CACHE_VERSION = 4 as const;
 
 export interface CachedFile {
   readonly size: number;
@@ -57,6 +58,7 @@ type SerializedRecord = readonly [
   dedupeKey: string | null,
   reportedCostUsd: number | null,
   recordCount: number,
+  fast: 0 | 1,
 ];
 
 interface SerializedFile {
@@ -109,6 +111,7 @@ export function encodeScanCache(cache: ScanCache): SerializedCache {
     record.dedupeKey,
     record.reportedCostUsd,
     record.recordCount,
+    record.fast ? 1 : 0,
   ];
 
   const files: Record<string, SerializedFile> = {};
@@ -178,6 +181,7 @@ export function decodeScanCache(document: unknown): ScanCache {
         dedupeKey,
         reportedCostUsd,
         recordCount,
+        fast,
       ] = row as SerializedRecord;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -192,7 +196,8 @@ export function decodeScanCache(document: unknown): ScanCache {
         !Number.isFinite(reasoning) ||
         !Number.isFinite(recordCount) ||
         !Number.isInteger(recordCount) ||
-        recordCount <= 0
+        recordCount <= 0 ||
+        (fast !== 0 && fast !== 1)
       ) {
         return null;
       }
@@ -211,6 +216,7 @@ export function decodeScanCache(document: unknown): ScanCache {
         },
         reportedCostUsd: typeof reportedCostUsd === "number" ? reportedCostUsd : null,
         recordCount,
+        fast: fast === 1,
         dedupeKey: typeof dedupeKey === "string" ? dedupeKey : null,
       });
     }

@@ -17,6 +17,7 @@
       // .mcp.json runs run-desktop-mcp.ts; `fetch:desktop-mcp` runs the fetcher.
       "entry": [
         "knip-schemas.ts",
+        "setup-worktree.ts",
         "mobile-native-client.ts",
         "run-desktop-mcp.ts",
         "fetch-munim-computer-use.ts",
@@ -44,6 +45,8 @@
         "src/snapShot/GlobalShiftShortcutWorker.ts!",
         "src/snapShot/RegionSnapShotWorker.ts!",
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
+        "src/boot.ts!",
+        "src/compileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",
@@ -56,7 +59,7 @@
       "ignoreDependencies": ["playwright-core", "electron-builder"],
     },
     "apps/web": {
-      // Worktree setup invokes this directly from t3.json.
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
       "entry": ["scripts/warm-dep-cache.ts"],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still

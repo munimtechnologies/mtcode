@@ -14,6 +14,7 @@ import {
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
   RuntimeMode,
+  type ServerProviderModel,
   ThreadId,
   TurnId,
   DESKTOP_MCP_SERVER_NAME,
@@ -51,6 +52,7 @@ import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
+  buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
   type T3CodeToolAvailability,
 } from "../CodexDeveloperInstructions.ts";
@@ -171,7 +173,7 @@ const McpElicitationFormField = Schema.Struct({
   type: Schema.optionalKey(NullableMcpElicitationString),
   title: Schema.optionalKey(NullableMcpElicitationString),
   description: Schema.optionalKey(NullableMcpElicitationString),
-  default: Schema.optionalKey(Schema.Unknown),
+  default: Schema.optionalKey(Schema.Json),
   enum: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
   enumNames: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
   oneOf: Schema.optionalKey(
@@ -193,10 +195,13 @@ const isMcpElicitationMetadata = Schema.is(McpElicitationMetadata);
 const isMcpElicitationForm = Schema.is(McpElicitationForm);
 
 // TODO: Verify `packages/effect-codex-app-server/scripts/generate.ts` so the generated
-// `V2TurnStartParams` schema includes `collaborationMode` directly.
+// `V2TurnStartParams` schema includes its experimental fields directly.
 const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
     collaborationMode: Schema.optionalKey(EffectCodexSchema.V2TurnStartParams__CollaborationMode),
+    additionalContext: Schema.optionalKey(
+      Schema.Record(Schema.String, EffectCodexSchema.V2TurnStartParams__AdditionalContextEntry),
+    ),
   }),
 );
 const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffect(
@@ -219,8 +224,7 @@ type CodexPluginSkillInput = {
   readonly path: string;
 };
 type CodexThreadItem =
-  | EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number]
-  | EffectCodexSchema.V2ThreadRollbackResponse["thread"]["turns"][number]["items"][number];
+  EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number];
 
 export interface CodexSessionRuntimeOptions {
   readonly threadId: ThreadId;
@@ -236,6 +240,8 @@ export interface CodexSessionRuntimeOptions {
   readonly resumeCursor?: CodexResumeCursor;
   readonly requireResume?: boolean;
   readonly appServerArgs?: ReadonlyArray<string>;
+  /** The provider's model list; supplies the display name for runtime info. */
+  readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
   /** Capabilities the session's `t3-code` MCP credential grants; drives the prompt blocks. */
   readonly mcpCapabilities?: ReadonlySet<string>;
   readonly mcpProviderSessionId?: string;
@@ -607,7 +613,7 @@ export function toMcpElicitationResponse(
         ? "always"
         : undefined;
   const form = mcpElicitationFormFields(payload);
-  const content: Record<string, unknown> = {};
+  const content: Record<string, Schema.Json> = {};
 
   for (const [key, field] of Object.entries(form?.properties ?? {})) {
     const options = mcpElicitationFieldOptions(field);
@@ -745,52 +751,51 @@ function runtimeModeToTurnSandboxPolicy(
   }
 }
 
-function buildCodexCollaborationMode(input: {
+function buildCodexTurnInstructions(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
+  readonly modelName?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly computerHistoryContext?: string;
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
   readonly desktopToolsAvailable?: boolean;
   readonly computerHomeWorkspace?: boolean;
-}): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
-  // Mode-less turns still need Computer History / Computer Use instructions
-  // when present — otherwise ordinary sendTurn calls silently drop them.
+}): Pick<CodexTurnStartParamsWithCollaborationMode, "collaborationMode" | "additionalContext"> {
   if (
     input.interactionMode === undefined &&
     !input.computerHistoryContext &&
-    input.desktopToolsAvailable !== true &&
-    input.computerHomeWorkspace !== true
+    !input.desktopToolsAvailable &&
+    !input.computerHomeWorkspace
   ) {
-    return undefined;
+    return {};
   }
   const interactionMode = input.interactionMode ?? "default";
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   const reasoningEffort = input.effort ?? "medium";
   return {
-    mode: interactionMode,
-    settings: {
-      model,
-      reasoning_effort: reasoningEffort,
-      developer_instructions: buildCodexDeveloperInstructions(
-        // The defaulted mode rather than the input's: a turn with no mode still carries
-        // Computer History, and passing undefined here would drop its instructions.
-        interactionMode,
-        { model, reasoningEffort },
-        input.browserToolsAvailable ?? true,
-        {
-          ...(input.computerHistoryContext
-            ? { computerHistoryContext: input.computerHistoryContext }
-            : {}),
-          ...(input.desktopToolsAvailable !== undefined
-            ? { desktopToolsAvailable: input.desktopToolsAvailable }
-            : {}),
-          ...(input.computerHomeWorkspace !== undefined
-            ? { computerHomeWorkspace: input.computerHomeWorkspace }
-            : {}),
-        },
-      ),
+    collaborationMode: {
+      mode: interactionMode,
+      settings: {
+        model,
+        reasoning_effort: reasoningEffort,
+        developer_instructions: buildCodexDeveloperInstructions(interactionMode),
+      },
     },
+    additionalContext: buildCodexAdditionalContext(
+      { model, modelName: input.modelName, reasoningEffort },
+      input.browserToolsAvailable ?? true,
+      {
+        ...(input.computerHistoryContext
+          ? { computerHistoryContext: input.computerHistoryContext }
+          : {}),
+        ...(input.desktopToolsAvailable !== undefined
+          ? { desktopToolsAvailable: input.desktopToolsAvailable }
+          : {}),
+        ...(input.computerHomeWorkspace !== undefined
+          ? { computerHomeWorkspace: input.computerHomeWorkspace }
+          : {}),
+      },
+    ),
   };
 }
 
@@ -851,6 +856,8 @@ export function buildTurnStartParams(input: {
     readonly path: string;
   }>;
   readonly model?: string;
+  /** Display name of `model`, for runtime info. */
+  readonly modelName?: string;
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
@@ -884,9 +891,10 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  const collaborationMode = buildCodexCollaborationMode({
+  const turnInstructions = buildCodexTurnInstructions({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
+    ...(input.modelName ? { modelName: input.modelName } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.computerHistoryContext
       ? { computerHistoryContext: input.computerHistoryContext }
@@ -909,7 +917,7 @@ export function buildTurnStartParams(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
-    ...(collaborationMode ? { collaborationMode } : {}),
+    ...turnInstructions,
   }).pipe(
     Effect.mapError((cause) =>
       CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
@@ -1493,7 +1501,7 @@ function updateSession(
 }
 
 function parseThreadSnapshot(
-  response: EffectCodexSchema.V2ThreadReadResponse | EffectCodexSchema.V2ThreadRollbackResponse,
+  response: EffectCodexSchema.V2ThreadReadResponse,
 ): CodexThreadSnapshot {
   return {
     threadId: response.thread.id,
@@ -1581,11 +1589,8 @@ export const rollbackCodexThread = Effect.fn("rollbackCodexThread")(function* (
   threadId: string,
   numTurns: number,
 ): Effect.fn.Return<CodexThreadSnapshot, CodexErrors.CodexAppServerError> {
-  if ((yield* readCodexHistoryMode(client, threadId)) !== "paginated") {
-    return parseThreadSnapshot(yield* client.request("thread/rollback", { threadId, numTurns }));
-  }
-  // Paginated threads replace history at a turn boundary instead of supporting
-  // the legacy count-based rollback endpoint.
+  // Codex replaces history at a turn boundary. It rejects threads that still
+  // use legacy history, which have no rollback API since Codex 0.156.
   const snapshot = yield* readCodexThread(client, threadId);
   const retainedCount = Math.max(0, snapshot.turns.length - numTurns);
   const firstRemoved = snapshot.turns[retainedCount];
@@ -1637,6 +1642,9 @@ export const makeCodexSessionRuntime = (
     let pendingUserSends = 0;
     const queuedUserTurns = new Set<string>();
     let lastCompletedTurnId: string | undefined;
+    /** The `additionalContext` of the latest `turn/start`, restored after compaction. */
+    const lastAdditionalContextRef =
+      yield* Ref.make<CodexTurnStartParamsWithCollaborationMode["additionalContext"]>(undefined);
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -1850,7 +1858,7 @@ export const makeCodexSessionRuntime = (
               }
             }),
           ),
-          Effect.catch(() => Effect.void),
+          Effect.ignore,
           Effect.forkIn(runtimeScope),
         );
     });
@@ -2202,6 +2210,35 @@ export const makeCodexSessionRuntime = (
         }
       });
 
+    /**
+     * Compaction rebuilds history from user messages and Codex's own context,
+     * which drops our `additionalContext` messages. Codex only resends an
+     * entry when its value changes, so without this the T3 context would stay
+     * lost until the model or effort changed. Awaited so the context is back
+     * before later notifications from the same turn are handled. Drop this if
+     * Codex enables its `retain_client_developer_messages` feature by default.
+     */
+    const restoreAdditionalContext = (threadId: string) =>
+      Effect.gen(function* () {
+        const context = yield* Ref.get(lastAdditionalContextRef);
+        if (!context) return;
+        yield* client.request("thread/inject_items", {
+          threadId,
+          items: Object.entries(context).map(([key, entry]) => ({
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: `<${key}>${entry.value}</${key}>` }],
+          })),
+        });
+      }).pipe(
+        Effect.timeout("10 seconds"),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to restore Codex additional context after compaction.", {
+            cause,
+          }),
+        ),
+      );
+
     const handleRawNotification = (notification: CodexServerNotification) =>
       Effect.gen(function* () {
         if (notification.method === "command/exec/outputDelta") return;
@@ -2335,6 +2372,13 @@ export const makeCodexSessionRuntime = (
               payload: taskEvent,
             });
           }
+        }
+        if (
+          notification.method === "item/completed" &&
+          notification.params.item.type === "contextCompaction" &&
+          notification.params.threadId === suppressRootId
+        ) {
+          yield* restoreAdditionalContext(notification.params.threadId);
         }
 
         let requestId: ApprovalRequestId | undefined;
@@ -3239,6 +3283,8 @@ export const makeCodexSessionRuntime = (
                 const normalizedModel = normalizeCodexModelSlug(
                   input.model ?? (yield* Ref.get(sessionRef)).model,
                 );
+                const models = options.models ? yield* options.models : [];
+                const modelName = models.find((model) => model.slug === normalizedModel)?.name;
                 const computerHistoryContext = input.computerHistoryContext;
                 const pluginSkills = input.input?.includes("$")
                   ? yield* resolvePluginSkillsForPrompt(input.input).pipe(
@@ -3257,6 +3303,7 @@ export const makeCodexSessionRuntime = (
                   ...(pluginSkills.length > 0 ? { skills: pluginSkills } : {}),
                   ...(input.attachments ? { attachments: input.attachments } : {}),
                   ...(normalizedModel ? { model: normalizedModel } : {}),
+                  ...(modelName ? { modelName } : {}),
                   ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
                   ...(input.effort ? { effort: input.effort } : {}),
                   ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
@@ -3274,6 +3321,7 @@ export const makeCodexSessionRuntime = (
                   ),
                   computerHomeWorkspace: isComputerHomeCwd(options.cwd),
                 });
+                yield* Ref.set(lastAdditionalContextRef, params.additionalContext);
                 const rawResponse = yield* client.raw.request("turn/start", params);
                 const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
                   Effect.mapError((error) =>

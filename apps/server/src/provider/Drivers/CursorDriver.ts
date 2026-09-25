@@ -145,27 +145,23 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         processEnv,
         modelDiscovery.discover,
       ).pipe(
-        Effect.flatMap((snapshot) =>
-          effectiveConfig.enabled && snapshot.installed && snapshot.auth.status === "authenticated"
-            ? readCursorUsageLimits(effectiveConfig, processEnv).pipe(
-                // The CLI probe cannot read Cursor's default macOS keychain login.
-                // When it reports nothing, fall back to the desktop app's dashboard
-                // session in the host's state.vscdb, unless an explicit API key
-                // names a possibly different account.
-                Effect.flatMap((usageLimits) =>
-                  usageLimits.windows.length > 0 || processEnv.CURSOR_API_KEY?.trim()
-                    ? Effect.succeed(usageLimits)
-                    : loadCursorUsageLimits(
-                        cursorDesktopHome ? { homeDir: cursorDesktopHome } : {},
-                      ).pipe(
-                        Effect.map((desktop) =>
-                          desktop.windows.length > 0 ? desktop : usageLimits,
-                        ),
-                      ),
-                ),
-                Effect.map((usageLimits) => ({ ...snapshot, usageLimits })),
-              )
-            : Effect.succeed(snapshot),
+        Effect.filterOrElse(
+          (snapshot) =>
+            !(
+              effectiveConfig.enabled &&
+              snapshot.installed &&
+              snapshot.auth.status === "authenticated"
+            ),
+          (snapshot) =>
+            Effect.gen(function* () {
+              const settings = yield* serverSettings.getSettings;
+              const usageLimits = yield* readCursorUsageLimits(
+                effectiveConfig,
+                processEnv,
+                settings.cursorKeychainUsageEnabled,
+              );
+              return { ...snapshot, usageLimits };
+            }),
         ),
         Effect.map(stampIdentity),
         Effect.provideService(HttpClient.HttpClient, httpClient),

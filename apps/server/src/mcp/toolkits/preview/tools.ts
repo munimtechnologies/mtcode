@@ -120,13 +120,13 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before interacting. Default is a slim snapshot: URL, visible text, interactive elements, and a PNG. Pass include:['ax'], include:['console'], or include:['network'] only when you need those heavier slices. Hidden tabs still capture. Set includeImage=false for text-only output. Set save=true to also write the PNG to disk and get screenshotPath back; embed that path in your reply as ![alt](screenshotPath) so the user sees it.",
+      "Inspect a page before interacting. Default is a slim snapshot: URL, visible text, interactive elements, and a PNG. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Pass include:['ax'], include:['console'], or include:['network'] only when you need those heavier slices. Hidden tabs still capture. The text is capped near 20 KB and lists what it omitted; use preview_evaluate to read more. Set includeImage=false for text-only output with the same page metadata. Set save=true to also write the PNG to disk and get screenshotPath back; with includeImage=false, save=true returns only the url and screenshotPath. Embed that path in your reply as ![alt](screenshotPath) so the user sees it. This is the only way to show the user a screenshot; the image in the tool result is not saved anywhere.",
     parameters: Schema.Struct({
       ...PreviewAutomationSnapshotInput.fields,
       save: Schema.optional(
         Schema.Boolean.annotate({
           description:
-            "Write the screenshot PNG to disk and return its absolute path as screenshotPath. Defaults to false.",
+            "Write the screenshot PNG to disk and return its absolute path as screenshotPath. With includeImage=false, return only the url and screenshotPath. Defaults to false.",
         }),
       ),
     }),

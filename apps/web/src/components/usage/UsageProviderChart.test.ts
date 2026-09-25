@@ -93,6 +93,7 @@ describe("buildPeriodColumns", () => {
       { provider: "cursor", value: 0 },
       { provider: "grok", value: 7 },
       { provider: "opencode", value: 3 },
+      { provider: "antigravity", value: 0 },
     ]);
   });
 

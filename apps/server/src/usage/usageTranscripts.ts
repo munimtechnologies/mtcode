@@ -24,6 +24,11 @@ export interface UsageRecord {
   readonly recordCount: number;
   readonly reportedCostUsd: number | null;
   /**
+   * Whether the request ran in fast mode, which bills at a model-specific
+   * multiple of the standard rate. Only Claude Code records this.
+   */
+  readonly fast: boolean;
+  /**
    * Key for cross-file de-duplication, or `null` when the record is inherently
    * unique and needs no dedup.
    */
@@ -156,6 +161,7 @@ export function parseClaudeLine(line: string): UsageRecord | null {
     },
     recordCount: 1,
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
+    fast: usageRecord["speed"] === "fast",
     dedupeKey,
   };
 }
@@ -316,6 +322,7 @@ export function parseCodexLine(line: string, state: CodexScanState): UsageRecord
     recordCount: 1,
     // Codex does not report cost in the rollout.
     reportedCostUsd: null,
+    fast: false,
     // Events surviving the fork-copy suppression above are unique to this
     // rollout, so they need no global dedup.
     dedupeKey: null,
@@ -471,6 +478,7 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
         model: "grok",
         sessionId,
         totals: grokTotalsToUsage(topLevel),
+        fast: false,
         recordCount: topLevel.modelCalls,
         reportedCostUsd: topLevel.costIsPartial ? null : grokCostTicksToUsd(topLevel.costUsdTicks),
         // No turn id means we cannot tell two same-second updates apart.
@@ -527,6 +535,7 @@ export function parseGrokLine(line: string): readonly UsageRecord[] {
       totals,
       recordCount: entry.totals.modelCalls,
       reportedCostUsd,
+      fast: false,
       dedupeKey: dedupeKeyFor(entry.model),
     });
   }

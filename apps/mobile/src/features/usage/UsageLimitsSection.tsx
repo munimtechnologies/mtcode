@@ -306,7 +306,7 @@ export function useRefreshLimits(
   const [failedEnvironments, setFailedEnvironments] = useState<
     readonly { environmentId: EnvironmentId; label: string }[]
   >([]);
-  const refresh = async (automatic = false) => {
+  const refresh = async (automatic = false, afterPending = false) => {
     const connected = [...presentations].filter(
       ([environmentId, presentation]) =>
         presentation.connection.phase === "connected" &&
@@ -319,6 +319,7 @@ export function useRefreshLimits(
             environmentId,
             () => refreshProviders({ environmentId, input: {} }),
             automatic,
+            afterPending,
           );
           if (result === undefined) return;
           setFailedEnvironments((previous) => [
@@ -366,5 +367,11 @@ export function useRefreshLimits(
         selectedEnvironmentIds === null || selectedEnvironmentIds.has(environmentId),
     )
     .map(({ label }) => label);
-  return { now, refreshing, failedLabels, refresh: refreshManually };
+  return {
+    now,
+    refreshing,
+    failedLabels,
+    refresh: refreshManually,
+    refreshAfterEnable: () => refresh(false, true),
+  };
 }
