@@ -86,7 +86,9 @@ export const EDITORS = [
   {
     id: "antigravity",
     label: "Antigravity",
-    commands: ["agy"],
+    // The standalone agy CLI is not the IDE. Prefer the IDE-specific launcher,
+    // while retaining app-bundle discovery on macOS.
+    commands: ["antigravity-ide", "agy-ide"],
     launchStyle: "goto",
     macAppName: "Antigravity",
     macRequiresAppBundle: true,

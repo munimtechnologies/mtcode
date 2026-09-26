@@ -1202,12 +1202,18 @@ it.effect("fails an Antigravity launch on macOS when only the agy command is on 
     );
 
     assert.instanceOf(error, ExternalLauncher.ExternalLauncherCommandNotFoundError);
-    assert.equal(error.command, "agy");
+    assert.equal(error.command, "antigravity-ide");
     assert.equal(spawnCount, 0);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
 for (const { platform, installPath, editor, args } of [
+  {
+    platform: "linux",
+    installPath: ".local/bin/antigravity-ide",
+    editor: "antigravity",
+    args: ["--goto", "/workspace with spaces/file.ts:12:4"],
+  },
   {
     platform: "darwin",
     installPath: "Applications/Cursor.app/Contents/Resources/app/bin/code",
@@ -1309,6 +1315,45 @@ for (const { platform, installPath, editor, args } of [
         );
         assert.deepEqual(spawned.args, args);
         assert.equal(spawned.options.shell, executable.endsWith(".cmd"));
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+// `agy` is the standalone Antigravity CLI, which installs to ~/.local/bin on
+// macOS and Linux and to its own bin folder on Windows. It is not the IDE.
+for (const { platform, installPath, onPath } of [
+  { platform: "darwin", installPath: ".local/bin/agy", onPath: true },
+  { platform: "linux", installPath: ".local/bin/agy", onPath: false },
+  { platform: "win32", installPath: "agy/bin/agy.cmd", onPath: true },
+] as const) {
+  it.effect.skipIf(windowsHost && platform !== "win32")(
+    `does not report the agy CLI as the Antigravity IDE on ${platform}`,
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-cli-" });
+        const executable = path.join(home, installPath);
+        yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+        yield* fs.writeFileString(executable, "#!/bin/sh\n");
+        yield* fs.chmod(executable, 0o755);
+        const editors = yield* Effect.gen(function* () {
+          const launcher = yield* ExternalLauncher.ExternalLauncher;
+          return yield* launcher.resolveAvailableEditors();
+        }).pipe(
+          Effect.provide(
+            testLayer({
+              platform,
+              env: {
+                HOME: home,
+                LOCALAPPDATA: home,
+                PATH: onPath ? path.dirname(executable) : path.join(home, "empty"),
+                PATHEXT: ".COM;.EXE;.BAT;.CMD",
+              },
+            }),
+          ),
+        );
+        assert.notInclude(editors, "antigravity");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 }

@@ -80,6 +80,7 @@
     "@vitejs/plugin-react": "^6.0.0",
     "babel-plugin-react-compiler": "1.0.0",
     "compression": "^1.8.1",
+    "jsdom": "^30.0.1",
     "micromark-extension-math": "^3.1.0",
     "micromark-util-types": "^2.0.2",
     "playwright": "1.60.0",

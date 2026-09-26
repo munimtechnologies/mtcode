@@ -14,7 +14,7 @@ import {
   type UsageSummary,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
-import { refreshUsage } from "@t3tools/client-runtime/state/usage";
+import { needsCursorKeychainAccess, refreshUsage } from "@t3tools/client-runtime/state/usage";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo } from "react";
@@ -36,6 +36,7 @@ export interface EnvironmentUsageStatus extends EnvironmentUsageOption {
   /** A connected usage query failed. Connection coverage uses `phase`. */
   readonly error: string | null;
   readonly summary: UsageSummary | null;
+  readonly needsCursorKeychainAccess: boolean;
 }
 
 interface UsageAtomValue {
@@ -69,6 +70,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
       // successful value remains visible. Wait through the first connection attempt,
       // then treat retries as terminal coverage so a down machine cannot block the UI.
       const result = get(serverEnvironment.usageSummary({ environmentId, input }));
+      const summary = Option.getOrNull(AsyncResult.value(result));
       const failed = option.phase === "connected" && result._tag === "Failure";
       environments.push({
         ...option,
@@ -77,7 +79,11 @@ const usageByWindowAtom = Atom.family((key: string) =>
           option.phase === "connecting" ||
           (option.phase === "connected" && result.waiting),
         error: failed ? "This environment could not report usage." : null,
-        summary: Option.getOrNull(AsyncResult.value(result)),
+        summary,
+        needsCursorKeychainAccess: needsCursorKeychainAccess(
+          summary,
+          get(serverEnvironment.providersValueAtom(environmentId)),
+        ),
       });
     }
 

@@ -112,8 +112,8 @@ export function UsageRouteScreen() {
     (environment) =>
       environment.summary !== null && !merged.staleEnvironments.includes(environment.environmentId),
   ).length;
-  const cursorAccessEnvironments = selectedEnvironments.filter((environment) =>
-    environment.summary?.sources.some((source) => source.action === "enableCursorKeychain"),
+  const cursorAccessEnvironments = selectedEnvironments.filter(
+    (environment) => environment.needsCursorKeychainAccess,
   );
   const refreshAfterCursorEnable = () => {
     void refresh();

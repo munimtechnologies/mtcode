@@ -1670,9 +1670,7 @@ function renderFeedEntry(
               </>
             ) : null}
             {message.originalText !== undefined ? (
-              <Text className="font-t3-medium text-xs text-foreground-secondary">
-                Edited
-              </Text>
+              <Text className="font-t3-medium text-xs text-foreground-secondary">Edited</Text>
             ) : null}
             <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">
               {entry.pendingMessage && !entry.acknowledged ? "Pending" : timestampLabel}
@@ -2535,7 +2533,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // content-inset override. Seed the fresh instance synchronously with the
   // current overlay height before the scroll integration's next reaction;
   // on Android the declarative contentInset floor covers this same window.
-  const listMountKey = `${feedThreadKey}:${presentedFeed.length === 0 ? "empty" : "filled"}`;
+  // The thinking row a running thread shows while its messages load is not
+  // content: the list must still remount, and so open at the end, when they
+  // arrive.
+  const listMountKey = `${feedThreadKey}:${presentedFeed.some((entry) => entry.type !== "thinking") ? "filled" : "empty"}`;
   useLayoutEffect(() => {
     const bottom = props.contentInsetEndAdjustment.value;
     if (bottom > 0) {

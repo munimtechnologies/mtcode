@@ -33,6 +33,7 @@ function environment(id: string, cost: number | null, hostId = id): EnvironmentU
     phase: "connected",
     isPending: cost === null,
     error: null,
+    needsCursorKeychainAccess: false,
     summary:
       cost === null
         ? null

@@ -20,7 +20,11 @@ import {
 } from "@t3tools/contracts";
 import { resolveEditorCommand } from "@t3tools/shared/editor";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
+import {
+  isCommandAvailable,
+  resolveSpawnCommand,
+  withPathDirectoryListings,
+} from "@t3tools/shared/shell";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -494,7 +498,7 @@ const resolveAvailableEditors = Effect.fn("externalLauncher.resolveAvailableEdit
   const platform = yield* HostProcessPlatform;
   const env = { ...(yield* readBrowserLaunchEnv), ...(yield* readCommandLookupEnv) };
   const macEnv = platform === "darwin" ? yield* readMacAppLookupEnv : {};
-  return yield* buildAvailableEditors(platform, env, macEnv);
+  return yield* buildAvailableEditors(platform, env, macEnv).pipe(withPathDirectoryListings);
 });
 
 const resolveFileManagerRevealKind = Effect.fn("externalLauncher.resolveFileManagerRevealKind")(
