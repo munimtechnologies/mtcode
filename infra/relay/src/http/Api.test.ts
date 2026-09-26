@@ -1215,7 +1215,11 @@ describe("relay routing fallback", () => {
                 Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
               ),
             ),
-            Layer.provide([publisher, signatures]),
+            Layer.provide([
+              publisher,
+              signatures,
+              Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
+            ]),
           ),
         ),
         Layer.provide(auth),
