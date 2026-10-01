@@ -8,6 +8,8 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useStartComputerThread } from "../hooks/useStartComputerThread";
+import { useScratchProject } from "../hooks/useScratchProject";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -30,6 +32,8 @@ function ChatRouteGlobalShortcuts() {
     useHandleNewThread();
   const startComputerThread = useStartComputerThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -85,6 +89,17 @@ function ChatRouteGlobalShortcuts() {
           defaultProjectRef,
           handleNewThread,
         });
+        return;
+      }
+
+      if (command === "chat.newWithoutProject") {
+        const environmentId = scratchEnvironmentId(
+          activeThread?.environmentId ?? activeDraftThread?.environmentId ?? primaryEnvironmentId,
+        );
+        if (environmentId === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void startScratchThread(environmentId);
         return;
       }
 
@@ -151,9 +166,12 @@ function ChatRouteGlobalShortcuts() {
     keybindings,
     defaultProjectRef,
     previewOpen,
+    primaryEnvironmentId,
     routeThreadRef,
+    scratchEnvironmentId,
     selectedThreadKeysSize,
     startComputerThread,
+    startScratchThread,
     terminalOpen,
   ]);
 

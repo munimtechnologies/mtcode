@@ -27,7 +27,7 @@ const OBJECTIVE = "Reduce p95 below 120ms";
 
 let app: IsolatedWebApp | undefined;
 
-describe.sequential("Goal", () => {
+describe("Goal", () => {
   beforeAll(async () => {
     app = await startIsolatedWebApp();
   }, 300_000);

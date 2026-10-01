@@ -41,7 +41,7 @@ async function shotState(id: (typeof STATE_IDS)[number]): Promise<void> {
   });
 }
 
-describe.sequential("capture goal state screenshots", () => {
+describe("capture goal state screenshots", () => {
   beforeAll(async () => {
     app = await startIsolatedWebApp({ addFixtureProject: false });
   }, 300_000);

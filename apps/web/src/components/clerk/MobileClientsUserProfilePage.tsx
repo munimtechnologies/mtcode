@@ -16,7 +16,6 @@ import {
   ClerkUserProfileRefreshButton,
   ClerkUserProfileRow,
 } from "./ClerkUserProfilePage";
-import { APP_BASE_NAME } from "../../branding";
 
 const MOBILE_CLIENT_SKELETON_ROWS = ["primary", "secondary"] as const;
 
@@ -95,7 +94,7 @@ function EmptyMobileClients() {
       <EmptyHeader>
         <EmptyTitle>No mobile clients</EmptyTitle>
         <EmptyDescription>
-          Sign in to {APP_BASE_NAME} on your iPhone to register it for push notifications and Live
+          Install T3 Code on your phone and sign in to T3 Connect to get push notifications and Live
           Activities.
         </EmptyDescription>
       </EmptyHeader>
@@ -113,7 +112,7 @@ export function MobileClientsUserProfilePage() {
   return (
     <ClerkUserProfilePage
       title="Mobile clients"
-      description="Devices registered to receive T3 Connect activity from your environments."
+      description="Mobile devices that get notifications from your environments."
       action={
         <ClerkUserProfileRefreshButton
           isPending={devicesState.isPending}
