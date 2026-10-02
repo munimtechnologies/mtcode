@@ -109,7 +109,7 @@ function PoolWindowCard({
       },
     });
   return (
-    <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
+    <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
       <View className="flex-row items-start justify-between gap-3">
         <View className="gap-1">
           <Text className="text-sm font-t3-medium text-foreground">{label ?? pool.label}</Text>
@@ -392,7 +392,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
                 </Text>
               ) : null}
             </View>
-            <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
+            <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
               <Text className="text-sm font-t3-medium text-foreground">{window.label}</Text>
               <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
                 {remainingPercent(window)}% left
@@ -412,7 +412,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
                 </Text>
               ) : null}
             </View>
-            <View className="gap-2 rounded-[24px] border-continuous bg-card p-4">
+            <View className="gap-2 rounded-[24px] border-continuous bg-grouped-card p-4">
               <Text className="text-sm font-t3-medium text-foreground">
                 {account.environments.length ? "Signed in" : "Source"}
               </Text>
@@ -427,7 +427,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
               )}
             </View>
             {account.redeem && account.limits.resetCredits ? (
-              <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
+              <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
                 <Text className="text-sm font-t3-medium text-foreground">Reset credits</Text>
                 <ResetCredits
                   key={account.key}
