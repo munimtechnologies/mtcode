@@ -6,12 +6,15 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { createNewProjectFolder } from "./NewProject.ts";
 
 const TestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-new-project-" })),
+  // The fork's git driver reads server settings (see GitVcsDriverCore).
+  Layer.provide(Layer.orDie(ServerSettings.layerTest())),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),
 );

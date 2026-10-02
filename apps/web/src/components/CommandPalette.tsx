@@ -113,7 +113,6 @@ import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { pullRequestEnvironment } from "../state/pullRequests";
-import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useScratchProject } from "../hooks/useScratchProject";
