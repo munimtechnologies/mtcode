@@ -16,27 +16,6 @@ export const HostResourcesSnapshot = Schema.Struct({
 });
 export type HostResourcesSnapshot = typeof HostResourcesSnapshot.Type;
 
-export const HOST_PATH_CHECK_MAX_PATHS = 16;
-export const HOST_PATH_CHECK_MAX_LENGTH = 512;
-
-/**
- * Paths a client wants checked on this host before routing a task here.
- * `~/x`, `%USERPROFILE%\\x` and relative paths resolve against the server's
- * home directory, so one prompt can be checked on every machine.
- */
-export const HostPathCheckInput = Schema.Struct({
-  paths: Schema.Array(
-    TrimmedNonEmptyString.check(Schema.isMaxLength(HOST_PATH_CHECK_MAX_LENGTH)),
-  ).check(Schema.isMaxLength(HOST_PATH_CHECK_MAX_PATHS)),
-});
-export type HostPathCheckInput = typeof HostPathCheckInput.Type;
-
-/** The subset of the requested paths, as given, that exist on this host. */
-export const HostPathCheckResult = Schema.Struct({
-  existing: Schema.Array(Schema.String),
-});
-export type HostPathCheckResult = typeof HostPathCheckResult.Type;
-
 export const ResourceTelemetryIoSemantics = Schema.Literals([
   "storage",
   "logical",

@@ -1093,15 +1093,6 @@ export function createServerEnvironmentAtoms<R, E>(
       execute: (input: EnvironmentRpcInput<typeof WS_METHODS.serverGetHostResources>) =>
         request(WS_METHODS.serverGetHostResources, input).pipe(Effect.timeout("5 seconds")),
     }),
-    /** One-shot reads for send-time routing, which must not wait on a cached query. */
-    readHostResources: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:read-host-resources",
-      tag: WS_METHODS.serverGetHostResources,
-    }),
-    checkHostPaths: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:check-host-paths",
-      tag: WS_METHODS.serverCheckHostPaths,
-    }),
     processResourceHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:process-resource-history",
       tag: WS_METHODS.serverGetProcessResourceHistory,

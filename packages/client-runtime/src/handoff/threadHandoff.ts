@@ -51,15 +51,10 @@ export interface ThreadHandoffInput {
     readonly instanceId: string;
     readonly model: string;
   } | null;
-  /** Set when the work moves to another computer rather than another model. */
-  readonly machineChange?: {
-    readonly from: string;
-    readonly to: string;
-  };
 }
 
 export function buildThreadHandoffMarkdown(input: ThreadHandoffInput): string {
-  const { thread, targetModelSelection, machineChange } = input;
+  const { thread, targetModelSelection } = input;
   const sections: string[] = [];
 
   const sourceModelLabel = thread.modelSelection
@@ -71,19 +66,9 @@ export function buildThreadHandoffMarkdown(input: ThreadHandoffInput): string {
 
   sections.push(
     `# Task Continuation Context\n` +
-      (machineChange
-        ? `> Moved from the computer **${machineChange.from}** to **${machineChange.to}**.\n`
-        : `> Continuing from **${sourceModelLabel}** to **${targetModelLabel}**.\n`) +
+      `> Continuing from **${sourceModelLabel}** to **${targetModelLabel}**.\n` +
       `> Source thread: "${thread.title}" (ID: \`${thread.id}\`)`,
   );
-  if (machineChange) {
-    sections.push(
-      `## 🖥️ Different Computer\n` +
-        `This task started on ${machineChange.from} and continues here on ${machineChange.to}. ` +
-        `Files that only existed on ${machineChange.from} are not here, and paths may differ. ` +
-        `Check what exists on this computer before continuing, and recreate or fetch anything that is missing.`,
-    );
-  }
 
   const messages = (thread.messages ?? []).filter(
     (m) => m.text.trim().length > 0 || (m.attachments && m.attachments.length > 0),

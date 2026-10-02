@@ -136,22 +136,4 @@ describe("buildThreadHandoffMarkdown", () => {
     );
     expect(markdown).toContain("Initial prompt before provider crash.");
   });
-
-  it("frames a move between computers instead of a model switch", () => {
-    const markdown = buildThreadHandoffMarkdown({
-      thread: {
-        id: "thread-move",
-        title: "Train the classifier",
-        modelSelection: { instanceId: "codex", model: "gpt-5.5" },
-        messages: [{ role: "user", text: "Train the classifier on the GPU." }],
-      },
-      targetModelSelection: { instanceId: "codex", model: "gpt-5.5" },
-      machineChange: { from: "MacBook Air", to: "Blade" },
-    });
-
-    expect(markdown).toContain("Moved from the computer **MacBook Air** to **Blade**.");
-    expect(markdown).not.toContain("Continuing from");
-    expect(markdown).toContain("Files that only existed on MacBook Air are not here");
-    expect(markdown).toContain("Train the classifier on the GPU.");
-  });
 });

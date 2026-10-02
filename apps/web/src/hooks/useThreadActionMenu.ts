@@ -75,10 +75,8 @@ export function useThreadActionMenu(input: {
   /** Fallback for "Copy path" when the thread has no worktree. */
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
-  /** Present on surfaces that can continue the thread on another computer. */
-  readonly onMoveToComputer?: (() => void) | undefined;
 }) {
-  const { threadRef, projectCwd, onStartRename, onMoveToComputer } = input;
+  const { threadRef, projectCwd, onStartRename } = input;
   const router = useRouter();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -165,7 +163,6 @@ export function useThreadActionMenu(input: {
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
-          canMoveToComputer: onMoveToComputer !== undefined,
           supports,
           snoozePresets,
         });
@@ -260,9 +257,6 @@ export function useThreadActionMenu(input: {
               }),
             );
             return;
-          case "move-to-computer":
-            onMoveToComputer?.();
-            return;
           case "mark-unread":
             markUnread(threadRef, thread.latestTurn?.completedAt);
             return;
@@ -353,7 +347,6 @@ export function useThreadActionMenu(input: {
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markUnread,
-      onMoveToComputer,
       onStartRename,
       pinThread,
       projectCwd,

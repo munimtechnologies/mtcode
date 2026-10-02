@@ -1,14 +1,8 @@
-import type { TaskPlatform } from "@t3tools/client-runtime/load-balancing";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import {
-  autoBalancePlatformLabel,
-  autoBalanceSelectValue,
-  parseAutoBalanceSelectValue,
-  type RunOnEnvironmentOption,
-} from "./BranchToolbar.logic";
+import type { EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
@@ -22,17 +16,12 @@ import {
 } from "./ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-const NO_TASK_PLATFORMS: readonly TaskPlatform[] = [];
-
 interface BranchToolbarEnvironmentSelectorProps {
   autoEnvironmentLabel?: string | undefined;
-  onAutoEnvironment?: ((platform: TaskPlatform | null) => void) | undefined;
-  /** Operating systems automatic routing can be limited to; empty hides the choice. */
-  autoBalancePlatforms?: readonly TaskPlatform[] | undefined;
-  autoBalancePlatform?: TaskPlatform | null | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
   environmentId: EnvironmentId;
-  availableEnvironments: readonly RunOnEnvironmentOption[];
+  availableEnvironments: readonly EnvironmentOption[];
   // Absent when there is only one environment to show: the indicator still
   // renders (as a static label) so remote projects are always identifiable.
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
@@ -41,8 +30,6 @@ interface BranchToolbarEnvironmentSelectorProps {
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
   autoEnvironmentLabel,
   onAutoEnvironment,
-  autoBalancePlatforms = NO_TASK_PLATFORMS,
-  autoBalancePlatform = null,
   envLocked,
   environmentId,
   availableEnvironments,
@@ -53,35 +40,17 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);
 
-  const selectedAutoValue = autoBalanceSelectValue(autoBalancePlatform);
-  const autoItems = useMemo(
-    () =>
-      onAutoEnvironment
-        ? [null, ...autoBalancePlatforms].map((platform) => {
-            const value = autoBalanceSelectValue(platform);
-            return {
-              value,
-              platform,
-              label:
-                autoEnvironmentLabel && value === selectedAutoValue
-                  ? autoEnvironmentLabel
-                  : platform
-                    ? autoBalancePlatformLabel(platform)
-                    : "Auto balance",
-            };
-          })
-        : [],
-    [autoBalancePlatforms, autoEnvironmentLabel, onAutoEnvironment, selectedAutoValue],
-  );
   const environmentItems = useMemo(
     () => [
-      ...autoItems,
+      ...(onAutoEnvironment
+        ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
+        : []),
       ...availableEnvironments.map((env) => ({
         value: env.environmentId,
         label: env.label,
       })),
     ],
-    [autoItems, availableEnvironments],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -121,13 +90,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={autoEnvironmentLabel ? selectedAutoValue : environmentId}
-      onValueChange={(value) => {
-        if (value === null) return;
-        const platform = parseAutoBalanceSelectValue(value);
-        if (platform === undefined) onEnvironmentChange(value as EnvironmentId);
-        else onAutoEnvironment?.(platform);
-      }}
+      value={autoEnvironmentLabel ? "auto" : environmentId}
+      onValueChange={(value) =>
+        value === "auto" ? onAutoEnvironment?.() : onEnvironmentChange(value as EnvironmentId)
+      }
       items={environmentItems}
     >
       <Tooltip>
@@ -168,23 +134,19 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
           <SelectGroupLabel>Run on</SelectGroupLabel>
-          {autoItems.map((item) => (
+          {onAutoEnvironment && (
             <SelectItem
-              key={item.value}
-              value={item.value}
+              value="auto"
               onClick={() => {
-                // Re-picking the active automatic choice re-checks the machines.
-                if (autoEnvironmentLabel && item.value === selectedAutoValue) {
-                  onAutoEnvironment?.(item.platform);
-                }
+                if (autoEnvironmentLabel) onAutoEnvironment?.();
               }}
             >
               <span className="inline-flex items-center gap-1.5">
                 <ScaleIcon className="size-3" aria-hidden="true" />
-                {item.label}
+                {autoEnvironmentLabel ?? "Auto balance"}
               </span>
             </SelectItem>
-          ))}
+          )}
           {availableEnvironments.map((env) => (
             <SelectItem key={env.environmentId} value={env.environmentId}>
               <span className="inline-flex items-center gap-1.5">

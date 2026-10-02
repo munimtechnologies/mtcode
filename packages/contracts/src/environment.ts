@@ -222,10 +222,6 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       can answer computerView.stream / computerView.input (live remote view).
       Absent on older servers and on machines without the binary. */
   computerView: Schema.optionalKey(Schema.Boolean),
-  /** Server answers server.checkHostPaths, so auto balance can route a task
-      to the machines that hold the folders it mentions. Absent on older
-      servers, which are routed without a path check. */
-  hostPathCheck: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

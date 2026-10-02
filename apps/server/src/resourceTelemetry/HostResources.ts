@@ -1,9 +1,5 @@
 import * as NodeOS from "node:os";
-import type {
-  HostPathCheckInput,
-  HostPathCheckResult,
-  HostResourcesSnapshot,
-} from "@t3tools/contracts";
+import type { HostResourcesSnapshot } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
@@ -13,18 +9,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { checkHostPaths } from "./HostPathCheck.ts";
-
 export class HostResources extends Context.Service<
   HostResources,
-  {
-    readonly read: Effect.Effect<HostResourcesSnapshot>;
-    /** Which of the given paths exist here; home-relative paths use `homeDirectory`. */
-    readonly checkPaths: (
-      input: HostPathCheckInput,
-      homeDirectory: string,
-    ) => Effect.Effect<HostPathCheckResult>;
-  }
+  { readonly read: Effect.Effect<HostResourcesSnapshot> }
 >()("t3/resourceTelemetry/HostResources") {}
 
 function readCpu() {
@@ -100,13 +87,7 @@ export const make = Effect.fn("makeHostResources")(function* () {
     lookup: (_key: "host") => sample(),
     timeToLive: "5 seconds",
   });
-  return HostResources.of({
-    read: Cache.get(cache, "host"),
-    checkPaths: (input, homeDirectory) =>
-      checkHostPaths(input, { homeDirectory, platform }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fs),
-      ),
-  });
+  return HostResources.of({ read: Cache.get(cache, "host") });
 });
 
 export const layer = Layer.effect(HostResources, make());

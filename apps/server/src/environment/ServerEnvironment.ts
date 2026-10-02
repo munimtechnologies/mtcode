@@ -277,7 +277,6 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       worktreeBaseDirectory: true,
       externalConversationImport: true,
-      hostPathCheck: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? {

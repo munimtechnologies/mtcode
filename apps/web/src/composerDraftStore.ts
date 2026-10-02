@@ -1,4 +1,3 @@
-import type { TaskPlatform } from "@t3tools/client-runtime/load-balancing";
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
   CommandId,
@@ -336,9 +335,6 @@ const PersistedDraftThreadState = Schema.Struct({
   logicalProjectKey: Schema.optionalKey(Schema.String),
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  autoBalancePlatform: Schema.optionalKey(
-    Schema.NullOr(Schema.Literals(["mac", "windows", "linux"])),
-  ),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -467,7 +463,6 @@ export interface DraftSessionState {
   logicalProjectKey: string;
   environmentSelection?: "auto" | "manual";
   loadBalancedEnvironmentId?: EnvironmentId | null;
-  autoBalancePlatform?: TaskPlatform | null;
   createdAt: string;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -549,7 +544,6 @@ interface ComposerDraftStoreState {
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
-      autoBalancePlatform?: TaskPlatform | null;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -567,7 +561,6 @@ interface ComposerDraftStoreState {
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
-      autoBalancePlatform?: TaskPlatform | null;
     },
   ) => void;
   /** Updates mutable draft-session metadata without touching composer content. */
@@ -584,7 +577,6 @@ interface ComposerDraftStoreState {
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
-      autoBalancePlatform?: TaskPlatform | null;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -1561,7 +1553,6 @@ function createDraftThreadState(
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
     loadBalancedEnvironmentId?: EnvironmentId | null;
-    autoBalancePlatform?: TaskPlatform | null;
   },
 ): DraftThreadState {
   // A project change (including switching environments within a logical
@@ -1605,11 +1596,6 @@ function createDraftThreadState(
               : existingThread.loadBalancedEnvironmentId,
           }
         : {}),
-    ...(options?.autoBalancePlatform !== undefined
-      ? { autoBalancePlatform: options.autoBalancePlatform }
-      : existingThread?.autoBalancePlatform !== undefined
-        ? { autoBalancePlatform: existingThread.autoBalancePlatform }
-        : {}),
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode:
       options?.runtimeMode ??
@@ -1651,7 +1637,6 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.logicalProjectKey === right.logicalProjectKey &&
     left.environmentSelection === right.environmentSelection &&
     left.loadBalancedEnvironmentId === right.loadBalancedEnvironmentId &&
-    left.autoBalancePlatform === right.autoBalancePlatform &&
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
     left.interactionMode === right.interactionMode &&
@@ -1817,11 +1802,6 @@ function normalizePersistedDraftThreads(
           : candidateDraftThread.loadBalancedEnvironmentId === null
             ? { loadBalancedEnvironmentId: null }
             : {}),
-        ...(candidateDraftThread.autoBalancePlatform === "mac" ||
-        candidateDraftThread.autoBalancePlatform === "windows" ||
-        candidateDraftThread.autoBalancePlatform === "linux"
-          ? { autoBalancePlatform: candidateDraftThread.autoBalancePlatform }
-          : {}),
         promotedTo,
       };
     }
@@ -2604,9 +2584,6 @@ function toHydratedDraftThreadState(
             persistedDraftThread.loadBalancedEnvironmentId as EnvironmentId | null,
         }
       : {}),
-    ...(persistedDraftThread.autoBalancePlatform !== undefined
-      ? { autoBalancePlatform: persistedDraftThread.autoBalancePlatform }
-      : {}),
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -2891,11 +2868,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                     ? null
                     : (existing.loadBalancedEnvironmentId ?? null)
                   : options.loadBalancedEnvironmentId,
-              ...(options.autoBalancePlatform !== undefined
-                ? { autoBalancePlatform: options.autoBalancePlatform }
-                : existing.autoBalancePlatform !== undefined
-                  ? { autoBalancePlatform: existing.autoBalancePlatform }
-                  : {}),
               createdAt:
                 options.createdAt === undefined
                   ? existing.createdAt
@@ -2915,7 +2887,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.logicalProjectKey === existing.logicalProjectKey &&
               nextDraftThread.environmentSelection === existing.environmentSelection &&
               nextDraftThread.loadBalancedEnvironmentId === existing.loadBalancedEnvironmentId &&
-              nextDraftThread.autoBalancePlatform === existing.autoBalancePlatform &&
               nextDraftThread.createdAt === existing.createdAt &&
               nextDraftThread.runtimeMode === existing.runtimeMode &&
               nextDraftThread.interactionMode === existing.interactionMode &&
