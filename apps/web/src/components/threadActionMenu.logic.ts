@@ -23,6 +23,7 @@ export type ThreadActionMenuId =
   | "rename"
   | "regenerate-title"
   | "mark-unread"
+  | "move-to-computer"
   | "copy"
   | "copy-path"
   | "copy-branch"
@@ -50,6 +51,8 @@ export interface ThreadActionMenuState {
   readonly isRegeneratingTitle: boolean;
   /** Archive rejects a thread with an active turn, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
+  /** The surface can continue this thread on another connected computer. */
+  readonly canMoveToComputer?: boolean;
   readonly supports: {
     readonly settlement: boolean;
     /** Server understands thread.auto-settle.set. */
@@ -127,6 +130,15 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    ...(state.canMoveToComputer
+      ? [
+          {
+            id: "move-to-computer" as const,
+            label: "Move to another computer…",
+            icon: "monitor",
+          },
+        ]
+      : []),
     ...(state.projectFilter
       ? [
           {

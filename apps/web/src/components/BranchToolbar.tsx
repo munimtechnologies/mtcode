@@ -1,4 +1,5 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type { TaskPlatform } from "@t3tools/client-runtime/load-balancing";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
@@ -23,16 +24,21 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
+  autoBalancePlatformLabel,
+  autoBalanceSelectValue,
   type EnvMode,
-  type EnvironmentOption,
+  parseAutoBalanceSelectValue,
   resolveContextStripLabelsCompact,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
+  type RunOnEnvironmentOption,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
+
+const EMPTY_TASK_PLATFORMS: readonly TaskPlatform[] = [];
 import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
@@ -80,11 +86,13 @@ interface BranchToolbarProps {
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
   autoEnvironmentLabel?: string | undefined;
-  onAutoEnvironment?: (() => void) | undefined;
+  onAutoEnvironment?: ((platform: TaskPlatform | null) => void) | undefined;
+  autoBalancePlatforms?: readonly TaskPlatform[] | undefined;
+  autoBalancePlatform?: TaskPlatform | null | undefined;
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
-  availableEnvironments?: readonly EnvironmentOption[];
+  availableEnvironments?: readonly RunOnEnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
   contextStripVisible?: boolean;
@@ -93,11 +101,13 @@ interface BranchToolbarProps {
 interface MobileRunContextSelectorProps {
   forceNewWorktree: boolean;
   autoEnvironmentLabel?: string | undefined;
-  onAutoEnvironment?: (() => void) | undefined;
+  onAutoEnvironment?: ((platform: TaskPlatform | null) => void) | undefined;
+  autoBalancePlatforms: readonly TaskPlatform[];
+  autoBalancePlatform: TaskPlatform | null;
   envLocked: boolean;
   envModeLocked: boolean;
   environmentId: EnvironmentId;
-  availableEnvironments: readonly EnvironmentOption[] | undefined;
+  availableEnvironments: readonly RunOnEnvironmentOption[] | undefined;
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
@@ -113,6 +123,8 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   forceNewWorktree,
   autoEnvironmentLabel,
   onAutoEnvironment,
+  autoBalancePlatforms,
+  autoBalancePlatform,
   envLocked,
   envModeLocked,
   environmentId,
@@ -230,30 +242,43 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
             <MenuGroup>
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
-                value={autoEnvironmentLabel ? "auto" : environmentId}
-                onValueChange={(value) =>
-                  value === "auto"
-                    ? onAutoEnvironment?.()
-                    : onEnvironmentChange(value as EnvironmentId)
+                value={
+                  autoEnvironmentLabel ? autoBalanceSelectValue(autoBalancePlatform) : environmentId
                 }
+                onValueChange={(value) => {
+                  const platform = parseAutoBalanceSelectValue(value);
+                  if (platform === undefined) onEnvironmentChange(value as EnvironmentId);
+                  else onAutoEnvironment?.(platform);
+                }}
               >
-                {onAutoEnvironment && (
-                  <MenuRadioItem
-                    value="auto"
-                    disabled={envLocked}
-                    closeOnClick
-                    onClick={() => {
-                      if (autoEnvironmentLabel) onAutoEnvironment?.();
-                    }}
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <ScaleIcon className="size-3" aria-hidden="true" />
-                      <span className="min-w-0 truncate">
-                        {autoEnvironmentLabel ?? "Auto balance"}
-                      </span>
-                    </span>
-                  </MenuRadioItem>
-                )}
+                {onAutoEnvironment &&
+                  [null, ...autoBalancePlatforms].map((platform) => {
+                    const value = autoBalanceSelectValue(platform);
+                    const selected =
+                      autoEnvironmentLabel !== undefined && platform === autoBalancePlatform;
+                    return (
+                      <MenuRadioItem
+                        key={value}
+                        value={value}
+                        disabled={envLocked}
+                        closeOnClick
+                        onClick={() => {
+                          if (selected) onAutoEnvironment(platform);
+                        }}
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <ScaleIcon className="size-3" aria-hidden="true" />
+                          <span className="min-w-0 truncate">
+                            {selected
+                              ? autoEnvironmentLabel
+                              : platform
+                                ? autoBalancePlatformLabel(platform)
+                                : "Auto balance"}
+                          </span>
+                        </span>
+                      </MenuRadioItem>
+                    );
+                  })}
                 {availableEnvironments.map((env) => (
                   <MenuRadioItem
                     key={env.environmentId}
@@ -518,6 +543,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onStartFromOriginChange,
   autoEnvironmentLabel,
   onAutoEnvironment,
+  autoBalancePlatforms = EMPTY_TASK_PLATFORMS,
+  autoBalancePlatform = null,
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
@@ -635,6 +662,8 @@ export const BranchToolbar = memo(function BranchToolbar({
             forceNewWorktree={forceNewWorktree}
             autoEnvironmentLabel={autoEnvironmentLabel}
             onAutoEnvironment={onAutoEnvironment}
+            autoBalancePlatforms={autoBalancePlatforms}
+            autoBalancePlatform={autoBalancePlatform}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
             environmentId={environmentId}
@@ -664,6 +693,8 @@ export const BranchToolbar = memo(function BranchToolbar({
               <BranchToolbarEnvironmentSelector
                 autoEnvironmentLabel={autoEnvironmentLabel}
                 onAutoEnvironment={onAutoEnvironment}
+                autoBalancePlatforms={autoBalancePlatforms}
+                autoBalancePlatform={autoBalancePlatform}
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}

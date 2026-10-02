@@ -61,6 +61,14 @@ describe("buildThreadActionMenuItems", () => {
     expect(items[copyIndex + 2]?.id).toBe("archive");
   });
 
+  it("offers moving to another computer only where the surface supports it", () => {
+    expect(ids(baseState)).not.toContain("move-to-computer");
+    const items = buildThreadActionMenuItems({ ...baseState, canMoveToComputer: true });
+    const moveIndex = items.findIndex((item) => item.id === "move-to-computer");
+    expect(items[moveIndex]).toMatchObject({ label: "Move to another computer…", icon: "monitor" });
+    expect(items[moveIndex - 1]?.id).toBe("mark-unread");
+  });
+
   it("offers project filtering only for surfaces with a scoped thread list", () => {
     expect(ids(baseState)).not.toContain("filter-by-project");
     expect(

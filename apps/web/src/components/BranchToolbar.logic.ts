@@ -5,6 +5,7 @@ import type {
   ProjectId,
   WorktreeSubmodules,
 } from "@t3tools/contracts";
+import type { TaskPlatform } from "@t3tools/client-runtime/load-balancing";
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
@@ -20,6 +21,33 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+}
+
+/** What the "Run on" picker needs; computer-wide threads have no project there yet. */
+export type RunOnEnvironmentOption = Omit<EnvironmentOption, "projectId">;
+
+const AUTO_BALANCE_PLATFORM_LABELS: Record<TaskPlatform, string> = {
+  mac: "Auto balance · Macs",
+  windows: "Auto balance · Windows",
+  linux: "Auto balance · Linux",
+};
+
+/** "Run on" values for automatic routing, optionally limited to one operating system. */
+export function autoBalanceSelectValue(platform: TaskPlatform | null | undefined): string {
+  return platform ? `auto:${platform}` : "auto";
+}
+
+/** The platform an automatic "Run on" value asks for; undefined for a machine id. */
+export function parseAutoBalanceSelectValue(value: string): TaskPlatform | null | undefined {
+  if (value === "auto") return null;
+  const platform = value.startsWith("auto:") ? value.slice("auto:".length) : null;
+  return platform === "mac" || platform === "windows" || platform === "linux"
+    ? platform
+    : undefined;
+}
+
+export function autoBalancePlatformLabel(platform: TaskPlatform): string {
+  return AUTO_BALANCE_PLATFORM_LABELS[platform];
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
