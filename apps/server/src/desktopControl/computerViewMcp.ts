@@ -24,10 +24,19 @@ const JPEG_QUALITY: Readonly<Record<Exclude<ComputerViewQuality, "lossless">, nu
   high: 85,
 };
 
+/** Longest a live capture call waits for the screen to change before answering. */
+export const COMPUTER_VIEW_LIVE_WAIT_MS = 500;
+
 /**
- * `screenshot` arguments for one frame. JPEG keeps a live stream cheap; the
- * macOS host only produces PNG and ignores both `format` and `quality`, and a
- * host older than munim-computer-use 0.5.1 ignores `quality`.
+ * `screenshot` arguments for one frame. JPEG keeps a live stream cheap. Hosts
+ * older than munim-computer-use 0.6.0 differ: the macOS one only produces PNG
+ * and ignores `format` and `quality`, and anything before 0.5.1 ignores
+ * `quality`.
+ *
+ * `live` asks the host for its live capture (0.6.0+ on macOS and Windows):
+ * the host keeps a capture stream open and, given `after`, waits until the
+ * screen changes past that frame. Older hosts and Linux ignore it and answer
+ * with an ordinary screenshot.
  */
 export function computerViewCaptureArguments(input: {
   readonly display: number;
@@ -35,11 +44,20 @@ export function computerViewCaptureArguments(input: {
   readonly quality?: ComputerViewQuality | undefined;
   /** Ask for the pointer too (munim-computer-use 0.5.2+ on Windows). */
   readonly cursor?: boolean | undefined;
+  readonly live?: { readonly after: number | null; readonly waitMs: number } | undefined;
 }): Record<string, unknown> {
   const quality = input.quality ?? "standard";
   const cursor = input.cursor === true ? { cursor: true } : {};
+  const live =
+    input.live === undefined
+      ? {}
+      : {
+          live: true,
+          wait_ms: input.live.waitMs,
+          ...(input.live.after === null ? {} : { after: input.live.after }),
+        };
   if (quality === "lossless") {
-    return { display: input.display, max_width: input.maxWidth, format: "png", ...cursor };
+    return { display: input.display, max_width: input.maxWidth, format: "png", ...cursor, ...live };
   }
   return {
     display: input.display,
@@ -47,7 +65,37 @@ export function computerViewCaptureArguments(input: {
     format: "jpeg",
     quality: JPEG_QUALITY[quality],
     ...cursor,
+    ...live,
   };
+}
+
+/** Where a live capture stands: its newest frame, and whether this result carries it. */
+export interface ComputerViewLiveState {
+  readonly seq: number;
+  readonly changed: boolean;
+}
+
+/**
+ * The host's `live: {json}` line. Null when the host took an ordinary
+ * screenshot instead, because it is older than 0.6.0 or has no live capture
+ * for this display.
+ */
+export function toolResultLive(result: McpToolResult): ComputerViewLiveState | null {
+  for (const item of contentItems(result)) {
+    if (item.type !== "text" || typeof item.text !== "string") continue;
+    if (!item.text.startsWith("live: ")) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(item.text.slice("live: ".length));
+    } catch {
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const value = parsed as Record<string, unknown>;
+    if (typeof value.seq !== "number" || !Number.isSafeInteger(value.seq)) return null;
+    return { seq: value.seq, changed: value.changed === true };
+  }
+  return null;
 }
 
 /** The pointer a capture reported, as the host's `cursor: {json}` text line. */

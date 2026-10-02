@@ -11,6 +11,7 @@ import {
   toolResultCursor,
   toolResultImage,
   toolResultIsError,
+  toolResultLive,
   toolResultText,
 } from "./computerViewMcp.ts";
 
@@ -250,5 +251,61 @@ describe("remote cursor", () => {
     const moved = computerViewCursorEvent({ ...arrow, x: 2 }, arrow, new Set(["0x10003"]));
     assert.strictEqual(moved?.x, 2);
     assert.isUndefined(moved?.image);
+  });
+});
+
+describe("live capture", () => {
+  it("asks for the live capture and the frame the viewer already has", () => {
+    assert.deepStrictEqual(
+      computerViewCaptureArguments({
+        display: 0,
+        maxWidth: 1600,
+        live: { after: 41, waitMs: 500 },
+      }),
+      {
+        display: 0,
+        max_width: 1600,
+        format: "jpeg",
+        quality: 55,
+        live: true,
+        wait_ms: 500,
+        after: 41,
+      },
+    );
+  });
+
+  it("leaves after out until the viewer has a frame", () => {
+    const args = computerViewCaptureArguments({
+      display: 0,
+      maxWidth: 1600,
+      live: { after: null, waitMs: 500 },
+    });
+    assert.strictEqual(args.live, true);
+    assert.isFalse("after" in args);
+  });
+
+  it("reads the host's live line, with or without an image", () => {
+    assert.deepStrictEqual(
+      toolResultLive({
+        content: [
+          { type: "image", data: "AAAA", mimeType: "image/jpeg" },
+          { type: "text", text: "display 0: screen origin (0, 0)" },
+          { type: "text", text: 'live: {"seq":12,"changed":true}' },
+        ],
+      }),
+      { seq: 12, changed: true },
+    );
+    assert.deepStrictEqual(
+      toolResultLive({ content: [{ type: "text", text: 'live: {"seq":12,"changed":false}' }] }),
+      { seq: 12, changed: false },
+    );
+  });
+
+  it("treats a result without a live line as an ordinary screenshot", () => {
+    assert.isNull(
+      toolResultLive({ content: [{ type: "image", data: "AAAA", mimeType: "image/jpeg" }] }),
+    );
+    assert.isNull(toolResultLive({ content: [{ type: "text", text: "live: not json" }] }));
+    assert.isNull(toolResultLive({ content: [{ type: "text", text: 'live: {"seq":"12"}' }] }));
   });
 });

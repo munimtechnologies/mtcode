@@ -38,6 +38,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildComputerViewFrame,
+  COMPUTER_VIEW_LIVE_WAIT_MS,
   computerViewCaptureArguments,
   computerViewCaptureIntervalMs,
   computerViewCursorEvent,
@@ -46,7 +47,9 @@ import {
   toolResultCursor,
   toolResultImage,
   toolResultIsError,
+  toolResultLive,
   toolResultText,
+  type ComputerViewLiveState,
   type McpToolResult,
 } from "./computerViewMcp.ts";
 import { makeResolveEnabledDesktopMcp } from "./desktopMcpLaunch.ts";
@@ -123,6 +126,11 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
   // move waited behind whatever capture was in flight (~100 ms on Windows).
   const captureState = yield* SynchronizedRef.make<ActiveClient | null>(null);
   const inputState = yield* SynchronizedRef.make<ActiveClient | null>(null);
+  // The capture helper keeps one live capture, of one display. Viewers of that
+  // display share it; a viewer of another display on the same machine falls
+  // back to ordinary screenshots rather than make the two take turns
+  // restarting it. Display index -> live viewers.
+  const liveViewers = new Map<number, number>();
 
   const writeMessage = (client: ActiveClient, message: Record<string, unknown>) =>
     client.writeMutex.withPermits(1)(
@@ -280,13 +288,22 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     maxWidth: number,
     quality: ComputerViewQuality | undefined,
     cursor: boolean,
+    live: { readonly after: number | null } | null,
   ) {
-    // The frame event carries whichever mime type actually came back: the
-    // macOS helper only produces PNG whatever was asked for.
+    // The frame event carries whichever mime type actually came back: macOS
+    // helpers before 0.6.0 only produce PNG whatever was asked for.
     const result = yield* callTool(
       client,
       "screenshot",
-      computerViewCaptureArguments({ display: display.index, maxWidth, quality, cursor }),
+      computerViewCaptureArguments({
+        display: display.index,
+        maxWidth,
+        quality,
+        cursor,
+        ...(live === null
+          ? {}
+          : { live: { after: live.after, waitMs: COMPUTER_VIEW_LIVE_WAIT_MS } }),
+      }),
       CAPTURE_TIMEOUT,
     ).pipe(
       Effect.mapError(
@@ -298,6 +315,13 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
         code: "capture_failed",
         detail: toolResultText(result) || "Screen capture failed.",
       });
+    }
+    const liveState: ComputerViewLiveState | null = live === null ? null : toolResultLive(result);
+    const hostCursor = cursor ? toolResultCursor(result) : null;
+    // Nothing changed within the wait: no image, only the frame number (and
+    // the pointer, which may have moved on its own).
+    if (liveState !== null && !liveState.changed) {
+      return { frame: null, cursor: hostCursor, live: liveState };
     }
     const image = toolResultImage(result);
     if (image === null) {
@@ -317,7 +341,7 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
         detail: "The captured image could not be decoded.",
       });
     }
-    return { frame, cursor: cursor ? toolResultCursor(result) : null };
+    return { frame, cursor: hostCursor, live: liveState };
   });
 
   const stream: ComputerViewBroker["Service"]["stream"] = (input) =>
@@ -346,10 +370,28 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
           displays,
           selectedDisplay: selected.index,
         };
+        const live = yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            if ([...liveViewers.keys()].some((index) => index !== selected.index)) return false;
+            liveViewers.set(selected.index, (liveViewers.get(selected.index) ?? 0) + 1);
+            return true;
+          }),
+          (claimed) =>
+            Effect.sync(() => {
+              if (!claimed) return;
+              const remaining = (liveViewers.get(selected.index) ?? 1) - 1;
+              if (remaining > 0) liveViewers.set(selected.index, remaining);
+              else liveViewers.delete(selected.index);
+            }),
+        );
         const maxWidth = input.maxWidth ?? COMPUTER_VIEW_DEFAULT_MAX_WIDTH;
         const activeInterval = computerViewCaptureIntervalMs(input.frameRate);
         let lastFrameAt = 0;
         let consecutiveFailures = 0;
+        // The newest live frame this viewer has. The host waits for the screen
+        // to change past it, so the loop neither polls an idle screen nor
+        // compares bytes.
+        let lastSeq: number | null = null;
         // A still screen encodes to the same bytes every time. Comparing them
         // is what lets the capture loop run fast without paying for it: only
         // changed pixels reach the client.
@@ -374,6 +416,7 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
             maxWidth,
             input.quality,
             wantsCursor,
+            live ? { after: lastSeq } : null,
           ).pipe(
             Effect.map((capture) => {
               consecutiveFailures = 0;
@@ -387,8 +430,9 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
               return Effect.succeed(error.detail);
             }),
           );
-          lastFrameAt = yield* Clock.currentTimeMillis;
+          const capturedAt = yield* Clock.currentTimeMillis;
           if (typeof captured === "string") {
+            lastFrameAt = capturedAt;
             return [{ type: "status", message: captured } satisfies ComputerViewStreamEvent];
           }
           const events: ComputerViewStreamEvent[] = [];
@@ -403,7 +447,23 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
             if (cursorEvent.image !== undefined) sentCursorImages.add(cursorEvent.id);
             events.push(cursorEvent);
           }
-          if (captured.frame.data === lastFrameData) {
+          if (captured.live !== null) {
+            // The host already waited for a change; a frame here is news. Pace
+            // from the last delivered frame, so a call that came back empty
+            // after waiting is followed straight away by the next one.
+            lastSeq = captured.live.seq;
+            unchangedRuns = 0;
+            if (captured.frame !== null || cursorEvent !== null) lastFrameAt = capturedAt;
+            if (captured.frame !== null) {
+              lastFrameData = captured.frame.data;
+              events.push(captured.frame);
+            }
+            return events;
+          }
+          // An ordinary screenshot: an older host, Linux, or a display the
+          // host has no live capture for.
+          lastFrameAt = capturedAt;
+          if (captured.frame === null || captured.frame.data === lastFrameData) {
             unchangedRuns = cursorEvent === null ? unchangedRuns + 1 : 0;
           } else {
             lastFrameData = captured.frame.data;
