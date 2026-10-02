@@ -2,9 +2,8 @@ import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
-  type OrchestrationCommand,
-  type OrchestrationShellSnapshot,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ServerCommand,
+  type OrchestrationV2ThreadShell,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -12,14 +11,13 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
 import { McpSchema, McpServer } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ComputerToolkitHandlersLive } from "./handlers.ts";
 import { ComputerToolkit } from "./tools.ts";
 
@@ -28,55 +26,35 @@ const environmentId = EnvironmentId.make("environment-mac");
 const projectId = ProjectId.make("project-t3");
 const sourceThreadId = ThreadId.make("thread-source");
 
-function makeThread(
-  id: ThreadId,
-  input: Partial<OrchestrationThreadShell> = {},
-): OrchestrationThreadShell {
-  return {
-    id,
-    projectId,
-    title: "Source Agent",
-    modelSelection: {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5-codex",
-    },
-    runtimeMode: "approval-required",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    pullRequests: [],
-    latestTurn: null,
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    ...input,
-  };
-}
+const source = {
+  id: sourceThreadId,
+  projectId,
+  title: "Source Agent",
+  modelSelection: {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-5-codex",
+  },
+  runtimeMode: "approval-required",
+  interactionMode: "default",
+  branch: null,
+  worktreePath: null,
+  archivedAt: null,
+} as unknown as OrchestrationV2ThreadShell;
 
-const source = makeThread(sourceThreadId);
-const snapshot = {
-  snapshotSequence: 10,
-  projects: [
-    {
-      id: projectId,
-      title: "t3code",
-      workspaceRoot: "/Users/me/dev/t3code",
-      defaultModelSelection: null,
-      scripts: [],
-      createdAt: now,
-      updatedAt: now,
-    },
-  ],
-  threads: [source],
+const project: ProjectStore.ProjectRow = {
+  projectId,
+  title: "t3code",
+  workspaceRoot: "/Users/me/dev/t3code",
+  defaultModelSelection: null,
+  defaultThreadEnvMode: null,
+  autoPull: false,
+  faviconPath: null,
+  projectIcon: null,
+  scripts: [],
+  createdAt: now,
   updatedAt: now,
-} satisfies OrchestrationShellSnapshot;
+  deletedAt: null,
+};
 
 const invocation = {
   environmentId,
@@ -108,27 +86,20 @@ const descriptor = {
   capabilities: { repositoryIdentity: false },
 };
 
-function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
-  const query = {
-    getShellSnapshot: () => Effect.succeed(snapshot),
-    getThreadShellById: (threadId: ThreadId) => {
-      const thread = snapshot.threads.find(({ id }) => id === threadId);
-      return Effect.succeed(thread === undefined ? Option.none() : Option.some(thread));
-    },
-  } as unknown as ProjectionSnapshotQuery["Service"];
+function makeTestLayer(dispatched: Array<OrchestrationV2ServerCommand>) {
+  const threads = {
+    getThreadShell: (threadId: ThreadId) =>
+      Effect.succeed(threadId === sourceThreadId ? source : null),
+    dispatch: (command: OrchestrationV2ServerCommand) =>
+      Effect.sync(() => {
+        dispatched.push(command);
+        return { sequence: 11, storedEvents: [] };
+      }),
+  } as unknown as ThreadManagementService.ThreadManagementService["Service"];
 
-  const engine = {
-    readEvents: () => Stream.empty,
-    dispatch: (command) => {
-      dispatched.push(command);
-      return Effect.succeed({ sequence: 11 });
-    },
-    readThreadEvents: () => Stream.empty,
-    getThreadReplayStats: () => Effect.die("unused thread replay stats"),
-    streamDomainEvents: Stream.empty,
-    subscribeDomainEvents: Effect.succeed(Stream.empty),
-    latestSequence: Effect.succeed(10),
-  } satisfies OrchestrationEngineService["Service"];
+  const projects = {
+    get: (id: ProjectId) => Effect.succeed(id === projectId ? Option.some(project) : Option.none()),
+  } as unknown as ProjectStore.ProjectStoreV2["Service"];
 
   const environment = {
     getEnvironmentId: Effect.succeed(environmentId),
@@ -142,15 +113,15 @@ function makeTestLayer(dispatched: Array<OrchestrationCommand>) {
     Layer.provide(ComputerToolkitHandlersLive),
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(ComputerTaskBroker.layer),
-    Layer.provideMerge(Layer.succeed(ProjectionSnapshotQuery, query)),
-    Layer.provideMerge(Layer.succeed(OrchestrationEngineService, engine)),
+    Layer.provideMerge(Layer.succeed(ThreadManagementService.ThreadManagementService, threads)),
+    Layer.provideMerge(Layer.succeed(ProjectStore.ProjectStoreV2, projects)),
     Layer.provideMerge(Layer.succeed(ServerEnvironment.ServerEnvironment, environment)),
     Layer.provideMerge(NodeServices.layer),
   );
 }
 
 it.effect("lists this machine and starts a local thread for computer_send this", () => {
-  const dispatched: Array<OrchestrationCommand> = [];
+  const dispatched: Array<OrchestrationV2ServerCommand> = [];
   return Effect.scoped(
     Effect.gen(function* () {
       const server = yield* McpServer.McpServer;
@@ -179,17 +150,23 @@ it.effect("lists this machine and starts a local thread for computer_send this",
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
         );
       expect(sent.isError).toBe(false);
-      expect(dispatched[0]?.type).toBe("thread.turn.start");
-      if (dispatched[0]?.type === "thread.turn.start") {
-        expect(dispatched[0].message.text).toContain("Build the Windows installer.");
-        expect(dispatched[0].bootstrap?.createThread?.projectId).toBe(projectId);
+      expect(dispatched.map(({ type }) => type)).toEqual(["thread.create", "message.dispatch"]);
+      const [create, send] = dispatched;
+      if (create?.type === "thread.create" && send?.type === "message.dispatch") {
+        expect(create.projectId).toBe(projectId);
+        expect(create.title).toBe("Build the Windows installer.");
+        expect(send.threadId).toBe(create.threadId);
+        expect(send.senderThreadId).toBe(sourceThreadId);
+        expect(send.text).toContain("Build the Windows installer.");
+        expect(send.dispatchMode).toEqual({ type: "start_immediately" });
       }
+      expect(sent.structuredContent).toMatchObject({ environmentId, projectId });
     }),
   ).pipe(Effect.provide(makeTestLayer(dispatched)));
 });
 
 it.effect("refuses an unknown computer", () => {
-  const dispatched: Array<OrchestrationCommand> = [];
+  const dispatched: Array<OrchestrationV2ServerCommand> = [];
   return Effect.scoped(
     Effect.gen(function* () {
       const server = yield* McpServer.McpServer;

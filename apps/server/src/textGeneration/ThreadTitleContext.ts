@@ -1,16 +1,10 @@
-import { isCorrectionMessage, type ChatAttachment } from "@t3tools/contracts";
+import type { ChatAttachment } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
 export type ThreadTitleMessage = {
   readonly role: "user" | "assistant" | "system" | "reasoning";
   readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  readonly correction?:
-    | {
-        readonly targetMessageId: string;
-        readonly replacementText: string;
-      }
-    | undefined;
 };
 
 const MAX_CONTEXT = 8_000;
@@ -36,7 +30,6 @@ export function formatThreadTitleContext(messages: ReadonlyArray<ThreadTitleMess
     if (
       message.role === "system" ||
       message.role === "reasoning" ||
-      isCorrectionMessage(message) ||
       (!message.text.trim() && !message.attachments?.length)
     )
       return [];

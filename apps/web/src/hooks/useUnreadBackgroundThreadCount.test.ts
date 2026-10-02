@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 
+import { makeThreadFixture } from "../test-fixtures";
 import {
   countUnreadBackgroundThreads,
   isThreadUnreadBackground,
@@ -16,42 +17,25 @@ function createMockThread(
   id: string,
   overrides?: Partial<EnvironmentThreadShell>,
 ): EnvironmentThreadShell {
-  return {
+  return makeThreadFixture({
     environmentId: envId,
     id: ThreadId.make(id),
     projectId: projId,
     title: `Thread ${id}`,
-    modelSelection: {
-      instanceId: providerInstanceId,
-      model: "test-model",
-    },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    pullRequests: [],
-    latestTurn: null,
+    modelSelection: { instanceId: providerInstanceId, model: "test-model" },
     createdAt: "2026-08-14T20:00:00.000Z",
     updatedAt: "2026-08-14T20:00:00.000Z",
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
     ...overrides,
-  };
+  });
 }
 
 describe("isThreadUnreadBackground", () => {
   it("returns false for archived threads", () => {
     const thread = createMockThread("thread-1", {
       archivedAt: "2026-08-14T20:10:00.000Z",
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-1"),
+        status: "completed",
         requestedAt: "2026-08-14T20:05:00.000Z",
         startedAt: "2026-08-14T20:05:01.000Z",
         completedAt: "2026-08-14T20:06:00.000Z",
@@ -63,9 +47,9 @@ describe("isThreadUnreadBackground", () => {
 
   it("returns false for the currently open route thread", () => {
     const thread = createMockThread("thread-1", {
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-1"),
+        status: "completed",
         requestedAt: "2026-08-14T20:05:00.000Z",
         startedAt: "2026-08-14T20:05:01.000Z",
         completedAt: "2026-08-14T20:06:00.000Z",
@@ -78,9 +62,9 @@ describe("isThreadUnreadBackground", () => {
 
   it("returns true when turn completed after last visited timestamp", () => {
     const thread = createMockThread("thread-1", {
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-1"),
+        status: "completed",
         requestedAt: "2026-08-14T20:05:00.000Z",
         startedAt: "2026-08-14T20:05:01.000Z",
         completedAt: "2026-08-14T20:06:00.000Z",
@@ -92,9 +76,9 @@ describe("isThreadUnreadBackground", () => {
 
   it("returns false when last visited timestamp is newer than turn completion", () => {
     const thread = createMockThread("thread-1", {
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-1"),
+        status: "completed",
         requestedAt: "2026-08-14T20:05:00.000Z",
         startedAt: "2026-08-14T20:05:01.000Z",
         completedAt: "2026-08-14T20:06:00.000Z",
@@ -108,9 +92,9 @@ describe("isThreadUnreadBackground", () => {
 
   it("returns false when thread was never visited", () => {
     const thread = createMockThread("thread-1", {
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-1"),
+        status: "completed",
         requestedAt: "2026-08-14T20:05:00.000Z",
         startedAt: "2026-08-14T20:05:01.000Z",
         completedAt: "2026-08-14T20:06:00.000Z",
@@ -124,9 +108,9 @@ describe("isThreadUnreadBackground", () => {
 describe("countUnreadBackgroundThreads", () => {
   it("counts only unread background threads", () => {
     const thread1 = createMockThread("thread-1", {
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-1"),
+        status: "completed",
         requestedAt: "2026-08-14T20:05:00.000Z",
         startedAt: "2026-08-14T20:05:01.000Z",
         completedAt: "2026-08-14T20:06:00.000Z",
@@ -134,9 +118,9 @@ describe("countUnreadBackgroundThreads", () => {
       },
     });
     const thread2 = createMockThread("thread-2", {
-      latestTurn: {
-        turnId: TurnId.make("turn-2"),
-        state: "completed",
+      latestRun: {
+        runId: RunId.make("run-2"),
+        status: "completed",
         requestedAt: "2026-08-14T20:10:00.000Z",
         startedAt: "2026-08-14T20:10:01.000Z",
         completedAt: "2026-08-14T20:11:00.000Z",

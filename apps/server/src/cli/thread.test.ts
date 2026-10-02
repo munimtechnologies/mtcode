@@ -7,9 +7,9 @@ import { waitForIdleThread } from "./thread.ts";
 
 it.effect("waits for the running turn to finish before returning the thread", () =>
   Effect.gen(function* () {
-    const statuses = ["running", "starting", "ready"];
+    const activeRunIds = ["run-1", "run-2", null];
     let reads = 0;
-    const readThread = Effect.sync(() => ({ session: { status: statuses[reads++]! } }));
+    const readThread = Effect.sync(() => ({ activeRunId: activeRunIds[reads++] ?? null }));
 
     const waiting = yield* Effect.forkChild(waitForIdleThread(readThread));
     yield* TestClock.adjust("5 seconds");
@@ -17,15 +17,15 @@ it.effect("waits for the running turn to finish before returning the thread", ()
     yield* TestClock.adjust("5 seconds");
     const thread = yield* Fiber.join(waiting);
 
-    assert.equal(thread?.session.status, "ready");
+    assert.isNull(thread?.activeRunId);
     assert.equal(reads, 3);
   }),
 );
 
 it.effect("returns an idle or missing thread without waiting", () =>
   Effect.gen(function* () {
-    assert.deepEqual(yield* waitForIdleThread(Effect.succeed({ session: null })), {
-      session: null,
+    assert.deepEqual(yield* waitForIdleThread(Effect.succeed({ activeRunId: null })), {
+      activeRunId: null,
     });
     assert.isUndefined(yield* waitForIdleThread(Effect.succeed(undefined)));
   }),

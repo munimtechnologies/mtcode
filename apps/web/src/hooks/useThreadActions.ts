@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { threadAllows } from "@t3tools/client-runtime/state/threads";
+import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
@@ -34,11 +34,13 @@ import {
   readEnvironmentSupportsActiveReorder,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentSupportsVisitedTracking,
   readEnvironmentThreadRefs,
   readProject,
   readThreadShell,
   readThreadShells,
 } from "../state/entities";
+import { useUiStateStore } from "../uiStateStore";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -47,7 +49,6 @@ import { useClientSettings } from "./useSettings";
 import * as ThreadUndo from "./threadUndo";
 import { showThreadUndoNotice } from "./showThreadUndoNotice";
 import { useAtomCommand } from "../state/use-atom-command";
-import { useThreadVisitedState } from "./useThreadVisitedState";
 
 export class ThreadArchiveBlockedError extends Schema.TaggedError<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -57,34 +58,8 @@ export class ThreadArchiveBlockedError extends Schema.TaggedError<ThreadArchiveB
   },
 ) {
   override get message(): string {
-    return "Cannot archive a running thread.";
+    return "Cannot archive while the provider is active.";
   }
-}
-
-export class ThreadCapabilityBlockedError extends Schema.TaggedError<ThreadCapabilityBlockedError>()(
-  "ThreadCapabilityBlockedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "This action is controlled by the thread's backing source.";
-  }
-}
-
-function capabilityFailure(thread: {
-  readonly environmentId: EnvironmentId;
-  readonly id: ThreadId;
-}) {
-  return AsyncResult.failure(
-    Cause.fail(
-      new ThreadCapabilityBlockedError({
-        environmentId: thread.environmentId,
-        threadId: thread.id,
-      }),
-    ),
-  );
 }
 
 export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadSettlementUnsupportedError>()(
@@ -179,7 +154,7 @@ export class ThreadActiveReorderUnsupportedError extends Schema.TaggedError<Thre
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support reordering unsettled threads yet. Update the server to drag the active list.";
+    return "Update this environment's server to reorder active threads.";
   }
 }
 
@@ -216,6 +191,32 @@ export async function navigateAfterThreadDeletion(navigate: () => Promise<void>)
       }),
     );
   }
+}
+
+/**
+ * Marks a thread unread. Servers with visited tracking own the unread marker
+ * (thread.mark-unread rewinds the server-side visited watermark, syncing the
+ * marker to every device); older servers keep the browser-local marker.
+ */
+function useMarkThreadUnread() {
+  const markThreadUnreadMutation = useAtomCommand(threadEnvironment.markUnread, {
+    reportFailure: false,
+  });
+  const markThreadUnreadLocal = useUiStateStore((state) => state.markThreadUnread);
+  return useCallback(
+    (target: ScopedThreadRef) => {
+      if (readEnvironmentSupportsVisitedTracking(target.environmentId)) {
+        void markThreadUnreadMutation({
+          environmentId: target.environmentId,
+          input: { threadId: target.threadId },
+        });
+        return;
+      }
+      const thread = readThreadShell(target);
+      markThreadUnreadLocal(scopedThreadKey(target), thread?.latestRun?.completedAt);
+    },
+    [markThreadUnreadLocal, markThreadUnreadMutation],
+  );
 }
 
 export function useThreadActions() {
@@ -256,6 +257,7 @@ export function useThreadActions() {
   const unsnoozeThreadMutation = useAtomCommand(threadEnvironment.unsnooze, {
     reportFailure: false,
   });
+  const markThreadUnread = useMarkThreadUnread();
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession);
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
@@ -271,7 +273,7 @@ export function useThreadActions() {
     (store) => store.clearProjectDraftThreadById,
   );
   const clearTerminalUiState = useTerminalUiStateStore((state) => state.clearTerminalUiState);
-  const { markVisited } = useThreadVisitedState();
+  const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const router = useRouter();
   const handleNewThread = useNewThreadHandler();
   // Keep a ref so archiveThread can call handleNewThread without appearing in
@@ -325,8 +327,7 @@ export function useThreadActions() {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
-      if (!threadAllows(thread, "archive")) return capabilityFailure(thread);
-      if (thread.session?.status === "running" && thread.session.activeTurnId != null) {
+      if (!threadRuntimeCanArchive(thread.runtime)) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadArchiveBlockedError({
@@ -352,7 +353,7 @@ export function useThreadActions() {
       }
       const wokeAt = threadWokeAt(thread, { now: new Date().toISOString() });
       if (wokeAt !== null) {
-        markVisited(threadRef, wokeAt);
+        markThreadVisited(scopedThreadKey(threadRef), wokeAt);
       }
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       opts.onArchived?.();
@@ -379,7 +380,7 @@ export function useThreadActions() {
     [
       archiveThreadMutation,
       getCurrentRouteThreadRef,
-      markVisited,
+      markThreadVisited,
       resolveThreadTarget,
       unarchiveThread,
     ],
@@ -400,7 +401,6 @@ export function useThreadActions() {
         return result;
       }
       const { thread, threadRef } = resolved;
-      if (!threadAllows(thread, "delete")) return capabilityFailure(thread);
       const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
         const shell = readThreadShell(ref);
         return shell === null ? [] : [shell];
@@ -462,7 +462,7 @@ export function useThreadActions() {
         shouldDeleteWorktree = confirmationResult.value;
       }
 
-      if (thread.session && thread.session.status !== "stopped") {
+      if (thread.runtime !== null) {
         await stopThreadSession({
           environmentId: threadRef.environmentId,
           input: { threadId: threadRef.threadId },
@@ -587,10 +587,6 @@ export function useThreadActions() {
 
   const unsettleThread = useCallback(
     async (target: ScopedThreadRef) => {
-      const resolved = resolveThreadTarget(target);
-      if (resolved && !threadAllows(resolved.thread, "unsettle")) {
-        return capabilityFailure(resolved.thread);
-      }
       if (!readEnvironmentSupportsSettlement(target.environmentId)) {
         return AsyncResult.failure(
           Cause.fail(
@@ -609,7 +605,7 @@ export function useThreadActions() {
         input: { threadId: target.threadId, reason: "user" },
       });
     },
-    [resolveThreadTarget, unsettleThreadMutation],
+    [unsettleThreadMutation],
   );
 
   /** Turns automatic settlement (inactivity, merged PR) on or off for one thread. */
@@ -702,7 +698,7 @@ export function useThreadActions() {
   );
 
   const settleThread = useCallback(
-    async (target: ScopedThreadRef, opts: { force?: boolean | undefined } = {}) => {
+    async (target: ScopedThreadRef) => {
       // Version skew: never send the command to a server that predates it —
       // the raw protocol rejection would read as a random failure.
       if (!readEnvironmentSupportsSettlement(target.environmentId)) {
@@ -716,9 +712,6 @@ export function useThreadActions() {
         );
       }
       const resolved = resolveThreadTarget(target);
-      if (resolved && !threadAllows(resolved.thread, "settle")) {
-        return capabilityFailure(resolved.thread);
-      }
       const wokeAt = resolved
         ? threadWokeAt(resolved.thread, { now: new Date().toISOString() })
         : null;
@@ -741,7 +734,7 @@ export function useThreadActions() {
         return result;
       }
       if (wokeAt !== null) {
-        markVisited(target, wokeAt);
+        markThreadVisited(scopedThreadKey(target), wokeAt);
       }
       showThreadUndoNotice({
         action: "Settled",
@@ -769,7 +762,7 @@ export function useThreadActions() {
       return result;
     },
     [
-      markVisited,
+      markThreadVisited,
       pinThread,
       resolveThreadTarget,
       settleThreadMutation,
@@ -844,10 +837,6 @@ export function useThreadActions() {
 
   const unsnoozeThread = useCallback(
     async (target: ScopedThreadRef) => {
-      const resolved = resolveThreadTarget(target);
-      if (resolved && !threadAllows(resolved.thread, "lifecycle")) {
-        return capabilityFailure(resolved.thread);
-      }
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
         return AsyncResult.failure(
           Cause.fail(
@@ -864,15 +853,11 @@ export function useThreadActions() {
         input: { threadId: target.threadId, reason: "user" },
       });
     },
-    [resolveThreadTarget, unsnoozeThreadMutation],
+    [unsnoozeThreadMutation],
   );
 
   const snoozeThread = useCallback(
-    async (
-      target: ScopedThreadRef,
-      snoozedUntil: string,
-      opts: { force?: boolean | undefined } = {},
-    ) => {
+    async (target: ScopedThreadRef, snoozedUntil: string) => {
       // Version skew: never send the command to a server that predates it.
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
         return AsyncResult.failure(
@@ -885,14 +870,10 @@ export function useThreadActions() {
         );
       }
       const resolved = resolveThreadTarget(target);
-      if (
-        !opts?.force &&
-        resolved &&
-        !canSnooze(resolved.thread, { now: new Date().toISOString() })
-      ) {
-        if (resolved && !threadAllows(resolved.thread, "lifecycle")) {
-          return capabilityFailure(resolved.thread);
-        }
+      // Blocked-on-you work and queued turns can't be snoozed away —
+      // client-side twin of the server invariants so the UI rejects before
+      // a round trip.
+      if (resolved && !canSnooze(resolved.thread, { now: new Date().toISOString() })) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadSnoozeBlockedError({
@@ -967,6 +948,7 @@ export function useThreadActions() {
       confirmAndUnpinThread,
       reorderPinnedThread,
       reorderActiveThread,
+      markThreadUnread,
       setThreadAutoSettle,
     }),
     [
@@ -974,8 +956,8 @@ export function useThreadActions() {
       confirmAndDeleteThread,
       confirmAndUnpinThread,
       deleteThread,
+      markThreadUnread,
       pinThread,
-      reorderActiveThread,
       reorderPinnedThread,
       reorderActiveThread,
       setThreadAutoSettle,

@@ -1,4 +1,13 @@
-import type { OrchestrationSessionStatus, RuntimeMode, ServerProvider } from "@t3tools/contracts";
+import type { RuntimeMode, ServerProvider } from "@t3tools/contracts";
+
+export type CodexSessionStatus =
+  | "idle"
+  | "starting"
+  | "running"
+  | "ready"
+  | "interrupted"
+  | "stopped"
+  | "error";
 
 export interface CodexRuntimeStatus {
   readonly approvalPolicy: "untrusted" | "on-request" | "never";
@@ -67,7 +76,7 @@ export function codexRemainingPercent(usedPercent: number): number {
   return Math.max(0, Math.min(100, 100 - usedPercent));
 }
 
-export function isCodexSessionStatus(status: OrchestrationSessionStatus): boolean {
+export function isCodexSessionStatus(status: CodexSessionStatus): boolean {
   return (
     status !== "stopped" && status !== "idle" && status !== "interrupted" && status !== "error"
   );

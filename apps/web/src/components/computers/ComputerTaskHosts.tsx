@@ -15,7 +15,7 @@ import {
   type ComputerTaskSendResult,
   type ComputerTaskStreamEvent,
   type EnvironmentId,
-  type OrchestrationShellSnapshot,
+  type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
@@ -220,7 +220,7 @@ function ComputerTaskHost(props: {
 async function waitForTargetSnapshot(
   registry: AtomRegistry.AtomRegistry,
   targetId: EnvironmentId,
-): Promise<OrchestrationShellSnapshot> {
+): Promise<OrchestrationV2ShellSnapshot> {
   const deadline = Date.now() + TARGET_READY_TIMEOUT_MS;
   let lastPhase: string | null = null;
   while (Date.now() < deadline) {

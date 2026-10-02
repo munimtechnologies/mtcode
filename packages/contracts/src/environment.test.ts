@@ -37,19 +37,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
-  it("treats a missing provider-handoff capability as unsupported under version skew", () => {
-    expect(decodeDescriptor(descriptor).capabilities.providerHandoff).toBeUndefined();
-  });
-
-  it("preserves an advertised provider-handoff capability", () => {
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, providerHandoff: true },
-      }).capabilities.providerHandoff,
-    ).toBe(true);
-  });
-
   it("treats message correction as an explicit version-skew capability", () => {
     expect(decodeDescriptor(descriptor).capabilities.threadMessageCorrection).toBeUndefined();
     expect(
@@ -71,15 +58,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
         homeDirectory: "/Users/me",
       }).homeDirectory,
     ).toBe("/Users/me");
-  });
-
-  it("preserves the native Pi external-thread capability", () => {
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, piExternalThreads: true },
-      }).capabilities.piExternalThreads,
-    ).toBe(true);
   });
 
   it("treats a missing attachment upload capability as unsupported", () => {
@@ -117,6 +95,22 @@ describe("ExecutionEnvironmentDescriptor", () => {
         ...descriptor,
         capabilities: { ...descriptor.capabilities, threadVisitedTracking: true },
       }).capabilities.threadVisitedTracking,
+    ).toBe(true);
+  });
+
+  it("treats missing server-resolved command context as unsupported", () => {
+    expect(decodeDescriptor(descriptor).capabilities.serverResolvedCommandContext).toBeUndefined();
+  });
+
+  it("preserves advertised server-resolved command context", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: {
+          ...descriptor.capabilities,
+          serverResolvedCommandContext: true,
+        },
+      }).capabilities.serverResolvedCommandContext,
     ).toBe(true);
   });
 });

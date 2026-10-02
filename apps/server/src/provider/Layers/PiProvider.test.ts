@@ -1,105 +1,80 @@
-import * as NodeAssert from "node:assert/strict";
-
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { PiSettings } from "@t3tools/contracts";
-import { it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as PlatformError from "effect/PlatformError";
-import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { PiRpcCommandError, PiRpcProtocolError, type PiRpcClient } from "../pi/PiRpcClient.ts";
-import { checkPiProviderStatus } from "./PiProvider.ts";
+import { checkPiProviderStatus, MINIMUM_PI_VERSION } from "./PiProvider.ts";
 
-const assert: typeof NodeAssert = NodeAssert;
-const settings = Schema.decodeSync(PiSettings)({ binaryPath: "fake-pi" });
+const encoder = new TextEncoder();
 
-const unusedClientMethods = {
-  events: Stream.empty,
-  setModel: () => Effect.die("unused"),
-  setThinkingLevel: () => Effect.die("unused"),
-  prompt: () => Effect.die("unused"),
-  abort: () => Effect.die("unused"),
-  close: () => Effect.void,
-} satisfies Omit<PiRpcClient, "getAvailableModels" | "getState">;
+function processHandle(input: {
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly exitCode?: number;
+}) {
+  const bytes = (value: string | undefined) =>
+    value === undefined || value.length === 0
+      ? Stream.empty
+      : Stream.succeed(encoder.encode(value));
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(900_000_001),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(input.exitCode ?? 0)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    unref: Effect.succeed(Effect.void),
+    stdin: Sink.drain,
+    stdout: bytes(input.stdout),
+    stderr: bytes(input.stderr),
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
 
-it.effect("maps Pi RPC inventory into selectable models", () =>
-  Effect.gen(function* () {
-    const snapshot = yield* checkPiProviderStatus(settings, { PI_TOKEN: "test" }, (options) =>
-      Effect.succeed({
-        ...unusedClientMethods,
-        getState: () =>
-          Effect.succeed({
-            model: { provider: "openai compatible", id: "gpt/5", reasoning: true },
-            thinkingLevel: "medium" as const,
-          }),
-        getAvailableModels: () =>
-          Effect.succeed({
-            models: [
-              { provider: "openai compatible", id: "gpt/5", name: " GPT Five ", reasoning: true },
-            ],
-          }),
-      } satisfies PiRpcClient).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            assert.equal(options.command, "fake-pi");
-            assert.equal(options.env?.PI_TOKEN, "test");
-            assert.equal(options.args?.includes("--no-session"), true);
-            for (const arg of [
-              "--no-context-files",
-              "--no-extensions",
-              "--no-skills",
-              "--no-prompt-templates",
-            ])
-              assert.equal(options.args?.includes(arg), false);
-          }),
-        ),
-      ),
+function piProbeSpawner(version: string) {
+  return ChildProcessSpawner.make((command) => {
+    const args = ChildProcess.isStandardCommand(command) ? command.args : [];
+    return Effect.succeed(
+      args.includes("--version")
+        ? processHandle({ stdout: `pi ${version}\n` })
+        : processHandle({ stderr: "RPC startup failed", exitCode: 1 }),
     );
+  });
+}
 
-    assert.equal(snapshot.status, "ready");
-    assert.equal(snapshot.auth.status, "authenticated");
-    assert.equal(snapshot.models[0]?.slug, "openai%20compatible/gpt%2F5");
-    assert.equal(snapshot.models[0]?.name, "GPT Five");
-    assert.equal(snapshot.models[0]?.isDefault, true);
-    assert.equal(snapshot.models[0]?.capabilities?.optionDescriptors?.[0]?.id, "thinkingLevel");
-    assert.equal(snapshot.models[0]?.capabilities?.optionDescriptors?.[0]?.currentValue, "medium");
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
+const settings = {
+  enabled: true,
+  binaryPath: "pi",
+  launchArgs: "",
+  customModels: [],
+} as const;
 
-it.effect("reports a binary missing error wrapped by the Pi RPC protocol as not installed", () =>
-  Effect.gen(function* () {
-    const missing = new PlatformError.SystemError({
-      _tag: "NotFound",
-      module: "ChildProcess",
-      method: "spawn",
-    });
-    const snapshot = yield* checkPiProviderStatus(settings, {}, () =>
-      Effect.fail(new PiRpcProtocolError({ detail: "failed to spawn Pi RPC", cause: missing })),
-    );
-
-    assert.equal(snapshot.installed, false);
-    assert.equal(snapshot.status, "error");
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.effect("reports discovery failure and does not spawn while disabled", () =>
-  Effect.gen(function* () {
-    let spawns = 0;
-    const factory = () => {
-      spawns += 1;
-      return Effect.fail(
-        new PiRpcCommandError({ command: "spawn", requestId: "test", detail: "inventory down" }),
+describe("PiProvider", () => {
+  it.effect("requires the first published Pi version with entries and settlement hooks", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* checkPiProviderStatus(settings).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, piProbeSpawner("0.80.3")),
       );
-    };
-    const failed = yield* checkPiProviderStatus(settings, {}, factory);
-    assert.equal(failed.status, "error");
-    assert.match(failed.message ?? "", /^Pi model discovery failed:/);
+      assert.equal(snapshot.status, "error");
+      assert.equal(snapshot.version, "0.80.3");
+      assert.include(snapshot.message ?? "", `Pi ${MINIMUM_PI_VERSION} or newer`);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
-    const disabled = yield* checkPiProviderStatus({ ...settings, enabled: false }, {}, factory);
-    assert.equal(disabled.enabled, false);
-    assert.equal(disabled.status, "disabled");
-    assert.match(disabled.message ?? "", /disabled/);
-    assert.equal(spawns, 1);
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
+  it.effect("keeps compatible Pi selectable when optional discovery fails", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* checkPiProviderStatus(settings).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, piProbeSpawner("0.84.3")),
+      );
+      assert.equal(snapshot.status, "ready");
+      assert.equal(snapshot.auth.status, "unknown");
+      assert.deepEqual(
+        snapshot.models.map((model) => model.slug),
+        ["default"],
+      );
+      assert.include(snapshot.message ?? "", "could not refresh its models and commands");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});

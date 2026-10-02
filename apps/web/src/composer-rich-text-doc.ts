@@ -120,17 +120,6 @@ function atomJsonForSegment(
       },
     };
   }
-  if (segment.type === "thread") {
-    return {
-      type: "composer-thread",
-      attrs: {
-        environmentId: segment.environmentId,
-        threadId: segment.threadId,
-        title: segment.title,
-        source: segment.source,
-      },
-    };
-  }
   if (segment.type === "citation") {
     return {
       type: "composer-citation",
@@ -312,7 +301,6 @@ export interface RichDocMap {
 function readAtomSource(node: ProseMirrorNode): string {
   const attrs = node.attrs as Record<string, unknown>;
   switch (node.type.name) {
-    case "composer-thread":
     case "composer-mention":
     case "composer-citation":
     case "composer-context-reference":

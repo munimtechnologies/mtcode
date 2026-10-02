@@ -1,157 +1,230 @@
 import {
   CommandId,
-  McpCapabilityUnavailableError,
-  ThreadId,
-  ThreadMetadataMcpAction,
-  type OrchestrationCommand,
-  type OrchestrationThreadShell,
+  OrchestratorMcpFailure,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2Command,
+  type ThreadMetadataMcpAction,
   type ThreadMetadataMcpUpdateInput,
   type ThreadMetadataMcpUpdateResult,
+  ThreadId,
 } from "@t3tools/contracts";
-import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as McpInvocationContext from "./McpInvocationContext.ts";
-
-export class ThreadMetadataThreadNotFoundError extends Schema.TaggedError<ThreadMetadataThreadNotFoundError>()(
-  "ThreadMetadataThreadNotFoundError",
-  { threadId: ThreadId },
-) {
-  override get message(): string {
-    return "Thread not found in the calling project.";
-  }
-}
-
-export class ThreadMetadataUpdateFailedError extends Schema.TaggedError<ThreadMetadataUpdateFailedError>()(
-  "ThreadMetadataUpdateFailedError",
-  { threadId: ThreadId, action: ThreadMetadataMcpAction, cause: Schema.Defect() },
-) {
-  override get message(): string {
-    return "Could not update thread metadata.";
-  }
-}
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import type { McpInvocationScope } from "./McpInvocationContext.ts";
 
 export class ThreadMetadataMcpService extends Context.Service<
   ThreadMetadataMcpService,
   {
     readonly update: (
+      scope: McpInvocationScope,
       input: ThreadMetadataMcpUpdateInput,
-    ) => Effect.Effect<
-      ThreadMetadataMcpUpdateResult,
-      | ThreadMetadataThreadNotFoundError
-      | ThreadMetadataUpdateFailedError
-      | McpCapabilityUnavailableError,
-      McpInvocationContext.McpInvocationContext
-    >;
+    ) => Effect.Effect<ThreadMetadataMcpUpdateResult, OrchestratorMcpFailure>;
   }
 >()("t3/mcp/ThreadMetadataMcpService") {}
 
-/**
- * Pull request links stay with the pullRequests toolkit (`link_pull_request` /
- * `unlink_pull_request`); this service only owns the thread title.
- */
-function metadataCommand(
-  commandId: CommandId,
-  target: OrchestrationThreadShell,
-  input: ThreadMetadataMcpUpdateInput,
-): OrchestrationCommand {
-  const base = { commandId, threadId: target.id };
-  switch (input.action) {
+function failure(code: OrchestratorMcpFailure["code"], message: string): OrchestratorMcpFailure {
+  return new OrchestratorMcpFailure({ code, message });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function threadLookupFailure(
+  error: ThreadManagementService.ThreadManagementError,
+): OrchestratorMcpFailure {
+  return error._tag === "ThreadManagementThreadNotFoundError"
+    ? failure("thread_not_found", error.message)
+    : failure("orchestration_error", error.message);
+}
+
+function stablePart(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function commandId(input: {
+  readonly scope: McpInvocationScope;
+  readonly threadId: ThreadId;
+  readonly action: ThreadMetadataMcpAction;
+  readonly requestKey: string;
+}): CommandId {
+  return CommandId.make(
+    [
+      "command",
+      "mcp",
+      stablePart(input.scope.providerSessionId),
+      "thread-update",
+      stablePart(input.threadId),
+      stablePart(input.action),
+      stablePart(input.requestKey),
+    ].join(":"),
+  );
+}
+
+function metadataCommand(input: {
+  readonly commandId: CommandId;
+  readonly threadId: ThreadId;
+  readonly projectId: OrchestrationV2AppThread["projectId"];
+  readonly update: ThreadMetadataMcpUpdateInput;
+}): Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }> {
+  switch (input.update.action) {
     case "rename":
-      return { ...base, type: "thread.meta.update", title: input.title! };
+      return {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        title: input.update.title!,
+      };
     case "regenerate_title":
-      return { ...base, type: "thread.meta.update", regenerateTitle: true };
+      return {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        regenerateTitle: true,
+      };
+    case "link_pull_request":
+      return {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        linkedPullRequest: {
+          projectId: input.projectId,
+          ...input.update.pullRequest!,
+        },
+      };
+    case "unlink_pull_request":
+      return {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        linkedPullRequest: null,
+      };
   }
 }
 
-export const make = Effect.gen(function* () {
+function resultFromThread(input: {
+  readonly action: ThreadMetadataMcpAction;
+  readonly commandId: CommandId;
+  readonly sequence: number;
+  readonly thread: OrchestrationV2AppThread;
+}): ThreadMetadataMcpUpdateResult {
+  return {
+    threadId: input.thread.id,
+    action: input.action,
+    commandId: input.commandId,
+    sequence: input.sequence,
+    title: input.thread.title,
+    titleRegeneration:
+      input.thread.titleRegeneration === undefined || input.thread.titleRegeneration === null
+        ? null
+        : {
+            requestId: input.thread.titleRegeneration.requestId,
+            startedAt: DateTime.formatIso(input.thread.titleRegeneration.startedAt),
+          },
+    linkedPullRequest: input.thread.linkedPullRequest ?? null,
+    updatedAt: DateTime.formatIso(input.thread.updatedAt),
+  };
+}
+
+const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const threadManagement = yield* ThreadManagementService.ThreadManagementService;
 
   const update = Effect.fn("ThreadMetadataMcpService.update")(function* (
+    scope: McpInvocationScope,
     input: ThreadMetadataMcpUpdateInput,
   ) {
-    const scope = yield* McpInvocationContext.requireMcpCapability("thread-metadata");
-    const threadId = input.threadId ?? scope.threadId;
-    const getThread = Effect.fn("ThreadMetadataMcpService.getThread")(function* (id: ThreadId) {
-      const thread = yield* snapshots.getThreadShellById(id).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ThreadMetadataUpdateFailedError({
-              threadId: id,
-              action: input.action,
-              cause,
-            }),
+    if (!scope.capabilities.has("orchestration")) {
+      return yield* failure(
+        "capability_denied",
+        "This MCP credential does not grant orchestration capabilities.",
+      );
+    }
+
+    const parentShell = yield* threadManagement
+      .getThreadShell(scope.threadId)
+      .pipe(
+        Effect.mapError((error) =>
+          failure(
+            "orchestration_error",
+            `Unable to locate calling thread ${scope.threadId}: ${errorMessage(error)}`,
+          ),
         ),
       );
-      if (Option.isNone(thread)) {
-        return yield* new ThreadMetadataThreadNotFoundError({ threadId: id });
-      }
-      return thread.value;
-    });
-    const parent = yield* getThread(scope.threadId);
-    const target = threadId === scope.threadId ? parent : yield* getThread(threadId);
-    if (target.projectId !== parent.projectId) {
-      return yield* new ThreadMetadataThreadNotFoundError({ threadId });
+    if (parentShell === null) {
+      return yield* failure("thread_not_found", `Calling thread ${scope.threadId} was not found.`);
     }
-    const requestKey = input.clientRequestId ?? (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
-    const commandId = CommandId.make(
-      [
-        "command",
-        "mcp",
-        scope.providerSessionId,
-        "thread-update",
-        threadId,
-        input.action,
-        requestKey,
-      ]
-        .map(encodeURIComponent)
-        .join(":"),
-    );
-    const { sequence } = yield* engine.dispatch(metadataCommand(commandId, target, input)).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ThreadMetadataUpdateFailedError({
-            threadId,
-            action: input.action,
-            cause,
-          }),
-      ),
-    );
-
-    // Main receipts return a sequence, not v2's complete thread event. Return the
-    // current saved metadata even on retries, while preserving the original receipt.
-    const saved = yield* getThread(threadId);
-    const linked = resolveThreadCurrentPullRequestLink(saved.pullRequests);
-    return {
+    const parent = yield* threadManagement
+      .getThreadRecords(scope.threadId, [])
+      .pipe(
+        Effect.mapError((error) =>
+          failure(
+            "orchestration_error",
+            `Unable to read calling thread ${scope.threadId}: ${errorMessage(error)}`,
+          ),
+        ),
+      );
+    const threadId = input.threadId ?? scope.threadId;
+    const target =
+      threadId === scope.threadId
+        ? parent
+        : yield* threadManagement
+            .getProjectThreadRecords({ projectId: parent.thread.projectId, threadId }, [])
+            .pipe(Effect.mapError(threadLookupFailure));
+    const requestKey =
+      input.clientRequestId === undefined
+        ? yield* crypto.randomUUIDv4.pipe(Effect.orDie)
+        : input.clientRequestId;
+    const updateCommandId = commandId({
+      scope,
       threadId,
       action: input.action,
-      commandId,
-      sequence,
-      title: saved.title,
-      titleRegeneration: saved.titleRegeneration ?? null,
-      linkedPullRequest:
-        linked === null
-          ? null
-          : {
-              projectId: saved.projectId,
-              repository: linked.repository,
-              number: linked.number,
-              url: linked.url,
-            },
-      updatedAt: saved.updatedAt,
-    } satisfies ThreadMetadataMcpUpdateResult;
+      requestKey,
+    });
+    const dispatched = yield* threadManagement
+      .dispatch(
+        metadataCommand({
+          commandId: updateCommandId,
+          threadId,
+          projectId: target.thread.projectId,
+          update: input,
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          failure(
+            "orchestration_error",
+            `Unable to ${input.action} for thread ${threadId}: ${errorMessage(error)}`,
+          ),
+        ),
+      );
+    const metadataEvent = dispatched.storedEvents.find(
+      (stored) => stored.event.type === "thread.metadata-updated",
+    );
+    if (metadataEvent === undefined || metadataEvent.event.type !== "thread.metadata-updated") {
+      return yield* failure(
+        "orchestration_error",
+        `Thread ${threadId} metadata update completed without a resultant state.`,
+      );
+    }
+    return resultFromThread({
+      action: input.action,
+      commandId: updateCommandId,
+      sequence: dispatched.sequence,
+      thread: metadataEvent.event.payload,
+    });
   });
 
   return ThreadMetadataMcpService.of({ update });
 });
 
-export const layer = Layer.effect(ThreadMetadataMcpService, make);
+export const layer: Layer.Layer<
+  ThreadMetadataMcpService,
+  never,
+  Crypto.Crypto | ThreadManagementService.ThreadManagementService
+> = Layer.effect(ThreadMetadataMcpService, make);

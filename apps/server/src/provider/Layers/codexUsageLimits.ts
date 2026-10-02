@@ -240,3 +240,19 @@ export function codexUsageLimitMessage(
     resetsAtMs: latestResetMs === Number.NEGATIVE_INFINITY ? undefined : latestResetMs,
   };
 }
+
+/** All exhausted windows must reset before a continuation can run. */
+export function codexUsageLimitResetAt(
+  snapshot: CodexRateLimitSnapshot | undefined,
+): string | null {
+  if (!snapshot) return null;
+  const windows = codexRateLimitsToWindows(snapshot).filter((window) => window.usedPercent >= 100);
+  if (windows.length === 0 || windows.some((window) => !window.resetsAt)) return null;
+  return windows.reduce<string | null>(
+    (latest, window) =>
+      latest === null || Date.parse(window.resetsAt!) > Date.parse(latest)
+        ? window.resetsAt!
+        : latest,
+    null,
+  );
+}

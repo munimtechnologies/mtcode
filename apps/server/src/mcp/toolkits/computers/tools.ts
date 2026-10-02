@@ -13,16 +13,16 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { EmptyToolInput } from "../emptyToolInput.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { resolveAppDisplayName } from "../../../appDisplayName.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   ComputerTaskBroker.ComputerTaskBroker,
   ServerEnvironment.ServerEnvironment,
-  ProjectionSnapshotQuery,
-  OrchestrationEngineService,
+  ThreadManagementService.ThreadManagementService,
+  ProjectStore.ProjectStoreV2,
   Crypto.Crypto,
 ];
 

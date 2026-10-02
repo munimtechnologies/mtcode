@@ -1,6 +1,7 @@
 import { useAtomCommand } from "../../state/use-atom-command";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { AudioLinesIcon, MicIcon, MicOffIcon, MinusIcon, PhoneOffIcon } from "lucide-react";
 import {
   createContext,
@@ -525,23 +526,28 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         const limit = Math.max(1, Math.min(20, Number(args.limit ?? 8)));
         const beforeMessageId =
           typeof args.beforeMessageId === "string" ? args.beforeMessageId : null;
+        const messages = thread.projection.messages;
         const endIndex = beforeMessageId
-          ? thread.messages.findIndex((message) => message.id === beforeMessageId)
-          : thread.messages.length;
+          ? messages.findIndex((message) => message.id === beforeMessageId)
+          : messages.length;
         if (endIndex < 0) return { ok: false, error: "Pagination cursor not found." };
         const startIndex = Math.max(0, endIndex - limit);
-        const page = thread.messages.slice(startIndex, endIndex).map((message) => ({
+        const page = messages.slice(startIndex, endIndex).map((message) => ({
           id: message.id,
           role: message.role,
           text:
             message.text.length > 8_000
               ? `${message.text.slice(0, 8_000)}\n[message truncated]`
               : message.text,
-          createdAt: message.createdAt,
+          createdAt: DateTime.formatIso(message.createdAt),
         }));
         return {
           ok: true,
-          task: { environmentId: ref.environmentId, threadId: ref.threadId, title: thread.title },
+          task: {
+            environmentId: ref.environmentId,
+            threadId: ref.threadId,
+            title: thread.projection.thread.title,
+          },
           messages: page,
           hasMore: startIndex > 0,
           nextBeforeMessageId: startIndex > 0 ? (page[0]?.id ?? null) : null,
@@ -772,7 +778,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         : new OpenAIRealtimeConnection();
       connectionRef.current = connection;
       const latestAssistantMessage =
-        [...(readThreadDetail(registration.threadRef)?.messages ?? [])]
+        [...(readThreadDetail(registration.threadRef)?.projection.messages ?? [])]
           .toReversed()
           .find((message) => message.role === "assistant" && !message.streaming)?.text ?? null;
 

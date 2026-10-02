@@ -1,5 +1,10 @@
-import type { SelfHostedPushDeviceRegistration, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ThreadShell,
+  SelfHostedPushDeviceRegistration,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
+import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -17,14 +22,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import {
-  agentAwarenessPublishIdentity,
-  eventThreadId,
-  resolveAgentAwarenessRelayPublishSnapshot,
-  shouldPublishAgentAwarenessEvent,
-} from "../relay/AgentAwarenessRelay.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import { shouldPublishAgentAwarenessEvent } from "../relay/AgentAwarenessRelay.ts";
 import { forkParked } from "../serverActivation.ts";
 import { isSelfHostedPushNotificationPhase } from "./pushNotificationPhase.ts";
 
@@ -63,6 +63,20 @@ function shouldNotify(state: RelayAgentActivityState | null): state is RelayAgen
   return state !== null && isSelfHostedPushNotificationPhase(state.phase);
 }
 
+/** Same identity rule as the relay: ignore `updatedAt`-only churn. */
+function notificationIdentity(state: RelayAgentActivityState | null): string {
+  if (state === null) return "null";
+  const { updatedAt: _updatedAt, ...meaningfulState } = state;
+  return JSON.stringify(meaningfulState);
+}
+
+function terminalWorkSinceStart(thread: OrchestrationV2ThreadShell, startedAt: number): boolean {
+  return (
+    thread.latestRunCompletedAt != null &&
+    DateTime.toEpochMillis(thread.latestRunCompletedAt) > startedAt
+  );
+}
+
 function notificationBody(state: RelayAgentActivityState): string {
   switch (state.phase) {
     case "waiting_for_approval":
@@ -79,9 +93,10 @@ function notificationBody(state: RelayAgentActivityState): string {
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const environment = yield* ServerEnvironment.ServerEnvironment;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const orchestration = yield* OrchestrationEngine.OrchestrationEngineService;
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const projects = yield* ProjectService.ProjectService;
   const httpClient = yield* HttpClient.HttpClient;
+  const startedAt = (yield* DateTime.now).epochMilliseconds;
   const lastStateByThread = yield* Ref.make(new Map<ThreadId, string>());
 
   const upsertDevice = SqlSchema.void({
@@ -135,20 +150,36 @@ export const make = Effect.gen(function* () {
     const devices = yield* listDevices({});
     if (devices.length === 0) return;
 
-    const thread = yield* snapshots.getThreadShellById(threadId);
-    const project = Option.isSome(thread)
-      ? yield* snapshots.getProjectShellById(thread.value.projectId)
-      : Option.none();
-    const state = resolveAgentAwarenessRelayPublishSnapshot({
+    const threadShell = yield* threads.getThreadShell(threadId);
+    if (threadShell === null || threadShell.archivedAt !== null) {
+      yield* Ref.update(lastStateByThread, (current) => {
+        const next = new Map(current);
+        next.delete(threadId);
+        return next;
+      });
+      return;
+    }
+    const project = yield* projects.getById(threadShell.projectId);
+    if (Option.isNone(project)) return;
+    const state = projectThreadAwarenessV2({
       environmentId: yield* environment.getEnvironmentId,
-      threadId,
-      thread,
-      project,
-    }).state;
-    const identity = agentAwarenessPublishIdentity(state);
-    const previous = (yield* Ref.get(lastStateByThread)).get(threadId);
+      project: project.value,
+      thread: threadShell,
+    });
+    const identity = notificationIdentity(state);
+    const lastStates = yield* Ref.get(lastStateByThread);
+    const previous = lastStates.get(threadId);
     yield* Ref.update(lastStateByThread, (current) => new Map(current).set(threadId, identity));
     if (previous === identity || !shouldNotify(state)) return;
+    // No history yet (fresh process): only terminal work finished by this
+    // process may alert, so replayed or historical threads stay quiet.
+    if (
+      previous === undefined &&
+      (state.phase === "completed" || state.phase === "failed") &&
+      !terminalWorkSinceStart(threadShell, startedAt)
+    ) {
+      return;
+    }
 
     const response = yield* HttpClientRequest.post("https://exp.host/--/api/v2/push/send").pipe(
       HttpClientRequest.bodyJson(
@@ -192,12 +223,9 @@ export const make = Effect.gen(function* () {
     "SelfHostedPushNotifications.start",
   )(function* () {
     yield* forkParked(
-      Stream.runForEach(orchestration.streamDomainEvents, (event) => {
-        const threadId = eventThreadId(event);
-        return threadId !== null && shouldPublishAgentAwarenessEvent(event)
-          ? worker.enqueue(threadId)
-          : Effect.void;
-      }),
+      Stream.runForEach(threads.streamDomainEvents, (event) =>
+        shouldPublishAgentAwarenessEvent(event) ? worker.enqueue(event.threadId) : Effect.void,
+      ),
     );
   });
 

@@ -1,7 +1,7 @@
 import { EnvironmentSupervisor } from "@t3tools/client-runtime/connection";
 import { createEnvironmentQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
 import { ThreadSnapshotLoader } from "@t3tools/client-runtime/state/threads";
-import type { ThreadId } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadDetailSnapshot, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -20,15 +20,16 @@ export const completionNotificationSnapshot = createEnvironmentQueryAtomFamily(
       readonly updatedAt: string;
     }) =>
       Effect.gen(function* () {
-        const supervisor = yield* EnvironmentSupervisor;
+        const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
         const loader = yield* ThreadSnapshotLoader;
         const prepared = yield* SubscriptionRef.get(supervisor.prepared);
         if (Option.isNone(prepared)) {
-          return Option.none();
+          return Option.none<OrchestrationV2ThreadDetailSnapshot>();
         }
-        return yield* loader.load(prepared.value, input.threadId, { turnLimit: 1 }, undefined, {
-          timeoutMs: 1_000,
-        });
+        const result = yield* loader.load(prepared.value, input.threadId);
+        return result._tag === "present"
+          ? Option.some(result.snapshot)
+          : Option.none<OrchestrationV2ThreadDetailSnapshot>();
       }),
   },
 );

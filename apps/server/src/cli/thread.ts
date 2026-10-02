@@ -6,8 +6,11 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentHttpApi,
   MessageId,
-  type ClientOrchestrationCommand,
   type ModelSelection,
+  ORCHESTRATION_PROTOCOL_HEADER,
+  ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+  type OrchestrationV2Command,
+  type OrchestrationV2ThreadLaunchInput,
   type OrchestrationProjectShell,
   ProjectId,
   ProviderInstanceId,
@@ -22,7 +25,6 @@ import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings"
 import { truncate } from "@t3tools/shared/String";
 import * as Console from "effect/Console";
 import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -46,6 +48,8 @@ import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { projectCommandErrorFromLiveServerRequest } from "./project.ts";
 
 const THREAD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(10);
+// Launch prepares the workspace and starts the first run before it answers.
+const THREAD_CLI_LAUNCH_TIMEOUT = Duration.seconds(60);
 const THREAD_BUSY_POLL_INTERVAL = Duration.seconds(5);
 const STDIN_PROMPT = "-";
 
@@ -273,14 +277,10 @@ const resolveModelSelection = Effect.fn("resolveThreadModelSelection")(function*
   return match.selection satisfies ModelSelection;
 });
 
-const isThreadBusy = (thread: { readonly session: { readonly status: string } | null }) =>
-  thread.session?.status === "running" || thread.session?.status === "starting";
+const isThreadBusy = (thread: { readonly activeRunId: string | null }) =>
+  thread.activeRunId !== null;
 
-export const waitForIdleThread = <
-  T extends { readonly session: { readonly status: string } | null },
-  E,
-  R,
->(
+export const waitForIdleThread = <T extends { readonly activeRunId: string | null }, E, R>(
   readThread: Effect.Effect<T | undefined, E, R>,
 ) =>
   Effect.gen(function* () {
@@ -316,19 +316,33 @@ const connectLiveServer = Effect.fn("connectLiveServer")(function* (
     (session) =>
       environmentAuth.revokeSession(session.sessionId).pipe(Effect.ignore({ log: true })),
   );
-  const headers = { authorization: `Bearer ${issued.token}` };
-  const callServer = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(
-      Effect.timeout(THREAD_CLI_LIVE_SERVER_TIMEOUT),
-      Effect.mapError(projectCommandErrorFromLiveServerRequest),
-    );
+  const authorization = `Bearer ${issued.token}`;
+  const callServer = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+    timeout: Duration.Duration = THREAD_CLI_LIVE_SERVER_TIMEOUT,
+  ) =>
+    effect.pipe(Effect.timeout(timeout), Effect.mapError(projectCommandErrorFromLiveServerRequest));
   return {
-    shell: callServer(client.orchestration.shellSnapshot({ headers })),
-    dispatch: (command: ClientOrchestrationCommand) =>
+    shell: callServer(
+      client.orchestration.shellSnapshot({
+        headers: {
+          authorization,
+          [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+        },
+      }),
+    ),
+    dispatch: (command: OrchestrationV2Command) =>
       callServer(
-        client.orchestration.dispatch({ headers, payload: command } as Parameters<
-          typeof client.orchestration.dispatch
-        >[0]),
+        // HttpApi narrows a union payload's static type; the server decodes any command.
+        client.orchestration.dispatch({
+          headers: { authorization },
+          payload: command,
+        } as Parameters<typeof client.orchestration.dispatch>[0]),
+      ),
+    launch: (input: OrchestrationV2ThreadLaunchInput) =>
+      callServer(
+        client.orchestration.launchThread({ headers: { authorization }, payload: input }),
+        THREAD_CLI_LAUNCH_TIMEOUT,
       ),
   };
 });
@@ -381,55 +395,27 @@ const runThreadStart = Effect.fn("runThreadStart")(function* (flags: {
     const runtimeMode = projectSettings.defaultRuntimeMode;
 
     const threadId = ThreadId.make(yield* threadCommandUuid);
-    const createdAt = DateTime.formatIso(yield* DateTime.now);
     const explicitTitle = Option.getOrUndefined(flags.title)?.trim() || undefined;
     const title = explicitTitle ?? truncate(prompt);
-    yield* server.dispatch({
-      type: "thread.create",
+    // Upstream's launch path creates the thread and sends the first message as
+    // one unit (and rolls the thread back when the message is rejected).
+    yield* server.launch({
       commandId: CommandId.make(yield* threadCommandUuid),
+      creationSource: "server",
       threadId,
       projectId: project.id,
       title,
+      generateTitle: explicitTitle === undefined,
       modelSelection,
       runtimeMode,
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      branch: null,
-      worktreePath: null,
-      createdAt,
+      workspaceStrategy: { type: "root" },
+      initialMessage: {
+        messageId: MessageId.make(yield* threadCommandUuid),
+        text: prompt,
+        attachments: [],
+      },
     });
-    yield* server
-      .dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make(yield* threadCommandUuid),
-        threadId,
-        message: {
-          messageId: MessageId.make(yield* threadCommandUuid),
-          role: "user",
-          text: prompt,
-          attachments: [],
-        },
-        modelSelection,
-        ...(explicitTitle === undefined ? { titleSeed: title } : {}),
-        runtimeMode,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        createdAt,
-      })
-      .pipe(
-        Effect.tapError((error) =>
-          error._tag === "ProjectLiveServerDeclaredResponseError"
-            ? threadCommandUuid.pipe(
-                Effect.flatMap((commandId) =>
-                  server.dispatch({
-                    type: "thread.delete",
-                    commandId: CommandId.make(commandId),
-                    threadId,
-                  }),
-                ),
-                Effect.ignore({ log: true }),
-              )
-            : Effect.void,
-        ),
-      );
 
     yield* Console.log(
       flags.json
@@ -464,19 +450,25 @@ const runThreadSend = Effect.fn("runThreadSend")(function* (flags: {
     if (thread === undefined) {
       return yield* new ThreadNotFoundError({ threadId });
     }
-    if (thread.hasPendingApprovals || thread.hasPendingUserInput) {
+    if (thread.pendingRuntimeRequest !== null) {
       return yield* new ThreadAwaitingUserError({ threadId });
     }
 
     const messageId = MessageId.make(yield* threadCommandUuid);
     yield* server.dispatch({
-      type: "thread.turn.start",
+      type: "message.dispatch",
+      createdBy: "user",
+      creationSource: "server",
       commandId: CommandId.make(yield* threadCommandUuid),
       threadId: thread.id,
-      message: { messageId, role: "user", text: prompt, attachments: [] },
-      runtimeMode: thread.runtimeMode,
-      interactionMode: thread.interactionMode,
-      createdAt: DateTime.formatIso(yield* DateTime.now),
+      messageId,
+      text: prompt,
+      attachments: [],
+      // `--now` lets the server pick steer/queue/restart from the provider's
+      // capabilities; otherwise the turn finished above, and a run that started
+      // in between is queued behind (upstream queued runs).
+      ...(flags.now ? { deliveryIntent: "auto" as const } : {}),
+      dispatchMode: { type: "queue_after_active" },
     });
 
     yield* Console.log(

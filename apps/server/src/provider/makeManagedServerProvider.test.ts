@@ -19,7 +19,7 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
 import { ProviderProbeTimeoutError } from "./providerSnapshot.ts";
 
@@ -150,7 +150,7 @@ function makeBackgroundPolicyLayer(shouldRunScopeWork: boolean) {
 
 const BackgroundPolicyAlwaysRunLayer = makeBackgroundPolicyLayer(true);
 const BackgroundPolicyNeverRunLayer = makeBackgroundPolicyLayer(false);
-const ServerSettingsTestLayer = ServerSettingsService.layerTest();
+const ServerSettingsTestLayer = ServerSettings.layerTest();
 const AlwaysRunTestLayer = Layer.merge(BackgroundPolicyAlwaysRunLayer, ServerSettingsTestLayer);
 const NeverRunTestLayer = Layer.merge(BackgroundPolicyNeverRunLayer, ServerSettingsTestLayer);
 
@@ -406,12 +406,14 @@ describe("makeManagedServerProvider", () => {
         const serverSettingsRef = yield* Ref.make(initialServerSettings);
         const serverSettingsChanges = yield* PubSub.unbounded<typeof initialServerSettings>();
         const serverSettingsLayer = Layer.succeed(
-          ServerSettingsService,
-          ServerSettingsService.of({
+          ServerSettings.ServerSettingsService,
+          ServerSettings.ServerSettingsService.of({
             start: Effect.void,
             ready: Effect.void,
             getSettings: Ref.get(serverSettingsRef),
             updateSettings: () => Effect.die(new Error("unused in this test")),
+            updateProviderInstance: () => Effect.die(new Error("unused in this test")),
+            withSettingsSnapshot: (use) => Ref.get(serverSettingsRef).pipe(Effect.flatMap(use)),
             streamChanges: Stream.empty,
             subscribeChanges: PubSub.subscribe(serverSettingsChanges).pipe(
               Effect.map((subscription) => Stream.fromSubscription(subscription)),
@@ -962,12 +964,14 @@ describe("makeManagedServerProvider", () => {
           },
         };
         const serverSettingsLayer = Layer.succeed(
-          ServerSettingsService,
-          ServerSettingsService.of({
+          ServerSettings.ServerSettingsService,
+          ServerSettings.ServerSettingsService.of({
             start: Effect.void,
             ready: Effect.void,
             getSettings: Effect.succeed(serverSettings),
             updateSettings: () => Effect.die(new Error("unused in this test")),
+            updateProviderInstance: () => Effect.die(new Error("unused in this test")),
+            withSettingsSnapshot: (use) => use(serverSettings),
             streamChanges: Stream.empty,
             subscribeChanges: Effect.succeed(Stream.empty),
           }),

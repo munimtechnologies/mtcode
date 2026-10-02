@@ -190,12 +190,10 @@ it.layer(testNodeServices)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadVisitedTracking).toBe(true);
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
       expect(second.capabilities.threadSnooze).toBe(true);
-      expect(second.capabilities.threadGoal).toBe(true);
       expect(second.capabilities.sourceControlSshPasswordPrompts).toBe(true);
-      expect(second.capabilities.providerHandoff).toBe(true);
-      expect(second.capabilities.threadMessageCorrection).toBe(true);
       expect(second.capabilities.threadPullRequests).toBe(true);
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
+      expect(second.capabilities.serverResolvedCommandContext).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
       expect(second.homeDirectory).toBe(
         process.env.HOME?.trim() || process.env.USERPROFILE?.trim() || NodeOS.homedir(),
@@ -297,7 +295,9 @@ it.layer(testNodeServices)("ServerEnvironmentLive", (it) => {
       expect(withFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
       expect(withFd.capabilities.desktopAppUpdate).toBe(true);
       expect(withFd.capabilities.serverSelfUpdateProgress).toBe(true);
-      expect(withFd.capabilities.serverUpdateThreadContinuation).toBe(true);
+      // v2 recovery terminalizes running runs on restart, so continuation
+      // stays unadvertised until the v2 runtime carries the markers.
+      expect(withFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
 
       const withoutFd = yield* describeWith({ mode: "desktop" });
       expect(withoutFd.capabilities.serverSelfUpdate).toBe("desktop-managed");

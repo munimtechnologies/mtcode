@@ -1,40 +1,19 @@
 import type { ClientSettings } from "@t3tools/contracts/settings";
-import type { AssistantCitation, ScheduledSendRecurrence } from "@t3tools/contracts";
+import type { AssistantCitation, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
 } from "@t3tools/shared/assistantCitations";
-import { BUILT_IN_GOAL_SLASH_COMMANDS } from "@t3tools/shared/composerTrigger";
-
 import {
   splitPromptIntoComposerSegments,
   type ComposerPromptSegment,
 } from "./composer-editor-mentions";
 
-/**
- * `pull-request` is the `#` trigger. It carries BOTH upstream's pull-request
- * references and MT Code's cross-thread references — the composer menu lists
- * thread matches and PR matches under the one trigger, so neither feature can
- * be shadowed by the other.
- */
-export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand =
-  | "model"
-  | "plan"
-  | "default"
-  | "goal"
-  | "goal pause"
-  | "goal resume"
-  | "goal clear";
-export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
+import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
-/** Extra send behavior chosen from the composer, beyond the enter/shortcut intent. */
-export interface ComposerSendOptions {
-  /** Hold the message in the thread queue until this UTC instant. */
-  readonly scheduledFor?: string;
-  /** Re-queue the message after each send at the same local time. Needs `scheduledFor`. */
-  readonly recurrence?: ScheduledSendRecurrence;
-}
+export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
+export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -47,24 +26,47 @@ export function formatAssistantCitationForComposer(citation: AssistantCitation, 
   return `${serializeAssistantCitation(withAssistantCitationComment(citation, comment))} `;
 }
 
-export function composerSubmissionIntentForEnter(input: {
+function composerRequiresModifier(
+  sendShortcut: ClientSettings["sendShortcut"] | undefined,
+  prompt: string,
+) {
+  return (
+    sendShortcut === "mod-enter" ||
+    (sendShortcut === "mod-enter-multiline" && /[\r\n]/.test(prompt))
+  );
+}
+
+export function composerSubmissionIntentForKey(input: {
+  event: ShortcutEventLike & { isComposing?: boolean; keyCode?: number; repeat?: boolean };
+  keybindings: ResolvedKeybindingsConfig;
+  platform?: string;
   isMobileViewport: boolean;
-  shiftKey: boolean;
-  modifierKey: boolean;
   isDraftThread: boolean;
   isRunning?: boolean;
   sendShortcut?: ClientSettings["sendShortcut"];
   prompt?: string;
 }): ComposerSubmissionIntent | null {
-  const requiresModifier =
-    input.sendShortcut === "mod-enter" ||
-    (input.sendShortcut === "mod-enter-multiline" && /[\r\n]/.test(input.prompt ?? ""));
-  if (input.isMobileViewport || (requiresModifier && !input.modifierKey)) return null;
-  if (input.shiftKey && !(requiresModifier && input.modifierKey && input.isRunning)) return null;
-  if (input.isRunning && input.modifierKey && (!requiresModifier || input.shiftKey)) {
-    return "alternate";
-  }
-  return input.modifierKey && input.isDraftThread ? "background" : "foreground";
+  const { event } = input;
+  if (input.isMobileViewport || event.isComposing || event.keyCode === 229 || event.repeat)
+    return null;
+  const command = resolveShortcutCommand(event, input.keybindings, {
+    ...(input.platform === undefined ? {} : { platform: input.platform }),
+    context: {
+      composerFocus: true,
+      draftThreadRoute: input.isDraftThread,
+      turnRunning: input.isRunning === true,
+    },
+  });
+  if (command === "composer.sendAlternate" && input.isRunning) return "alternate";
+  if (command === "composer.sendBackground" && input.isDraftThread) return "background";
+  if (command !== null || event.key !== "Enter" || event.shiftKey || event.altKey) return null;
+  if (
+    composerRequiresModifier(input.sendShortcut, input.prompt ?? "") &&
+    !event.metaKey &&
+    !event.ctrlKey
+  )
+    return null;
+  return "foreground";
 }
 
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";
@@ -99,7 +101,6 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
   for (const segment of segments) {
     if (
       segment.type === "mention" ||
-      segment.type === "thread" ||
       segment.type === "citation" ||
       segment.type === "context-reference"
     ) {
@@ -173,7 +174,6 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
   for (const segment of segments) {
     if (
       segment.type === "mention" ||
-      segment.type === "thread" ||
       segment.type === "citation" ||
       segment.type === "context-reference"
     ) {
@@ -302,7 +302,9 @@ export function composerStateAtPromptEnd(text: string): {
   };
 }
 
-export function parseStandaloneComposerSlashCommand(text: string): "plan" | "default" | null {
+export function parseStandaloneComposerSlashCommand(
+  text: string,
+): Exclude<ComposerSlashCommand, "model"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -322,54 +324,4 @@ export function replaceTextRange(
   const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd));
   const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
   return { text: nextText, cursor: safeStart + replacement.length };
-}
-
-/**
- * The slash commands the composer offers itself, before the provider's own.
- * Extracted from the menu so the built-ins stay covered: the goal entries have
- * been dropped by an integration merge before, and nothing unit-level noticed.
- */
-export function buildBuiltInSlashCommandItems(options: {
-  readonly planModeUiEnabled: boolean;
-}): ReadonlyArray<{
-  readonly id: string;
-  readonly type: "slash-command";
-  readonly command: ComposerSlashCommand;
-  readonly label: string;
-  readonly description: string;
-}> {
-  return [
-    {
-      id: "slash:model",
-      type: "slash-command",
-      command: "model",
-      label: "/model",
-      description: "Switch response model for this thread",
-    },
-    ...BUILT_IN_GOAL_SLASH_COMMANDS.map((item) => ({
-      id: `slash:${item.command.replaceAll(" ", "-")}`,
-      type: "slash-command" as const,
-      command: item.command,
-      label: item.label,
-      description: item.description,
-    })),
-    ...(options.planModeUiEnabled
-      ? ([
-          {
-            id: "slash:plan",
-            type: "slash-command",
-            command: "plan",
-            label: "/plan",
-            description: "Switch this thread into plan mode",
-          },
-          {
-            id: "slash:default",
-            type: "slash-command",
-            command: "default",
-            label: "/default",
-            description: "Switch this thread back to normal build mode",
-          },
-        ] as const)
-      : []),
-  ];
 }

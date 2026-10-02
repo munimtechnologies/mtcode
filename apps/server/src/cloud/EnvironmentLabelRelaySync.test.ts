@@ -138,6 +138,8 @@ it.effect("cancels an older synchronization when a newer label arrives", () =>
         ready: Effect.void,
         getSettings: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, environmentLabel: "Old label" }),
         updateSettings: () => Effect.die("unused"),
+        updateProviderInstance: () => Effect.die("unused"),
+        withSettingsSnapshot: () => Effect.die("unused"),
         streamChanges: Stream.empty,
         subscribeChanges: PubSub.subscribe(changes).pipe(
           Effect.map((subscription) => Stream.fromSubscription(subscription)),

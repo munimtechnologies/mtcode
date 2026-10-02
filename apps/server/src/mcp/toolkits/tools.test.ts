@@ -3,15 +3,11 @@ import { McpSchema, Tool } from "effect/unstable/ai";
 
 import { ComputerToolkit } from "./computers/tools.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit } from "./preview/tools.ts";
-import { ThreadReferenceToolkit } from "./threadReference/tools.ts";
-import { ThreadRelayToolkit } from "./threads/tools.ts";
 
 const toolkits = {
   ComputerToolkit,
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
-  ThreadReferenceToolkit,
-  ThreadRelayToolkit,
 };
 
 // Every toolkit registered by McpHttpServer.layer must produce an input schema

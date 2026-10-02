@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyGitStatusStreamEvent,
+  formatGeneratedBranchName,
   buildTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
@@ -289,5 +290,54 @@ describe("resolveAutoFeatureBranchName", () => {
     [["feature/topic-other"], "topic", "feature/topic"],
   ])("avoids branch and namespace collisions for %j", (existing, preferred, expected) => {
     expect(resolveAutoFeatureBranchName(existing as string[], preferred as string)).toBe(expected);
+  });
+});
+
+describe("formatGeneratedBranchName", () => {
+  it.each(["t3code", "t3code/"])("joins static prefix %s with one slash", (prefix) => {
+    expect(
+      formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),
+    ).toBe("t3code/add-search");
+  });
+  it("supports an empty prefix and preserves user prefix casing", () => {
+    expect(
+      formatGeneratedBranchName("Add Search", { mode: "static", prefix: "", instructions: "" }),
+    ).toBe("add-search");
+    expect(
+      formatGeneratedBranchName("Add Search", {
+        mode: "static",
+        prefix: "Team/Julius/",
+        instructions: "",
+      }),
+    ).toBe("Team/Julius/add-search");
+  });
+  it.each([
+    ["release..candidate", "release-candidate/add-search"],
+    [" Team / Jules.lock/", "Team/Jules-lock/add-search"],
+    ["-team//feature@{new}", "team/feature-new/add-search"],
+    [" /?. / ", "add-search"],
+  ])("normalizes invalid static prefix %s", (prefix, expected) => {
+    expect(
+      formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),
+    ).toBe(expected);
+  });
+  it("uses the model's semantic prefix without the stored static prefix", () => {
+    expect(
+      formatGeneratedBranchName("feat/Add Search", {
+        mode: "semantic",
+        prefix: "t3code",
+        instructions: "",
+      }),
+    ).toBe("feat/add-search");
+  });
+  it("preserves the full custom name, including case, dots and length", () => {
+    const branch = `Julius/ABC-123/release.v2-${"x".repeat(70)}`;
+    expect(
+      formatGeneratedBranchName(` ${branch} `, {
+        mode: "custom",
+        prefix: "ignored",
+        instructions: "",
+      }),
+    ).toBe(branch);
   });
 });

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
 import { CodexBackgroundTasks, supportsCodexMonitoring } from "./CodexBackgroundTasks.ts";
-import { make as makeLiveness } from "../../orchestration/ThreadBackgroundLiveness.ts";
 
 const command = (id = "watch", monitor = true) => ({
   id,
@@ -22,38 +21,6 @@ describe("Codex background tasks", () => {
     expect(tasks.takeWake()?.output).toBe("foo-done");
     tasks.completed(command());
     expect(tasks.takeWake()?.output).toBe("out-tail\nerr-tail\nWatcher exited with code 0.");
-  });
-
-  it("keeps Monitoring until the last background shell exits", () => {
-    const tasks = new CodexBackgroundTasks();
-    const liveness = makeLiveness();
-    for (const id of ["one", "two"]) {
-      const task = tasks.started(command(id, false))!;
-      liveness.recordTaskLiveness({
-        threadId: "thread",
-        ...task,
-        taskType: "shell",
-        kind: "started",
-      });
-    }
-    expect(liveness.getThreadBackgroundLiveness("thread")).toBe("monitoring");
-    const first = tasks.completed(command("one"))!;
-    liveness.recordTaskLiveness({
-      threadId: "thread",
-      ...first,
-      taskType: "shell",
-      kind: "completed",
-    });
-    expect(liveness.getThreadBackgroundLiveness("thread")).toBe("monitoring");
-    const last = tasks.completed(command("two"))!;
-    liveness.recordTaskLiveness({
-      threadId: "thread",
-      ...last,
-      taskType: "shell",
-      kind: "completed",
-    });
-    expect(liveness.getThreadBackgroundLiveness("thread")).toBeNull();
-    expect(tasks.takeWake()).toBeUndefined();
   });
 
   it("subscribes by native process ID and discards queued output on unsubscribe", () => {

@@ -10,7 +10,6 @@ import {
   type EnvironmentShellStatus,
   type EnvironmentShellState,
 } from "@t3tools/client-runtime/state/shell";
-import { createPiExternalThreadAtoms } from "@t3tools/client-runtime/state/pi-native";
 import {
   type EnvironmentCatalogState,
   enabledEnvironmentIds,
@@ -25,15 +24,7 @@ import { isHostedStaticApp } from "../hostedPairing";
 
 export const shellEnvironment = createShellEnvironmentAtoms(connectionAtomRuntime);
 export const environmentShell = createEnvironmentShellAtoms(connectionAtomRuntime);
-export const piExternalEnvironment = createPiExternalThreadAtoms(connectionAtomRuntime);
-export const environmentSnapshotAtom = createEnvironmentSnapshotAtom(
-  environmentShell.stateAtom,
-  (environmentId) =>
-    piExternalEnvironment.catalog({
-      environmentId,
-      input: undefined,
-    }),
-);
+export const environmentSnapshotAtom = createEnvironmentSnapshotAtom(environmentShell.stateAtom);
 
 const EMPTY_SHELL_ENVIRONMENT_IDS: ReadonlySet<EnvironmentId> = new Set();
 

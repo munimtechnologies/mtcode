@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import { playTurnCompletionSound } from "~/audio/turnChime";
 import { useClientSettings } from "./useSettings";
 import { useThreadShells } from "~/state/entities";
-import { isLatestTurnSettled } from "~/session-logic";
+import { isLatestRunSettled } from "~/session-logic";
 
 export function detectNewTurnCompletions(
   threads: ReadonlyArray<EnvironmentThreadShell>,
@@ -29,18 +29,17 @@ export function detectNewTurnCompletions(
     const previousState = previousCompletions[threadKey];
 
     const isSettled =
-      isLatestTurnSettled(thread.latestTurn, thread.session) &&
-      thread.latestTurn?.state !== "running" &&
-      Boolean(thread.latestTurn?.completedAt);
+      isLatestRunSettled(thread.latestRun, thread.runtime) &&
+      Boolean(thread.latestRun?.completedAt);
 
     if (!isSettled) {
-      if (thread.session?.status === "running" || thread.latestTurn?.state === "running") {
+      if (thread.runtime?.status === "running" || thread.latestRun?.status === "running") {
         nextCompletions[threadKey] = "running";
       }
       continue;
     }
 
-    const completedAt = thread.latestTurn?.completedAt;
+    const completedAt = thread.latestRun?.completedAt;
     if (!completedAt) continue;
 
     if (previousState === undefined) {

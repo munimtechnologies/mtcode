@@ -31,7 +31,6 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   type DesktopWslState,
-  CommandId,
   type EnvironmentId,
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
@@ -45,7 +44,6 @@ import {
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
-  CrosshairIcon,
   ArrowLeftIcon,
   BlocksIcon,
   ChartNoAxesColumnIcon,
@@ -57,7 +55,6 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
-  ImportIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -107,7 +104,6 @@ import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
-import { piExternalEnvironment } from "../state/shell";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
@@ -119,19 +115,7 @@ import { useScratchProject } from "../hooks/useScratchProject";
 import { useNewProject } from "../hooks/useNewProject";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import {
-  formatGoalStatusMessage,
-  goalChipActionLabel,
-  goalChipActions,
-} from "@t3tools/shared/composerTrigger";
-import { useThreadGoalActions } from "../hooks/useThreadGoalActions";
-import {
-  readEnvironmentSupportsGoal,
-  useProjects,
-  useServerConfigs,
-  useThreadShells,
-  waitForProject,
-} from "../state/entities";
+import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -160,7 +144,6 @@ import {
   isMacPlatform,
   isWindowsPlatform,
   newProjectId,
-  randomUUID,
 } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { SshPasswordRequestDialog, useSshPasswordRequest } from "./SshPasswordRequestDialog";
@@ -206,7 +189,6 @@ import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { CHAT_SEARCH_OPEN_EVENT } from "./chat/ChatSearch";
-import { ExternalConversationImportDialog } from "./ExternalConversationImportDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
 import {
@@ -220,7 +202,11 @@ import {
   primaryServerKeybindingsAtom,
   primaryServerProvidersAtom,
 } from "../state/server";
-import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  type ProviderInstanceEntry,
+} from "../providerInstances";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
@@ -229,30 +215,6 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 
-const NATIVE_PI_CREATE_COMMAND_PREFIX = "t3-native-pi-create:";
-function nativePiCreateCommandId(projectKey: string): CommandId | null {
-  const key = `${NATIVE_PI_CREATE_COMMAND_PREFIX}${projectKey}`;
-  try {
-    const existing = window.sessionStorage.getItem(key);
-    if (existing !== null) return CommandId.make(existing);
-    const created = randomUUID();
-    window.sessionStorage.setItem(key, created);
-    return CommandId.make(created);
-  } catch {
-    return null;
-  }
-}
-
-function clearNativePiCreateCommandId(projectKey: string, commandId: CommandId): boolean {
-  const key = `${NATIVE_PI_CREATE_COMMAND_PREFIX}${projectKey}`;
-  try {
-    if (window.sessionStorage.getItem(key) !== commandId) return false;
-    window.sessionStorage.removeItem(key);
-    return window.sessionStorage.getItem(key) === null;
-  } catch {
-    return false;
-  }
-}
 import type { ChatComposerHandle } from "./chat/ChatComposer";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -265,58 +227,6 @@ import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
-
-const APPEARANCE_OPTIONS = [
-  { mode: "system", label: "System", icon: MonitorIcon },
-  { mode: "light", label: "Light", icon: SunIcon },
-  { mode: "dark", label: "Dark", icon: MoonIcon },
-] as const;
-
-function notifyThemeSaveFailure(): void {
-  toastManager.add(
-    stackedThreadToast({
-      type: "error",
-      title: "Couldn't save theme selection",
-      description: "Try again.",
-    }),
-  );
-}
-
-function projectFavicon(project: Project) {
-  return <ProjectFavicon project={project} className="size-4" />;
-}
-
-function ProjectSearchDescription(props: {
-  readonly environmentLabels: ReadonlyArray<string>;
-  readonly grouped: boolean;
-  readonly location: {
-    readonly kind: "local" | "remote";
-    readonly label: string;
-    readonly machine: EnvironmentMachineKind;
-  };
-  readonly workspaceRoot: string;
-}) {
-  if (!props.grouped) {
-    return (
-      <span className="flex min-w-0 items-center gap-1">
-        <span className="inline-flex min-w-0 items-center gap-1">
-          {props.location.kind === "remote" ? (
-            <EnvironmentMachineIcon
-              aria-hidden
-              kind={props.location.machine}
-              className={COMMAND_PALETTE_META_ICON_CLASS}
-            />
-          ) : null}
-          <span className="truncate">{props.location.label}</span>
-        </span>
-        <CommandPaletteMetaDot />
-        <span className="truncate">{props.workspaceRoot}</span>
-      </span>
-    );
-  }
-
-  return <span className="truncate">{props.environmentLabels.join(" · ")}</span>;
-}
 
 function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
   if (os === "windows") {
@@ -433,6 +343,10 @@ function remoteProjectSourceIcon(source: AddProjectRemoteSource, className: stri
   }
 }
 
+function projectFaviconIcon(project: Project): ReactNode {
+  return <ProjectFavicon project={project} className={ITEM_ICON_CLASS} />;
+}
+
 function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string | null {
   if (!flow) return null;
   if (flow.step === "confirm") return null;
@@ -534,6 +448,26 @@ function overlayModeForCommand(command: string | null): SearchOverlayMode | null
   return command in OVERLAY_MODE_BY_COMMAND
     ? OVERLAY_MODE_BY_COMMAND[command as keyof typeof OVERLAY_MODE_BY_COMMAND]
     : null;
+}
+
+const APPEARANCE_OPTIONS = [
+  { mode: "system", label: "System", icon: MonitorIcon },
+  { mode: "light", label: "Light", icon: SunIcon },
+  { mode: "dark", label: "Dark", icon: MoonIcon },
+] as const;
+
+function notifyThemeSaveFailure(): void {
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title: "Couldn't save theme selection",
+      description: "Try again.",
+    }),
+  );
+}
+
+function projectFavicon(project: Project) {
+  return <ProjectFavicon project={project} className="size-4" />;
 }
 
 export function CommandPalette({ children }: { children: ReactNode }) {
@@ -674,8 +608,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
             query: detail.query,
             ...(detail.linkedThreads ? { linkedThreads: detail.linkedThreads } : {}),
           });
-        } else if (detail.open === "import-conversation") {
-          toggleMode("import");
         } else {
           setOpen(true);
         }
@@ -728,9 +660,7 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : props.mode === "import"
-              ? "Import conversation"
-              : "Command palette"
+            : "Command palette"
       }
       className={cn("overflow-hidden", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -750,11 +680,6 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
-      ) : props.mode === "import" ? (
-        <ExternalConversationImportDialog
-          onBack={() => props.openOverlayMode("command")}
-          onClose={() => props.setOpen(false)}
-        />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}
@@ -787,9 +712,6 @@ function OpenCommandPaletteDialog(props: {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
-  const createNativePiSession = useAtomCommand(piExternalEnvironment.createSession, {
-    reportFailure: false,
-  });
   const { scratchEnvironmentId, scratchWorkspaceRootFor, startScratchThread } = useScratchProject();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
@@ -817,7 +739,6 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const startComputerThread = useStartComputerThread();
-  const { runGoalAction, showGoalStatus } = useThreadGoalActions();
   const projects = useProjects();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const referenceThreadRef =
@@ -867,17 +788,6 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
 
-  const hasExternalConversationImport = useMemo(() => {
-    const capableEnvironmentIds = new Set(
-      environments
-        .filter(
-          (environment) =>
-            environment.serverConfig?.environment.capabilities.externalConversationImport === true,
-        )
-        .map((environment) => environment.environmentId),
-    );
-    return projects.some((project) => capableEnvironmentIds.has(project.environmentId));
-  }, [environments, projects]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -909,10 +819,17 @@ function OpenCommandPaletteDialog(props: {
   const providerEntryByEnvironmentAndInstanceId = useMemo(() => {
     const map = new Map<string, ProviderInstanceEntry>();
     for (const environment of environments) {
+      const serverConfig = environment.serverConfig;
       const environmentProviders =
-        environment.serverConfig?.providers ??
+        serverConfig?.providers ??
         (environment.environmentId === primaryEnvironmentId ? providers : []);
-      for (const entry of deriveProviderInstanceEntries(environmentProviders)) {
+      const derived = deriveProviderInstanceEntries(environmentProviders);
+      // Settings fill the ACP registry identity (agent id, icon URL) the
+      // derived entries alone do not carry.
+      const entries = serverConfig
+        ? applyProviderInstanceSettings(derived, serverConfig.settings)
+        : derived;
+      for (const entry of entries) {
         map.set(`${environment.environmentId}:${entry.instanceId}`, entry);
       }
     }
@@ -1371,7 +1288,7 @@ function OpenCommandPaletteDialog(props: {
             />
           );
         },
-        icon: projectFavicon,
+        icon: projectFaviconIcon,
         runProject: openProjectFromSearch,
       }),
     [
@@ -1455,7 +1372,7 @@ function OpenCommandPaletteDialog(props: {
               </span>
             );
           },
-          icon: projectFavicon,
+          icon: projectFaviconIcon,
           runProject: async (project) => {
             const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
             const contextualRefBelongsToGroup =
@@ -1510,7 +1427,7 @@ function OpenCommandPaletteDialog(props: {
         renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
         renderDescription: (thread, { projectTitle }) => {
           const modelInstanceId =
-            thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
+            thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
           const providerEntry =
             providerEntryByEnvironmentAndInstanceId.get(
               `${thread.environmentId}:${modelInstanceId}`,
@@ -1527,8 +1444,10 @@ function OpenCommandPaletteDialog(props: {
               isCurrent={thread.id === activeThreadId}
               driverKind={providerEntry?.driverKind ?? null}
               providerDisplayName={
-                thread.session?.providerName ?? providerEntry?.displayName ?? modelInstanceId
+                thread.runtime?.providerName ?? providerEntry?.displayName ?? modelInstanceId
               }
+              acpRegistryAgentId={providerEntry?.acpRegistryAgentId}
+              acpRegistryIconUrl={providerEntry?.acpRegistryIconUrl}
             />
           );
         },
@@ -1558,6 +1477,7 @@ function OpenCommandPaletteDialog(props: {
       activeThreadId,
       clientSettings.sidebarThreadSortOrder,
       navigate,
+      projectCwdById,
       projectByKey,
       projectEnvironmentLocationById,
       projectTitleById,
@@ -1986,18 +1906,6 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
-  const nativePiProjectRef = activeThread
-    ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
-    : defaultProjectRef;
-  const nativePiProject =
-    nativePiProjectRef === null
-      ? undefined
-      : projects.find(
-          (project) =>
-            project.environmentId === nativePiProjectRef.environmentId &&
-            project.id === nativePiProjectRef.projectId,
-        );
-
   actionItems.push({
     kind: "action",
     value: "action:new-thread",
@@ -2050,81 +1958,6 @@ function OpenCommandPaletteDialog(props: {
         { value: "projects", label: "Projects", items: projectThreadItems },
       ],
     });
-
-    if (hasExternalConversationImport) {
-      actionItems.push({
-        kind: "action",
-        value: "action:import-conversation",
-        searchTerms: ["import conversation", "claude code", "codex", "history", "external"],
-        title: "Import conversation",
-        description: "Claude Code or Codex",
-        icon: <ImportIcon className={ITEM_ICON_CLASS} />,
-        keepOpen: true,
-        run: async () => {
-          openOverlayMode("import");
-        },
-      });
-    }
-    if (
-      nativePiProject &&
-      serverConfigs.get(nativePiProject.environmentId)?.environment.capabilities
-        .piExternalThreads === true
-    ) {
-      actionItems.push({
-        kind: "action",
-        value: "action:new-native-pi-session",
-        searchTerms: ["new native pi session", "pi", "external thread"],
-        title: `New native Pi session in ${nativePiProject.title}`,
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          const projectKey = `${nativePiProject.environmentId}:${nativePiProject.id}:${nativePiProject.workspaceRoot}`;
-          const commandId = nativePiCreateCommandId(projectKey);
-          if (commandId === null) {
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Could not save native Pi task",
-                description:
-                  "Browser storage is unavailable. Native Pi cannot start safely until storage is restored.",
-              }),
-            );
-            return;
-          }
-          const result = await createNativePiSession({
-            environmentId: nativePiProject.environmentId,
-            input: { cwd: nativePiProject.workspaceRoot, commandId },
-          });
-          if (result._tag === "Failure") {
-            const cause = squashAtomCommandFailure(result);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Could not create native Pi session",
-                description:
-                  cause instanceof Error ? cause.message : "An unexpected error occurred.",
-              }),
-            );
-            return;
-          }
-          if (!clearNativePiCreateCommandId(projectKey, commandId)) {
-            toastManager.add(
-              stackedThreadToast({
-                type: "warning",
-                title: "Native Pi started, but storage cleanup failed",
-                description:
-                  "Restore browser storage before starting another native Pi session in this project.",
-              }),
-            );
-          }
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(
-              scopeThreadRef(nativePiProject.environmentId, result.value.threadId),
-            ),
-          });
-        },
-      });
-    }
   }
 
   if (activeThread !== null) {
@@ -2212,7 +2045,7 @@ function OpenCommandPaletteDialog(props: {
       // Failures throw into executeItem's error toast.
       run: async () => {
         const { environmentId } = thread;
-        if (thread.session && thread.session.status !== "stopped") {
+        if (thread.runtime !== null) {
           const stopped = await stopThreadSession({
             environmentId,
             input: { threadId: thread.id },
@@ -2231,7 +2064,7 @@ function OpenCommandPaletteDialog(props: {
         const refreshed = await refreshProviders({
           environmentId,
           input: {
-            instanceId: thread.session?.providerInstanceId ?? thread.modelSelection.instanceId,
+            instanceId: thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId,
             cwd: thread.worktreePath ?? project.workspaceRoot,
             fresh: true,
           },
@@ -2326,47 +2159,6 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread && readEnvironmentSupportsGoal(activeThread.environmentId)) {
-    const goal = activeThread.goal ?? null;
-    const goalForStatus = goal == null ? null : { status: goal.status, objective: goal.objective };
-    actionItems.push({
-      kind: "action",
-      value: "action:goal-status",
-      searchTerms: ["goal", "objective", "status", "/goal"],
-      title: "Show Objective status",
-      description: formatGoalStatusMessage(goalForStatus),
-      icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        showGoalStatus(goalForStatus);
-      },
-    });
-    if (goal != null) {
-      for (const action of goalChipActions(goal.status)) {
-        actionItems.push({
-          kind: "action",
-          value: `action:goal-${action}`,
-          searchTerms: [
-            "goal",
-            "objective",
-            action,
-            goalChipActionLabel(action),
-            "/goal",
-            `/goal ${action}`,
-          ],
-          title: `${goalChipActionLabel(action)} Objective`,
-          description: goal.objective,
-          icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
-          run: async () => {
-            await runGoalAction({
-              environmentId: activeThread.environmentId,
-              threadId: activeThread.id,
-              action,
-            });
-          },
-        });
-      }
-    }
-  }
   const changeThemeItem: CommandPaletteSubmenuItem = {
     kind: "submenu",
     value: "action:change-theme",
@@ -3741,4 +3533,36 @@ function OpenCommandPaletteDialog(props: {
       ) : null}
     </>
   );
+}
+
+function ProjectSearchDescription(props: {
+  readonly environmentLabels: ReadonlyArray<string>;
+  readonly grouped: boolean;
+  readonly location: {
+    readonly kind: "local" | "remote";
+    readonly label: string;
+    readonly machine: EnvironmentMachineKind;
+  };
+  readonly workspaceRoot: string;
+}) {
+  if (!props.grouped) {
+    return (
+      <span className="flex min-w-0 items-center gap-1">
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {props.location.kind === "remote" ? (
+            <EnvironmentMachineIcon
+              aria-hidden
+              kind={props.location.machine}
+              className={COMMAND_PALETTE_META_ICON_CLASS}
+            />
+          ) : null}
+          <span className="truncate">{props.location.label}</span>
+        </span>
+        <CommandPaletteMetaDot />
+        <span className="truncate">{props.workspaceRoot}</span>
+      </span>
+    );
+  }
+
+  return <span className="truncate">{props.environmentLabels.join(" · ")}</span>;
 }

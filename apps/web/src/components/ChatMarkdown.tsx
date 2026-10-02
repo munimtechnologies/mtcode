@@ -19,7 +19,6 @@ import {
   MessageSquareIcon,
   MessageSquareWarningIcon,
   Minimize2Icon,
-  MessagesSquareIcon,
   OctagonAlertIcon,
   PlayIcon,
   PresentationIcon,
@@ -28,18 +27,14 @@ import {
   WrapTextIcon,
   type LucideIcon,
 } from "lucide-react";
-import {
-  type AssetResource,
+import type {
+  AssetResource,
   EnvironmentId,
-  type ScopedThreadRef,
-  type ServerProviderSkill,
-  type ThreadPullRequestKey,
-  ThreadId,
+  ScopedThreadRef,
+  ServerProviderSkill,
+  ThreadPullRequestKey,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { parseComposerThreadLink } from "@t3tools/shared/composerTrigger";
 import { faviconUrlForOrigin } from "@t3tools/shared/favicon";
-import { useNavigate } from "@tanstack/react-router";
 import { githubMediaFetchUrl } from "@t3tools/shared/githubMedia";
 import {
   isAtomCommandInterrupted,
@@ -205,7 +200,6 @@ import {
   BrowserPreviewUnavailableError,
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
-import { buildThreadRouteParams } from "../threadRoutes";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
@@ -503,13 +497,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [
-      ...(defaultSchema.protocols?.href ?? []),
-      "file",
-      "t3-thread",
-      "t3-citation",
-      "t3-context",
-    ],
+    href: [...(defaultSchema.protocols?.href ?? []), "file", "t3-citation", "t3-context"],
     src: [...(defaultSchema.protocols?.src ?? []), "file", "t3-context"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
@@ -2557,7 +2545,6 @@ function useChatMarkdownState({
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
   const markdownUrlTransform = useCallback((href: string) => {
-    if (parseComposerThreadLink(href)) return href;
     if (parseAssistantCitationHref(href)) return href;
     if (parseComposerContextHref(href)) return href;
     if (isWindowsDrivePathHref(href)) return href;
@@ -2898,54 +2885,6 @@ function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
 }
 
 // Keep component types stable when streaming changes the message state.
-/**
- * A `t3-thread://` reference rendered as a chip that navigates to the referenced
- * thread. Its own component so the navigate hook has a stable call site inside
- * the module-level renderer map.
- */
-function ChatMarkdownThreadReferenceLink({
-  href,
-  copyText,
-  environmentId,
-  threadId,
-  children,
-  ...props
-}: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
-  readonly href: string;
-  readonly copyText: string;
-  readonly environmentId: string;
-  readonly threadId: string;
-}) {
-  const navigate = useNavigate();
-  const target = scopeThreadRef(EnvironmentId.make(environmentId), ThreadId.make(threadId));
-  const link = (
-    <ContextChip
-      kind="mention"
-      render={<a {...props} href={href} />}
-      data-markdown-copy={copyText}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(target),
-        });
-      }}
-    >
-      <MessagesSquareIcon className="size-3.5 shrink-0" aria-hidden="true" />
-      <span>{children}</span>
-    </ContextChip>
-  );
-  return (
-    <Tooltip>
-      <TooltipTrigger render={link} />
-      <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight">
-        Open referenced thread
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
-
 const CHAT_MARKDOWN_COMPONENTS = {
   h1: markdownHeadingRenderer(1),
   h2: markdownHeadingRenderer(2),
@@ -3065,20 +3004,6 @@ const CHAT_MARKDOWN_COMPONENTS = {
       );
     }
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
-    const threadReference = normalizedHref ? parseComposerThreadLink(normalizedHref) : null;
-    if (threadReference) {
-      return (
-        <ChatMarkdownThreadReferenceLink
-          {...props}
-          href={normalizedHref}
-          copyText={`[${plainHastText(node)}](${normalizedHref})`}
-          environmentId={threadReference.environmentId}
-          threadId={threadReference.threadId}
-        >
-          {children}
-        </ChatMarkdownThreadReferenceLink>
-      );
-    }
     const fileLinkMeta = normalizedHref
       ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
         resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd))

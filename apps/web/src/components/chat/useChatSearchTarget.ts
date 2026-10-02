@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import type { MessageId, TurnId } from "@t3tools/contracts";
+import type { MessageId, RunId } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { TimelineEntry } from "../../session-logic";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
@@ -57,7 +57,7 @@ export function useChatSearchTarget({
   viewport,
   historyLoading,
   loadEarlier,
-  onExpandTurn,
+  onExpandRun,
   onManualNavigation,
 }: {
   request: ChatSearchRequest | null;
@@ -68,7 +68,7 @@ export function useChatSearchTarget({
   viewport: HTMLElement | null;
   historyLoading: boolean;
   loadEarlier: CitationHistoryPage | null;
-  onExpandTurn: (turnId: TurnId) => void;
+  onExpandRun: (runId: RunId) => void;
   onManualNavigation: () => void;
 }) {
   const [loaded, setLoaded] = useState(false);
@@ -125,9 +125,9 @@ export function useChatSearchTarget({
       return;
     }
     if (index < 0) {
-      if (source.kind === "message" && source.message.turnId && !navigation.expanded) {
+      if (source.kind === "message" && source.message.runId && !navigation.expanded) {
         navigation.expanded = true;
-        onExpandTurn(source.message.turnId);
+        onExpandRun(source.message.runId);
       } else {
         fail();
       }
@@ -184,7 +184,7 @@ export function useChatSearchTarget({
     listRef,
     loadEarlier,
     loaded,
-    onExpandTurn,
+    onExpandRun,
     onManualNavigation,
     request,
     viewport,

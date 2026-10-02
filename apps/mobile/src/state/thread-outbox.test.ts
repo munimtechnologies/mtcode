@@ -140,6 +140,15 @@ describe("thread outbox", () => {
       decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
     ).toEqual(message);
   });
+  it("retains queue mode when a queued provider switch reloads from storage", () => {
+    const message: QueuedThreadMessage = {
+      ...queuedMessage({ messageId: "queued-switch", createdAt: "2026-09-17T09:00:00.000Z" }),
+      dispatchMode: "queue",
+    };
+    expect(
+      decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
+    ).toEqual(message);
+  });
   it.each(["read", "json", "schema"] as const)(
     "recovers usable messages without permitting cleanup after a record %s failure",
     async (failure) => {
@@ -325,42 +334,12 @@ describe("thread outbox", () => {
         ...message,
       }),
     ).toEqual(message);
-    expect(
-      decodeQueuedThreadMessage({
-        schemaVersion: 2,
-        ...message,
-      }),
-    ).toEqual(message);
-    expect(
-      decodeQueuedThreadMessage({
-        schemaVersion: 3,
-        ...message,
-      }),
-    ).toEqual(message);
     expect(() =>
       decodeQueuedThreadMessage({
         schemaVersion: 1,
         environmentId: "environment-1",
       }),
     ).toThrow();
-  });
-
-  it("round-trips attachGoal on schema v4", () => {
-    const message = {
-      ...queuedMessage({
-        messageId: "message-1",
-        createdAt: "2026-06-08T10:00:01.000Z",
-      }),
-      attachGoal: "Reduce p95 below 120ms",
-    } satisfies QueuedThreadMessage;
-
-    const encoded = encodeQueuedThreadMessage(message) as {
-      schemaVersion: number;
-      attachGoal?: string;
-    };
-    expect(encoded.schemaVersion).toBe(4);
-    expect(encoded.attachGoal).toBe("Reduce p95 below 120ms");
-    expect(decodeQueuedThreadMessage(encoded)).toEqual(message);
   });
 
   it("persists generic attachment paths without embedding their contents", () => {
@@ -424,7 +403,6 @@ describe("thread outbox", () => {
       },
       runtimeMode: "approval-required",
       interactionMode: "plan",
-      deliveryMode: "after-current",
     } satisfies QueuedThreadMessage;
 
     expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(selectedMessage))).toEqual(

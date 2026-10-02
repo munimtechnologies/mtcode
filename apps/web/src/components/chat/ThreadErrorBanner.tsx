@@ -1,11 +1,11 @@
+import type { OrchestrationV2ProviderFailureClass } from "@t3tools/contracts";
 import { memo, useRef } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import { CheckIcon, CircleAlertIcon, CopyIcon, HourglassIcon, XIcon } from "lucide-react";
+import { CheckIcon, CircleAlertIcon, CopyIcon, XIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { OpenAI } from "../Icons";
 import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
-import { UsageLimitCountdown } from "./UsageLimitCountdown";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { anchoredToastManager } from "../ui/toast";
 
@@ -104,7 +104,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
   copyContext,
   onDismiss,
-  usageLimitResetsAt,
+  errorClass,
   chatGptUsageLimit = false,
 }: {
   error: string | null;
@@ -113,42 +113,16 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
     readonly provider?: string | null;
     readonly threadId?: string | null;
   };
+  errorClass?: OrchestrationV2ProviderFailureClass | null;
   onDismiss?: () => void;
-  /** Renders the calm reached-your-limit notice instead of the raw error. */
-  usageLimitResetsAt?: string | null;
   chatGptUsageLimit?: boolean;
 }) {
   if (!error) return null;
-  if (usageLimitResetsAt) {
-    return (
-      <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
-        <Alert variant="info" controlAlignment="first-line" className="alert-glass">
-          <HourglassIcon />
-          <AlertDescription>
-            Reached your plan's usage limit ·{" "}
-            <UsageLimitCountdown resetsAt={usageLimitResetsAt} prefix="tokens return in" />
-          </AlertDescription>
-          {onDismiss && (
-            <AlertAction>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label="Dismiss usage limit notice"
-                onClick={onDismiss}
-              >
-                <XIcon />
-              </Button>
-            </AlertAction>
-          )}
-        </Alert>
-      </div>
-    );
-  }
+  const variant = errorClass === "usage_limit" ? "warning" : "error";
   const clipboardText = formatThreadErrorClipboardText({ error, ...copyContext });
-
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
-      <Alert variant="error" surface="glass" controlAlignment="first-line">
+      <Alert variant={variant} surface="glass" controlAlignment="first-line" data-variant={variant}>
         {chatGptUsageLimit ? (
           <OpenAI className="size-4 text-foreground!" aria-hidden="true" />
         ) : (
@@ -172,11 +146,11 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
         <AlertAction>
           {chatGptUsageLimit ? <ChatGptUsageButton variant="default" size="sm" /> : null}
           <ThreadErrorCopyButton clipboardText={clipboardText} />
-          {onDismiss && (
+          {onDismiss ? (
             <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
-              <XIcon className="text-destructive" />
+              <XIcon />
             </Button>
-          )}
+          ) : null}
         </AlertAction>
       </Alert>
     </div>

@@ -1,5 +1,4 @@
 import * as Path from "effect/Path";
-import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -17,10 +16,9 @@ import {
   resolveProjectAgentBrowserAccess,
   resolveProjectAutoPull,
 } from "@t3tools/shared/serverSettings";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
+import { ProjectService } from "./ProjectService.ts";
 import { ProjectTransferFiles } from "./ProjectTransferFiles.ts";
 
 const isProjectTransferError = Schema.is(ProjectTransferError);
@@ -33,15 +31,13 @@ interface Transfer {
   destination?: string;
   mode: "clone" | "copy";
   projectId: ProjectId;
-  createdAt: string;
   unpacked: boolean;
   registered: boolean;
 }
 
 export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* () {
   const path = yield* Path.Path;
-  const projects = yield* ProjectionSnapshotQuery;
-  const engine = yield* OrchestrationEngineService;
+  const projects = yield* ProjectService;
   const settings = yield* ServerSettingsService;
   const git = yield* GitVcsDriver;
   const files = new ProjectTransferFiles();
@@ -74,7 +70,7 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
         return { operation: "release" };
       }
       if (input.operation === "prepare") {
-        const found = yield* projects.getProjectShellById(input.projectId);
+        const found = yield* projects.getShell(input.projectId);
         if (Option.isNone(found))
           return yield* new ProjectTransferError({
             message: "The source project no longer exists.",
@@ -129,7 +125,6 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
           configuration,
           mode: input.mode,
           projectId: ProjectId.make(files.id()),
-          createdAt: DateTime.formatIso(yield* DateTime.now),
           unpacked: false,
           registered: false,
         };
@@ -217,7 +212,6 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
           configuration: input.configuration,
           byteLength: input.byteLength,
           projectId: ProjectId.make(files.id()),
-          createdAt: DateTime.formatIso(yield* DateTime.now),
           unpacked: false,
           registered: false,
         });
@@ -262,16 +256,19 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
       const project = transfer.configuration.project;
       // Once a durable project may exist, cancellation must never delete its checkout.
       transfer.registered = true;
-      yield* engine.dispatch({
-        type: "project.create",
-        commandId: CommandId.make(`${input.transferId}:create`),
-        projectId: transfer.projectId,
-        workspaceRoot: cwd,
-        title: project.title,
-        createdAt: transfer.createdAt,
-      });
-      yield* engine.dispatch({
-        type: "project.meta.update",
+      // Retries after a failed settings write find the project already there.
+      const existing = yield* projects.getById(transfer.projectId);
+      if (Option.isNone(existing)) {
+        yield* projects.create({
+          commandId: CommandId.make(`${input.transferId}:create`),
+          projectId: transfer.projectId,
+          workspaceRoot: cwd,
+          title: project.title,
+          defaultModelSelection: project.defaultModelSelection,
+          scripts: project.scripts,
+        });
+      }
+      yield* projects.update({
         commandId: CommandId.make(`${input.transferId}:configure`),
         projectId: transfer.projectId,
         defaultModelSelection: project.defaultModelSelection,

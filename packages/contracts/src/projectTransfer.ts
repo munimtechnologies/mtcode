@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { OrchestrationProjectShell } from "./orchestration.ts";
+import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 
 export const PROJECT_TRANSFER_CHUNK_BYTES = 256 * 1024;
 export const PROJECT_TRANSFER_MAX_BYTES = 10 * 1024 * 1024 * 1024;

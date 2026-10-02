@@ -8,7 +8,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
-import { ControlPillMenu } from "../../components/ControlPill";
 import { AppText as Text } from "../../components/AppText";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
@@ -27,6 +26,7 @@ import {
   planMobileScopedSettingsClear,
   planMobileScopedSettingsPatch,
   resolveMobileSettingsTargets,
+  uniformMobileSetting,
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 
@@ -45,7 +45,6 @@ export function SettingsThreadsRouteScreen() {
           contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         >
           <AutoSettleSettingsRows />
-          <MessageSettingsSection />
           <LegacySettingsSection />
         </ScrollView>
       </SettingsScreen>
@@ -86,7 +85,12 @@ function AutoSettleSettingsRows() {
     return null;
   }
 
-  const writeToAll = (patch: Partial<AutoSettleSettings>) => {
+  const writeToAll = (
+    patch: Partial<AutoSettleSettings> & {
+      autoResumeLimitedThreads?: boolean;
+      snoozeLimitedThreads?: boolean;
+    },
+  ) => {
     if (writeInFlight.current) return;
     const writes = planMobileScopedSettingsPatch(syncTargets, projectSelected, patch);
     if (writes.length === 0) return;
@@ -109,17 +113,12 @@ function AutoSettleSettingsRows() {
       environmentId: reference.environment.environmentId,
       projectId: reference.projectId,
       settings: referenceSettings,
-      supportsScope:
-        reference.environment.serverConfig.environment.capabilities.threadAutoSettlementScope ===
-        true,
     },
     displayTargets.map((target) => ({
       environmentId: target.environment.environmentId,
       projectId: target.projectId,
       label: target.environment.label,
       settings: target.settings,
-      supportsScope:
-        target.environment.serverConfig.environment.capabilities.threadAutoSettlementScope === true,
     })),
   );
 
@@ -133,17 +132,13 @@ function AutoSettleSettingsRows() {
     syncTargets.some(
       (target) =>
         target.sources.sidebarAutoSettleOnMerge === "project" ||
-        target.sources.sidebarAutoSettleAfterDays === "project" ||
-        target.sources.sidebarAutoSettlePinnedThreads === "project" ||
-        target.sources.sidebarAutoSettleScope === "project",
+        target.sources.sidebarAutoSettleAfterDays === "project",
     );
   const clearProjectOverrides = () => {
     if (writeInFlight.current) return;
     const writes = planMobileScopedSettingsClear(syncTargets, [
       "sidebarAutoSettleOnMerge",
       "sidebarAutoSettleAfterDays",
-      "sidebarAutoSettlePinnedThreads",
-      "sidebarAutoSettleScope",
     ]);
     if (writes.length === 0) return;
     writeInFlight.current = true;
@@ -173,6 +168,24 @@ function AutoSettleSettingsRows() {
           onClear={clearProjectOverrides}
         />
       ) : null}
+      {!projectSelected ? (
+        <SettingsSection title="Usage limits">
+          <SettingsSwitchRow
+            icon="clock"
+            label="Auto-resume limited threads"
+            value={uniformMobileSetting(displayTargets, "autoResumeLimitedThreads")}
+            disabled={disabled}
+            onValueChange={(value) => writeToAll({ autoResumeLimitedThreads: value })}
+          />
+          <SettingsSwitchRow
+            icon="clock"
+            label="Snooze limited threads"
+            value={uniformMobileSetting(displayTargets, "snoozeLimitedThreads")}
+            disabled={disabled}
+            onValueChange={(value) => writeToAll({ snoozeLimitedThreads: value })}
+          />
+        </SettingsSection>
+      ) : null}
       <SettingsSection title="Auto-settle">
         <SettingsSwitchRow
           icon="arrow.triangle.branch"
@@ -182,71 +195,14 @@ function AutoSettleSettingsRows() {
           onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}
         />
         <SettingsSwitchRow
-          icon="pin"
-          label="Auto-settle pinned threads"
-          subtitle="Pinned threads stay active unless this is on"
-          value={referenceSettings.sidebarAutoSettlePinnedThreads}
+          icon="clock"
+          label="Auto-settle inactive threads"
+          value={afterDays !== null}
           disabled={disabled}
-          onValueChange={(value) => writeToAll({ sidebarAutoSettlePinnedThreads: value })}
+          onValueChange={(value) =>
+            writeToAll({ sidebarAutoSettleAfterDays: value ? AUTO_SETTLE_DEFAULT_DAYS : null })
+          }
         />
-        <ControlPillMenu
-          accessibilityLabel="Auto-settle inactive threads"
-          actions={[
-            {
-              id: "off",
-              title: "Off",
-              state: afterDays === null ? "on" : "off",
-              attributes: { disabled },
-            },
-            {
-              id: "all",
-              title: "All threads",
-              attributes: { disabled },
-              state:
-                afterDays !== null && referenceSettings.sidebarAutoSettleScope === "all"
-                  ? "on"
-                  : "off",
-            },
-            {
-              id: "without-pr",
-              title: "Threads without a PR",
-              state:
-                afterDays !== null && referenceSettings.sidebarAutoSettleScope === "without-pr"
-                  ? "on"
-                  : "off",
-              attributes: {
-                disabled:
-                  disabled ||
-                  syncTargets.some(
-                    (target) =>
-                      target.environment.serverConfig.environment.capabilities
-                        .threadAutoSettlementScope !== true,
-                  ),
-              },
-            },
-          ]}
-          onPressAction={({ nativeEvent }) => {
-            if (disabled) return;
-            const value = nativeEvent.event;
-            if (value !== "off" && value !== "all" && value !== "without-pr") return;
-            writeToAll({
-              sidebarAutoSettleAfterDays:
-                value === "off" ? null : (afterDays ?? AUTO_SETTLE_DEFAULT_DAYS),
-              sidebarAutoSettleScope: value === "off" ? "all" : value,
-            });
-          }}
-        >
-          <View className="gap-1 p-4">
-            <Text className="text-lg text-foreground">Auto-settle inactive threads</Text>
-            <Text className="text-sm text-foreground-muted">
-              {afterDays === null
-                ? "Off"
-                : referenceSettings.sidebarAutoSettleScope === "all"
-                  ? "All threads"
-                  : "Threads without a PR"}
-            </Text>
-          </View>
-        </ControlPillMenu>
         {afterDays !== null ? (
           <View className="flex-row items-center gap-4 px-4 py-4 android:min-h-14 android:py-3">
             <View className="w-[22px] android:w-6" />
@@ -280,26 +236,6 @@ function AutoSettleSettingsRows() {
         </SettingsSection>
       ) : null}
     </View>
-  );
-}
-
-/** Device-local message delivery preference (MT fork). */
-function MessageSettingsSection() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
-  const steerActiveTurns =
-    !AsyncResult.isSuccess(preferencesResult) || preferencesResult.value.steerActiveTurns !== false;
-
-  return (
-    <SettingsSection title="Messages">
-      <SettingsSwitchRow
-        icon="arrow.up.right.circle"
-        label="Steer active turns"
-        subtitle="When off, messages wait on the server and run next."
-        value={steerActiveTurns}
-        onValueChange={(value) => savePreferences({ steerActiveTurns: value })}
-      />
-    </SettingsSection>
   );
 }
 

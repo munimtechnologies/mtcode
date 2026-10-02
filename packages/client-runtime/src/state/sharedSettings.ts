@@ -27,6 +27,8 @@ const SHARED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleScope",
   "sidebarAutoSettleOnMerge",
   "sidebarAutoSettlePinnedThreads",
+  "autoResumeLimitedThreads",
+  "snoozeLimitedThreads",
   "newWorktreesStartFromOrigin",
   "createGitHubPullRequestsAsDraft",
   "sourceControlWritingStyle",

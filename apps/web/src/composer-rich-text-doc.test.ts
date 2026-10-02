@@ -1,5 +1,4 @@
 import { getSchemaByResolvedExtensions, Node, resolveExtensions } from "@tiptap/core";
-import { serializeComposerThreadLink } from "@t3tools/shared/composerTrigger";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskList } from "@tiptap/extension-task-list";
 import { Node as ProseMirrorNode } from "@tiptap/pm/model";
@@ -41,12 +40,6 @@ const schema = getSchemaByResolvedExtensions(
       gapcursor: false,
       trailingNode: false,
       code: false,
-    }),
-    stubAtom("composer-thread", {
-      environmentId: { default: "" },
-      threadId: { default: "" },
-      title: { default: "" },
-      source: { default: "" },
     }),
     ComposerCodeExtension,
     stubAtom("composer-mention", { path: { default: "" }, source: { default: "" } }),
@@ -98,12 +91,6 @@ const plainSchema = getSchemaByResolvedExtensions(
       italic: false,
       strike: false,
       code: false,
-    }),
-    stubAtom("composer-thread", {
-      environmentId: { default: "" },
-      threadId: { default: "" },
-      title: { default: "" },
-      source: { default: "" },
     }),
     stubAtom("composer-mention", { path: { default: "" }, source: { default: "" } }),
     stubAtom("composer-skill", {
@@ -373,21 +360,4 @@ describe("composer rich text document model", () => {
     expect(collapsedToFlat(map, 3)).toBe(2);
     expect(collapsedToFlat(map, 9)).toBe(6);
   });
-});
-
-it("preserves thread references through the Tiptap document", () => {
-  const source = serializeComposerThreadLink({
-    environmentId: "env-1",
-    threadId: "thread-2",
-    title: "Earlier task",
-  });
-  const prompt = `Continue ${source} here`;
-  expect(roundTrip(prompt).value).toBe(prompt);
-  const json = buildDocJson(prompt, (name) => ({ label: name, description: null }));
-  const paragraph = ProseMirrorNode.fromJSON(schema, json).firstChild;
-  let hasThreadNode = false;
-  paragraph?.forEach((node) => {
-    if (node.type.name === "composer-thread") hasThreadNode = true;
-  });
-  expect(hasThreadNode).toBe(true);
 });

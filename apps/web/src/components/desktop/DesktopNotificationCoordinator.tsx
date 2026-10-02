@@ -8,7 +8,7 @@ import type { BackgroundPolicySnapshot, EnvironmentId } from "@t3tools/contracts
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import { projectThreadAwareness, type AgentAwarenessState } from "@t3tools/shared/agentAwareness";
+import { projectThreadAwarenessV2, type AgentAwarenessState } from "@t3tools/shared/agentAwareness";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 
@@ -189,10 +189,10 @@ export function DesktopNotificationCoordinator() {
         {
           key: scopedThreadKey(target),
           target,
-          state: projectThreadAwareness({
+          state: projectThreadAwarenessV2({
             environmentId: thread.environmentId,
             project,
-            thread,
+            thread: thread.source,
           }),
         },
       ];
@@ -205,8 +205,11 @@ export function DesktopNotificationCoordinator() {
         threads.map((thread) => [
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           {
-            assistantMessageId: thread.latestTurn?.assistantMessageId ?? null,
-            turnId: thread.latestTurn?.turnId ?? null,
+            assistantMessageId: thread.latestRun?.assistantMessageId ?? null,
+            runId: thread.latestRun?.runId ?? null,
+            // The shell already carries the newest visible message, so most
+            // completions need no snapshot load for their preview.
+            latestVisibleMessage: thread.source.latestVisibleMessage,
             updatedAt: thread.updatedAt,
             supportsPagination:
               serverConfigs.get(thread.environmentId)?.threadSnapshotPagination === true,
@@ -338,10 +341,10 @@ export function DesktopNotificationCoordinator() {
           if (currentProject === null) {
             return false;
           }
-          const currentAwareness = projectThreadAwareness({
+          const currentAwareness = projectThreadAwarenessV2({
             environmentId: currentThread.environmentId,
             project: currentProject,
-            thread: currentThread,
+            thread: currentThread.source,
           });
           // Metadata can update while a completion preview loads. The semantic phase and turn
           // identity decide whether this notification is still current.
@@ -353,7 +356,22 @@ export function DesktopNotificationCoordinator() {
         let completionPreview: string | null = null;
         if (transition.event === "completion" && queuedSettings.showContext) {
           const context = completionContexts.get(scopedThreadKey(target));
-          if (context?.supportsPagination) {
+          const latestVisibleMessage = context?.latestVisibleMessage ?? null;
+          if (latestVisibleMessage?.role === "assistant") {
+            completionPreview = completionNotificationPreview({
+              messages: [
+                {
+                  id: latestVisibleMessage.id,
+                  role: latestVisibleMessage.role,
+                  runId: null,
+                  streaming: false,
+                  text: latestVisibleMessage.text,
+                },
+              ],
+              assistantMessageId: null,
+              runId: null,
+            });
+          } else if (context?.supportsPagination) {
             const result = await settleWithin(
               loadCompletionSnapshot({
                 environmentId: transition.state.environmentId,
@@ -366,9 +384,9 @@ export function DesktopNotificationCoordinator() {
             );
             if (result?._tag === "Success" && Option.isSome(result.value)) {
               completionPreview = completionNotificationPreview({
-                messages: result.value.value.thread.messages,
+                messages: result.value.value.projection.messages,
                 assistantMessageId: context.assistantMessageId,
-                turnId: context.turnId,
+                runId: context.runId,
               });
             }
           }

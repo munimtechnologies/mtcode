@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import type {
-  EnvironmentProject,
-  EnvironmentThreadShell,
+import {
+  threadRuntimeIsActive,
+  type EnvironmentProject,
+  type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -11,7 +13,6 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type MessageId,
 } from "@t3tools/contracts";
-import { isGoalCommandForm } from "@t3tools/shared/composerTrigger";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -47,7 +48,6 @@ import {
 import { removeThreadOutboxMessage } from "./thread-outbox-removal";
 import {
   isQueuedThreadCreationSendable,
-  modelSelectionsEqual,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
@@ -203,11 +203,6 @@ function findCreationProject(
 
 function settingsCommandId(message: QueuedThreadMessage, setting: string): CommandId {
   return CommandId.make(`${message.commandId}:${setting}`);
-}
-
-function queuedAttachGoalObjective(message: QueuedThreadMessage): string | null {
-  const objective = message.attachGoal?.trim();
-  return objective !== undefined && objective.length > 0 ? objective : null;
 }
 
 /**
@@ -637,16 +632,12 @@ async function preserveUploadedAttachmentsForEditor(
 
 export function useThreadOutboxDrain(): void {
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
-  const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
-    reportFailure: false,
-  });
   const setThreadRuntimeMode = useAtomCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
   });
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
-  const setThreadGoal = useAtomCommand(threadEnvironment.setGoal, { reportFailure: false });
   const dispatchingQueuedMessageId = useAtomValue(dispatchingQueuedMessageIdAtom);
   const editingQueuedMessageIds = useAtomValue(editingQueuedMessageIdsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
@@ -780,53 +771,6 @@ export function useThreadOutboxDrain(): void {
     return { reportFailure };
   }, []);
 
-  const attachQueuedGoal = useCallback(
-    async (
-      queuedMessage: QueuedThreadMessage,
-      reportFailure: ReturnType<typeof makeDeliveryHelpers>["reportFailure"],
-    ): Promise<boolean> => {
-      const objective = queuedAttachGoalObjective(queuedMessage);
-      if (objective === null) {
-        return true;
-      }
-      const goalResult = await setThreadGoal({
-        environmentId: queuedMessage.environmentId,
-        input: {
-          threadId: queuedMessage.threadId,
-          objective,
-          messageId: queuedMessage.messageId,
-        },
-      });
-      // A failed attach must keep the outbox entry: the retried delivery
-      // dedupes the Turn by commandId and re-attempts the Objective.
-      return reportFailure(goalResult, "goal-attach") === null;
-    },
-    [setThreadGoal],
-  );
-
-  const dropQueuedCommandForm = useCallback(
-    async (queuedMessage: QueuedThreadMessage) => {
-      const { reportFailure } = makeDeliveryHelpers(queuedMessage);
-      const attached = await attachQueuedGoal(queuedMessage, reportFailure);
-      if (!attached) {
-        return false;
-      }
-      try {
-        await removeThreadOutboxMessage(queuedMessage);
-        return true;
-      } catch (error) {
-        console.warn("[thread-outbox] failed to drop queued goal command form", {
-          environmentId: queuedMessage.environmentId,
-          threadId: queuedMessage.threadId,
-          messageId: queuedMessage.messageId,
-          error,
-        });
-        return false;
-      }
-    },
-    [attachQueuedGoal, makeDeliveryHelpers],
-  );
-
   const sendQueuedMessage = useCallback(
     async (queuedMessage: QueuedThreadMessage, thread: EnvironmentThreadShell) => {
       const serverConfig = appAtomRegistry.get(
@@ -841,25 +785,6 @@ export function useThreadOutboxDrain(): void {
         );
       }
       const { reportFailure } = makeDeliveryHelpers(queuedMessage);
-
-      if (isGoalCommandForm(queuedMessage.text)) {
-        return dropQueuedCommandForm(queuedMessage);
-      }
-
-      if (!modelSelectionsEqual(settings.modelSelection, thread.modelSelection)) {
-        const updateResult = await updateThreadMetadata({
-          environmentId: queuedMessage.environmentId,
-          input: {
-            commandId: settingsCommandId(queuedMessage, "model-selection"),
-            threadId: queuedMessage.threadId,
-            modelSelection: settings.modelSelection,
-          },
-        });
-        if (AsyncResult.isFailure(updateResult)) {
-          reportFailure(updateResult, "settings-sync");
-          return false;
-        }
-      }
 
       if (settings.runtimeMode !== thread.runtimeMode) {
         const runtimeResult = await setThreadRuntimeMode({
@@ -946,6 +871,7 @@ export function useThreadOutboxDrain(): void {
         environmentId: queuedMessage.environmentId,
         input: {
           commandId: queuedMessage.commandId,
+          creationSource: "mobile",
           threadId: queuedMessage.threadId,
           message: {
             messageId: queuedMessage.messageId,
@@ -962,10 +888,17 @@ export function useThreadOutboxDrain(): void {
             attachments: prepared.attachments,
           },
           modelSelection: sendSettings.modelSelection,
+          titleSeed: deriveThreadTitleSeed({
+            text: queuedMessage.text,
+            attachments: queuedMessage.attachments,
+          }),
           runtimeMode: sendSettings.runtimeMode,
           interactionMode: sendSettings.interactionMode,
-          deliveryMode: queuedMessage.deliveryMode,
           createdAt: queuedMessage.createdAt,
+          // Rows written before follow-up behavior existed keep the previous
+          // delivery, which the server turns into a queued run when a turn is
+          // already active.
+          dispatchMode: queuedMessage.dispatchMode ?? "start",
         },
       });
       const failure = reportFailure(deliveryResult, "start-turn");
@@ -974,10 +907,6 @@ export function useThreadOutboxDrain(): void {
       }
       if (failure?.action === "restore") {
         return restoreQueuedMessage(persistedMessage, failure.message);
-      }
-      const attached = await attachQueuedGoal(queuedMessage, reportFailure);
-      if (!attached) {
-        return false;
       }
       acknowledgedExistingThreadMessageIdsRef.current.add(persistedMessage.messageId);
       const delivered =
@@ -988,13 +917,10 @@ export function useThreadOutboxDrain(): void {
       return delivered;
     },
     [
-      attachQueuedGoal,
-      dropQueuedCommandForm,
       makeDeliveryHelpers,
       setThreadInteractionMode,
       setThreadRuntimeMode,
       startTurn,
-      updateThreadMetadata,
       restoreQueuedMessage,
     ],
   );
@@ -1008,9 +934,6 @@ export function useThreadOutboxDrain(): void {
       const modelSelection = queuedMessage.modelSelection;
       if (modelSelection === undefined) {
         return false;
-      }
-      if (isGoalCommandForm(queuedMessage.text)) {
-        return dropQueuedCommandForm(queuedMessage);
       }
       const serverConfig = appAtomRegistry.get(
         serverEnvironment.configValueAtom(queuedMessage.environmentId),
@@ -1102,7 +1025,6 @@ export function useThreadOutboxDrain(): void {
           modelSelection: sendSettings.modelSelection,
           runtimeMode: sendSettings.runtimeMode,
           interactionMode: sendSettings.interactionMode,
-          deliveryMode: queuedMessage.deliveryMode,
           workspaceMode: creation.workspaceMode,
           branch: creation.branch,
           worktreePath: creation.worktreePath,
@@ -1117,10 +1039,6 @@ export function useThreadOutboxDrain(): void {
       }
       if (failure?.action === "restore") {
         return restoreQueuedMessage(persistedMessage, failure.message);
-      }
-      const attached = await attachQueuedGoal(queuedMessage, reportFailure);
-      if (!attached) {
-        return false;
       }
       // Recorded before the queue entry goes so the thread screen never sees a
       // gap between the queued creation and the server's shell.
@@ -1139,7 +1057,7 @@ export function useThreadOutboxDrain(): void {
       }
       return outcome === "removed";
     },
-    [attachQueuedGoal, dropQueuedCommandForm, makeDeliveryHelpers, restoreQueuedMessage, startTurn],
+    [makeDeliveryHelpers, restoreQueuedMessage, startTurn],
   );
 
   // A creation outcome bridges setup until the server's shell has a turn.
@@ -1155,10 +1073,10 @@ export function useThreadOutboxDrain(): void {
         threads.some(
           (thread) =>
             scopedThreadKey(thread.environmentId, thread.id) === threadKey &&
-            (thread.latestTurn !== null ||
-              thread.session?.status === "error" ||
-              thread.session?.status === "stopped" ||
-              thread.session?.status === "interrupted"),
+            (thread.latestRun !== null ||
+              thread.runtime?.status === "failed" ||
+              thread.runtime?.status === "cancelled" ||
+              thread.runtime?.status === "interrupted"),
         )
       ) {
         clearPendingThreadCreationOutcome(threadKey);
@@ -1247,7 +1165,7 @@ export function useThreadOutboxDrain(): void {
         threadExists: thread !== undefined,
         shellStatus,
         environmentConnected: environment?.connectionState === "connected",
-        threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
+        threadBusy: threadRuntimeIsActive(thread?.runtime),
       });
       // The delivery action resolves first; capability checks apply only to
       // a message that will send. Checking earlier would restore a
@@ -1353,8 +1271,7 @@ export function useThreadOutboxDrain(): void {
             appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
             nextQueuedMessage,
           );
-          const liveThreadBusy =
-            liveThread?.session?.status === "running" || liveThread?.session?.status === "starting";
+          const liveThreadBusy = threadRuntimeIsActive(liveThread?.runtime);
           const liveDeliveryAction = resolveThreadOutboxDeliveryAction({
             isCreation: creation !== undefined,
             threadExists: liveThread !== undefined,

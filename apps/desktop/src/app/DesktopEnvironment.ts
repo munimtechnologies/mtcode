@@ -214,6 +214,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
+  // MT distro: Electron profile directory names (munim -> "mt", default -> "t3code").
   const userDataDirName = distro.userDataDirName;
   const legacyUserDataDirName = distro.legacyUserDataDirName;
   const linuxApplicationsDir = path.join(

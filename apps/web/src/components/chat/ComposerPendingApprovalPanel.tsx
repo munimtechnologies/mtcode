@@ -13,13 +13,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
   pendingCount,
   className,
 }: ComposerPendingApprovalPanelProps) {
-  // Fork: Computer Use (`permissions`) and MCP tool (`tool`) approvals are MCP
-  // elicitations too, so their detail is prose like `mcp-elicitation`.
-  const isProseDetail =
-    approval.requestKind === "mcp-elicitation" ||
-    approval.requestKind === "permissions" ||
-    approval.requestKind === "tool";
-  const Detail = isProseDetail ? "span" : "code";
+  const Detail = approval.requestKind === "mcp-elicitation" ? "span" : "code";
   const fallbackLabel =
     approval.requestKind === "mcp-elicitation"
       ? "App access approval"
@@ -29,11 +23,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
           ? "File read approval"
           : approval.requestKind === "permission"
             ? "App permission approval"
-            : approval.requestKind === "permissions"
-              ? "Computer Use approval"
-              : approval.requestKind === "tool"
-                ? "Tool approval"
-                : "File change approval";
+            : "File change approval";
   const detailAriaLabel =
     approval.requestKind === "mcp-elicitation"
       ? "App access request"
@@ -43,11 +33,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
           ? "File to read"
           : approval.requestKind === "permission"
             ? "Permission request"
-            : approval.requestKind === "permissions"
-              ? "Computer Use request"
-              : approval.requestKind === "tool"
-                ? "Tool request"
-                : "File change";
+            : "File change";
 
   return (
     <span
@@ -66,14 +52,16 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
         aria-label={detailAriaLabel}
         className={cn(
           "block max-h-20 w-full min-w-0 overflow-auto text-xs text-foreground [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 [&::-webkit-scrollbar]:h-1.5",
-          isProseDetail
+          approval.requestKind === "mcp-elicitation"
             ? "whitespace-pre-wrap font-sans wrap-break-word"
             : "whitespace-pre font-mono",
         )}
         data-approval-detail="complete"
         tabIndex={0}
       >
-        {approval.detail || fallbackLabel}
+        {approval.responseCapability === "not_resumable"
+          ? "Provider process is gone — interrupt or restart the run to respond."
+          : approval.detail || fallbackLabel}
       </Detail>
     </span>
   );

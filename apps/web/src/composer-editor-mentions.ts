@@ -22,13 +22,6 @@ export type ComposerPromptSegment =
       source: string;
     }
   | {
-      type: "thread";
-      environmentId: string;
-      threadId: string;
-      title: string;
-      source: string;
-    }
-  | {
       type: "citation";
       citation: AssistantCitation;
       source: string;
@@ -121,6 +114,7 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
       pushTextSegment(segments, text.slice(cursor, match.start));
     }
 
+    const matchText = text.slice(match.start, match.end);
     if (match.type === "citation") {
       segments.push({ type: "citation", citation: match.citation, source: match.source });
     } else if (match.type === "context-reference") {
@@ -137,16 +131,11 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
         path: match.value,
         source: match.source,
       });
-    } else if (match.type === "thread") {
-      segments.push({
-        type: "thread",
-        environmentId: match.environmentId,
-        threadId: match.threadId,
-        title: match.title,
-        source: match.source,
-      });
-    } else {
+    } else if (match.type === "skill") {
       segments.push({ type: "skill", name: match.value, source: match.source });
+    } else {
+      // Any other inline token kind renders as plain prompt text.
+      pushTextSegment(segments, matchText);
     }
 
     cursor = match.end;

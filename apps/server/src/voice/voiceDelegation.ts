@@ -1,18 +1,28 @@
 import { randomUUID } from "node:crypto";
 import { CommandId, MessageId, VoiceApiError, type ThreadId } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
-import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
-import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 
-/** Only the two orchestration entry points a spoken request needs. */
-export type VoiceDelegationEngine = Pick<
-  OrchestrationEngineShape,
-  "dispatch" | "subscribeDomainEvents"
+import type { ThreadManagementServiceShape } from "../orchestration-v2/ThreadManagementService.ts";
+
+/** Only the thread-management entry points a spoken request needs. */
+export type VoiceDelegationThreads = Pick<
+  ThreadManagementServiceShape,
+  "getThreadShell" | "sendToThread" | "waitForThread" | "getThreadRecords"
 >;
-export type VoiceDelegationQuery = Pick<ProjectionSnapshotQueryShape, "getThreadDetailById">;
+
+/** Matches the realtime voice call's own budget for one delegated request. */
+const VOICE_REQUEST_TIMEOUT_MS = 10 * 60 * 1_000;
+
+const unavailable = (message: string) =>
+  new VoiceApiError({ reason: "upstream_unavailable", message });
+
+const describe = (error: unknown): string => {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { readonly message: unknown }).message;
+    if (typeof message === "string" && message.length > 0) return message;
+  }
+  return "The selected agent could not be reached.";
+};
 
 /**
  * Run one spoken request as a normal turn in `threadId` and resolve with the
@@ -20,109 +30,67 @@ export type VoiceDelegationQuery = Pick<ProjectionSnapshotQueryShape, "getThread
  * reach a provider.
  */
 export const delegateVoiceRequest = (
-  engine: VoiceDelegationEngine,
-  query: VoiceDelegationQuery,
+  threads: VoiceDelegationThreads,
   threadId: ThreadId,
   prompt: string,
 ) =>
   Effect.gen(function* () {
-    const found = yield* query.getThreadDetailById(threadId);
-    if (Option.isNone(found) || found.value.archivedAt !== null) {
-      return yield* Effect.fail(
-        new VoiceApiError({
-          reason: "upstream_unavailable",
-          message: "Open an existing, active MT Code task before starting voice.",
-        }),
+    const shell = yield* threads
+      .getThreadShell(threadId)
+      .pipe(Effect.mapError((error) => unavailable(describe(error))));
+    if (shell === null || shell.archivedAt !== null) {
+      return yield* unavailable("Open an existing, active MT Code task before starting voice.");
+    }
+    if (shell.activeRunId !== null) {
+      return yield* unavailable(
+        "The selected agent is already working. Wait for its answer before sending another voice request.",
       );
     }
-    const thread = found.value;
-    if (thread.session?.status === "running" || thread.session?.status === "starting") {
-      return yield* Effect.fail(
-        new VoiceApiError({
-          reason: "upstream_unavailable",
-          message:
-            "The selected agent is already working. Wait for its answer before sending another voice request.",
-        }),
-      );
-    }
-    // Acquire before dispatch so even an immediate provider answer cannot be lost.
-    const events = yield* engine.subscribeDomainEvents;
-    const now = DateTime.formatIso(yield* DateTime.now);
-    const receipt = yield* engine.dispatch({
-      type: "thread.turn.start",
-      commandId: CommandId.make(`voice:${randomUUID()}`),
-      threadId,
-      message: {
+    // No model selection: the task's own selection decides who answers — never the voice layer.
+    const sent = yield* threads
+      .sendToThread({
+        projectId: shell.projectId,
+        commandId: CommandId.make(`voice:${randomUUID()}`),
+        threadId,
         messageId: MessageId.make(randomUUID()),
-        role: "user",
         text: prompt,
         attachments: [],
-      },
-      modelSelection: thread.modelSelection,
-      runtimeMode: thread.runtimeMode,
-      interactionMode: thread.interactionMode,
-      createdAt: now,
-    });
-    let started = false;
-    let turnId: string | null = null;
-    // Keyed by turn: a provider can still be flushing the previous turn's
-    // messages when this one starts, and voice must never read those out.
-    const messages = new Map<string, Map<string, string>>();
-    const answer = yield* events.pipe(
-      Stream.filter((event) => event.aggregateId === threadId && event.sequence > receipt.sequence),
-      Stream.mapEffect((event) =>
-        Effect.gen(function* () {
-          if (event.type === "thread.message-sent" && event.payload.role === "assistant") {
-            const turn = event.payload.turnId ?? "";
-            const turnMessages = messages.get(turn) ?? new Map<string, string>();
-            // A streamed message ends with an empty-text event that only marks
-            // the message final; the body came on the events before it.
-            if (event.payload.text.length > 0 || !turnMessages.has(event.payload.messageId)) {
-              turnMessages.set(event.payload.messageId, event.payload.text);
-            }
-            messages.set(turn, turnMessages);
-          }
-          if (event.type !== "thread.session-set") return Option.none<string>();
-          const session = event.payload.session;
-          if (session.status === "running") {
-            started = true;
-            turnId = session.activeTurnId;
-          }
-          if (
-            session.status === "error" ||
-            session.status === "interrupted" ||
-            session.status === "stopped"
-          ) {
-            return yield* Effect.fail(
-              new VoiceApiError({
-                reason: "upstream_unavailable",
-                message:
-                  session.lastError ?? "The selected agent's turn stopped before completing.",
-              }),
-            );
-          }
-          // "idle" and "ready" both settle a turn as completed (see the projector).
-          if (
-            started &&
-            (session.status === "ready" || session.status === "idle") &&
-            session.activeTurnId === null
-          ) {
-            if (session.lastError)
-              return yield* Effect.fail(
-                new VoiceApiError({ reason: "upstream_unavailable", message: session.lastError }),
-              );
-            const answered = messages.get(turnId ?? "") ?? messages.get("");
-            return Option.some(
-              [...(answered?.values() ?? [])].join("\n\n") ||
-                "The agent completed without a text response. Check the task for results.",
-            );
-          }
-          return Option.none<string>();
-        }),
-      ),
-      Stream.filter(Option.isSome),
-      Stream.map((value) => value.value),
-      Stream.runHead,
-    );
-    return Option.getOrElse(answer, () => "The agent connection ended before a result arrived.");
-  }).pipe(Effect.scoped, Effect.timeout("10 minutes"));
+        mode: "auto",
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.mapError((error) => unavailable(describe(error))));
+    const waited = yield* threads
+      .waitForThread({
+        projectId: shell.projectId,
+        threadId,
+        runId: sent.run.id,
+        timeoutMs: VOICE_REQUEST_TIMEOUT_MS,
+      })
+      .pipe(Effect.mapError((error) => unavailable(describe(error))));
+    if (waited.timedOut || waited.run === null) {
+      return yield* unavailable(
+        "The selected agent is still working. Check the task for its answer.",
+      );
+    }
+    if (waited.run.status !== "completed") {
+      const latest = yield* threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null));
+      return yield* unavailable(
+        latest?.lastError ?? "The selected agent's turn stopped before completing.",
+      );
+    }
+    // Only this run's messages: a provider can still be flushing the previous
+    // turn's messages when this one starts, and voice must never read those out.
+    const records = yield* threads
+      .getThreadRecords(threadId, ["messages"], {
+        messageRunIds: [sent.run.id],
+        messageRoles: ["assistant"],
+      })
+      .pipe(Effect.mapError((error) => unavailable(describe(error))));
+    const answer = records.messages
+      .filter((message) => message.role === "assistant" && message.runId === sent.run.id)
+      .map((message) => message.text.trim())
+      .filter((text) => text.length > 0)
+      .join("\n\n");
+    return answer || "The agent completed without a text response. Check the task for results.";
+  });

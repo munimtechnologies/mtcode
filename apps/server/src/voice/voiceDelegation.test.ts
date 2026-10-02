@@ -1,130 +1,115 @@
 import { expect, it } from "@effect/vitest";
 import {
-  EventId,
   MessageId,
-  type OrchestrationEvent,
-  type OrchestrationThread,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2Run,
+  type OrchestrationV2ThreadShell,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
 
-import {
-  delegateVoiceRequest,
-  type VoiceDelegationEngine,
-  type VoiceDelegationQuery,
-} from "./voiceDelegation.ts";
+import type { ThreadManagementSendInput } from "../orchestration-v2/ThreadManagementService.ts";
+import { delegateVoiceRequest, type VoiceDelegationThreads } from "./voiceDelegation.ts";
 
 const THREAD_ID = ThreadId.make("thread-voice");
-const NOW = "2026-01-01T00:00:00.000Z";
+const RUN_ID = RunId.make("run-voice");
 
-const sessionSet = (
-  sequence: number,
-  session: {
-    readonly status: string;
-    readonly activeTurnId?: string | null;
-    readonly lastError?: string;
-  },
-): OrchestrationEvent =>
+const makeShell = (overrides: Record<string, unknown> = {}): OrchestrationV2ThreadShell =>
   ({
-    sequence,
-    eventId: EventId.make(`event-${sequence}`),
-    aggregateKind: "thread",
-    aggregateId: THREAD_ID,
-    occurredAt: NOW,
-    commandId: null,
-    causationEventId: null,
-    correlationId: null,
-    metadata: {},
-    type: "thread.session-set",
-    payload: { session: { activeTurnId: null, ...session } },
-  }) as unknown as OrchestrationEvent;
-
-const messageSent = (
-  sequence: number,
-  turnId: string,
-  text: string,
-  messageId = `message-${sequence}`,
-): OrchestrationEvent =>
-  ({
-    sequence,
-    eventId: EventId.make(`event-${sequence}`),
-    aggregateKind: "thread",
-    aggregateId: THREAD_ID,
-    occurredAt: NOW,
-    commandId: null,
-    causationEventId: null,
-    correlationId: null,
-    metadata: {},
-    type: "thread.message-sent",
-    payload: { messageId: MessageId.make(messageId), role: "assistant", turnId, text },
-  }) as unknown as OrchestrationEvent;
-
-const makeThread = (overrides: Record<string, unknown> = {}): OrchestrationThread =>
-  ({
-    threadId: THREAD_ID,
+    id: THREAD_ID,
+    projectId: "project-voice",
     archivedAt: null,
-    session: { status: "ready", activeTurnId: null },
-    modelSelection: { model: "sonnet" },
-    runtimeMode: "full-access",
-    interactionMode: "agent",
-    messages: [],
+    activeRunId: null,
+    lastError: null,
+    modelSelection: { instanceId: "claudeAgent", model: "sonnet" },
     ...overrides,
-  }) as unknown as OrchestrationThread;
+  }) as unknown as OrchestrationV2ThreadShell;
 
-const makeQuery = (thread: Option.Option<OrchestrationThread>): VoiceDelegationQuery => ({
-  getThreadDetailById: () => Effect.succeed(thread),
-});
+const makeRun = (status: OrchestrationV2Run["status"]): OrchestrationV2Run =>
+  ({ id: RUN_ID, threadId: THREAD_ID, status }) as unknown as OrchestrationV2Run;
 
-const makeEngine = (
-  events: ReadonlyArray<OrchestrationEvent>,
-  onDispatch?: (command: unknown) => void,
-): VoiceDelegationEngine => ({
-  dispatch: (command) =>
-    Effect.sync(() => {
-      onDispatch?.(command);
-      return { sequence: 1 };
-    }),
-  subscribeDomainEvents: Effect.succeed(Stream.fromArray(events)),
-});
+const assistant = (
+  text: string,
+  runId: RunId | null = RUN_ID,
+  id = `message-${text.length}`,
+): OrchestrationV2ConversationMessage =>
+  ({
+    id: MessageId.make(id),
+    threadId: THREAD_ID,
+    runId,
+    role: "assistant",
+    text,
+  }) as unknown as OrchestrationV2ConversationMessage;
+
+const makeThreads = (input: {
+  readonly shell: OrchestrationV2ThreadShell | null;
+  readonly finalShell?: OrchestrationV2ThreadShell;
+  readonly finalStatus?: OrchestrationV2Run["status"];
+  readonly timedOut?: boolean;
+  readonly messages?: ReadonlyArray<OrchestrationV2ConversationMessage>;
+  readonly onSend?: (input: ThreadManagementSendInput) => void;
+}): VoiceDelegationThreads => {
+  let reads = 0;
+  return {
+    getThreadShell: () =>
+      Effect.sync(() => {
+        reads += 1;
+        return reads > 1 && input.finalShell !== undefined ? input.finalShell : input.shell;
+      }),
+    sendToThread: (send) =>
+      Effect.sync(() => {
+        input.onSend?.(send);
+        return { run: makeRun("running") } as never;
+      }),
+    waitForThread: () =>
+      Effect.succeed({
+        threadId: THREAD_ID,
+        run: makeRun(input.finalStatus ?? "completed"),
+        timedOut: input.timedOut ?? false,
+      }),
+    getThreadRecords: (_threadId, _fields, filter) =>
+      Effect.succeed({
+        thread: {},
+        messages: (input.messages ?? []).filter(
+          (message) =>
+            filter?.messageRunIds === undefined ||
+            (message.runId !== null && filter.messageRunIds.includes(message.runId)),
+        ),
+      } as never),
+  };
+};
 
 it.effect("runs the spoken request as a turn and answers with the agent's text", () =>
   Effect.gen(function* () {
-    const dispatched: Array<Record<string, unknown>> = [];
-    const engine = makeEngine(
-      [
-        sessionSet(2, { status: "running", activeTurnId: "turn-1" }),
-        messageSent(3, "turn-1", "17 times 23 is 391."),
-        sessionSet(4, { status: "ready", activeTurnId: null }),
-      ],
-      (command) => dispatched.push(command as Record<string, unknown>),
-    );
+    const sent: Array<ThreadManagementSendInput> = [];
     const answer = yield* delegateVoiceRequest(
-      engine,
-      makeQuery(Option.some(makeThread())),
+      makeThreads({
+        shell: makeShell(),
+        messages: [assistant("17 times 23 is 391.")],
+        onSend: (send) => sent.push(send),
+      }),
       THREAD_ID,
       "What is seventeen times twenty-three?",
     );
     expect(answer).toBe("17 times 23 is 391.");
-    expect(dispatched).toHaveLength(1);
-    expect(dispatched[0]?.type).toBe("thread.turn.start");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toBe("What is seventeen times twenty-three?");
     // The task's own model selection decides who answers — never the voice layer.
-    expect(dispatched[0]?.modelSelection).toEqual({ model: "sonnet" });
+    expect(sent[0]?.modelSelection).toBeUndefined();
   }),
 );
 
-it.effect("ignores messages from a turn the request did not start", () =>
+it.effect("ignores messages from a run the request did not start", () =>
   Effect.gen(function* () {
-    const engine = makeEngine([
-      messageSent(2, "turn-earlier", "leftover from the previous turn"),
-      sessionSet(3, { status: "running", activeTurnId: "turn-1" }),
-      messageSent(4, "turn-1", "391"),
-      sessionSet(5, { status: "ready", activeTurnId: null }),
-    ]);
     const answer = yield* delegateVoiceRequest(
-      engine,
-      makeQuery(Option.some(makeThread())),
+      makeThreads({
+        shell: makeShell(),
+        messages: [
+          assistant("leftover from the previous turn", RunId.make("run-earlier"), "m-1"),
+          assistant("391", RUN_ID, "m-2"),
+        ],
+      }),
       THREAD_ID,
       "What is seventeen times twenty-three?",
     );
@@ -132,55 +117,32 @@ it.effect("ignores messages from a turn the request did not start", () =>
   }),
 );
 
-it.effect("keeps a streamed answer when the final event carries no text", () =>
+it.effect("joins every assistant message of the run and skips empty ones", () =>
   Effect.gen(function* () {
-    const engine = makeEngine([
-      sessionSet(2, { status: "running", activeTurnId: "turn-1" }),
-      messageSent(3, "turn-1", "17 x 23 = 391", "message-a"),
-      // How a streamed provider message actually ends: same id, empty body.
-      messageSent(4, "turn-1", "", "message-a"),
-      sessionSet(5, { status: "ready", activeTurnId: null }),
-    ]);
     const answer = yield* delegateVoiceRequest(
-      engine,
-      makeQuery(Option.some(makeThread())),
-      THREAD_ID,
-      "What is seventeen times twenty-three?",
-    );
-    expect(answer).toBe("17 x 23 = 391");
-  }),
-);
-
-it.effect("treats an idle session as a finished turn", () =>
-  Effect.gen(function* () {
-    const engine = makeEngine([
-      sessionSet(2, { status: "running", activeTurnId: "turn-1" }),
-      messageSent(3, "turn-1", "Done."),
-      sessionSet(4, { status: "idle", activeTurnId: null }),
-    ]);
-    const answer = yield* delegateVoiceRequest(
-      engine,
-      makeQuery(Option.some(makeThread())),
+      makeThreads({
+        shell: makeShell(),
+        messages: [
+          assistant("Checking.", RUN_ID, "m-1"),
+          assistant("", RUN_ID, "m-2"),
+          assistant("Done.", RUN_ID, "m-3"),
+        ],
+      }),
       THREAD_ID,
       "Anything",
     );
-    expect(answer).toBe("Done.");
+    expect(answer).toBe("Checking.\n\nDone.");
   }),
 );
 
 it.effect("surfaces a failed turn instead of speaking a made-up answer", () =>
   Effect.gen(function* () {
-    const engine = makeEngine([
-      sessionSet(2, { status: "running", activeTurnId: "turn-1" }),
-      sessionSet(3, {
-        status: "error",
-        activeTurnId: null,
-        lastError: "Claude usage limit reached",
-      }),
-    ]);
     const failure = yield* delegateVoiceRequest(
-      engine,
-      makeQuery(Option.some(makeThread())),
+      makeThreads({
+        shell: makeShell(),
+        finalShell: makeShell({ lastError: "Claude usage limit reached" }),
+        finalStatus: "failed",
+      }),
       THREAD_ID,
       "Anything",
     ).pipe(Effect.flip);
@@ -190,28 +152,35 @@ it.effect("surfaces a failed turn instead of speaking a made-up answer", () =>
 
 it.effect("refuses to queue a second request while the agent is still working", () =>
   Effect.gen(function* () {
-    const engine = makeEngine([]);
+    const sent: Array<ThreadManagementSendInput> = [];
     const failure = yield* delegateVoiceRequest(
-      engine,
-      makeQuery(
-        Option.some(makeThread({ session: { status: "running", activeTurnId: "turn-1" } })),
-      ),
+      makeThreads({
+        shell: makeShell({ activeRunId: RunId.make("run-busy") }),
+        onSend: (send) => sent.push(send),
+      }),
       THREAD_ID,
       "Anything",
     ).pipe(Effect.flip);
     expect(failure.message).toContain("already working");
+    expect(sent).toHaveLength(0);
   }),
 );
 
 it.effect("refuses to speak into an archived or missing task", () =>
   Effect.gen(function* () {
-    const failure = yield* delegateVoiceRequest(
-      makeEngine([]),
-      makeQuery(Option.none()),
+    const missing = yield* delegateVoiceRequest(
+      makeThreads({ shell: null }),
       THREAD_ID,
       "Anything",
     ).pipe(Effect.flip);
-    expect(failure._tag).toBe("VoiceApiError");
-    expect(failure.message).toContain("active MT Code task");
+    expect(missing._tag).toBe("VoiceApiError");
+    expect(missing.message).toContain("active MT Code task");
+
+    const archived = yield* delegateVoiceRequest(
+      makeThreads({ shell: makeShell({ archivedAt: "2026-01-01T00:00:00.000Z" }) }),
+      THREAD_ID,
+      "Anything",
+    ).pipe(Effect.flip);
+    expect(archived.message).toContain("active MT Code task");
   }),
 );

@@ -4076,8 +4076,10 @@ const makePluginProviderCommands = Effect.gen(function* () {
       };
     }
     const config = decodeCursorSettingsOption(instance.config ?? {});
+    // V2 Cursor runs on the SDK and keeps `binaryPath` only for V1 configs;
+    // MCP OAuth still drives the CLI, so fall back to its default name.
     return Option.isSome(config)
-      ? { command: config.value.binaryPath, env: environment }
+      ? { command: config.value.binaryPath || "cursor-agent", env: environment }
       : undefined;
   });
 

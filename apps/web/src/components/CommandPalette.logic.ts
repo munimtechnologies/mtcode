@@ -57,7 +57,7 @@ export function browseInputEndPaddingClass(input: {
  * search, and conversation import surfaces. One reducer owns open/mode state
  * so the surfaces can never stack and re-triggering a mode closes it.
  */
-export type SearchOverlayMode = "command" | "files" | "content" | "import";
+export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
@@ -97,11 +97,7 @@ export function reduceCommandPaletteUiState(
         : { ...state, open: false, openIntent: null };
     case "ToggleMode":
       return state.open && state.mode === action.mode
-        ? {
-            open: false,
-            mode: action.mode === "import" ? "command" : state.mode,
-            openIntent: null,
-          }
+        ? { open: false, mode: state.mode, openIntent: null }
         : { open: true, mode: action.mode, openIntent: null };
     case "OpenSearch":
       return {
@@ -248,14 +244,13 @@ export type BuildThreadActionItemsThread = Pick<
   | "id"
   | "modelSelection"
   | "projectId"
-  | "session"
+  | "runtime"
   | "title"
   | "worktreePath"
 > & {
   pullRequests?: SidebarThreadSummary["pullRequests"];
   updatedAt: string;
   latestUserMessageAt?: string | null;
-  goal?: { readonly status: string } | null | undefined;
 };
 
 export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
@@ -287,9 +282,6 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
 
     if (projectTitle) {
       descriptionParts.push(projectTitle);
-    }
-    if (thread.goal?.status === "active") {
-      descriptionParts.push("Active");
     }
     if (thread.branch) {
       descriptionParts.push(`#${thread.branch}`);

@@ -1,6 +1,8 @@
 import * as Schema from "effect/Schema";
 
-import { ChatAttachment, OrchestrationMessageRole } from "./orchestration.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
+
+const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 import {
   IsoDateTime,
   MessageId,

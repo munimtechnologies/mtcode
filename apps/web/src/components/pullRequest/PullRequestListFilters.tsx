@@ -2,7 +2,7 @@ import { Spinner } from "~/components/ui/spinner";
 import type {
   EnvironmentId,
   ProjectId,
-  ProjectIconOverride,
+  PullRequestInvolvement,
   PullRequestListFilters,
   PullRequestListState,
   SourceControlProviderKind,

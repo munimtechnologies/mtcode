@@ -1,148 +1,13 @@
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Console from "effect/Console";
-import * as Duration from "effect/Duration";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import { Argument, Command } from "effect/unstable/cli";
-import * as CliError from "effect/unstable/cli/CliError";
-
-import * as NetService from "@t3tools/shared/Net";
-import packageJson from "../package.json" with { type: "json" };
-import { runSupervisorDaemon } from "./piNative/SupervisorDaemon.ts";
-import { authCommand } from "./cli/auth.ts";
-import { appCommand } from "./cli/app.ts";
-import { connectCommand } from "./cli/connect.ts";
-import { tryLaunchDesktopApp } from "./cli/desktopLaunch.ts";
-import { pairCommand } from "./cli/pair.ts";
-import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
-import { sharedServerCommandFlags } from "./cli/config.ts";
+/**
+ * Thin CLI entry.
+ *
+ * Every ACP agent spawns `t3 acp-mcp-bridge` while opening its session, and
+ * terminal-fallback agents run `t3 acp-mcp-call` per tool call, so their
+ * startup sits on first-message latency. Both dispatch here before the full
+ * CLI module graph (seconds of evaluation) loads; everything else defers to
+ * the real CLI in ./binCli.ts.
+ */
 import { isEntrypoint } from "./entrypoint.ts";
-import { openLiveProjectIfPresent, projectCommand } from "./cli/project.ts";
-import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
-import { serviceCommand } from "./cli/service.ts";
-import { uninstallCommand } from "./cli/uninstall.ts";
-import { updateCommand } from "./cli/update.ts";
-import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
-import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
-import { servicePreflightCommand } from "./cli/servicePreflight.ts";
-import { sshHelperCommand } from "./cli/sshHelper.ts";
-import { themeCommand } from "./cli/theme.ts";
-import { threadCommand } from "./cli/thread.ts";
-import { traceCommand } from "./cli/trace.ts";
-import { triageCommand } from "./cli/triage.ts";
-import { resolveAppDisplayName } from "./appDisplayName.ts";
-
-const DESKTOP_OPEN_POLL_ATTEMPTS = 40;
-const DESKTOP_OPEN_POLL_DELAY = Duration.millis(500);
-
-const openProjectViaDesktopOrLiveServer = Effect.fn("openProjectViaDesktopOrLiveServer")(
-  function* (flags: {
-    readonly baseDir: Option.Option<string>;
-    readonly cwd: Option.Option<string>;
-  }) {
-    // Already attached to whatever is serving this home (CLI or desktop backend).
-    // Never clear discovery here: a transient miss must not delete a live
-    // desktop/server runtime file before we launch/poll.
-    if (yield* openLiveProjectIfPresent({ ...flags, clearOnFailure: false })) {
-      return true;
-    }
-
-    // No live backend: try the installed desktop app, then attach once it is up.
-    if (!(yield* tryLaunchDesktopApp())) {
-      return false;
-    }
-
-    for (let attempt = 0; attempt < DESKTOP_OPEN_POLL_ATTEMPTS; attempt += 1) {
-      yield* Effect.sleep(DESKTOP_OPEN_POLL_DELAY);
-      if (yield* openLiveProjectIfPresent({ ...flags, clearOnFailure: false })) {
-        return true;
-      }
-    }
-
-    yield* Console.error(
-      `Launched ${resolveAppDisplayName()} desktop, but it did not become ready in time. Falling back to the CLI server.`,
-    );
-    return false;
-  },
-);
-
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
-
-const connectPublicConfigMissingMessage =
-  "T3 Connect commands are unavailable: this build is missing T3 Connect public configuration.";
-
-class ConnectPublicConfigMissingError extends CliError.UserError {
-  override get message() {
-    return connectPublicConfigMissingMessage;
-  }
-}
-
-const connectUnavailableCommand = Command.make("connect", {
-  command: Argument.String("command").pipe(Argument.variadic),
-}).pipe(
-  Command.withDescription("T3 Connect is unavailable in builds without public configuration."),
-  Command.unlisted,
-  Command.withHandler(() =>
-    Effect.fail(
-      new CliError.ShowHelp({
-        commandPath: ["t3", "connect"],
-        errors: [new ConnectPublicConfigMissingError({ cause: connectPublicConfigMissingMessage })],
-      }),
-    ),
-  ),
-);
-
-export const piSupervisorCommand = Command.make("pi-supervisor").pipe(
-  Command.unlisted,
-  Command.withHandler(() => Effect.promise(runSupervisorDaemon)),
-);
-
-export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
-  Command.make("t3", { ...sharedServerCommandFlags }).pipe(
-    Command.withDescription(
-      `Run the ${resolveAppDisplayName()} server, or open a directory in the desktop app / a running server.`,
-    ),
-    Command.withHandler((flags) =>
-      Effect.gen(function* () {
-        const cwd = flags.cwd ?? Option.none();
-        if (
-          Option.isSome(cwd) &&
-          (yield* openProjectViaDesktopOrLiveServer({
-            baseDir: flags.baseDir ?? Option.none(),
-            cwd,
-          }))
-        ) {
-          return;
-        }
-        return yield* runServerCommand(flags);
-      }),
-    ),
-    Command.withSubcommands([
-      startCommand,
-      serveCommand,
-      appCommand,
-      pairCommand,
-      authCommand,
-      projectCommand,
-      threadCommand,
-      serviceCommand,
-      updateCommand,
-      uninstallCommand,
-      serviceLauncherCommand,
-      claudeHistoryCommand,
-      servicePreflightCommand,
-      sshHelperCommand,
-      themeCommand,
-      traceCommand,
-      triageCommand,
-      piSupervisorCommand,
-      cloudEnabled ? connectCommand : connectUnavailableCommand,
-    ]),
-  );
-
-export const cli = makeCli();
 
 if (
   isEntrypoint({
@@ -151,9 +16,12 @@ if (
     runtimeMain: import.meta.main,
   })
 ) {
-  Command.run(cli, { version: packageJson.version }).pipe(
-    Effect.scoped,
-    Effect.provide(CliRuntimeLayer),
-    NodeRuntime.runMain,
-  );
+  const command = process.argv[2];
+  if (command === "acp-mcp-bridge" || command === "acp-mcp-call") {
+    const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
+    await runAcpMcpCliFastPath(command, process.argv.slice(3));
+  } else {
+    const { runCli } = await import("./binCli.ts");
+    runCli();
+  }
 }

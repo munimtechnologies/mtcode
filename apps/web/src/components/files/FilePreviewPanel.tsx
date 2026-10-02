@@ -1127,7 +1127,6 @@ export default function FilePreviewPanel({
               openInCwd={absolutePath}
               terminalCwd={cwd}
               compact
-              enableShortcut={false}
             />
           ) : null}
           {canToggleRendered && renderedMode ? (

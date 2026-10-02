@@ -7,19 +7,11 @@ import { ProviderOptionSelections } from "./model.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 /**
- * `ModelSelection` — selection of a model on a configured provider instance.
+ * Selection of a model on a configured provider instance.
  *
- * The routing key is `instanceId` (a user-defined slug identifying one
- * configured provider instance). Drivers, credentials, working-directory
- * bindings, and any other per-instance state are recovered from the
- * runtime registry via the instance id.
- *
- * Wire legacy: persisted selections produced before the driver/instance
- * split carried a `provider: <driver-id>` field instead. The schema absorbs
- * that shape via a pre-decoding transform — `{provider, model}` is promoted
- * to `{instanceId: defaultInstanceIdForDriver(provider), model}`. No
- * post-decode compatibility code lives in the runtime; the transform is the
- * only compat surface.
+ * `instanceId` is the routing key. The provider driver, credentials,
+ * environment, and continuation identity are resolved by the provider
+ * instance registry rather than encoded into the selection itself.
  */
 const ModelSelectionWire = Schema.Struct({
   instanceId: ProviderInstanceId,
@@ -27,10 +19,6 @@ const ModelSelectionWire = Schema.Struct({
   options: Schema.optionalKey(ProviderOptionSelections),
 });
 
-// Source shape for persisted legacy payloads. Fields are typed as
-// `Schema.Unknown` so malformed drafts still make it into the transform and
-// fail validation through the target schema (with proper error messages)
-// rather than at the source-struct layer where the error is less actionable.
 const ModelSelectionSource = Schema.Struct({
   provider: Schema.optional(Schema.Unknown),
   instanceId: Schema.optional(Schema.Unknown),
@@ -38,16 +26,16 @@ const ModelSelectionSource = Schema.Struct({
   options: Schema.optional(Schema.Unknown),
 });
 
+/**
+ * The decoder still accepts the historical `{ provider, model }` shape while
+ * V1 persistence remains readable. Runtime code only receives the canonical
+ * instance-based representation.
+ */
 export const ModelSelection = ModelSelectionSource.pipe(
   Schema.decodeTo(
     ModelSelectionWire,
     SchemaTransformation.transformEffect({
       decode: (raw) => {
-        // Resolve the routing key: prefer an explicit `instanceId`; fall
-        // back to promoting the legacy `provider` slug (the canonical
-        // `defaultInstanceIdForDriver` mapping) so persisted rollout-era
-        // payloads decode without data loss. The target schema brands the
-        // string as `ProviderInstanceId`.
         const instanceIdSource =
           raw.instanceId !== undefined
             ? raw.instanceId
@@ -63,8 +51,8 @@ export const ModelSelection = ModelSelectionSource.pipe(
       },
       encode: (value) => {
         const base: Record<string, unknown> = {
-          model: value.model,
           instanceId: value.instanceId,
+          model: value.model,
         };
         if (value.options !== undefined) base.options = value.options;
         return Effect.succeed(base as typeof ModelSelectionSource.Encoded);

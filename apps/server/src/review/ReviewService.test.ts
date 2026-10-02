@@ -8,7 +8,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Path from "effect/Path";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
-import { ServerConfig } from "../config.ts";
+import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -162,7 +162,7 @@ describe("ReviewService", () => {
         realPath: (target: string) =>
           Effect.succeed(target === configuredRootRequest ? configuredRoot : target),
       });
-      const config = yield* Effect.service(ServerConfig).pipe(
+      const config = yield* Effect.service(ServerConfig.ServerConfig).pipe(
         Effect.provide(ServerConfig.layerTest(workspaceRoot, baseDir)),
       );
       const detectCalls: Array<{ readonly cwd: string }> = [];
@@ -182,7 +182,7 @@ describe("ReviewService", () => {
           }),
         ),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-        Layer.provide(Layer.succeed(ServerConfig, config)),
+        Layer.provide(Layer.succeed(ServerConfig.ServerConfig, config)),
         Layer.provide(Layer.succeed(FileSystem.FileSystem, simulatedFileSystem)),
         Layer.provide(NodePath.layerWin32),
       );

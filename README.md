@@ -151,6 +151,7 @@ Full docs live in [docs/](./docs):
 - [Voice dictation](./docs/user/voice-dictation.md)
 - [Attachments](./docs/user/attachments.md)
 - [Project settings](./docs/user/project-settings.md)
+- [Appearance preferences](./docs/user/appearance.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Thread messaging](./docs/user/thread-messaging.md)
 - [Continue a thread with another provider](./docs/user/provider-handoff.md)

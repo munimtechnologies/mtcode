@@ -18,18 +18,11 @@ function timeOfDayLabel(date: Date, timestampFormat: TimestampFormat): string {
 export function resolveSnoozePresets(
   now: Date,
   timestampFormat: TimestampFormat,
-  options?: { readonly limitsResetAt?: string | null },
 ): ReadonlyArray<SnoozePreset> {
-  return resolveSharedSnoozePresets(now, options).map((preset) => {
+  return resolveSharedSnoozePresets(now).map((preset) => {
     const wake = parseTimestampDate(preset.snoozedUntil);
     if (wake === null) return preset;
     const time = timeOfDayLabel(wake, timestampFormat);
-    if (preset.id === "limits-reset") {
-      return {
-        ...preset,
-        whenLabel: snoozeWakeDescription(preset.snoozedUntil, now, timestampFormat),
-      };
-    }
     return {
       ...preset,
       whenLabel:
@@ -41,9 +34,8 @@ export function resolveSnoozePresets(
 }
 
 /**
- * Menus resolve their presets when they open, so a `limits-reset` row left on
- * screen past the reset would snooze into the past. Only that row can expire;
- * the others are relative to the open time.
+ * Menus resolve their presets when they open; a menu left on screen long
+ * enough could otherwise snooze into the past.
  */
 export function snoozePresetExpired(
   preset: Pick<SnoozePreset, "snoozedUntil">,

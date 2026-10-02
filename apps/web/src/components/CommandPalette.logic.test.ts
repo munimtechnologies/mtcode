@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
+import { makeThreadFixture } from "../test-fixtures";
 import {
   buildBrowseGroups,
   buildCommandPaletteProjectMetadata,
@@ -194,16 +195,6 @@ describe("reduceCommandPaletteUiState", () => {
     expect(
       reduceCommandPaletteUiState(contentOpen, { _tag: "ToggleMode", mode: "content" }),
     ).toEqual({ open: false, mode: "content", openIntent: null });
-
-    const importOpen = reduceCommandPaletteUiState(contentOpen, {
-      _tag: "ToggleMode",
-      mode: "import",
-    });
-    expect(importOpen).toEqual({ open: true, mode: "import", openIntent: null });
-
-    expect(reduceCommandPaletteUiState(importOpen, { _tag: "ToggleMode", mode: "import" })).toEqual(
-      { open: false, mode: "command", openIntent: null },
-    );
   });
 
   it("switches between open modes without closing", () => {
@@ -326,13 +317,8 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   };
 }
 
-function makeThread(overrides: Partial<Thread> = {}): Omit<Thread, "goal"> & {
-  readonly goal: {
-    readonly status: NonNullable<Thread["goal"]>["status"];
-    readonly objectivePreview: string;
-  } | null;
-} {
-  return {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
+  return makeThreadFixture({
     id: ThreadId.make("thread-1"),
     environmentId: LOCAL_ENVIRONMENT_ID,
     projectId: PROJECT_ID,
@@ -340,7 +326,7 @@ function makeThread(overrides: Partial<Thread> = {}): Omit<Thread, "goal"> & {
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
     runtimeMode: "full-access",
     interactionMode: "default",
-    session: null,
+    runtime: null,
     messages: [],
     proposedPlans: [],
     createdAt: "2026-03-01T00:00:00.000Z",
@@ -349,19 +335,11 @@ function makeThread(overrides: Partial<Thread> = {}): Omit<Thread, "goal"> & {
     settledAt: null,
     deletedAt: null,
     updatedAt: "2026-03-01T00:00:00.000Z",
-    latestTurn: null,
+    latestRun: null,
     branch: null,
     worktreePath: null,
-    checkpoints: [],
-    pullRequests: [],
-    activities: [],
     ...overrides,
-    // Palette items read the compact Goal shell, not the full detail Goal.
-    goal:
-      overrides.goal != null
-        ? { status: overrides.goal.status, objectivePreview: overrides.goal.objective }
-        : null,
-  };
+  });
 }
 
 describe("buildProjectActionItems", () => {
@@ -650,27 +628,6 @@ describe("buildThreadActionItems", () => {
       query: "reconnect",
     });
     expect(item?.description).toBe("T3 Code · #feat/search");
-  });
-
-  it("mentions an Active Goal in the thread description", () => {
-    const [item] = buildThreadActionItems({
-      threads: [
-        makeThread({
-          goal: {
-            status: "active",
-            objective: "Reduce p95 below 120ms",
-            createdAt: "2026-03-01T00:00:00.000Z",
-            updatedAt: "2026-03-01T00:00:00.000Z",
-          },
-        }),
-      ],
-      projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
-      sortOrder: "updated_at",
-      icon: null,
-      runThread: async (_thread) => undefined,
-    });
-
-    expect(item?.description).toBe("T3 Code · Active");
   });
 
   it("surfaces threads when the query is their ID, without outranking title matches", () => {

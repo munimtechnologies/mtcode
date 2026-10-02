@@ -143,11 +143,7 @@ export interface ComposerPromptEditorProps {
     contextIds: string[],
   ) => void;
   onVisibleSelectionChange?: () => void;
-  onCommandKeyDown?: (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape",
-    event: KeyboardEvent,
-    isTaskItem?: boolean,
-  ) => boolean;
+  onCommandKeyDown?: (key: string, event: KeyboardEvent, isTaskItem?: boolean) => boolean;
   onPageScrollKeyDown?: (key: "PageUp" | "PageDown") => void;
   onPageScrollKeyUp?: (key: string) => void;
   onPageScrollRelease?: () => void;
@@ -203,45 +199,6 @@ function resolvedThemeFromDocument(): "light" | "dark" {
  */
 const CHIP_NODE_SELECTION_CLASS_NAME =
   "relative inline-flex select-none items-center align-middle leading-none data-[composer-chip-selected]:after:pointer-events-none data-[composer-chip-selected]:after:absolute data-[composer-chip-selected]:after:inset-0 data-[composer-chip-selected]:after:rounded-sm data-[composer-chip-selected]:after:bg-[Highlight] data-[composer-chip-selected]:after:opacity-30 data-[composer-chip-selected]:after:content-['']";
-const ComposerThreadExtension = Node.create({
-  name: "composer-thread",
-  group: "inline",
-  inline: true,
-  atom: true,
-  selectable: true,
-  addAttributes() {
-    return {
-      environmentId: { default: "" },
-      threadId: { default: "" },
-      title: { default: "" },
-      source: { default: "" },
-    };
-  },
-  parseHTML() {
-    return [{ tag: "span[data-composer-thread]" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return ["span", { "data-composer-thread": "", ...HTMLAttributes }];
-  },
-  addNodeView() {
-    return ReactNodeViewRenderer(ComposerThreadNodeView);
-  },
-});
-
-function ComposerThreadNodeView({ node }: NodeViewProps) {
-  return (
-    <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
-      <ContextChip
-        kind="mention"
-        contentEditable={false}
-        data-composer-thread-chip="true"
-        title={`Thread reference · ${node.attrs.threadId}`}
-      >
-        {node.attrs.title || node.attrs.threadId}
-      </ContextChip>
-    </NodeViewWrapper>
-  );
-}
 
 const ComposerMentionExtension = Node.create({
   name: "composer-mention",
@@ -869,7 +826,6 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         }),
         ComposerUndoGroupingExtension,
         ComposerMentionExtension,
-        ComposerThreadExtension,
         ComposerSkillExtension,
         ComposerCitationExtension,
         ComposerContextReferenceExtension,
@@ -1041,18 +997,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
             });
           }
           if (!handler) return false;
-          const key =
-            event.key === "Tab"
-              ? ("Tab" as const)
-              : event.key === "ArrowDown"
-                ? ("ArrowDown" as const)
-                : event.key === "ArrowUp"
-                  ? ("ArrowUp" as const)
-                  : event.key === "Escape"
-                    ? ("Escape" as const)
-                    : null;
-          if (!key) return false;
-          const handled = handler(key, event);
+          const handled = handler(event.key, event);
           if (handled) {
             event.preventDefault();
             event.stopPropagation();

@@ -19,8 +19,22 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
+import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
+import { PreviewControlsHandlersLive } from "./toolkits/previewControls/handlers.ts";
+import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
+import { EnvironmentHandlersLive } from "./toolkits/environment/handlers.ts";
+import { ProjectToolkit } from "./toolkits/project/tools.ts";
+import { ProjectHandlersLive } from "./toolkits/project/handlers.ts";
+import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
+import { AttachmentHandlersLive } from "./toolkits/attachment/handlers.ts";
+import { ThreadToolkit } from "./toolkits/thread/tools.ts";
+import { ThreadToolkitHandlersLive } from "./toolkits/thread/handlers.ts";
+import * as ThreadMetadataMcpService from "./ThreadMetadataMcpService.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+import { OrchestratorToolkitHandlersLive } from "./toolkits/orchestrator/handlers.ts";
+import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
@@ -30,20 +44,14 @@ import {
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
-import { ThreadReferenceToolkitHandlersLive } from "./toolkits/threadReference/handlers.ts";
-import { ThreadReferenceToolkit } from "./toolkits/threadReference/tools.ts";
-import { ThreadRelayToolkitHandlersLive } from "./toolkits/threads/handlers.ts";
-import { ThreadRelayToolkit } from "./toolkits/threads/tools.ts";
 import { ComputerToolkitHandlersLive } from "./toolkits/computers/handlers.ts";
 import { ComputerToolkit } from "./toolkits/computers/tools.ts";
 import { DEFAULT_APP_DISPLAY_NAME } from "../appDisplayName.ts";
-import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
-import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
-import { ThreadMetadataToolkitHandlersLive } from "./toolkits/threadMetadata/handlers.ts";
-import { ThreadMetadataToolkit } from "./toolkits/threadMetadata/tools.ts";
-import * as ThreadMetadataMcp from "./ThreadMetadataMcpService.ts";
 import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
+import * as WorktreeMcpService from "./WorktreeMcpService.ts";
+import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
+import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import {
   DeviceScreenshotToolkitHandlersLive,
   DeviceStandardToolkitHandlersLive,
@@ -662,29 +670,43 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
-export const ThreadReferenceToolkitRegistrationLive = McpServer.toolkit(
-  ThreadReferenceToolkit,
-).pipe(Layer.provide(ThreadReferenceToolkitHandlersLive));
-
-export const ThreadRelayToolkitRegistrationLive = McpServer.toolkit(ThreadRelayToolkit).pipe(
-  Layer.provide(ThreadRelayToolkitHandlersLive),
-);
-
 export const ComputerToolkitRegistrationLive = McpServer.toolkit(ComputerToolkit).pipe(
   Layer.provide(ComputerToolkitHandlersLive),
 );
 
-export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequestsToolkit).pipe(
-  Layer.provide(PullRequestsToolkitHandlersLive),
+export const OrchestratorToolkitRegistrationLive = McpServer.toolkit(OrchestratorToolkit).pipe(
+  Layer.provide(OrchestratorToolkitHandlersLive),
+  Layer.provide(OrchestratorMcpService.layer),
+  Layer.provide(ThreadMetadataMcpService.layer),
 );
 
-export const ThreadMetadataToolkitRegistrationLive = McpServer.toolkit(ThreadMetadataToolkit).pipe(
-  Layer.provide(ThreadMetadataToolkitHandlersLive),
-  Layer.provide(ThreadMetadataMcp.layer),
+export const ThreadToolkitRegistrationLive = McpServer.toolkit(ThreadToolkit).pipe(
+  Layer.provide(ThreadToolkitHandlersLive),
 );
 
 const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
   Layer.provide(WorktreeToolkitHandlersLive),
+  Layer.provide(WorktreeMcpService.layer),
+);
+
+const PreviewControlsRegistrationLive = McpServer.toolkit(PreviewControlsToolkit).pipe(
+  Layer.provide(PreviewControlsHandlersLive),
+);
+
+const EnvironmentRegistrationLive = McpServer.toolkit(EnvironmentToolkit).pipe(
+  Layer.provide(EnvironmentHandlersLive),
+);
+
+const ProjectRegistrationLive = McpServer.toolkit(ProjectToolkit).pipe(
+  Layer.provide(ProjectHandlersLive),
+);
+
+const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
+  Layer.provide(AttachmentHandlersLive),
+);
+
+export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequestsToolkit).pipe(
+  Layer.provide(PullRequestsToolkitHandlersLive),
 );
 
 const DeviceStandardToolkitRegistrationLive = McpServer.toolkit(DeviceStandardToolkit).pipe(
@@ -709,12 +731,15 @@ const McpTransportLive = McpServer.layerHttp({
 
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
-  ThreadReferenceToolkitRegistrationLive,
-  ThreadRelayToolkitRegistrationLive,
   ComputerToolkitRegistrationLive,
-  PullRequestsToolkitRegistrationLive,
+  OrchestratorToolkitRegistrationLive,
+  ThreadToolkitRegistrationLive,
+  AttachmentRegistrationLive,
+  ProjectRegistrationLive,
+  EnvironmentRegistrationLive,
+  PreviewControlsRegistrationLive,
   WorktreeToolkitRegistrationLive,
-  ThreadMetadataToolkitRegistrationLive,
+  PullRequestsToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
   MonitorToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

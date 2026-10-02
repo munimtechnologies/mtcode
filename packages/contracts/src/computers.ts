@@ -1,6 +1,7 @@
 import { EnvironmentId, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentPlatformOs } from "./environment.ts";
-import { ModelSelection, ProviderInteractionMode, RuntimeMode } from "./orchestration.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import * as Schema from "effect/Schema";
 
 export const COMPUTER_SEND_MESSAGE_MAX_CHARS = 8_000;

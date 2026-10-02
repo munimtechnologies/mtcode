@@ -1,12 +1,5 @@
-import {
-  CommandId,
-  ComputerTaskError,
-  MessageId,
-  ThreadId,
-  type OrchestrationThreadShell,
-} from "@t3tools/contracts";
+import { CommandId, ComputerTaskError, MessageId, ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -14,8 +7,8 @@ import * as Schema from "effect/Schema";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { resolveComputer } from "./resolve.ts";
 import { ComputerToolkit } from "./tools.ts";
 
@@ -24,10 +17,12 @@ const TITLE_MAX = 80;
 
 function threadTitle(preferred: string | undefined, message: string, sourceLabel: string): string {
   const fromPreferred = preferred?.trim();
-  if (fromPreferred && fromPreferred.length > 0) return fromPreferred.slice(0, TITLE_MAX);
+  if (fromPreferred && fromPreferred.length > 0) {
+    return fromPreferred.slice(0, TITLE_MAX).trimEnd();
+  }
   const firstLine = message.split(/\r?\n/, 1)[0]?.trim() ?? "";
-  if (firstLine.length > 0) return firstLine.slice(0, TITLE_MAX);
-  return `Task from ${sourceLabel}`.slice(0, TITLE_MAX);
+  if (firstLine.length > 0) return firstLine.slice(0, TITLE_MAX).trimEnd();
+  return `Task from ${sourceLabel}`.slice(0, TITLE_MAX).trimEnd();
 }
 
 export function formatComputerTaskMessage(input: {
@@ -47,10 +42,10 @@ export function formatComputerTaskMessage(input: {
 }
 
 const readActiveThread = Effect.fn("ComputerTask.readActiveThread")(function* (
-  query: ProjectionSnapshotQuery["Service"],
-  threadId: OrchestrationThreadShell["id"],
+  threads: ThreadManagementService.ThreadManagementServiceShape,
+  threadId: ThreadId,
 ) {
-  const thread = yield* query.getThreadShellById(threadId).pipe(
+  const thread = yield* threads.getThreadShell(threadId).pipe(
     Effect.mapError(
       (cause) =>
         new ComputerTaskError({
@@ -60,7 +55,7 @@ const readActiveThread = Effect.fn("ComputerTask.readActiveThread")(function* (
         }),
     ),
   );
-  return Option.filter(thread, ({ archivedAt }) => archivedAt === null);
+  return Option.filter(Option.fromNullishOr(thread), ({ archivedAt }) => archivedAt === null);
 });
 
 const handlers = {
@@ -76,8 +71,8 @@ const handlers = {
   }),
   computer_send: Effect.fn("ComputerTask.computerSend")(function* (input) {
     const invocation = yield* McpInvocationContext.McpInvocationContext;
-    const query = yield* ProjectionSnapshotQuery;
-    const source = yield* readActiveThread(query, invocation.threadId);
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const source = yield* readActiveThread(threads, invocation.threadId);
     if (Option.isNone(source)) {
       return yield* new ComputerTaskError({
         code: "source_unavailable",
@@ -85,7 +80,9 @@ const handlers = {
       });
     }
 
-    const snapshot = yield* query.getShellSnapshot().pipe(
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const sourceProject = yield* projects.get(source.value.projectId).pipe(
+      Effect.map(Option.getOrUndefined),
       Effect.mapError(
         (cause) =>
           new ComputerTaskError({
@@ -94,9 +91,6 @@ const handlers = {
             cause,
           }),
       ),
-    );
-    const sourceProject = snapshot.projects.find(
-      (project) => project.id === source.value.projectId,
     );
     if (!sourceProject) {
       return yield* new ComputerTaskError({
@@ -122,63 +116,50 @@ const handlers = {
 
     if (resolved.thisMachine) {
       const crypto = yield* Crypto.Crypto;
-      const engine = yield* OrchestrationEngineService;
-      const [commandUuid, threadUuid, messageUuid, createdAt] = yield* Effect.all([
+      const dispatchFailed = (cause: unknown) =>
+        new ComputerTaskError({
+          code: "dispatch_failed",
+          detail: "T3 could not start a thread on this computer.",
+          cause,
+        });
+      const [commandUuid, threadUuid, messageUuid] = yield* Effect.all([
         crypto.randomUUIDv4,
         crypto.randomUUIDv4,
         crypto.randomUUIDv4,
-        Effect.map(DateTime.now, DateTime.formatIso),
-      ]).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ComputerTaskError({
-              code: "dispatch_failed",
-              detail: "T3 could not start a thread on this computer.",
-              cause,
-            }),
-        ),
-      );
+      ]).pipe(Effect.mapError(dispatchFailed));
       const threadId = ThreadId.make(threadUuid);
-      const accepted = yield* engine
+      yield* threads
         .dispatch({
-          type: "thread.turn.start",
-          commandId: CommandId.make(`mcp:computer-send:${commandUuid}`),
+          type: "thread.create",
+          createdBy: "agent",
+          creationSource: "mcp",
+          commandId: CommandId.make(`mcp:computer-send:${commandUuid}:create`),
           threadId,
-          message: {
-            messageId: MessageId.make(messageUuid),
-            role: "user",
-            text: message,
-            attachments: [],
-          },
+          projectId: source.value.projectId,
+          title,
           modelSelection: source.value.modelSelection,
-          titleSeed: title,
           runtimeMode: source.value.runtimeMode,
           interactionMode: source.value.interactionMode,
-          bootstrap: {
-            createThread: {
-              projectId: source.value.projectId,
-              title,
-              modelSelection: source.value.modelSelection,
-              runtimeMode: source.value.runtimeMode,
-              interactionMode: source.value.interactionMode,
-              branch: null,
-              worktreePath: null,
-              createdAt,
-            },
-          },
-          createdAt,
+          branch: null,
+          worktreePath: null,
         })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new ComputerTaskError({
-                code: "dispatch_failed",
-                detail: "T3 could not start a thread on this computer.",
-                cause,
-              }),
-          ),
-        );
-      void accepted;
+        .pipe(Effect.mapError(dispatchFailed));
+      yield* threads
+        .dispatch({
+          type: "message.dispatch",
+          createdBy: "agent",
+          creationSource: "mcp",
+          commandId: CommandId.make(`mcp:computer-send:${commandUuid}`),
+          threadId,
+          senderThreadId: source.value.id,
+          messageId: MessageId.make(messageUuid),
+          text: message,
+          attachments: [],
+          ...(input.title === undefined ? { titleSeed: title } : {}),
+          modelSelection: source.value.modelSelection,
+          dispatchMode: { type: "start_immediately" },
+        })
+        .pipe(Effect.mapError(dispatchFailed));
       return {
         environmentId: descriptor.environmentId,
         threadId,
