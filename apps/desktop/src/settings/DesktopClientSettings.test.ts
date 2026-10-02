@@ -75,6 +75,7 @@ const clientSettings: ClientSettings = {
   legacySidebarEnabled: false,
   soundNotificationsEnabled: true,
   tabsEnabled: true,
+  sidebarWorkingShelfEnabled: false,
   loadBalancingEnabled: false,
   loadBalancingWeights: { "environment-1": 75, "environment-2": 0 },
   pullRequestMergeMethodOverrides: {},
