@@ -1,5 +1,11 @@
 import { isChatGptUsageLimitError } from "@t3tools/shared/usageLimits";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
+import {
+  type ComputerTaskCandidate,
+  useComputerTaskRouting,
+} from "../hooks/useComputerTaskRouting";
+import { useEnsureComputerHomeProject } from "../hooks/useStartComputerThread";
+import { type TaskPlatform, taskPlatformForOs } from "@t3tools/client-runtime/load-balancing";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import { threadEnvironmentAttribution } from "@t3tools/contracts";
@@ -35,6 +41,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   type ResolvedKeybindingsConfig,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
   type ThreadLinkedPullRequest,
@@ -397,6 +404,7 @@ import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { ThreadHandoffDialog } from "./chat/ThreadHandoffDialog";
+import { MoveThreadToComputerDialog } from "./chat/MoveThreadToComputerDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatSearch, CHAT_SEARCH_OPEN_EVENT } from "./chat/ChatSearch";
@@ -410,10 +418,12 @@ import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImag
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
 import {
+  autoBalancePlatformLabel,
   type EnvironmentOption,
   resolveEffectiveEnvMode,
   resolveLocalCheckoutBranchMismatch,
   shouldShowComposerContextStrip,
+  type RunOnEnvironmentOption,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 import {
@@ -2646,6 +2656,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     [navigate, setEnvironmentEnabled],
   );
+  const loadBalancingSettings = useClientSettings();
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
@@ -2675,13 +2686,46 @@ export default function ChatView(props: ChatViewProps) {
     return envs;
   }, [activeProject, allProjects, projectGroupingSettings, primaryEnvironmentId, environmentById]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
+  // A computer-wide thread (a machine's home folder) has no project that
+  // exists elsewhere, so with balancing on every connected computer can take
+  // it: each machine's own home folder stands in for the project.
+  const homeRunOnEnvironments = useMemo((): RunOnEnvironmentOption[] => {
+    if (!isComputerHomeWorkspaceActive || !loadBalancingSettings.loadBalancingEnabled) return [];
+    return environments
+      .filter(
+        (environment) =>
+          environment.environmentId === activeThread?.environmentId ||
+          (environment.connection.phase === "connected" &&
+            Boolean(environment.serverConfig?.environment.homeDirectory)),
+      )
+      .map((environment) => ({
+        environmentId: environment.environmentId,
+        label: environment.label,
+        isPrimary: environment.environmentId === primaryEnvironmentId,
+        machine: resolveEnvironmentMachineKind(environment.serverConfig ?? null),
+      }))
+      .toSorted((a, b) =>
+        a.isPrimary !== b.isPrimary ? (a.isPrimary ? -1 : 1) : a.label.localeCompare(b.label),
+      );
+  }, [
+    activeThread?.environmentId,
+    environments,
+    isComputerHomeWorkspaceActive,
+    loadBalancingSettings.loadBalancingEnabled,
+    primaryEnvironmentId,
+  ]);
+  const homeRunOn = homeRunOnEnvironments.length > 1;
+  const runOnEnvironments: readonly RunOnEnvironmentOption[] = homeRunOn
+    ? homeRunOnEnvironments
+    : logicalProjectEnvironments;
+  const canPickRunOn = runOnEnvironments.length > 1;
   const activeEnvironmentOption =
-    logicalProjectEnvironments.find(
+    runOnEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
+    canPickEnvironment: canPickRunOn,
   });
 
   const openPullRequestDialog = useCallback(
@@ -2845,27 +2889,38 @@ export default function ChatView(props: ChatViewProps) {
       (activeThread.session !== null && activeThread.session.status !== "stopped")),
   );
 
-  const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
     clientSettingsHydrated &&
     draftId &&
     !envLocked &&
     hasMultipleEnvironments &&
+    !homeRunOn &&
     loadBalancingSettings.loadBalancingEnabled &&
     draftThread?.environmentSelection !== "manual" &&
     (!composerHasAttachments || Boolean(draftThread?.loadBalancedEnvironmentId)) &&
     (!draftThread?.branch || draftThread.environmentSelection === "auto") &&
     !draftThread?.worktreePath,
   );
+  // Computer-wide drafts are routed when they are sent, because the prompt
+  // decides which machines fit (the OS it needs, the folders it names).
+  const automaticHomeEnvironment = Boolean(
+    clientSettingsHydrated &&
+    draftId &&
+    !envLocked &&
+    homeRunOn &&
+    draftThread?.environmentSelection !== "manual" &&
+    !composerHasAttachments &&
+    !draftThread?.worktreePath,
+  );
   const autoUpdateEnvironments = useMemo(
     () =>
-      automaticEnvironment
-        ? logicalProjectEnvironments.flatMap(({ environmentId }) => {
+      automaticEnvironment || automaticHomeEnvironment
+        ? runOnEnvironments.flatMap(({ environmentId }) => {
             const environment = environmentById.get(environmentId);
             return environment ? [environment] : [];
           })
         : [],
-    [automaticEnvironment, logicalProjectEnvironments, environmentById],
+    [automaticEnvironment, automaticHomeEnvironment, runOnEnvironments, environmentById],
   );
   const autoBalanceUpdateBanner = useAutoBalanceUpdateBanner(autoUpdateEnvironments);
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
@@ -4151,64 +4206,24 @@ export default function ChatView(props: ChatViewProps) {
     logicalProjectEnvironments,
     setDraftThreadContext,
   ]);
-  const onAutoEnvironment = useCallback(() => {
-    if (envLocked || !draftId) return;
-    if (composerHasAttachments) {
-      toastManager.add({
-        type: "warning",
-        id: "load-balancing-attachments",
-        title: "Keep attachments on this machine",
-        description:
-          "Remove attachments before choosing automatic routing, then attach them on the selected machine.",
-      });
-      return;
-    }
-    loadBalancing.refresh(
-      logicalProjectEnvironments.map((environment) => environment.environmentId),
-    );
-    setDraftThreadContext(draftId, {
-      environmentSelection: "auto",
-      loadBalancedEnvironmentId: null,
-      branch: null,
-      worktreePath: null,
-    });
-  }, [
-    envLocked,
-    draftId,
-    setDraftThreadContext,
-    loadBalancing.refresh,
-    logicalProjectEnvironments,
-    composerHasAttachments,
-  ]);
-  const autoEnvironmentLabel = automaticEnvironment
-    ? draftThread?.loadBalancedEnvironmentId
-      ? "Auto balance"
-      : loadBalancing.pending
-        ? "Checking machines…"
-        : loadBalancing.failed
-          ? "Auto balance unavailable"
-          : "Auto balance"
-    : undefined;
-
-  // Handle environment change for draft threads.  When the user picks a
-  // different environment we update the draft context to point at the physical
-  // project in that environment while keeping the same logical project.
-  const onEnvironmentChange = useCallback(
-    (nextEnvironmentId: EnvironmentId) => {
-      if (envLocked || !draftId) return;
-      const target = logicalProjectEnvironments.find(
-        (env) => env.environmentId === nextEnvironmentId,
-      );
-      if (!target) return;
+  /** Points the draft at a project on another machine, keeping the user's runtime choice. */
+  const retargetDraft = useCallback(
+    (
+      target: ScopedProjectRef,
+      selection: {
+        environmentSelection: "auto" | "manual";
+        loadBalancedEnvironmentId: EnvironmentId | null;
+      },
+    ) => {
+      if (!draftId) return;
       const targetProject = allProjects.find(
         (project) =>
           project.environmentId === target.environmentId && project.id === target.projectId,
       );
       const targetServerConfig = environmentById.get(target.environmentId)?.serverConfig;
       setDraftThreadContext(draftId, {
-        projectRef: scopeProjectRef(target.environmentId, target.projectId),
-        environmentSelection: "manual",
-        loadBalancedEnvironmentId: null,
+        projectRef: target,
+        ...selection,
         ...(composerRuntimeMode === null
           ? {
               runtimeMode: resolveNewThreadRuntimeMode(
@@ -4231,10 +4246,242 @@ export default function ChatView(props: ChatViewProps) {
       composerActiveProvider,
       composerRuntimeMode,
       draftId,
-      envLocked,
       environmentById,
-      logicalProjectEnvironments,
       setDraftThreadContext,
+    ],
+  );
+
+  const ensureComputerHomeProject = useEnsureComputerHomeProject();
+  const routeComputerTask = useComputerTaskRouting();
+  const [homeRouting, setHomeRouting] = useState(false);
+  const homeRoutingRef = useRef(false);
+  // The draft a routed send was already decided for, so the resend goes straight through.
+  const routedHomeSendRef = useRef<DraftId | null>(null);
+  const [pendingRoutedSend, setPendingRoutedSend] = useState<{
+    readonly draftId: DraftId;
+    readonly projectRef: ScopedProjectRef;
+    readonly startedAt: number;
+    readonly submissionIntent: ComposerSubmissionIntent;
+    readonly sendOptions: ComposerSendOptions | undefined;
+  } | null>(null);
+  const platformForEnvironment = useCallback(
+    (environmentId: EnvironmentId) =>
+      taskPlatformForOs(environmentById.get(environmentId)?.serverConfig?.environment.platform.os),
+    [environmentById],
+  );
+  // "Run on" offers an OS limit only when the machines actually differ.
+  const autoBalancePlatforms = useMemo((): TaskPlatform[] => {
+    if (!homeRunOn) return [];
+    const platforms = new Set<TaskPlatform>();
+    for (const { environmentId } of homeRunOnEnvironments) {
+      const platform = platformForEnvironment(environmentId);
+      if (platform) platforms.add(platform);
+    }
+    return platforms.size > 1
+      ? (["mac", "windows", "linux"] as const).filter((p) => platforms.has(p))
+      : [];
+  }, [homeRunOn, homeRunOnEnvironments, platformForEnvironment]);
+
+  /** Machines that can take this computer-wide draft with the selected provider. */
+  const homeRoutingCandidates = useMemo(
+    (): ComputerTaskCandidate[] =>
+      homeRunOnEnvironments.flatMap(({ environmentId, label }) => {
+        const environment = environmentById.get(environmentId);
+        const weight = loadBalancingSettings.loadBalancingWeights[environmentId] ?? 50;
+        const providerReady = environment?.serverConfig?.providers.some(
+          (provider) =>
+            (activeProviderInstanceId === null ||
+              provider.instanceId === activeProviderInstanceId) &&
+            provider.driver === selectedProvider &&
+            provider.enabled &&
+            provider.installed &&
+            provider.status !== "error" &&
+            provider.auth.status !== "unauthenticated" &&
+            provider.availability !== "unavailable",
+        );
+        if (environment?.connection.phase !== "connected" || weight <= 0 || !providerReady) {
+          return [];
+        }
+        return [
+          {
+            environmentId,
+            label,
+            platform: platformForEnvironment(environmentId),
+            weight,
+            supportsPathCheck:
+              environment.serverConfig?.environment.capabilities.hostPathCheck === true,
+          },
+        ];
+      }),
+    [
+      activeProviderInstanceId,
+      environmentById,
+      homeRunOnEnvironments,
+      loadBalancingSettings.loadBalancingWeights,
+      platformForEnvironment,
+      selectedProvider,
+    ],
+  );
+
+  /**
+   * Decides where a computer-wide draft runs, moves it there, and resends.
+   * Returns false when the send should continue on the current machine now.
+   */
+  const routeHomeDraft = async (
+    submissionIntent: ComposerSubmissionIntent,
+    sendOptions: ComposerSendOptions | undefined,
+  ): Promise<boolean> => {
+    if (!draftId || !activeThread || homeRoutingRef.current) return true;
+    homeRoutingRef.current = true;
+    setHomeRouting(true);
+    let handedOff = false;
+    try {
+      const currentEnvironmentId = activeThread.environmentId;
+      const currentLabel = environmentById.get(currentEnvironmentId)?.label ?? "this computer";
+      const decision = await routeComputerTask({
+        prompt: promptRef.current,
+        candidates: homeRoutingCandidates,
+        platformOverride: draftThread?.autoBalancePlatform ?? null,
+      });
+      if (decision.kind === "none") {
+        toastManager.add({
+          type: "info",
+          title: `Running on ${currentLabel}`,
+          description:
+            decision.reason === "no-platform-match"
+              ? "No connected computer runs the operating system this task needs."
+              : decision.reason === "no-path-match"
+                ? "No single computer has every folder you mentioned."
+                : "No other computer reported free capacity.",
+        });
+        routedHomeSendRef.current = draftId;
+        return false;
+      }
+      const targetEnvironmentId = decision.environmentId as EnvironmentId;
+      if (targetEnvironmentId === currentEnvironmentId) {
+        routedHomeSendRef.current = draftId;
+        return false;
+      }
+      const projectRef = await ensureComputerHomeProject(targetEnvironmentId);
+      if (!projectRef) {
+        routedHomeSendRef.current = draftId;
+        return false;
+      }
+      retargetDraft(projectRef, {
+        environmentSelection: "auto",
+        loadBalancedEnvironmentId: targetEnvironmentId,
+      });
+      toastManager.add({
+        type: "info",
+        title: `Sent to ${environmentById.get(targetEnvironmentId)?.label ?? "another computer"}`,
+        description:
+          decision.reason === "named"
+            ? "You named this computer in the message."
+            : "It was the least busy computer that fits this task.",
+      });
+      routedHomeSendRef.current = draftId;
+      setPendingRoutedSend({
+        draftId,
+        projectRef,
+        startedAt: Date.now(),
+        submissionIntent,
+        sendOptions,
+      });
+      handedOff = true;
+      return true;
+    } finally {
+      if (!handedOff) {
+        homeRoutingRef.current = false;
+        setHomeRouting(false);
+      }
+    }
+  };
+
+  const onAutoEnvironment = useCallback(
+    (platform: TaskPlatform | null = null) => {
+      if (envLocked || !draftId) return;
+      if (composerHasAttachments) {
+        toastManager.add({
+          type: "warning",
+          id: "load-balancing-attachments",
+          title: "Keep attachments on this machine",
+          description:
+            "Remove attachments before choosing automatic routing, then attach them on the selected machine.",
+        });
+        return;
+      }
+      if (homeRunOn) {
+        // Computer-wide drafts stay put until they are sent; routing reads the prompt.
+        setDraftThreadContext(draftId, {
+          environmentSelection: "auto",
+          loadBalancedEnvironmentId: null,
+          autoBalancePlatform: platform,
+        });
+        return;
+      }
+      loadBalancing.refresh(
+        logicalProjectEnvironments.map((environment) => environment.environmentId),
+      );
+      setDraftThreadContext(draftId, {
+        environmentSelection: "auto",
+        loadBalancedEnvironmentId: null,
+        branch: null,
+        worktreePath: null,
+      });
+    },
+    [
+      envLocked,
+      draftId,
+      homeRunOn,
+      setDraftThreadContext,
+      loadBalancing.refresh,
+      logicalProjectEnvironments,
+      composerHasAttachments,
+    ],
+  );
+  const autoEnvironmentLabel = automaticHomeEnvironment
+    ? homeRouting
+      ? "Choosing a computer…"
+      : draftThread?.autoBalancePlatform
+        ? autoBalancePlatformLabel(draftThread.autoBalancePlatform)
+        : "Auto balance"
+    : automaticEnvironment
+      ? draftThread?.loadBalancedEnvironmentId
+        ? "Auto balance"
+        : loadBalancing.pending
+          ? "Checking machines…"
+          : loadBalancing.failed
+            ? "Auto balance unavailable"
+            : "Auto balance"
+      : undefined;
+
+  // Handle environment change for draft threads.  When the user picks a
+  // different environment we update the draft context to point at the physical
+  // project in that environment while keeping the same logical project. A
+  // computer-wide draft moves to the picked machine's own home folder.
+  const onEnvironmentChange = useCallback(
+    (nextEnvironmentId: EnvironmentId) => {
+      if (envLocked || !draftId) return;
+      const manual = { environmentSelection: "manual", loadBalancedEnvironmentId: null } as const;
+      if (homeRunOn) {
+        void ensureComputerHomeProject(nextEnvironmentId).then((projectRef) => {
+          if (projectRef) retargetDraft(projectRef, manual);
+        });
+        return;
+      }
+      const target = logicalProjectEnvironments.find(
+        (env) => env.environmentId === nextEnvironmentId,
+      );
+      if (!target) return;
+      retargetDraft(scopeProjectRef(target.environmentId, target.projectId), manual);
+    },
+    [
+      draftId,
+      ensureComputerHomeProject,
+      envLocked,
+      homeRunOn,
+      logicalProjectEnvironments,
+      retargetDraft,
     ],
   );
 
@@ -8142,6 +8389,21 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
+    if (homeRoutingRef.current) return;
+    if (
+      automaticHomeEnvironment &&
+      draftId &&
+      routedHomeSendRef.current !== draftId &&
+      !directAnnotation &&
+      !queuedMessage
+    ) {
+      void routeHomeDraft(submissionIntent, sendOptions).then((handled) => {
+        if (!handled) {
+          void onSendRef.current(undefined, submissionIntent, undefined, undefined, sendOptions);
+        }
+      });
+      return;
+    }
     if (needsLoadBalancing) {
       toastManager.add({
         type: "warning",
@@ -10451,6 +10713,168 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  // Other connected computers this thread could continue on.
+  const moveTargets = useMemo(
+    (): RunOnEnvironmentOption[] =>
+      environments
+        .filter(
+          (environment) =>
+            environment.environmentId !== activeThread?.environmentId &&
+            environment.connection.phase === "connected" &&
+            Boolean(environment.serverConfig?.environment.homeDirectory),
+        )
+        .map((environment) => ({
+          environmentId: environment.environmentId,
+          label: environment.label,
+          isPrimary: environment.environmentId === primaryEnvironmentId,
+          machine: resolveEnvironmentMachineKind(environment.serverConfig ?? null),
+        }))
+        .toSorted((a, b) => a.label.localeCompare(b.label)),
+    [activeThread?.environmentId, environments, primaryEnvironmentId],
+  );
+  const openMoveDialog = useCallback(() => setIsMoveDialogOpen(true), []);
+
+  /**
+   * Starts a new thread on another computer from the move summary: in the same
+   * repository when that computer has it, otherwise in its home folder.
+   */
+  const handleConfirmMove = useCallback(
+    async (input: {
+      readonly markdown: string;
+      readonly targetEnvironmentId: EnvironmentId;
+      readonly stopSource: boolean;
+    }) => {
+      if (!activeServerThread || !activeThread) return;
+      const { targetEnvironmentId } = input;
+      const targetEnvironment = environmentById.get(targetEnvironmentId);
+      const targetLabel = targetEnvironment?.label ?? "the other computer";
+      const sameProject = logicalProjectEnvironments.find(
+        (environment) => environment.environmentId === targetEnvironmentId,
+      );
+      const projectRef = sameProject
+        ? scopeProjectRef(sameProject.environmentId, sameProject.projectId)
+        : await ensureComputerHomeProject(targetEnvironmentId);
+      if (!projectRef) return;
+      const targetProviders = targetEnvironment?.serverConfig?.providers ?? [];
+      const sourceSelection = activeServerThread.modelSelection;
+      const modelSelection = targetProviders.some(
+        (provider) =>
+          provider.instanceId === sourceSelection.instanceId &&
+          provider.enabled &&
+          provider.installed &&
+          provider.auth.status !== "unauthenticated",
+      )
+        ? sourceSelection
+        : resolveDefaultProviderModelSelection(targetProviders, null);
+      if (!modelSelection) {
+        toastManager.add({
+          type: "error",
+          title: `No agent is set up on ${targetLabel}`,
+          description: "Sign in to a provider there, then try again.",
+        });
+        return;
+      }
+
+      const nextThreadId = newThreadId();
+      const createdAt = new Date().toISOString();
+      const title = activeThread.title;
+      const createResult = await withHandoffTimeout(() =>
+        createThread({
+          environmentId: targetEnvironmentId,
+          input: {
+            threadId: nextThreadId,
+            projectId: projectRef.projectId,
+            title,
+            modelSelection,
+            runtimeMode: activeServerThread.runtimeMode,
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          },
+        }),
+      );
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult === null || createResult._tag === "Failure" ? createResult : null;
+      if (failure === null) {
+        const startResult = await withHandoffTimeout(() =>
+          startThreadTurn({
+            environmentId: targetEnvironmentId,
+            input: {
+              threadId: nextThreadId,
+              message: {
+                messageId: newMessageId(),
+                role: "user",
+                text: input.markdown,
+                attachments: [],
+              },
+              modelSelection,
+              titleSeed: title,
+              runtimeMode: activeServerThread.runtimeMode,
+              interactionMode: "default",
+              createdAt,
+            },
+          }),
+        );
+        failure = startResult === null || startResult._tag === "Failure" ? startResult : null;
+      }
+      if (failure === null) {
+        const started = await settlePromise(() =>
+          waitForStartedServerThread(scopeThreadRef(targetEnvironmentId, nextThreadId)),
+        );
+        failure = started._tag === "Failure" ? started : null;
+      }
+      if (failure !== null || timedOutRef.current) {
+        timedOutRef.current = false;
+        if (createResult !== null && createResult._tag === "Success") {
+          await deleteThread({
+            environmentId: targetEnvironmentId,
+            input: { threadId: nextThreadId },
+          });
+        }
+        const error =
+          failure !== null && !isAtomCommandInterrupted(failure)
+            ? squashAtomCommandFailure(failure)
+            : null;
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Could not move the thread to ${targetLabel}`,
+            description: error instanceof Error ? error.message : `${targetLabel} did not respond.`,
+          }),
+        );
+        return;
+      }
+      // Stop here before navigating: the interrupt targets the thread on screen.
+      if (input.stopSource && canInterruptRunningThread) await onInterrupt();
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: targetEnvironmentId, threadId: nextThreadId },
+      });
+      toastManager.add({
+        type: "success",
+        title: `Moved to ${targetLabel}`,
+        description: "The new thread starts from a summary of this one.",
+      });
+    },
+    [
+      activeServerThread,
+      activeThread,
+      canInterruptRunningThread,
+      createThread,
+      deleteThread,
+      ensureComputerHomeProject,
+      environmentById,
+      logicalProjectEnvironments,
+      navigate,
+      onInterrupt,
+      startThreadTurn,
+      waitForStartedServerThread,
+      withHandoffTimeout,
+    ],
+  );
+
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
@@ -10662,6 +11086,45 @@ export default function ChatView(props: ChatViewProps) {
   }, [cancelWorktreeSetup, draftId, routeThreadRef.environmentId, worktreeSetup]);
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
+  // A routed send resumes once the draft has moved to the chosen computer.
+  useEffect(() => {
+    if (!pendingRoutedSend) return;
+    const finish = () => {
+      setPendingRoutedSend(null);
+      homeRoutingRef.current = false;
+      setHomeRouting(false);
+    };
+    if (pendingRoutedSend.draftId !== draftId) {
+      finish();
+      return;
+    }
+    if (
+      activeThread?.environmentId === pendingRoutedSend.projectRef.environmentId &&
+      activeProject?.id === pendingRoutedSend.projectRef.projectId
+    ) {
+      finish();
+      void onSendRef.current(
+        undefined,
+        pendingRoutedSend.submissionIntent,
+        undefined,
+        undefined,
+        pendingRoutedSend.sendOptions,
+      );
+      return;
+    }
+    const timer = globalThis.setTimeout(
+      () => {
+        finish();
+        toastManager.add({
+          type: "error",
+          title: "Could not move the draft",
+          description: "The chosen computer did not answer. Your message was not sent.",
+        });
+      },
+      Math.max(0, 10_000 - (Date.now() - pendingRoutedSend.startedAt)),
+    );
+    return () => globalThis.clearTimeout(timer);
+  }, [activeProject?.id, activeThread?.environmentId, draftId, pendingRoutedSend]);
   // Resend once the cancelled dispatch has settled and the composer is free.
   // Every state that makes `onSend` bail and wait is part of the readiness
   // check, so the flag survives a reconnect, a reverting checkpoint, or a
@@ -11138,6 +11601,9 @@ export default function ChatView(props: ChatViewProps) {
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
+            {...(isServerThread && moveTargets.length > 0
+              ? { onMoveToComputer: openMoveDialog }
+              : {})}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -11581,17 +12047,19 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(canCheckoutPullRequestIntoThread
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                                {...(canPickRunOn ? { onEnvironmentChange } : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
                                 onAutoEnvironment={
                                   draftId &&
                                   !envLocked &&
-                                  hasMultipleEnvironments &&
+                                  canPickRunOn &&
                                   loadBalancingSettings.loadBalancingEnabled
                                     ? onAutoEnvironment
                                     : undefined
                                 }
-                                availableEnvironments={logicalProjectEnvironments}
+                                autoBalancePlatforms={autoBalancePlatforms}
+                                autoBalancePlatform={draftThread?.autoBalancePlatform ?? null}
+                                availableEnvironments={runOnEnvironments}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />
@@ -11665,6 +12133,17 @@ export default function ChatView(props: ChatViewProps) {
               />
             ) : null}
 
+            {activeServerThread && isMoveDialogOpen && moveTargets.length > 0 ? (
+              <MoveThreadToComputerDialog
+                open={isMoveDialogOpen}
+                onOpenChange={setIsMoveDialogOpen}
+                sourceThread={activeServerThread}
+                sourceLabel={activeEnvironment?.label ?? "this computer"}
+                computers={moveTargets}
+                sourceRunning={canInterruptRunningThread}
+                onConfirm={handleConfirmMove}
+              />
+            ) : null}
             {activeServerThread && handoffTargetModelSelection ? (
               <ThreadHandoffDialog
                 open={isHandoffDialogOpen}

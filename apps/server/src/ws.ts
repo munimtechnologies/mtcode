@@ -3257,6 +3257,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetHostResources, hostResources.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverCheckHostPaths]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverCheckHostPaths,
+            serverEnvironment.getDescriptor.pipe(
+              Effect.flatMap(({ homeDirectory }) =>
+                homeDirectory === undefined
+                  ? Effect.succeed({ existing: [] })
+                  : hostResources.checkPaths(input, homeDirectory),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetProcessResourceHistory,

@@ -99,6 +99,27 @@ on that machine. Existing threads stay where they started. If resource checks ar
 unavailable or all eligible machines are full, choose a machine manually to continue.
 Mobile keeps its manual environment selection.
 
+Threads started on a whole computer (its home folder, not a project) can run on any
+connected machine. The machine is picked when you send, from what the message asks
+for:
+
+- A machine you name ("run this on Blade") gets the thread.
+- Work that only runs on one operating system (Xcode, PowerShell, `apt`, and so on)
+  stays on machines with that system. To set it yourself, pick **Auto balance · Macs**
+  or **Auto balance · Windows** under **Run on**.
+- Folders you mention (`~/dev/app`, `C:\Users\you\dev\app`) narrow the choice to the
+  machines that have them. `~` and relative paths are looked up in each machine's home
+  folder.
+- Of what is left, the least busy machine wins.
+
+If nothing fits, the thread runs on the current machine and a notice says why.
+Messages with attachments stay on the current machine.
+
+To continue a running thread somewhere else, open the thread menu and choose
+**Move to another computer…**. A new thread starts there with an editable summary
+of this one, and you can stop the turn here at the same time. Files that only exist
+on the first machine do not move with it.
+
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale
