@@ -85,7 +85,9 @@ export PATH="$HOME/.local/mtcode-node/current/bin:$HOME/.vite-plus/bin:$PATH"
 cp .env.example .env
 
 log "installing dependencies"
-vp install
+# CI=true answers pnpm's "remove the modules directory?" prompt (no TTY here)
+# and keeps the install on the committed lockfile.
+CI=true vp install
 
 # Align package versions like the other publish builds, so the bundled server
 # and web report this version. The stamp is build input only.

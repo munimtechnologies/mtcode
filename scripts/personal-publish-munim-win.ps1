@@ -58,8 +58,13 @@ Log "Node=$nodeVersion"
 
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
+# CI=true answers pnpm's "remove the modules directory?" prompt (no TTY over
+# ssh) and keeps the install on the committed lockfile.
+$env:CI = "true"
 pnpm install
-if ($LASTEXITCODE -ne 0) { throw "pnpm install failed: $LASTEXITCODE" }
+$installExit = $LASTEXITCODE
+Remove-Item Env:CI
+if ($installExit -ne 0) { throw "pnpm install failed: $installExit" }
 # Align package versions like upstream's release workflow, so the bundled
 # server and web report this version.
 node scripts/update-release-package-versions.ts $env:T3CODE_DESKTOP_VERSION
