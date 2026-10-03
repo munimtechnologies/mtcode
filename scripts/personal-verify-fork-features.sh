@@ -78,6 +78,15 @@ require apps/web/src/components/ChatView.tsx "buildInterruptedTurnContinuationPr
 require packages/shared/src/orchestrationV2Timeline.ts "if (isOrchestrationV2HiddenContinuationMessage(item)) return false;" "timeline visibility hides the continuation message"
 require apps/server/src/orchestration-v2/ProjectionStore.ts "messageId: MessageId.make(row.message_id)" "SQL timeline index carries message ids for the hidden continuation"
 
+# --- Edit the last user message (PR #7237, ported onto orchestration-v2 2026-10-02) ---
+# Built on upstream's rollback: Send rolls back to before the message (files
+# kept) and sends the edited text. Upstream has only "Edit from here", which
+# returns the message to the composer.
+require apps/web/src/components/ChatView.tsx "{ messageEdit }" "ChatView passes the edit state to the timeline"
+require apps/web/src/components/ChatView.tsx "restoreFiles: false" "message edit rolls back without restoring files"
+require apps/web/src/components/chat/MessagesTimeline.tsx "<EditUserMessageButton" "edit affordance on the last user message"
+require apps/web/src/components/chat/MessagesTimeline.tsx "<InlineUserMessageEditor" "inline editor in the user message bubble"
+
 # --- Cross-thread tools (a0d8862a1, ae1be5092, 146cd13a6) ---
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/mcp/McpHttpServer.ts "ThreadReferenceToolkit" "thread_read toolkit registered"
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/mcp/McpHttpServer.ts "ThreadRelayToolkit" "thread_list/thread_send toolkit registered"

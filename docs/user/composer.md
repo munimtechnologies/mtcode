@@ -170,6 +170,12 @@ This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
 memory. The action is available only when the provider supports rewind.
 
+To reword only your latest message, choose **Edit message** beneath it while the
+agent is idle, change the text, and choose **Send** (or press `Cmd+Enter` /
+`Ctrl+Enter`). The conversation rewinds to before that message and the edited
+version is sent in its place with the same attachments. Workspace files are left
+as they are.
+
 ## Prompt stash
 
 On web and desktop, press `Cmd+S` on macOS or `Ctrl+S` on Windows and Linux to save

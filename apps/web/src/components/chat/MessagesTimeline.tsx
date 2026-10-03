@@ -147,6 +147,9 @@ import type {
   KnownComposerContextRecord,
 } from "@t3tools/contracts";
 import { Button, InlineButton } from "../ui/button";
+import { Textarea } from "../ui/textarea";
+import { isCommentSubmitShortcut } from "../diffs/commentSubmitShortcut";
+import { splitEditableUserMessage } from "./userMessageEdit";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
@@ -305,6 +308,7 @@ interface TimelineRowSharedState {
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
+  messageEdit: TimelineMessageEditState;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onRunShellCommand: ((command: string) => void) | undefined;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -349,6 +353,34 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
+
+/** Edit the last user message in place (MT Code fork; see ./userMessageEdit.ts). */
+export interface TimelineMessageEditState {
+  /** The one user message that may be edited now. Its row also needs a rollback point. */
+  readonly editableMessageId: MessageId | null;
+  readonly editingMessageId: MessageId | null;
+  readonly isSaving: boolean;
+  /** The draft survives the virtualized row unmounting and remounting. */
+  readonly readDraft: () => string | null;
+  readonly onDraftChange: (draft: string) => void;
+  readonly onBegin: (messageId: MessageId) => void;
+  readonly onCancel: () => void;
+  readonly onSave: (input: {
+    readonly messageId: MessageId;
+    readonly turnCount: number;
+    readonly draft: string;
+  }) => void;
+}
+const NO_MESSAGE_EDIT: TimelineMessageEditState = {
+  editableMessageId: null,
+  editingMessageId: null,
+  isSaving: false,
+  readDraft: () => null,
+  onDraftChange: () => {},
+  onBegin: () => {},
+  onCancel: () => {},
+  onSave: () => {},
+};
 
 interface WorkGroupViewState {
   scrollPositions: Map<string, WorkGroupScrollAnchor>;
@@ -447,6 +479,7 @@ interface MessagesTimelineProps {
   }) => void;
   supportsConversationRollback: boolean;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
+  messageEdit?: TimelineMessageEditState;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   onRunShellCommand?: (command: string) => void;
   isRevertingCheckpoint: boolean;
@@ -521,6 +554,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRollbackCheckpoint,
   supportsConversationRollback,
   onRevertToTurnCount,
+  messageEdit = NO_MESSAGE_EDIT,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   onRunShellCommand,
   isRevertingCheckpoint,
@@ -1177,6 +1211,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runs,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
+      messageEdit,
       onRunShellCommand,
       onImageExpand,
       onFileOpen,
@@ -1211,6 +1246,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runs,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
+      messageEdit,
       onRunShellCommand,
       onImageExpand,
       onFileOpen,
@@ -2009,6 +2045,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     [userImages],
   );
   const revertTurnCount = row.revertTurnCount;
+  const { messageEdit } = ctx;
+  const isEditing =
+    messageEdit.editingMessageId === row.message.id && typeof revertTurnCount === "number";
   // A file with a chip in the prose needs no standalone row. Media is the exception: the
   // thumbnail is the only way to actually see it, so it shows whether or not it has a chip.
   const chippedAttachmentIds = new Set(
@@ -2166,7 +2205,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className={cn(
+          "relative rounded-2xl bg-message p-3 text-message-foreground",
+          isEditing ? "w-full" : "max-w-[80%]",
+        )}
+      >
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
@@ -2270,15 +2314,23 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
-        <div onCopyCapture={onBodyCopyCapture}>
-          <CollapsibleUserMessageBody
-            text={resolvedContext.text}
-            searchExpanded={ctx.searchMessageId === row.message.id}
-            renderContextReference={renderContextReference}
-            skills={ctx.skills}
-            markdownCwd={ctx.markdownCwd}
+        {isEditing ? (
+          <InlineUserMessageEditor
+            messageId={row.message.id}
+            messageText={row.message.text}
+            turnCount={revertTurnCount}
           />
-        </div>
+        ) : (
+          <div onCopyCapture={onBodyCopyCapture}>
+            <CollapsibleUserMessageBody
+              text={resolvedContext.text}
+              searchExpanded={ctx.searchMessageId === row.message.id}
+              renderContextReference={renderContextReference}
+              skills={ctx.skills}
+              markdownCwd={ctx.markdownCwd}
+            />
+          </div>
+        )}
       </div>
       {row.projectedItem &&
       row.projectedItem.item.status !== "completed" &&
@@ -2301,7 +2353,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {typeof revertTurnCount === "number" && (
+            {typeof revertTurnCount === "number" &&
+              !isEditing &&
+              messageEdit.editableMessageId === row.message.id && (
+                <EditUserMessageButton messageId={row.message.id} />
+              )}
+            {typeof revertTurnCount === "number" && !isEditing && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
             {resolvedContext.text && (
@@ -2394,6 +2451,91 @@ export function resolvePreviewAnnotationImage(input: {
     ) ??
     input.previewImages[input.annotationRecordIds.indexOf(input.record.contextId)] ??
     null
+  );
+}
+
+function InlineUserMessageEditor({
+  messageId,
+  messageText,
+  turnCount,
+}: {
+  messageId: MessageId;
+  messageText: string;
+  turnCount: number;
+}) {
+  const edit = use(TimelineRowCtx).messageEdit;
+  const activity = use(TimelineRowActivityCtx);
+  const [draft, setDraft] = useState(
+    () => edit.readDraft() ?? splitEditableUserMessage(messageText).editableText.trim(),
+  );
+  const disabled = edit.isSaving || activity.isWorking || activity.isRevertingCheckpoint;
+  const save = () => edit.onSave({ messageId, turnCount, draft });
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <Textarea
+        autoFocus
+        aria-label="Edit message"
+        value={draft}
+        disabled={disabled}
+        onChange={(event) => {
+          setDraft(event.currentTarget.value);
+          edit.onDraftChange(event.currentTarget.value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            edit.onCancel();
+          }
+          if (isCommentSubmitShortcut(event, draft, disabled)) {
+            event.preventDefault();
+            save();
+          }
+        }}
+      />
+      <div className="flex justify-end gap-1.5">
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          disabled={edit.isSaving}
+          onClick={edit.onCancel}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          disabled={disabled || draft.trim().length === 0}
+          onClick={save}
+        >
+          {edit.isSaving ? "Sending…" : "Send"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function EditUserMessageButton({ messageId }: { messageId: MessageId }) {
+  const edit = use(TimelineRowCtx).messageEdit;
+  const activity = use(TimelineRowActivityCtx);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            disabled={activity.isRevertingCheckpoint || activity.isWorking}
+            onClick={() => edit.onBegin(messageId)}
+            aria-label="Edit message"
+          />
+        }
+      >
+        <SquarePenIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Edit message</TooltipPopup>
+    </Tooltip>
   );
 }
 

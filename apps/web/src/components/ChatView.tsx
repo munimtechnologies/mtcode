@@ -419,7 +419,17 @@ import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
-import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
+import {
+  MessagesTimeline,
+  type MessagesTimelineHistoryControls,
+  type TimelineMessageEditState,
+} from "./chat/MessagesTimeline";
+import {
+  applyOptimisticMessageEdit,
+  deriveEditableUserMessageId,
+  replaceEditableUserText,
+  type OptimisticMessageEdit,
+} from "./chat/userMessageEdit";
 import { ChatSearch, CHAT_SEARCH_OPEN_EVENT } from "./chat/ChatSearch";
 import type { ChatSearchRequest } from "./chat/useChatSearchTarget";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
@@ -1822,6 +1832,16 @@ export default function ChatView(props: ChatViewProps) {
     return () => revokeBlobPreviewUrl(src);
   }, [expandedImage]);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
+  // Edit the last user message in place: the message being edited, and the
+  // edited text shown in its bubble while the rollback runs.
+  const [editingMessage, setEditingMessage] = useState<{
+    messageId: MessageId;
+    routeThreadKey: string;
+  } | null>(null);
+  const [savingMessageEdit, setSavingMessageEdit] = useState<
+    (OptimisticMessageEdit & { routeThreadKey: string }) | null
+  >(null);
+  const messageEditDraftRef = useRef<string | null>(null);
   // Last live snapshot from the setup stream. The server drops a finished
   // snapshot after a grace period and emits null; holding it here bridges the
   // gap until the settled activity arrives on the thread projection.
@@ -3835,7 +3855,20 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [optimisticUserMessages],
   );
-  const timelineEntries = isServerThread ? serverTimelineEntries : draftTimelineEntries;
+  const timelineEntries = useMemo(
+    () =>
+      applyOptimisticMessageEdit(
+        isServerThread ? serverTimelineEntries : draftTimelineEntries,
+        savingMessageEdit?.routeThreadKey === routeThreadKey ? savingMessageEdit : null,
+      ),
+    [
+      draftTimelineEntries,
+      isServerThread,
+      routeThreadKey,
+      savingMessageEdit,
+      serverTimelineEntries,
+    ],
+  );
   const timelineMessages = useMemo(
     () => timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
     [timelineEntries],
@@ -10369,6 +10402,168 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount, messageId);
   }, []);
 
+  if (editingMessage && editingMessage.routeThreadKey !== routeThreadKey) {
+    setEditingMessage(null);
+  }
+  /**
+   * Saves an edit of the last user message: rolls the thread back to before
+   * it (files stay as they are) and sends the edited text with the original
+   * attachments and context as a new message.
+   */
+  const onSaveMessageEdit = async (input: {
+    readonly messageId: MessageId;
+    readonly turnCount: number;
+    readonly draft: string;
+  }) => {
+    if (!activeThread || isRevertingCheckpoint || sendInFlightRef.current) return;
+    const source = serverProjection?.messages.find((message) => message.id === input.messageId);
+    if (!source || source.role !== "user" || input.draft.trim().length === 0) return;
+    const text = replaceEditableUserText(source.text, input.draft);
+    if (text === source.text) {
+      setEditingMessage(null);
+      return;
+    }
+    const threadId = activeThread.id;
+    if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
+      setThreadError(threadId, `Reconnect ${activeEnvironmentUnavailableLabel} before editing.`);
+      return;
+    }
+    if (phase === "running" || isSendBusy || isConnecting) {
+      setThreadError(threadId, "Interrupt the current turn before editing a message.");
+      return;
+    }
+    sendInFlightRef.current = true;
+    setSavingMessageEdit({ messageId: input.messageId, text, routeThreadKey });
+    useComposerDraftStore.setState((store) => ({
+      rewindingThreadKeys: new Set(store.rewindingThreadKeys).add(routeThreadKey),
+    }));
+    setThreadError(threadId, null);
+    const messageId = newMessageId();
+    let rolledBack = false;
+    try {
+      const commandId = CommandId.make(randomUUID());
+      await waitForRevertedMessage(
+        routeThreadRef,
+        input.messageId,
+        input.turnCount,
+        commandId,
+        async () => {
+          const result = await revertThreadCheckpoint({
+            environmentId,
+            input: { commandId, threadId, turnCount: input.turnCount, restoreFiles: false },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        },
+      );
+      rolledBack = true;
+      const createdAt = new Date().toISOString();
+      beginLocalDispatch();
+      setOptimisticUserMessages((messages) => [
+        ...messages,
+        {
+          id: messageId,
+          role: "user",
+          text,
+          ...(source.attachments.length > 0 ? { attachments: source.attachments } : {}),
+          ...(source.context ? { context: source.context } : {}),
+          runId: null,
+          createdAt,
+          updatedAt: createdAt,
+          streaming: false,
+        },
+      ]);
+      setEditingMessage(null);
+      messageEditDraftRef.current = null;
+      const settingsResult = await persistThreadSettingsForNextTurn({
+        threadId,
+        createdAt,
+        runtimeMode,
+        interactionMode,
+      });
+      const result =
+        settingsResult._tag === "Failure"
+          ? settingsResult
+          : await startThreadTurn({
+              environmentId,
+              input: {
+                threadId,
+                message: {
+                  messageId,
+                  role: "user",
+                  text,
+                  attachments: source.attachments,
+                  ...(source.context ? { context: source.context } : {}),
+                },
+                runtimeMode,
+                interactionMode,
+                createdAt,
+              },
+            });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+    } catch (error) {
+      if (rolledBack) {
+        // The original message is gone, so the edit goes back to the composer.
+        setOptimisticUserMessages((messages) =>
+          messages.filter((message) => message.id !== messageId),
+        );
+        resetLocalDispatch();
+        const store = useComposerDraftStore.getState();
+        const currentPrompt = store.getComposerDraft(composerDraftTarget)?.prompt ?? "";
+        const restoredPrompt = recallableComposerPrompt(text);
+        const nextPrompt =
+          currentPrompt.length > 0 ? `${currentPrompt}\n\n${restoredPrompt}` : restoredPrompt;
+        store.setPrompt(composerDraftTarget, nextPrompt);
+        if (currentRouteThreadKeyRef.current === routeThreadKey) {
+          promptRef.current = nextPrompt;
+          composerRef.current?.resetCursorState({ prompt: nextPrompt, cursor: nextPrompt.length });
+        }
+      }
+      setThreadError(
+        threadId,
+        error instanceof Error ? error.message : "Failed to edit the message.",
+      );
+    } finally {
+      sendInFlightRef.current = false;
+      setSavingMessageEdit(null);
+      useComposerDraftStore.setState((store) => {
+        const remaining = new Set(store.rewindingThreadKeys);
+        remaining.delete(routeThreadKey);
+        return { rewindingThreadKeys: remaining };
+      });
+    }
+  };
+  // Read at call time so the timeline's edit state keeps a stable identity.
+  const onSaveMessageEditRef = useRef(onSaveMessageEdit);
+  onSaveMessageEditRef.current = onSaveMessageEdit;
+  const editableMessageId = useMemo(
+    () => (isServerThread ? deriveEditableUserMessageId(timelineEntries) : null),
+    [isServerThread, timelineEntries],
+  );
+  const editingMessageId =
+    editingMessage?.routeThreadKey === routeThreadKey ? editingMessage.messageId : null;
+  const isSavingMessageEdit = savingMessageEdit?.routeThreadKey === routeThreadKey;
+  const messageEdit = useMemo<TimelineMessageEditState>(
+    () => ({
+      editableMessageId,
+      editingMessageId,
+      isSaving: isSavingMessageEdit,
+      readDraft: () => messageEditDraftRef.current,
+      onDraftChange: (draft) => {
+        messageEditDraftRef.current = draft;
+      },
+      onBegin: (messageId) => {
+        messageEditDraftRef.current = null;
+        setEditingMessage({ messageId, routeThreadKey });
+      },
+      onCancel: () => {
+        messageEditDraftRef.current = null;
+        setEditingMessage(null);
+      },
+      onSave: (input) => void onSaveMessageEditRef.current(input),
+    }),
+    [editableMessageId, editingMessageId, isSavingMessageEdit, routeThreadKey],
+  );
+
   const pendingSidebarFileDrops = useSidebarPendingFileDropStore((state) => state.pending);
   const consumePendingFileDrop = useSidebarPendingFileDropStore(
     (state) => state.consumePendingFileDrop,
@@ -10888,6 +11083,7 @@ export default function ChatView(props: ChatViewProps) {
                 onRevertToTurnCount={
                   paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
                 }
+                {...(!paintOnlyDisplayedTimeline ? { messageEdit } : {})}
                 {...(!paintOnlyDisplayedTimeline
                   ? { onUseArtifactTemplate: useArtifactTemplate }
                   : {})}
