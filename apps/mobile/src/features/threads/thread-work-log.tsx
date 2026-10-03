@@ -1376,6 +1376,8 @@ function toolGroupSummarySymbolName(kind: ToolGroupSummaryKind): AppSymbolName {
     case "link-pr":
     case "unlink-pr":
     case "list-prs":
+    case "watch-pr":
+    case "unwatch-pr":
       return "arrow.triangle.pull";
     case "read":
       return { ios: "eye", android: "visibility" };

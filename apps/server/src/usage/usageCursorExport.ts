@@ -310,7 +310,7 @@ export function parseCursorUsageCsv(csv: string, userId: string): readonly Usage
       sessionId: `cursor-${userId}-${dateStr.slice(0, 10)}`,
       totals,
       recordCount: 1,
-      fast: false,
+      speed: "standard",
       // Numeric Cost only. Included / "-" stay null so LiteLLM prices them.
       reportedCostUsd: costUsd,
       dedupeKey: `cursor:${userId}:${dateStr}:${model}:${lineIndex}`,

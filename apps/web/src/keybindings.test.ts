@@ -1429,7 +1429,7 @@ describe("composer and pull request shortcuts", () => {
         ctrlKey: platform !== "MacIntel",
       };
       const queuedKey = event({ key: "Enter", shiftKey: true, ...modifier });
-      const backgroundKey = event({ key: "Enter", altKey: true, ...modifier });
+      const backgroundKey = event({ key: "Enter", ...modifier });
       assert.strictEqual(
         resolveShortcutCommand(queuedKey, DEFAULT_RESOLVED_KEYBINDINGS, {
           platform,
