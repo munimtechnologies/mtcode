@@ -88,6 +88,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { resolveClaudeSdkExecutablePath } from "../../provider/Drivers/ClaudeExecutable.ts";
 import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
 import { compileClaudeModelSelection } from "../../claudeModelOptions.ts";
@@ -7754,9 +7755,13 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
           ),
         }
       : {};
+    const binaryPath = yield* resolveClaudeSdkExecutablePath(
+      expandHomePath(config.binaryPath),
+      claudeEnvironment,
+    );
     return makeClaudeAdapterV2({
       instanceId,
-      settings: { ...config, enabled, binaryPath: expandHomePath(config.binaryPath) },
+      settings: { ...config, enabled, binaryPath },
       environment: claudeEnvironment,
       attachmentsDir: serverConfig.attachmentsDir,
       fileSystem,
