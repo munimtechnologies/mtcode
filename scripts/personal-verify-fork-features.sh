@@ -250,7 +250,7 @@ require apps/server/src/persistence/Migrations.ts "ProjectionUsageLimitResume" "
 require apps/server/src/process/externalLauncher.ts "readHostEnv(COMMAND_LOOKUP_ENV_NAMES)" "editor discovery reads the hydrated PATH (#12501)"
 require apps/server/src/process/externalLauncher.ts "resolveMacAppBundle" "macOS editor app-bundle discovery"
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/provider/Layers/CodexSessionRuntime.ts "RECOVERABLE_THREAD_RESUME_CAPABILITY_SNIPPETS" "Codex resume falls back on unsupported list_turns (#12468)"
-pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts '"thread.session-start-requested" ||' "Codex wake for externally queued messages (#12466)"
+# retired 2026-10-02 (Sheehan: codex queue never used; upstream closed #12466 unmerged): pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts '"thread.session-start-requested" ||' "Codex wake for externally queued messages (#12466)"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
