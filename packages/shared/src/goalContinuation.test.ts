@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildGoalContinuationPrompt,
+  buildInterruptedTurnContinuationPrompt,
   countTrailingEmptyGoalContinuations,
   goalBlockCommandId,
   goalContinuationCommandId,
@@ -28,6 +29,15 @@ describe("buildGoalContinuationPrompt", () => {
     const prompt = buildGoalContinuationPrompt(objective);
     expect(prompt).toContain(objective);
     expect(prompt).not.toContain("Continue working toward this Objective until $1");
+  });
+});
+
+describe("buildInterruptedTurnContinuationPrompt", () => {
+  it("asks to resume the stopped work without repeating it or saying goal", () => {
+    const prompt = buildInterruptedTurnContinuationPrompt();
+    expect(prompt).toContain("interrupted");
+    expect(prompt).toContain("Do not repeat work that is already done");
+    expect(prompt.toLowerCase()).not.toContain("goal");
   });
 });
 

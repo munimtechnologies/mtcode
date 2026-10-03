@@ -31,6 +31,7 @@ import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { interruptedRunContinuationMessageId } from "@t3tools/shared/orchestrationV2Timeline";
 import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
@@ -3356,6 +3357,145 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
       assert.isDefined(rolledBackShellThread);
       assert.isNull(rolledBackShellThread.latestVisibleMessage);
       assert.deepEqual(rolledBackShellThread?.pendingBackgroundTasks ?? [], []);
+    }),
+  );
+
+  it.effect("hides the one-tap Continue message from memory and SQL timelines", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:projection-hidden-continuation");
+      const stoppedRunId = RunId.make("run:projection-hidden-continuation:stopped");
+      const continuationRunId = RunId.make("run:projection-hidden-continuation:continued");
+      const continuationMessageId = interruptedRunContinuationMessageId(stoppedRunId);
+      const userItemId = TurnItemId.make("turn-item:projection-hidden-continuation:user");
+      const continuationItemId = TurnItemId.make(
+        "turn-item:projection-hidden-continuation:continue",
+      );
+      const assistantItemId = TurnItemId.make("turn-item:projection-hidden-continuation:reply");
+
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-hidden-continuation:thread-created"),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId: ProjectId.make("project:projection-hidden-continuation"),
+          title: "Projection hidden continuation",
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+      const userMessageItem = (input: {
+        readonly id: TurnItemId;
+        readonly runId: RunId;
+        readonly messageId: MessageId;
+        readonly ordinal: number;
+      }) =>
+        projectionStore.apply({
+          id: EventId.make(`event:${input.id}`),
+          type: "turn-item.updated",
+          threadId,
+          runId: input.runId,
+          driver,
+          occurredAt: now,
+          payload: {
+            createdBy: "user",
+            creationSource: "web",
+            id: input.id,
+            threadId,
+            runId: input.runId,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: input.ordinal,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "user_message",
+            messageId: input.messageId,
+            inputIntent: "turn_start",
+            text: "user text",
+            attachments: [],
+          },
+        });
+      yield* userMessageItem({
+        id: userItemId,
+        runId: stoppedRunId,
+        messageId: MessageId.make("message:projection-hidden-continuation:user"),
+        ordinal: 1,
+      });
+      yield* userMessageItem({
+        id: continuationItemId,
+        runId: continuationRunId,
+        messageId: continuationMessageId,
+        ordinal: 2,
+      });
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-hidden-continuation:reply"),
+        type: "turn-item.updated",
+        threadId,
+        runId: continuationRunId,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: assistantItemId,
+          threadId,
+          runId: continuationRunId,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 3,
+          status: "completed",
+          title: null,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          type: "assistant_message",
+          messageId: MessageId.make("message:projection-hidden-continuation:reply"),
+          text: "continued",
+          streaming: false,
+        },
+      });
+
+      const projection = yield* projectionStore.getThreadProjection(threadId);
+      assert.lengthOf(projection.turnItems, 3);
+      assert.deepEqual(
+        projection.visibleTurnItems.map((row) => row.sourceItemId),
+        [userItemId, assistantItemId],
+      );
+      const page = yield* projectionStore.getTimelinePage(threadId, {
+        view: "activity",
+        limit: 10,
+      });
+      assert.deepEqual(
+        page.items.map((row) => row.sourceItemId),
+        [userItemId, assistantItemId],
+      );
+      assert.equal(page.totalItems, 2);
     }),
   );
 

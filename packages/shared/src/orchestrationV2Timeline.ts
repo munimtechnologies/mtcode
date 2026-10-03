@@ -1,15 +1,43 @@
-import type {
-  OrchestrationV2Run,
-  OrchestrationV2RunAttempt,
-  OrchestrationV2TurnItem,
-  OrchestrationV2UserMessageInputIntent,
+import {
+  MessageId,
+  type OrchestrationV2Run,
+  type OrchestrationV2RunAttempt,
+  type OrchestrationV2TurnItem,
+  type OrchestrationV2UserMessageInputIntent,
+  type RunId,
 } from "@t3tools/contracts";
 
 type TimelineRun = Pick<OrchestrationV2Run, "id" | "status">;
 type TimelineRunAttempt = Pick<OrchestrationV2RunAttempt, "runId" | "rootNodeId" | "status">;
 type TimelineTurnItem = Pick<OrchestrationV2TurnItem, "type" | "runId" | "nodeId"> & {
   readonly inputIntent?: OrchestrationV2UserMessageInputIntent;
+  readonly messageId?: MessageId;
 };
+
+const INTERRUPTED_RUN_CONTINUATION_MESSAGE_PREFIX = "message:interrupted-continuation:";
+
+/**
+ * The message the composer's one-tap Continue sends after Stop. It carries the
+ * T3-authored continuation prompt to the provider but is not a transcript row:
+ * a Continuation has no user message (docs/adr/0005). One id per interrupted
+ * run, so a second tap cannot continue the same run twice.
+ */
+export function interruptedRunContinuationMessageId(runId: RunId): MessageId {
+  return MessageId.make(`${INTERRUPTED_RUN_CONTINUATION_MESSAGE_PREFIX}${runId}`);
+}
+
+export function isInterruptedRunContinuationMessageId(messageId: string): boolean {
+  return messageId.startsWith(INTERRUPTED_RUN_CONTINUATION_MESSAGE_PREFIX);
+}
+
+/** Hidden everywhere a timeline is shown, including history a fork inherits. */
+export function isOrchestrationV2HiddenContinuationMessage(item: TimelineTurnItem): boolean {
+  return (
+    item.type === "user_message" &&
+    item.messageId !== undefined &&
+    isInterruptedRunContinuationMessageId(item.messageId)
+  );
+}
 
 export function isOrchestrationV2SupersededInterrupt(input: {
   readonly item: TimelineTurnItem;
@@ -65,6 +93,8 @@ export function isOrchestrationV2TurnItemVisible(input: {
     return false;
   }
 
+  if (isOrchestrationV2HiddenContinuationMessage(item)) return false;
+
   return !isOrchestrationV2SupersededInterrupt({
     item,
     attempts: input.attempts,
@@ -101,6 +131,7 @@ export function createOrchestrationV2TurnItemVisibility(input: {
       item.inputIntent === "queued_turn"
     )
       return false;
+    if (isOrchestrationV2HiddenContinuationMessage(item)) return false;
     return !(
       item.type === "run_interrupt_result" &&
       item.runId !== null &&

@@ -1,4 +1,6 @@
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
+import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/goalContinuation";
+import { interruptedRunContinuationMessageId } from "@t3tools/shared/orchestrationV2Timeline";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -3736,6 +3738,104 @@ it.layer(TestLayer)("usage-limit recovery", (it) => {
         }
         assert.lengthOf((yield* orchestrator.getThreadProjection(threadId)).runs, 3);
       }),
+  );
+
+  it.effect("continues a stopped run without a visible user message", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const events = yield* EventSink.EventSinkV2;
+      const threadId = ThreadId.make("hidden-continue");
+      const projectId = ProjectId.make("hidden-continue:project");
+      const now = yield* DateTime.now;
+      yield* seedProject({
+        projectId,
+        title: "Continue project",
+        workspaceRoot: process.cwd(),
+        defaultModelSelection: modelSelection,
+        createdAt: DateTime.formatIso(now),
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("hidden-continue:create"),
+        threadId,
+        projectId,
+        title: "Stopped thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("hidden-continue:start"),
+        threadId,
+        messageId: MessageId.make("hidden-continue:start"),
+        text: "Start work.",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const [stopped] = (yield* orchestrator.getThreadProjection(threadId)).runs as [
+        OrchestrationV2Run,
+      ];
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make("hidden-continue:stop"),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...stopped, status: "interrupted", completedAt: now },
+          },
+        ],
+      });
+      // What the composer's Continue sends after Stop (ChatView onResume).
+      const messageId = interruptedRunContinuationMessageId(stopped.id);
+      const continueCommand = (suffix: string) => ({
+        type: "message.dispatch" as const,
+        commandId: CommandId.make(`hidden-continue:continue:${suffix}`),
+        threadId,
+        messageId,
+        manualContinuationOfRunId: stopped.id,
+        text: buildInterruptedTurnContinuationPrompt(),
+        attachments: [],
+        dispatchMode: { type: "start_immediately" as const },
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+      });
+      yield* orchestrator.dispatch(continueCommand("first"));
+
+      const after = yield* orchestrator.getThreadProjection(threadId);
+      assert.deepEqual(
+        after.runs.map((run) => run.status),
+        ["interrupted", "starting"],
+      );
+      assert.equal(after.runs[1]?.userMessageId, messageId);
+      // The provider is prompted with the authored text...
+      assert.equal(
+        after.messages.find((message) => message.id === messageId)?.text,
+        buildInterruptedTurnContinuationPrompt(),
+      );
+      // ...but no client shows it as something the user said.
+      assert.isFalse(
+        after.visibleTurnItems.some(
+          ({ item }) => item.type === "user_message" && item.messageId === messageId,
+        ),
+      );
+      assert.isTrue(
+        after.visibleTurnItems.some(
+          ({ item }) => item.type === "user_message" && item.messageId === "hidden-continue:start",
+        ),
+      );
+      assert.equal(
+        (yield* orchestrator.dispatch(continueCommand("second")).pipe(Effect.exit))._tag,
+        "Failure",
+      );
+    }),
   );
 
   it.effect.each([

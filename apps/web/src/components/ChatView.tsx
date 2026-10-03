@@ -125,6 +125,8 @@ import {
 } from "@t3tools/shared/projectScripts";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/goalContinuation";
+import { interruptedRunContinuationMessageId } from "@t3tools/shared/orchestrationV2Timeline";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
@@ -8176,15 +8178,24 @@ export default function ChatView(props: ChatViewProps) {
           interactionMode,
         });
         if (settingsResult._tag === "Failure") return settingsResult;
+        // Continue after Stop is a Continuation with no user message (ADR 0005):
+        // the provider gets the T3-authored prompt and the timeline hides the
+        // message. A usage-limit resume keeps upstream's visible prompt.
+        const continuesStoppedRun =
+          serverProjection?.runs.find((run) => run.id === resumableRunId)?.status === "interrupted";
         const turnResult = await startThreadTurn({
           environmentId,
           input: {
             threadId,
             manualContinuationOfRunId: resumableRunId,
             message: {
-              messageId: newMessageId(),
+              messageId: continuesStoppedRun
+                ? interruptedRunContinuationMessageId(resumableRunId)
+                : newMessageId(),
               role: "user",
-              text: "Continue where you left off.",
+              text: continuesStoppedRun
+                ? buildInterruptedTurnContinuationPrompt()
+                : "Continue where you left off.",
               attachments: [],
             },
             runtimeMode,

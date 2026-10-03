@@ -67,12 +67,16 @@ pending apps/web/src/components/chat/ChatComposer.tsx "buildBuiltInSlashCommandI
 pending apps/web/src/components/chat/ChatComposer.tsx "ComposerGoalBadge" "goal badge rendered by composer"
 
 # --- One-tap Continue as a Continuation Turn (upstream #11716, taken 2026-09-16) ---
-# Upstream submits a "Continue" user message; the fork dispatches
-# thread.turn.continue so the Turn has no user message (docs/adr/0005). A merge
-# that re-takes upstream's composer handler would quietly bring the message back.
-pending apps/web/src/components/ChatView.tsx "onContinueInterruptedTurn={onContinueInterruptedTurn}" "composer Continue dispatches the continuation command"
-pending apps/server/src/orchestration/decider.ts 'case "thread.turn.continue"' "decider handles the one-tap continuation command"
-pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildInterruptedTurnContinuationPrompt" "provider reactor authors the interrupted-turn prompt"
+# Upstream's Resume after Stop sends a visible "Continue where you left off."
+# message. The fork's Continuation has no user message (docs/adr/0005): on
+# orchestration-v2 (ported 2026-10-02) onResume sends the authored prompt under
+# a per-run hidden message id, and the shared timeline visibility rule hides
+# it on every client. A merge that re-takes upstream's onResume or visibility
+# code would quietly bring the message back.
+require apps/web/src/components/ChatView.tsx "interruptedRunContinuationMessageId(resumableRunId)" "composer Continue sends the hidden continuation message"
+require apps/web/src/components/ChatView.tsx "buildInterruptedTurnContinuationPrompt()" "composer Continue sends the authored interrupted-turn prompt"
+require packages/shared/src/orchestrationV2Timeline.ts "if (isOrchestrationV2HiddenContinuationMessage(item)) return false;" "timeline visibility hides the continuation message"
+require apps/server/src/orchestration-v2/ProjectionStore.ts "messageId: MessageId.make(row.message_id)" "SQL timeline index carries message ids for the hidden continuation"
 
 # --- Cross-thread tools (a0d8862a1, ae1be5092, 146cd13a6) ---
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/mcp/McpHttpServer.ts "ThreadReferenceToolkit" "thread_read toolkit registered"

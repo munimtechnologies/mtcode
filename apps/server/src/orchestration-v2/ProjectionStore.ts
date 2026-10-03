@@ -29,7 +29,6 @@ import type {
   ProviderTurnId,
   RunAttemptId,
   RuntimeRequestId,
-  MessageId,
 } from "@t3tools/contracts";
 import {
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
@@ -53,9 +52,11 @@ import {
   ThreadId,
   TurnItemId,
   NodeId,
+  MessageId,
 } from "@t3tools/contracts";
 import {
   createOrchestrationV2TurnItemVisibility,
+  isOrchestrationV2HiddenContinuationMessage,
   isOrchestrationV2SupersededInterrupt,
   isOrchestrationV2TurnItemVisible,
 } from "@t3tools/shared/orchestrationV2Timeline";
@@ -1232,6 +1233,7 @@ function visibleTurnItemsThroughRun(input: {
   const localPrefix = inheritedVisibleTurnItemsFromLocalItems(
     input.sourceProjection.turnItems.filter((item) => {
       if (
+        isOrchestrationV2HiddenContinuationMessage(item) ||
         isOrchestrationV2SupersededInterrupt({
           item,
           attempts: input.sourceProjection.attempts,
@@ -4523,6 +4525,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       "id" | "threadId" | "runId" | "nodeId" | "type"
     > & {
       readonly inputIntent?: "queued_turn";
+      readonly messageId?: MessageId;
     };
     type TimelineIndexRow = {
       readonly sourceThreadId: ThreadId;
@@ -4550,8 +4553,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           node_id: string | null;
           type: OrchestrationV2TurnItem["type"];
           input_intent: string | null;
+          message_id: string | null;
         }>`SELECT turn_item_id, run_id, node_id, type,
-          CASE WHEN type = 'user_message' THEN json_extract(payload_json, '$.inputIntent') END AS input_intent
+          CASE WHEN type = 'user_message' THEN json_extract(payload_json, '$.inputIntent') END AS input_intent,
+          CASE WHEN type = 'user_message' THEN json_extract(payload_json, '$.messageId') END AS message_id
         FROM orchestration_v2_projection_turn_items WHERE thread_id = ${threadId}
         ORDER BY ordinal ASC, turn_item_id ASC`;
         const items: Array<TimelineIndexItem> = rows.map((row) => ({
@@ -4561,6 +4566,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           nodeId: row.node_id === null ? null : NodeId.make(row.node_id),
           type: row.type,
           ...(row.input_intent === "queued_turn" ? { inputIntent: "queued_turn" as const } : {}),
+          // Visibility hides the one-tap Continue's message by its id.
+          ...(row.message_id === null ? {} : { messageId: MessageId.make(row.message_id) }),
         }));
         const local: Array<TimelineIndexRow> = items.map((item) => ({
           sourceThreadId: threadId,
@@ -4588,6 +4595,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ),
             ...source.local.filter(
               (row) =>
+                !isOrchestrationV2HiddenContinuationMessage(row.item) &&
                 !isOrchestrationV2SupersededInterrupt({
                   item: row.item,
                   attempts: source.records.attempts,
