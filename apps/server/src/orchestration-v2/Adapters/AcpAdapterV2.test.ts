@@ -604,8 +604,9 @@ function makeTurnInput(input: {
 }
 
 describe("AcpAdapterV2", () => {
-  for (const outcome of ["failed", "recovered", "completed", "cancelled"] as const) {
-    it.live(`projects Mistral retry notices and their ${outcome} outcome`, () =>
+  it.live.each(["failed", "recovered", "completed", "cancelled"] as const)(
+    "projects Mistral retry notices and their %s outcome",
+    (outcome) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const instanceId = ProviderInstanceId.make(`vibe-retry-${outcome}`);
@@ -692,8 +693,7 @@ describe("AcpAdapterV2", () => {
           assert.equal(retries.at(-1)?.title, "Provider recovered");
         }
       }).pipe(Effect.provide(testLayer), Effect.scoped),
-    );
-  }
+  );
 
   it("preserves legacy ids and scopes v2 ids by provider instance", () => {
     const instanceId = ProviderInstanceId.make("acp-identity-test");
@@ -2996,8 +2996,9 @@ describe("AcpAdapterV2", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  for (const model of ["grok-build", "composer-2"]) {
-    it.effect(`Grok configures the native session for ${model}`, () =>
+  it.effect.each(["grok-build", "composer-2"])(
+    "Grok configures the native session for %s",
+    (model) =>
       Effect.gen(function* () {
         const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -3050,8 +3051,7 @@ describe("AcpAdapterV2", () => {
           model === "grok-build" ? 0 : 1,
         );
       }).pipe(Effect.provide(testLayer), Effect.scoped),
-    );
-  }
+  );
 
   it.live("Grok reapplies an explicit return to the session's setup-time model", () =>
     Effect.gen(function* () {

@@ -642,8 +642,9 @@ it.effect(
   },
 );
 
-for (const entry of ["startup", "open-url"] as const) {
-  it.effect(`receives hosted web sign-in through the desktop ${entry} handler`, () =>
+it.effect.each(["startup", "open-url"] as const)(
+  "receives hosted web sign-in through the desktop %s handler",
+  (entry) =>
     Effect.gen(function* () {
       storageMock.mockReturnValue(storageAdapter);
       createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
@@ -722,5 +723,4 @@ for (const entry of ["startup", "open-url"] as const) {
         Effect.provideService(DesktopWindow.DesktopWindow, unusedDesktopWindow),
       );
     }).pipe(Effect.scoped),
-  );
-}
+);

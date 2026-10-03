@@ -111,8 +111,9 @@ function makeDesktopWindowLayer(
 }
 
 describe("DesktopLifecycle", () => {
-  for (const platform of ["darwin", "win32", "linux"] satisfies ReadonlyArray<NodeJS.Platform>) {
-    it.effect(`lets the updater's quit event proceed on ${platform}`, () => {
+  it.effect.each(["darwin", "win32", "linux"] satisfies ReadonlyArray<NodeJS.Platform>)(
+    "lets the updater's quit event proceed on %s",
+    (platform) => {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
       let windowsDestroyed = false;
       const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
@@ -163,8 +164,8 @@ describe("DesktopLifecycle", () => {
           assert.isTrue(yield* Ref.get(state.quitting));
         }),
       ).pipe(Effect.provide(layer));
-    });
-  }
+    },
+  );
 
   it.effect("does not quit on window-all-closed on win32 (with tray) or darwin", () =>
     Effect.gen(function* () {
