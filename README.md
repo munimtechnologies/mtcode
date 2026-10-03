@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a aria-label="download" href="https://munimtech.com/mt-code"><b>Download MT Code</b></a>
+  <a aria-label="download" href="https://munimtech.com/mtcode"><b>Download MT Code</b></a>
 &ensp;•&ensp;
   <a aria-label="documentation" href="https://github.com/munimtechnologies/mtcode/tree/main/docs">Read the Documentation</a>
 &ensp;•&ensp;
@@ -52,7 +52,7 @@ MT Code is a free, open-source desktop app for running and controlling coding ag
 
 ## Download
 
-**[munimtech.com/mt-code](https://munimtech.com/mt-code)** — or grab installers straight from [GitHub Releases](https://github.com/munimtechnologies/mtcode/releases):
+**[munimtech.com/mtcode](https://munimtech.com/mtcode)** — or grab installers straight from [GitHub Releases](https://github.com/munimtechnologies/mtcode/releases):
 
 - **macOS** (Apple Silicon): `MT-Code-<version>-arm64.dmg`
 - **Windows** (x64): `MT-Code-<version>-x64.exe`

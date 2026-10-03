@@ -327,7 +327,7 @@ ${CHANGELOG}
 MT Code — public build from \`munimtechnologies/mtcode@main\`.
 
 - App ID: \`com.munim.mtcode\`
-- Downloads: https://munimtech.com/mt-code
+- Downloads: https://munimtech.com/mtcode
 - Updates come from this repository (not pingdotgg/t3code)
 
 Commit: \`$(git rev-parse --short HEAD)\`
