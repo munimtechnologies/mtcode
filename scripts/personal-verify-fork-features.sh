@@ -57,14 +57,14 @@ require apps/mobile/src/features/usage/UsageRouteScreen.tsx 'label: "All"' "All 
 require apps/server/src/usage/UsageService.ts "retentionCutoffMs" "All-window scan-cache retention in UsageService"
 
 # --- Goals (86e27ef70, 579221de3, 07d149458) ---
-pending apps/server/src/orchestration/projector.ts "thread.goal-set" "goal events in in-memory projector"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/server/src/orchestration/projector.ts "thread.goal-set" "goal events in in-memory projector"
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/projector.ts "thread.queued-turn-dispatched" "queued-turn events in in-memory projector"
-pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildGoalContinuationPrompt" "goal continuation prompt in provider reactor"
-pending apps/web/src/components/ChatView.tsx "parseGoalComposerCommand" "/goal interception in ChatView submit path"
-pending apps/web/src/components/CommandPalette.tsx "runGoalAction" "Objective actions in command palette"
-pending apps/web/src/components/Sidebar.tsx "GoalActiveMarker" "goal marker in sidebar"
-pending apps/web/src/components/chat/ChatComposer.tsx "buildBuiltInSlashCommandItems" "/goal items in composer slash menu"
-pending apps/web/src/components/chat/ChatComposer.tsx "ComposerGoalBadge" "goal badge rendered by composer"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildGoalContinuationPrompt" "goal continuation prompt in provider reactor"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/web/src/components/ChatView.tsx "parseGoalComposerCommand" "/goal interception in ChatView submit path"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/web/src/components/CommandPalette.tsx "runGoalAction" "Objective actions in command palette"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/web/src/components/Sidebar.tsx "GoalActiveMarker" "goal marker in sidebar"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/web/src/components/chat/ChatComposer.tsx "buildBuiltInSlashCommandItems" "/goal items in composer slash menu"
+# retired 2026-10-02 (Sheehan: never used; Codex and Grok ship their own goal command): pending apps/web/src/components/chat/ChatComposer.tsx "ComposerGoalBadge" "goal badge rendered by composer"
 
 # --- One-tap Continue as a Continuation Turn (upstream #11716, taken 2026-09-16) ---
 # Upstream's Resume after Stop sends a visible "Continue where you left off."

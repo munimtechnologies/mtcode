@@ -26,14 +26,6 @@ export function slashCommandItem(page: Page, id: string): Locator {
   return page.locator(`[data-composer-item-id="${id}"]`);
 }
 
-export function goalChip(page: Page): Locator {
-  return page.locator("[data-goal-chip]");
-}
-
-export function goalActiveMarker(page: Page): Locator {
-  return page.locator("[data-goal-active]");
-}
-
 export function toastTitle(page: Page): Locator {
   return page.locator("[data-slot=toast-title]");
 }
@@ -102,11 +94,6 @@ export async function stopRunningTurnIfNeeded(page: Page): Promise<void> {
       { timeout: 120_000 },
     )
     .toBe(true);
-}
-
-export async function submitGoalSlashCommand(page: Page, command: string): Promise<void> {
-  await typeInComposer(page, command);
-  await submitComposer(page);
 }
 
 export async function runPaletteAction(page: Page, query: string): Promise<void> {

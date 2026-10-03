@@ -125,7 +125,7 @@ import {
 } from "@t3tools/shared/projectScripts";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/goalContinuation";
+import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/turnContinuation";
 import { interruptedRunContinuationMessageId } from "@t3tools/shared/orchestrationV2Timeline";
 import {
   latestUnheldRun,

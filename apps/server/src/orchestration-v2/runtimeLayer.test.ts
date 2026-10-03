@@ -1,5 +1,5 @@
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
-import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/goalContinuation";
+import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/turnContinuation";
 import { interruptedRunContinuationMessageId } from "@t3tools/shared/orchestrationV2Timeline";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";

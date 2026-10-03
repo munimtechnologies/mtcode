@@ -131,7 +131,6 @@ Full docs live in [docs/](./docs):
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Desktop notifications](./docs/user/desktop-notifications.md)
-- [Goals](./docs/user/goals.md)
 - [Plugins](./docs/user/plugins.md)
 - [Voice dictation](./docs/user/voice-dictation.md)
 - [Attachments](./docs/user/attachments.md)

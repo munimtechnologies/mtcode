@@ -231,9 +231,9 @@
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
     },
-    "./goalContinuation": {
-      "types": "./src/goalContinuation.ts",
-      "import": "./src/goalContinuation.ts"
+    "./turnContinuation": {
+      "types": "./src/turnContinuation.ts",
+      "import": "./src/turnContinuation.ts"
     },
     "./composerInlineTokens": {
       "types": "./src/composerInlineTokens.ts",
