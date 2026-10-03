@@ -9,6 +9,7 @@ import {
 } from "@t3tools/shared/munimComputerUse";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import * as ServerSettings from "../serverSettings.ts";
@@ -95,4 +96,25 @@ export const makeResolveEnabledDesktopMcp = Effect.fn(
       Effect.provideService(HostProcessPlatform, platform),
       Effect.provideService(HostProcessEnvironment, environment),
     );
+});
+
+/**
+ * `makeResolveEnabledDesktopMcp` for layers that may lack server settings or
+ * the platform services (narrow test layers): `undefined` when any is absent,
+ * so the adapter runs without Computer Use and keeps `R = never`.
+ */
+export const makeOptionalResolveEnabledDesktopMcp = Effect.fn(
+  "desktopControl.makeOptionalResolveEnabledDesktopMcp",
+)(function* () {
+  const settings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+  const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const path = yield* Effect.serviceOption(Path.Path);
+  if (Option.isNone(settings) || Option.isNone(fileSystem) || Option.isNone(path)) {
+    return undefined;
+  }
+  return yield* makeResolveEnabledDesktopMcp().pipe(
+    Effect.provideService(ServerSettings.ServerSettingsService, settings.value),
+    Effect.provideService(FileSystem.FileSystem, fileSystem.value),
+    Effect.provideService(Path.Path, path.value),
+  );
 });

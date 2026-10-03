@@ -1719,6 +1719,7 @@ describe("PreviewManager", () => {
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setWindowOpenHandler: vi.fn(),
+          setIgnoreMenuShortcuts: vi.fn(),
           debugger: {
             isAttached: () => false,
             attach: vi.fn(),

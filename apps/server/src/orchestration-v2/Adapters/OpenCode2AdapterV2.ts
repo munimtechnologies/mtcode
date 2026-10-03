@@ -36,6 +36,7 @@ import {
 } from "@opencode/client/effect";
 import { Mcp } from "@opencode/schema/mcp";
 import {
+  DESKTOP_MCP_SERVER_NAME,
   isOrchestrationV2WorkActive,
   type OrchestrationV2AppThread,
   type OrchestrationV2ConversationMessage,
@@ -68,6 +69,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../../config.ts";
+import { makeOptionalResolveEnabledDesktopMcp } from "../../desktopControl/desktopMcpLaunch.ts";
 import { paginate, type OpenCode2StreamEvent } from "../../provider/opencode2/OpenCode2Client.ts";
 import * as OpenCode2Server from "../../provider/opencode2/OpenCode2Server.ts";
 import {
@@ -819,6 +821,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
   const serverConfig = yield* ServerConfig.ServerConfig;
   const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
   const driver = OPENCODE_PROVIDER;
+  // MT Code: Computer Use (`mt-desktop`) needs server settings; narrow layers
+  // omit it. The instance's server is shared by its sessions, so the
+  // directories this instance registered the server in are tracked here.
+  const resolveDesktopMcp = yield* makeOptionalResolveEnabledDesktopMcp();
+  const desktopMcpDirectories = new Set<string>();
 
   /**
    * Lends the instance's server to a session until its scope closes. A spawned
@@ -3165,6 +3172,55 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         client.mcp.remove({ server: mcp.name, location: { directory: mcp.directory } }),
       ).pipe(Effect.timeout("5 seconds"), Effect.ignore({ log: true }));
 
+    /**
+     * MT Code: Computer Use (`mt-desktop`) for the directory, registered once
+     * on the shared server and left for the instance's other sessions (a
+     * spawned server forgets it when it stops). A server already listed that
+     * this instance did not add is the user's own and wins. Switching Computer
+     * Use off removes the one this instance added. The tools are an addition,
+     * so failures only log.
+     */
+    const syncDesktopMcp = (directory: string) =>
+      Effect.gen(function* () {
+        if (resolveDesktopMcp === undefined || connection.external) return;
+        const desktopMcp = yield* resolveDesktopMcp();
+        if (desktopMcp === undefined) {
+          if (desktopMcpDirectories.delete(directory)) {
+            yield* removeMcp({ name: DESKTOP_MCP_SERVER_NAME, directory });
+          }
+          return;
+        }
+        const listed = yield* client.mcp.list({ location: { directory } }).pipe(
+          Effect.timeout(INVENTORY_TIMEOUT),
+          Effect.map((servers) =>
+            servers.data.some((server) => server.name === DESKTOP_MCP_SERVER_NAME),
+          ),
+        );
+        if (listed) return;
+        yield* client.mcp
+          .add({
+            server: DESKTOP_MCP_SERVER_NAME,
+            location: { directory },
+            config: new Mcp.LocalConfig({
+              type: "local",
+              command: [desktopMcp.path],
+              ...(desktopMcp.env.length > 0
+                ? {
+                    environment: Object.fromEntries(
+                      desktopMcp.env.map((entry) => [entry.name, entry.value]),
+                    ),
+                  }
+                : {}),
+            }),
+          })
+          .pipe(Effect.timeout(INVENTORY_TIMEOUT));
+        desktopMcpDirectories.add(directory);
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Could not add Computer Use's MCP server to OpenCode.", cause),
+        ),
+      );
+
     // T3's MCP registrations outlive a session only on an external server; a
     // spawned one forgets them when it stops.
     yield* Effect.addFinalizer(() =>
@@ -3229,6 +3285,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           );
         if (added) state.mcp = wanted;
       }
+      yield* syncDesktopMcp(directory);
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
         t3OrchestrationSystemPrompt(state.mcp !== undefined),

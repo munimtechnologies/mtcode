@@ -27,7 +27,10 @@ const seedPreview = Effect.gen(function* () {
   `;
 });
 
-describe("V2 preview upgrade", () => {
+// Upstream-only: these simulate databases written by T3 Code's published V2
+// preview builds, which used upstream migration ids 53-56. MT Code keeps its own
+// ~/.mt database and registers V2 at fork ids 64/65, so these never apply.
+describe.skip("V2 preview upgrade", () => {
   it.effect("upgrades a published preview without replaying V2 or losing import progress", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

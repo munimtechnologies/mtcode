@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import type { InteractionUpdate } from "@cursor/sdk";
+import type { AgentOptions, InteractionUpdate } from "@cursor/sdk";
 import {
   CursorSettings,
   EnvironmentId,
@@ -824,6 +824,87 @@ describe("CursorAdapterV2", () => {
       McpProviderSession.clearMcpProviderSession(threadId);
     }
   });
+
+  it.effect("adds Computer Use (mt-desktop) unless the user's Cursor config defines it", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspace = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "cursor-v2-desktop-mcp-",
+      });
+      const instanceId = ProviderInstanceId.make("cursor");
+      const threadId = ThreadId.make("cursor-desktop-mcp-thread");
+      const modelSelection = { instanceId, model: "composer-2.5" };
+      const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: workspace,
+      });
+      const settings = yield* decodeCursorSettings({});
+      const serverConfig = yield* ServerConfig.ServerConfig.pipe(
+        Effect.provide(ServerConfig.layerTest(workspace, { prefix: "cursor-v2-desktop-config-" })),
+      );
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const openedMcpServers = Effect.fn("openedMcpServers")(function* (
+        userDefinesDesktopMcp: boolean,
+      ) {
+        const opened: Array<AgentOptions["mcpServers"]> = [];
+        const lookups: Array<string | undefined> = [];
+        const adapter = makeCursorAdapterV2({
+          instanceId,
+          settings,
+          environment: { HOME: workspace },
+          fileSystem,
+          path,
+          idAllocator,
+          serverConfig,
+          resolveDesktopMcp: () =>
+            Effect.succeed({
+              path: "/opt/mt/munim-computer-use",
+              env: [{ name: "MTCODE_DESKTOP_BROWSER", value: "0" }],
+            }),
+          userDefinesDesktopMcp: (input) =>
+            Effect.sync(() => {
+              lookups.push(input.cwd);
+              return userDefinesDesktopMcp;
+            }),
+          runner: {
+            assertComplete: Effect.void,
+            open: (input) =>
+              Effect.sync(() => {
+                opened.push(input.options.mcpServers);
+                return {
+                  agentId: "native-cursor-desktop",
+                  listMessages: Effect.succeed([]),
+                  close: Effect.void,
+                  send: () => Effect.die("not sent in this test"),
+                };
+              }),
+          },
+        });
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("cursor-desktop-session"),
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* runtime.ensureThread({ threadId, modelSelection, runtimePolicy });
+        assert.deepEqual(lookups, [workspace]);
+        return opened;
+      });
+
+      assert.deepEqual(yield* openedMcpServers(false), [
+        {
+          "mt-desktop": {
+            type: "stdio",
+            command: "/opt/mt/munim-computer-use",
+            env: { MTCODE_DESKTOP_BROWSER: "0" },
+          },
+        },
+      ]);
+      assert.deepEqual(yield* openedMcpServers(true), [undefined]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
 
   it("recognizes direct and SDK-wrapped abort failures as cancellation", () => {
     assert.isTrue(isCursorCancellationError({ name: "AbortError" }));

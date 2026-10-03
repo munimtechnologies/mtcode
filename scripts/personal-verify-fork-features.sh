@@ -25,6 +25,17 @@ cd "$REPO"
 
 fail=0
 
+pending() {
+  # pending <file> <grep-pattern> <feature description>
+  # Fork feature dropped by the 2026-10-02 upstream orchestrator merge (#2829)
+  # with no upstream equivalent, awaiting a port onto orchestration-v2. Warns
+  # without failing; turn back into `require` once ported.
+  local file="$1" pattern="$2" desc="$3"
+  if [[ ! -f "$file" ]] || ! grep -q -- "$pattern" "$file"; then
+    echo "PENDING PORT: $desc ($file)" >&2
+  fi
+}
+
 require() {
   # require <file> <grep-pattern> <feature description>
   local file="$1" pattern="$2" desc="$3"
@@ -46,37 +57,37 @@ require apps/mobile/src/features/usage/UsageRouteScreen.tsx 'label: "All"' "All 
 require apps/server/src/usage/UsageService.ts "retentionCutoffMs" "All-window scan-cache retention in UsageService"
 
 # --- Goals (86e27ef70, 579221de3, 07d149458) ---
-require apps/server/src/orchestration/projector.ts "thread.goal-set" "goal events in in-memory projector"
-require apps/server/src/orchestration/projector.ts "thread.queued-turn-dispatched" "queued-turn events in in-memory projector"
-require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildGoalContinuationPrompt" "goal continuation prompt in provider reactor"
-require apps/web/src/components/ChatView.tsx "parseGoalComposerCommand" "/goal interception in ChatView submit path"
-require apps/web/src/components/CommandPalette.tsx "runGoalAction" "Objective actions in command palette"
-require apps/web/src/components/Sidebar.tsx "GoalActiveMarker" "goal marker in sidebar"
-require apps/web/src/components/chat/ChatComposer.tsx "buildBuiltInSlashCommandItems" "/goal items in composer slash menu"
-require apps/web/src/components/chat/ChatComposer.tsx "ComposerGoalBadge" "goal badge rendered by composer"
+pending apps/server/src/orchestration/projector.ts "thread.goal-set" "goal events in in-memory projector"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/projector.ts "thread.queued-turn-dispatched" "queued-turn events in in-memory projector"
+pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildGoalContinuationPrompt" "goal continuation prompt in provider reactor"
+pending apps/web/src/components/ChatView.tsx "parseGoalComposerCommand" "/goal interception in ChatView submit path"
+pending apps/web/src/components/CommandPalette.tsx "runGoalAction" "Objective actions in command palette"
+pending apps/web/src/components/Sidebar.tsx "GoalActiveMarker" "goal marker in sidebar"
+pending apps/web/src/components/chat/ChatComposer.tsx "buildBuiltInSlashCommandItems" "/goal items in composer slash menu"
+pending apps/web/src/components/chat/ChatComposer.tsx "ComposerGoalBadge" "goal badge rendered by composer"
 
 # --- One-tap Continue as a Continuation Turn (upstream #11716, taken 2026-09-16) ---
 # Upstream submits a "Continue" user message; the fork dispatches
 # thread.turn.continue so the Turn has no user message (docs/adr/0005). A merge
 # that re-takes upstream's composer handler would quietly bring the message back.
-require apps/web/src/components/ChatView.tsx "onContinueInterruptedTurn={onContinueInterruptedTurn}" "composer Continue dispatches the continuation command"
-require apps/server/src/orchestration/decider.ts 'case "thread.turn.continue"' "decider handles the one-tap continuation command"
-require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildInterruptedTurnContinuationPrompt" "provider reactor authors the interrupted-turn prompt"
+pending apps/web/src/components/ChatView.tsx "onContinueInterruptedTurn={onContinueInterruptedTurn}" "composer Continue dispatches the continuation command"
+pending apps/server/src/orchestration/decider.ts 'case "thread.turn.continue"' "decider handles the one-tap continuation command"
+pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts "buildInterruptedTurnContinuationPrompt" "provider reactor authors the interrupted-turn prompt"
 
 # --- Cross-thread tools (a0d8862a1, ae1be5092, 146cd13a6) ---
-require apps/server/src/mcp/McpHttpServer.ts "ThreadReferenceToolkit" "thread_read toolkit registered"
-require apps/server/src/mcp/McpHttpServer.ts "ThreadRelayToolkit" "thread_list/thread_send toolkit registered"
-require apps/web/src/components/chat/ChatComposer.tsx "searchThreadReferences" "# thread-reference search in composer"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/mcp/McpHttpServer.ts "ThreadReferenceToolkit" "thread_read toolkit registered"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/mcp/McpHttpServer.ts "ThreadRelayToolkit" "thread_list/thread_send toolkit registered"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/web/src/components/chat/ChatComposer.tsx "searchThreadReferences" "# thread-reference search in composer"
 
 # --- Voice dictation, web composer (5fe86fbb6, c239c12e0) ---
 require apps/web/src/components/chat/ChatComposer.tsx "VoiceTranscriptionPanel" "dictation panel rendered by web composer"
 
 # --- Computer-use permission/tool approvals (b671c08ef lineage) ---
-require apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts 'case "permissions_approval"' "permissions approval request kind mapping"
-require apps/server/src/provider/Layers/CodexSessionRuntime.ts "mcpApprovalRequestKind" "MCP tool/permissions approval routing in Codex runtime"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts 'case "permissions_approval"' "permissions approval request kind mapping"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/provider/Layers/CodexSessionRuntime.ts "mcpApprovalRequestKind" "MCP tool/permissions approval routing in Codex runtime"
 
 # --- Resume-on-restart (65d715fb2) ---
-require apps/server/src/serverRuntimeStartup.ts "sessionStartupReconciler" "startup reconciler runs at boot"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/serverRuntimeStartup.ts "sessionStartupReconciler" "startup reconciler runs at boot"
 
 # --- Computer-use agent cursor (b671c08ef) ---
 # --- Computer Use ships munim-computer-use (fetched, not built) under MT's identity ---
@@ -87,13 +98,30 @@ require apps/desktop/src/computerUse/nativeHost.ts "install-native-host" "MT Cod
 
 # --- Computer-use desktop MCP auto-injection into agent sessions (b671c08ef lineage, 2026-08-25) ---
 # Every spawned session gets the bundled `mt-desktop` MCP server; user-defined
-# servers with the same name win over injection.
-require apps/server/src/provider/Layers/ClaudeAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Claude sessions"
-require apps/server/src/provider/Layers/ClaudeAdapter.ts "userDefinesDesktopMcp" "user-config-wins guard on Claude desktop MCP injection"
-require apps/server/src/provider/Layers/CodexAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Codex sessions"
-require apps/server/src/provider/Layers/CodexAdapter.ts "hasConfiguredMcpServerNamed" "user-config-wins guard on Codex desktop MCP injection"
-require apps/server/src/provider/Layers/CursorAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Cursor sessions"
-require apps/server/src/provider/Layers/GrokAdapter.ts "resolveDesktopMcp" "desktop MCP injected into Grok sessions"
+# servers with the same name win over injection. Since the orchestration-v2
+# merge (2026-10-02) the injection lives in the v2 adapters: each driver's
+# create() builds `resolveDesktopMcp` (gated on the Computer Use setting) and
+# the adapter attaches it next to upstream's t3-code server.
+V2=apps/server/src/orchestration-v2/Adapters
+require $V2/ClaudeAdapterV2.ts "makeResolveEnabledDesktopMcp" "Claude driver resolves the desktop MCP"
+require $V2/ClaudeAdapterV2.ts "withClaudeDesktopMcp(" "desktop MCP injected into Claude sessions"
+require $V2/ClaudeAdapterV2.ts "userDefinesDesktopMcp" "user-config-wins guard on Claude desktop MCP injection"
+require $V2/CodexAdapterV2.ts "makeResolveEnabledDesktopMcp" "Codex driver resolves the desktop MCP"
+require $V2/CodexAdapterV2.ts "codexDesktopMcpAppServerArgs(desktopMcp)" "desktop MCP injected into Codex sessions"
+require $V2/CodexAdapterV2.ts 'argument.includes(`mcp_servers.' "user-config-wins guard on Codex desktop MCP injection (launch args)"
+require $V2/CursorAdapterV2.ts "makeResolveEnabledDesktopMcp" "Cursor driver resolves the desktop MCP"
+require $V2/CursorAdapterV2.ts "cursorSessionMcpServers(turnInput.threadId, sessionDesktopMcp)" "desktop MCP injected into Cursor turns"
+require $V2/CursorAdapterV2.ts "desktopMcp: sessionDesktopMcp" "desktop MCP injected into Cursor agent options"
+require $V2/CursorAdapterV2.ts "makeCursorUserDefinesDesktopMcp" "user-config-wins guard on Cursor desktop MCP injection"
+require $V2/AcpAdapterV2.ts "acpMcpContext(threadId, self, desktopMcpServers)" "desktop MCP injected into ACP runtimes (Grok, ACP registry agents)"
+require $V2/AcpAdapterV2.ts "acpMcpActivation(threadId, self, desktopMcpServers)" "desktop MCP injected into ACP session load/resume"
+require $V2/GrokAdapterV2.ts "makeGrokDesktopMcpHooks" "Grok driver resolves the desktop MCP"
+require $V2/GrokAdapterV2.ts "makeGrokUserDefinesDesktopMcp" "user-config-wins guard on Grok desktop MCP injection"
+require $V2/AcpRegistryAdapterV2.ts "makeResolveEnabledDesktopMcp" "desktop MCP injected into ACP registry agents (Devin etc.)"
+require $V2/OpenCodeAdapterV2.ts "makeOptionalResolveEnabledDesktopMcp()" "OpenCode 1.x driver resolves the desktop MCP"
+require $V2/OpenCodeAdapterV2.ts "name: DESKTOP_MCP_SERVER_NAME," "desktop MCP injected into OpenCode 1.x sessions"
+require $V2/OpenCode2AdapterV2.ts "makeOptionalResolveEnabledDesktopMcp()" "OpenCode 2 adapter resolves the desktop MCP"
+require $V2/OpenCode2AdapterV2.ts "yield\* syncDesktopMcp(directory)" "desktop MCP injected into OpenCode 2 turns"
 
 # --- Computer-use thread view (9c23b7fa6, eb1bdd5e2) ---
 require apps/server/src/ws.ts "computerViewStream" "computer view RPCs registered"
@@ -143,10 +171,10 @@ require apps/web/src/hooks/useHandleNewThread.ts "shouldReadProjectFileForNewThr
 # A 2026-08-17 integrate left contracts on the old "pdf" attachment model while
 # the server moved to upstream's generic "file" type, so the server bundle threw
 # "PROVIDER_SEND_TURN_MAX_FILE_BYTES is not defined" on boot and crash-looped.
-require packages/contracts/src/orchestration.ts "ChatFileAttachment" "generic file attachment schema"
-require packages/contracts/src/orchestration.ts "ChatUnknownAttachment" "forward-compatible unknown attachment schema"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require packages/contracts/src/orchestration.ts "ChatFileAttachment" "generic file attachment schema"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require packages/contracts/src/orchestration.ts "ChatUnknownAttachment" "forward-compatible unknown attachment schema"
 require apps/server/src/attachmentStore.ts 'case "file"' "file attachments get a stored path"
-require apps/server/src/provider/Layers/CursorAdapter.ts 'attachment.type !== "image"' "non-image attachments sent as ACP resource links"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/provider/Layers/CursorAdapter.ts 'attachment.type !== "image"' "non-image attachments sent as ACP resource links"
 require apps/web/src/components/chat/MessagesTimeline.tsx "filter(isImageAttachment)" "timeline image grid filters non-images"
 
 # --- WS client analytics props (restored 2026-08-29) ---
@@ -198,18 +226,18 @@ require apps/server/src/provider/Drivers/OpenCodeDriver.ts "loadOpenCodeUsageLim
 
 # --- Usage-limit recovery (upstream #11215 + #9012 port; kept over #12458, 2026-09-18) ---
 require apps/server/src/persistence/Migrations.ts "ProjectionUsageLimitResume" "usage-limit resume migration (fork id 56)"
-require apps/server/src/server.ts "UsageLimitResumeReactor.layer" "usage-limit resume sweep wired"
-require apps/server/src/provider/Layers/ClaudeAdapter.ts "usageLimitFailureFor" "Claude usage-limit classification"
-require packages/client-runtime/src/state/threadSettled.ts "threadUsageLimitResetsAt" "snooze-until-reset source"
-require apps/server/src/orchestration/decider.ts 'reason: "cleared"' "settle/archive disarm an armed usage-limit resume"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/server.ts "UsageLimitResumeReactor.layer" "usage-limit resume sweep wired"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/provider/Layers/ClaudeAdapter.ts "usageLimitFailureFor" "Claude usage-limit classification"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require packages/client-runtime/src/state/threadSettled.ts "threadUsageLimitResetsAt" "snooze-until-reset source"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/decider.ts 'reason: "cleared"' "settle/archive disarm an armed usage-limit resume"
 
 # --- Upstream PRs taken 2026-09-18 (open upstream; keep until they merge there) ---
-require apps/server/src/orchestration/ThreadSettlementPolicy.ts "autoSettleScope" "auto-settle scope: threads without a PR (#12258)"
-require apps/server/src/orchestration/ThreadSettlementPolicy.ts "snoozeWakeAt" "woken snoozed threads get a fresh auto-settle window (#12525)"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/ThreadSettlementPolicy.ts "autoSettleScope" "auto-settle scope: threads without a PR (#12258)"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/ThreadSettlementPolicy.ts "snoozeWakeAt" "woken snoozed threads get a fresh auto-settle window (#12525)"
 require apps/server/src/process/externalLauncher.ts "readHostEnv(COMMAND_LOOKUP_ENV_NAMES)" "editor discovery reads the hydrated PATH (#12501)"
 require apps/server/src/process/externalLauncher.ts "resolveMacAppBundle" "macOS editor app-bundle discovery"
-require apps/server/src/provider/Layers/CodexSessionRuntime.ts "RECOVERABLE_THREAD_RESUME_CAPABILITY_SNIPPETS" "Codex resume falls back on unsupported list_turns (#12468)"
-require apps/server/src/orchestration/Layers/ProviderCommandReactor.ts '"thread.session-start-requested" ||' "Codex wake for externally queued messages (#12466)"
+# retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/provider/Layers/CodexSessionRuntime.ts "RECOVERABLE_THREAD_RESUME_CAPABILITY_SNIPPETS" "Codex resume falls back on unsupported list_turns (#12468)"
+pending apps/server/src/orchestration/Layers/ProviderCommandReactor.ts '"thread.session-start-requested" ||' "Codex wake for externally queued messages (#12466)"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2

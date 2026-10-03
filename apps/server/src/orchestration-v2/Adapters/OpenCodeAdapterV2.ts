@@ -17,6 +17,7 @@ import {
   type ModelSelection,
   type OpenCodeSettings,
   type OrchestrationV2AppThread,
+  DESKTOP_MCP_SERVER_NAME,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanStep,
@@ -56,6 +57,10 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
+import {
+  type DesktopMcpLaunch,
+  makeOptionalResolveEnabledDesktopMcp,
+} from "../../desktopControl/desktopMcpLaunch.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
@@ -438,6 +443,11 @@ export interface OpenCodeAdapterV2Options {
   readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
   readonly serverConfig: ServerConfig.ServerConfig["Service"];
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /**
+   * MT Code: resolves the munim-computer-use (`mt-desktop`) MCP server when
+   * Computer Use is enabled; re-read per session.
+   */
+  readonly resolveDesktopMcp?: () => Effect.Effect<DesktopMcpLaunch | undefined>;
 }
 
 export interface OpenCodeProtocolLogEvent {
@@ -982,6 +992,43 @@ export function makeOpenCodeAdapterV2(
                 oauth: false,
               },
             }),
+          );
+        }
+        // MT Code: Computer Use (`mt-desktop`) on the session's own spawned
+        // server, like t3-code. A server the user's OpenCode config already
+        // defines wins. The tools are an addition: failures only log.
+        const desktopMcp =
+          options.resolveDesktopMcp === undefined || connection.external
+            ? undefined
+            : yield* options.resolveDesktopMcp();
+        if (desktopMcp !== undefined) {
+          yield* Effect.gen(function* () {
+            const status = yield* OpenCodeRuntime.runOpenCodeSdk("mcp.status", () =>
+              client.mcp.status(),
+            );
+            if (status.data !== undefined && DESKTOP_MCP_SERVER_NAME in status.data) {
+              return;
+            }
+            yield* OpenCodeRuntime.runOpenCodeSdk("mcp.add", () =>
+              client.mcp.add({
+                name: DESKTOP_MCP_SERVER_NAME,
+                config: {
+                  type: "local",
+                  command: [desktopMcp.path],
+                  ...(desktopMcp.env.length > 0
+                    ? {
+                        environment: Object.fromEntries(
+                          desktopMcp.env.map((entry) => [entry.name, entry.value]),
+                        ),
+                      }
+                    : {}),
+                },
+              }),
+            );
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not add Computer Use's MCP server to OpenCode.", cause),
+            ),
           );
         }
 
@@ -3707,6 +3754,8 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const serverConfig = yield* ServerConfig.ServerConfig;
+      // MT Code: Computer Use needs server settings; narrow layers omit it.
+      const resolveDesktopMcp = yield* makeOptionalResolveEnabledDesktopMcp();
       return makeOpenCodeAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
@@ -3714,6 +3763,7 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
         runtime: openCodeRuntime,
         idAllocator,
         serverConfig,
+        ...(resolveDesktopMcp === undefined ? {} : { resolveDesktopMcp }),
         ...(providerEventLoggers.native === undefined
           ? {}
           : { nativeEventLogger: providerEventLoggers.native }),

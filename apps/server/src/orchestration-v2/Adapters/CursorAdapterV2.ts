@@ -12,6 +12,7 @@ import { formatReadToolLabel, formatSearchToolLabel } from "@t3tools/shared/tool
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import {
   CursorSettings,
+  DESKTOP_MCP_SERVER_NAME,
   isOrchestrationV2WorkActive,
   defaultInstanceIdForDriver,
   type ChatAttachment,
@@ -44,6 +45,12 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
+import {
+  type DesktopMcpLaunch,
+  makeResolveEnabledDesktopMcp,
+} from "../../desktopControl/desktopMcpLaunch.ts";
+import { makeCursorUserDefinesDesktopMcp } from "../../desktopControl/desktopMcpUserConfig.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { CursorTransportFailure } from "../../provider/acp/CursorTransportFailure.ts";
 import { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
@@ -217,6 +224,30 @@ export function cursorMcpServers(threadId: ThreadId): Record<string, McpServerCo
   };
 }
 
+/**
+ * MT Code: the t3-code server plus Computer Use (`mt-desktop`) as a stdio MCP
+ * server when the session resolved one.
+ */
+export function cursorSessionMcpServers(
+  threadId: ThreadId,
+  desktopMcp: DesktopMcpLaunch | undefined,
+): Record<string, McpServerConfig> | undefined {
+  const t3Servers = cursorMcpServers(threadId);
+  if (desktopMcp === undefined) {
+    return t3Servers;
+  }
+  return {
+    ...t3Servers,
+    [DESKTOP_MCP_SERVER_NAME]: {
+      type: "stdio",
+      command: desktopMcp.path,
+      ...(desktopMcp.env.length > 0
+        ? { env: Object.fromEntries(desktopMcp.env.map((entry) => [entry.name, entry.value])) }
+        : {}),
+    },
+  };
+}
+
 function providerSession(input: {
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
   readonly providerInstanceId: ProviderInstanceId;
@@ -306,9 +337,11 @@ export function makeCursorAgentOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly threadId: ThreadId;
+  /** MT Code: Computer Use (`mt-desktop`) resolved for this session. */
+  readonly desktopMcp?: DesktopMcpLaunch;
 }): AgentOptions {
   const policy = cursorRuntimeAgentPolicy(input.runtimePolicy);
-  const mcpServers = cursorMcpServers(input.threadId);
+  const mcpServers = cursorSessionMcpServers(input.threadId, input.desktopMcp);
   return {
     model: cursorSdkModelSelection(input.modelSelection),
     name: `T3 Code ${input.threadId}`,
@@ -849,6 +882,17 @@ export interface CursorAdapterV2Options {
   readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
   readonly runner: CursorAgentSdk.CursorAgentSdkRunnerShape;
   readonly serverConfig: ServerConfig.ServerConfig["Service"];
+  /**
+   * MT Code: resolves the munim-computer-use (`mt-desktop`) MCP server when
+   * Computer Use is enabled. Re-read per session so Settings toggles apply to
+   * the next session without restarting the app.
+   */
+  readonly resolveDesktopMcp?: () => Effect.Effect<DesktopMcpLaunch | undefined>;
+  /** MT Code: the user's own Cursor `mcp.json` defining `mt-desktop` wins over injection. */
+  readonly userDefinesDesktopMcp?: (input: {
+    readonly cwd?: string;
+    readonly environment: NodeJS.ProcessEnv;
+  }) => Effect.Effect<boolean>;
 }
 
 export function makeCursorAdapterV2(
@@ -877,6 +921,21 @@ export function makeCursorAdapterV2(
         const liveAgent = yield* Ref.make<CursorLiveAgent | null>(null);
         const activeTurn = yield* Ref.make<ActiveCursorTurn | null>(null);
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
+        // MT Code: Computer Use (`mt-desktop`) rides next to the t3-code server,
+        // unless the user's own Cursor config already defines that name.
+        const desktopMcp =
+          adapterOptions.resolveDesktopMcp === undefined
+            ? undefined
+            : yield* adapterOptions.resolveDesktopMcp();
+        const sessionDesktopMcp =
+          desktopMcp === undefined ||
+          (adapterOptions.userDefinesDesktopMcp !== undefined &&
+            (yield* adapterOptions.userDefinesDesktopMcp({
+              ...(input.runtimePolicy.cwd === null ? {} : { cwd: input.runtimePolicy.cwd }),
+              environment: adapterOptions.environment,
+            })))
+            ? undefined
+            : desktopMcp;
 
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
@@ -2070,6 +2129,7 @@ export function makeCursorAdapterV2(
               modelSelection: openInput.modelSelection,
               runtimePolicy: openInput.runtimePolicy,
               threadId: openInput.threadId,
+              ...(sessionDesktopMcp === undefined ? {} : { desktopMcp: sessionDesktopMcp }),
             }),
             threadId: openInput.threadId,
             providerSessionId: input.providerSessionId,
@@ -2180,7 +2240,7 @@ export function makeCursorAdapterV2(
               runtimePolicy: turnInput.runtimePolicy,
             });
             const message = yield* resolveUserMessage(turnInput);
-            const mcpServers = cursorMcpServers(turnInput.threadId);
+            const mcpServers = cursorSessionMcpServers(turnInput.threadId, sessionDesktopMcp);
             const pendingUpdates: Array<InteractionUpdate> = [];
             let context: ActiveCursorTurn | null = null;
             const sdkRun = yield* agent.session.send({
@@ -2602,6 +2662,17 @@ export const CursorAdapterV2Driver: ProviderAdapterDriver<
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const runner = yield* CursorAgentSdk.CursorAgentSdkRunner;
       const serverConfig = yield* ServerConfig.ServerConfig;
+      // MT Code: Computer Use needs server settings; narrow layers that omit
+      // them run without it.
+      const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+      const mtCodeHooks = Option.isSome(serverSettings)
+        ? {
+            resolveDesktopMcp: yield* makeResolveEnabledDesktopMcp().pipe(
+              Effect.provideService(ServerSettings.ServerSettingsService, serverSettings.value),
+            ),
+            userDefinesDesktopMcp: yield* makeCursorUserDefinesDesktopMcp(),
+          }
+        : {};
       return makeCursorAdapterV2({
         instanceId: input.instanceId,
         settings: {
@@ -2614,6 +2685,7 @@ export const CursorAdapterV2Driver: ProviderAdapterDriver<
         idAllocator,
         runner,
         serverConfig,
+        ...mtCodeHooks,
       });
     },
     (effect, input) =>

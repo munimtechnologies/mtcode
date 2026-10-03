@@ -780,6 +780,88 @@ describe("AcpAdapterV2", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("adds Computer Use (mt-desktop) next to the t3-code bridge in every transport", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const selfInvocation = yield* resolveSelfInvocation().pipe(
+        Effect.provideService(HostProcessIsExecutable, true),
+      );
+      const instanceId = ProviderInstanceId.make("acp-test-desktop-mcp");
+      const threadId = ThreadId.make("thread-acp-desktop-mcp");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-acp-desktop-mcp"),
+        threadId,
+        providerSessionId: "mcp-session-acp-desktop-mcp",
+        providerInstanceId: instanceId,
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer desktop-mcp-token",
+        browserToolsAvailable: false,
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+      );
+
+      const resolvedFor: Array<string> = [];
+      let runtimeInput: AcpAdapterV2RuntimeInput | undefined;
+      const adapter = makeAcpAdapterV2({
+        crypto: yield* Crypto.Crypto,
+        instanceId,
+        flavor: {
+          driver: ACP_TEST_DRIVER,
+          capabilities: AcpProviderCapabilitiesV2,
+          makeRuntime: (input) =>
+            Effect.sync(() => {
+              runtimeInput = input;
+            }).pipe(Effect.andThen(Effect.die("runtime is not started in this test"))),
+        },
+        fileSystem,
+        idAllocator,
+        serverConfig,
+        selfInvocation,
+        resolveDesktopMcp: (input) =>
+          Effect.sync(() => {
+            resolvedFor.push(input.cwd);
+            return {
+              path: "/opt/mt/munim-computer-use",
+              env: [{ name: "MTCODE_DESKTOP_AGENT_CURSOR", value: "0" }],
+            };
+          }),
+      });
+      yield* adapter
+        .openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-acp-desktop-mcp"),
+          modelSelection: { instanceId, model: "default" },
+          runtimePolicy: ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            cwd: process.cwd(),
+          }),
+        })
+        .pipe(Effect.exit);
+
+      const desktopServer = {
+        name: "mt-desktop",
+        command: "/opt/mt/munim-computer-use",
+        args: [],
+        env: [{ name: "MTCODE_DESKTOP_AGENT_CURSOR", value: "0" }],
+      };
+      assert.deepEqual(resolvedFor, [process.cwd()]);
+      assert.deepEqual(
+        runtimeInput?.mcpServers.map((server) => server.name),
+        ["t3-code", "mt-desktop"],
+      );
+      assert.deepEqual(runtimeInput?.mcpServers[1], desktopServer);
+      // Agents speaking MCP-over-ACP still launch the stdio desktop server.
+      assert.deepEqual(runtimeInput?.acpMcpServers, [
+        { type: "acp", name: "t3-code", serverId: "t3-code" },
+        desktopServer,
+      ]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.live("refreshes ACP prompt instructions when the interaction mode changes", () =>
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;

@@ -902,7 +902,7 @@ export type AntigravityAuthMethod = typeof AntigravityAuthMethod.Type;
 export const AntigravitySettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     authMethod: AntigravityAuthMethod.pipe(

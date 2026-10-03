@@ -2341,7 +2341,6 @@ function FontFamilySettingsRow({
 const AUTO_SETTLE_OPTIONS = [
   { value: "off", label: "Off" },
   { value: "all", label: "All threads" },
-  { value: "without-pr", label: "Threads without a PR" },
 ] as const;
 
 type AutoSettleMode = (typeof AUTO_SETTLE_OPTIONS)[number]["value"];
@@ -2954,13 +2953,9 @@ export function GeneralSettingsPanel() {
     "sidebarAutoSettleAfterDays",
     "sidebarAutoSettleScope",
   ]);
-  const supportsAutoSettleScope = connectedEnvironments.every(
-    (environment) =>
-      environment.serverConfig?.environment.capabilities.threadAutoSettlementScope === true,
-  );
   const autoSettleAfterDays = settings.sidebarAutoSettleAfterDays;
   const autoSettleScope = settings.sidebarAutoSettleScope;
-  const autoSettleMode = autoSettleAfterDays === null ? "off" : autoSettleScope;
+  const autoSettleMode: AutoSettleMode = autoSettleAfterDays === null ? "off" : "all";
   const autoSettleChanged =
     autoSettleAfterDays !== DEFAULT_INACTIVITY_SETTINGS.sidebarAutoSettleAfterDays ||
     autoSettleScope !== DEFAULT_INACTIVITY_SETTINGS.sidebarAutoSettleScope;
@@ -3189,44 +3184,9 @@ export function GeneralSettingsPanel() {
 
             <SettingsRow
               serverScoped
-              settingKeys={["sidebarAutoSettlePinnedThreads"]}
-              {...searchableSetting("auto-settle-pinned-threads")}
-              description="Pinned threads stay active by default. Turn this on to let pins settle like any other thread."
-              resetAction={
-                settings.sidebarAutoSettlePinnedThreads !==
-                DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettlePinnedThreads ? (
-                  <SettingResetButton
-                    label="auto-settle pinned threads"
-                    onClick={() =>
-                      updateSettings({
-                        sidebarAutoSettlePinnedThreads:
-                          DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettlePinnedThreads,
-                      })
-                    }
-                  />
-                ) : null
-              }
-              control={
-                <ScopedSwitch
-                  settingKeys={["sidebarAutoSettlePinnedThreads"]}
-                  checked={settings.sidebarAutoSettlePinnedThreads}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ sidebarAutoSettlePinnedThreads: Boolean(checked) })
-                  }
-                  aria-label="Auto-settle pinned threads"
-                />
-              }
-            />
-
-            <SettingsRow
-              serverScoped
               settingKeys={["sidebarAutoSettleAfterDays", "sidebarAutoSettleScope"]}
               {...searchableSetting("auto-settle-inactive-threads")}
-              description={
-                autoSettleMode === "without-pr"
-                  ? "Sidebar threads without a PR settle automatically after this long."
-                  : "Sidebar threads with no activity for this long settle automatically."
-              }
+              description="Sidebar threads with no activity for this long settle automatically."
               resetAction={
                 autoSettleChanged ? (
                   <SettingResetButton
@@ -3250,11 +3210,7 @@ export function GeneralSettingsPanel() {
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>
                     {AUTO_SETTLE_OPTIONS.map(({ value, label }) => (
-                      <SelectItem
-                        key={value}
-                        value={value}
-                        disabled={value === "without-pr" && !supportsAutoSettleScope}
-                      >
+                      <SelectItem key={value} value={value}>
                         {label}
                       </SelectItem>
                     ))}

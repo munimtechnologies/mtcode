@@ -2083,7 +2083,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           assert.isTrue(local.hasWorkingTreeChanges);
           assert.deepEqual(local.workingTree.files, [
             { path: "feature.txt", insertions: 1, deletions: 0 },
-            { path: "untracked.txt", insertions: 0, deletions: 0 },
+            // MT Code counts an untracked file's lines as insertions.
+            { path: "untracked.txt", insertions: 1, deletions: 0 },
           ]);
 
           commands.length = 0;

@@ -37,6 +37,7 @@ import {
   acpSubagentStatusBlocksTurnSettlement,
   acpSupportsImagePrompts,
 } from "./AcpAdapterV2.ts";
+import type { AcpAdapterV2RuntimeInput } from "./AcpAdapterV2.ts";
 import {
   makeGrokAcpAdapterFlavor,
   makeGrokAdapterV2,
@@ -461,6 +462,81 @@ describe("Grok launch permission mode", () => {
         yield* launchArgs(policy("full-access", { approvalPolicy: "on-request" })),
         asking,
       );
+    }),
+  );
+});
+
+describe("Grok Computer Use (mt-desktop) injection", () => {
+  const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
+    prefix: "t3-grok-v2-desktop-mcp-",
+  }).pipe(Layer.provide(NodeServices.layer));
+  const testLayer = Layer.mergeAll(NodeServices.layer, IdAllocator.layer, serverConfigLayer);
+
+  // Opens a session and returns the MCP servers handed to the Grok runtime;
+  // the runtime dies after recording, so no process starts.
+  const runtimeMcpServers = (userDefinesDesktopMcp: boolean) =>
+    Effect.gen(function* () {
+      let runtimeInput: AcpAdapterV2RuntimeInput | undefined;
+      const lookups: Array<string | undefined> = [];
+      const instanceId = ProviderInstanceId.make("grok-desktop-mcp-test");
+      const adapter = makeGrokAdapterV2({
+        instanceId,
+        settings: LAUNCH_TEST_GROK_SETTINGS,
+        environment: {},
+        hostPlatform: "darwin",
+        childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+        crypto: yield* Crypto.Crypto,
+        fileSystem: yield* FileSystem.FileSystem,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig: yield* ServerConfig.ServerConfig,
+        selfInvocation: yield* resolveSelfInvocation(),
+        resolveDesktopMcp: () =>
+          Effect.succeed({
+            path: "/opt/mt/munim-computer-use",
+            env: [{ name: "MTCODE_DESKTOP_PROFILE", value: "mtcode" }],
+          }),
+        userDefinesDesktopMcp: (input) =>
+          Effect.sync(() => {
+            lookups.push(input.cwd);
+            return userDefinesDesktopMcp;
+          }),
+        makeRuntime: (input) =>
+          Effect.sync(() => {
+            runtimeInput = input;
+          }).pipe(Effect.andThen(Effect.die("runtime is not started in this test"))),
+      });
+      yield* adapter
+        .openSession({
+          threadId: ThreadId.make("grok-desktop-mcp-test"),
+          providerSessionId: ProviderSessionId.make("grok-desktop-mcp-test"),
+          modelSelection: { instanceId, model: "grok-build" },
+          runtimePolicy: ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            cwd: process.cwd(),
+          }),
+        })
+        .pipe(Effect.scoped, Effect.exit);
+      assert.deepEqual(lookups, [process.cwd()]);
+      return runtimeInput?.mcpServers ?? [];
+    }).pipe(Effect.provide(testLayer));
+
+  it.effect("hands Grok the mt-desktop stdio server when Computer Use is enabled", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(yield* runtimeMcpServers(false), [
+        {
+          name: "mt-desktop",
+          command: "/opt/mt/munim-computer-use",
+          args: [],
+          env: [{ name: "MTCODE_DESKTOP_PROFILE", value: "mtcode" }],
+        },
+      ]);
+    }),
+  );
+
+  it.effect("leaves mt-desktop to the user's own Grok config when it defines one", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(yield* runtimeMcpServers(true), []);
     }),
   );
 });

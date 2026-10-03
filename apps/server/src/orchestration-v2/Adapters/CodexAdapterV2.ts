@@ -118,6 +118,8 @@ import {
 } from "../../provider/Layers/codexLaunchArgs.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as MonitorSession from "../../mcp/MonitorSession.ts";
+import { makeCodexMonitorRuntime } from "./CodexMonitorRuntime.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -1539,6 +1541,8 @@ export const createCodexAdapterV2 = (
     // MT Code: Computer Use + Computer History need server settings; tests and
     // narrow layers that omit them simply run without the fork extras.
     const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+    // MT Code: monitor_start / monitor_unsubscribe route to the session's monitor runtime.
+    const monitorSessions = yield* Effect.serviceOption(MonitorSession.MonitorSessions);
     const mtCodeHooks = Option.isSome(serverSettings)
       ? {
           resolveDesktopMcp: yield* makeResolveEnabledDesktopMcp().pipe(
@@ -1561,6 +1565,7 @@ export const createCodexAdapterV2 = (
       serverConfig,
       continuationRequests,
       ...mtCodeHooks,
+      ...(Option.isSome(monitorSessions) ? { monitorSessions: monitorSessions.value } : {}),
       ...hooks,
     });
   });
@@ -1622,6 +1627,8 @@ export interface CodexAdapterV2Options {
   readonly resolveDesktopMcp?: () => Effect.Effect<DesktopMcpLaunch | undefined>;
   /** MT Code: Computer History block injected into every turn, when enabled. */
   readonly loadComputerHistoryContext?: Effect.Effect<string | undefined>;
+  /** MT Code: registry the Monitor MCP toolkit resolves provider sessions through. */
+  readonly monitorSessions?: MonitorSession.MonitorSessions["Service"];
   /**
    * Sink for post-settle background command completions so the orchestrator
    * can start a continuation run. Optional: adapters that omit it keep
@@ -1710,21 +1717,35 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             ),
           );
         const initialized = yield* Ref.make(false);
+        const codexUserAgent = yield* Ref.make<string | undefined>(undefined);
         const ensureInitialized = Effect.gen(function* () {
           const alreadyInitialized = yield* Ref.get(initialized);
           if (alreadyInitialized) {
             return;
           }
 
-          yield* client.request("initialize", {
+          const initializeResponse = yield* client.request("initialize", {
             // Codex uses the client name as the request originator, so sessions
             // identify themselves exactly like the provider probe.
             clientInfo: buildCodexInitializeParams().clientInfo,
             capabilities: CODEX_CLIENT_CAPABILITIES,
           });
+          yield* Ref.set(codexUserAgent, initializeResponse.userAgent);
           yield* client.notify("initialized", undefined);
           yield* Ref.set(initialized, true);
         });
+        // MT Code: background monitors started through the Monitor MCP toolkit.
+        const monitors = yield* makeCodexMonitorRuntime({
+          driver: CODEX_PROVIDER,
+          client: {
+            exec: (params) => client.request("command/exec", params),
+            terminate: (processId) => client.request("command/exec/terminate", { processId }),
+          },
+          userAgent: Ref.get(codexUserAgent),
+          monitorSessions: adapterOptions.monitorSessions,
+          continuationRequests,
+        });
+        yield* client.handleServerNotification("command/exec/outputDelta", monitors.onOutputDelta);
         const now = yield* DateTime.now;
         const session = providerSession({
           providerSessionId: input.providerSessionId,
@@ -5460,6 +5481,9 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           // against a long-delayed resume. Codex emits no resume-expected
           // signal to pin on.
           hasPendingBackgroundWork: Effect.gen(function* () {
+            if (yield* monitors.hasRunningMonitors) {
+              return true;
+            }
             for (const items of (yield* Ref.get(runningCommandItemsByTurn)).values()) {
               if (items.size > 0) {
                 return true;
@@ -5670,6 +5694,16 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                 else next.delete(threadId);
                 return next;
               });
+              yield* monitors.noteTurn({
+                route: {
+                  threadId: turnInput.threadId,
+                  providerThreadId: turnInput.providerThread.id,
+                  cwd: turnCwd ?? null,
+                  sandboxPolicy: turnStartParams.sandboxPolicy,
+                },
+                message: turnInput.message,
+                mcpCredentialId: mcpSession?.providerSessionId,
+              });
               const started = yield* client.request("turn/start", turnStartParams);
               const nativeTurnId = started.turn.id;
               const startedAt = codexTimestamp(started.turn.startedAt);
@@ -5718,6 +5752,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               }
 
               const codexInput = yield* toCodexInput(turnInput);
+              yield* monitors.noteSteer({
+                threadId: turnInput.threadId,
+                message: turnInput.message,
+              });
               yield* client.request("turn/steer", {
                 expectedTurnId: activeTurn.nativeTurnId,
                 input: codexInput,
@@ -5754,6 +5792,8 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             ),
           interruptTurn: (turnInput) =>
             Effect.gen(function* () {
+              // MT Code: Stop also ends the thread's background monitors.
+              yield* monitors.stopThread(turnInput.providerThread.id);
               const [activeTurnContexts, settledTurnContexts] =
                 yield* turnTerminalizationPermit.withPermits(1)(
                   Effect.gen(function* () {

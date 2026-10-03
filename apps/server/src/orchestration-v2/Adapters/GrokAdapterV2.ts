@@ -18,12 +18,19 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
+import {
+  type DesktopMcpLaunch,
+  makeResolveEnabledDesktopMcp,
+} from "../../desktopControl/desktopMcpLaunch.ts";
+import { makeGrokUserDefinesDesktopMcp } from "../../desktopControl/desktopMcpUserConfig.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import {
   applyGrokAcpModelSelection,
@@ -121,6 +128,16 @@ export interface GrokAdapterV2Options {
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   readonly testHooks?: Parameters<typeof makeAcpAdapterV2>[0]["testHooks"];
+  /**
+   * MT Code: resolves the munim-computer-use (`mt-desktop`) MCP server when
+   * Computer Use is enabled; re-read per session.
+   */
+  readonly resolveDesktopMcp?: () => Effect.Effect<DesktopMcpLaunch | undefined>;
+  /** MT Code: the user's own Grok `config.toml` defining `mt-desktop` wins over injection. */
+  readonly userDefinesDesktopMcp?: (input: {
+    readonly cwd?: string;
+    readonly environment: NodeJS.ProcessEnv;
+  }) => Effect.Effect<boolean>;
   readonly makeRuntime?: (
     input: AcpAdapterV2RuntimeInput,
   ) => Effect.Effect<
@@ -329,8 +346,42 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
   };
 }
 
+/**
+ * MT Code: Computer Use (`mt-desktop`) for Grok sessions; Grok launches stdio
+ * MCP servers from `session/new`, unless its own config defines the name.
+ */
+function grokResolveDesktopMcp(options: GrokAdapterV2Options) {
+  const { resolveDesktopMcp, userDefinesDesktopMcp } = options;
+  if (resolveDesktopMcp === undefined) return undefined;
+  return (input: { readonly cwd: string }) =>
+    Effect.gen(function* () {
+      const desktopMcp = yield* resolveDesktopMcp();
+      if (desktopMcp === undefined) return undefined;
+      if (
+        userDefinesDesktopMcp !== undefined &&
+        (yield* userDefinesDesktopMcp({ cwd: input.cwd, environment: options.environment }))
+      ) {
+        return undefined;
+      }
+      return desktopMcp;
+    });
+}
+
+/** MT Code: Computer Use hooks; narrow layers without server settings skip them. */
+const makeGrokDesktopMcpHooks = Effect.gen(function* () {
+  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+  if (Option.isNone(serverSettings)) return {};
+  return {
+    resolveDesktopMcp: yield* makeResolveEnabledDesktopMcp().pipe(
+      Effect.provideService(ServerSettings.ServerSettingsService, serverSettings.value),
+    ),
+    userDefinesDesktopMcp: yield* makeGrokUserDefinesDesktopMcp(),
+  };
+});
+
 export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
   const flavor = makeGrokAcpAdapterFlavor(options);
+  const resolveDesktopMcp = grokResolveDesktopMcp(options);
   return makeAcpAdapterV2({
     instanceId: options.instanceId,
     flavor,
@@ -344,6 +395,7 @@ export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
       ? {}
       : { continuationRequests: options.continuationRequests }),
     ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
+    ...(resolveDesktopMcp === undefined ? {} : { resolveDesktopMcp }),
   });
 }
 
@@ -373,6 +425,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
       const serverConfig = yield* ServerConfig.ServerConfig;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
+      const desktopMcpHooks = yield* makeGrokDesktopMcpHooks;
       return makeGrokAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
@@ -385,6 +438,7 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
         serverConfig,
         selfInvocation,
         continuationRequests,
+        ...desktopMcpHooks,
         nativeLogging: (threadId) =>
           makeNativeLogger({
             nativeEventLogger: providerEventLoggers.native,
@@ -432,6 +486,7 @@ const layer: Layer.Layer<
     const serverConfig = yield* ServerConfig.ServerConfig;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
     const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
+    const desktopMcpHooks = yield* makeGrokDesktopMcpHooks;
     return makeGrokAdapterV2({
       instanceId: GROK_DEFAULT_INSTANCE_ID,
       settings: DEFAULT_GROK_SETTINGS,
@@ -444,6 +499,7 @@ const layer: Layer.Layer<
       serverConfig,
       selfInvocation,
       continuationRequests,
+      ...desktopMcpHooks,
       nativeLogging: (threadId) =>
         makeNativeLogger({
           nativeEventLogger: providerEventLoggers.native,

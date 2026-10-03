@@ -23,6 +23,11 @@ import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
 import {
+  type DesktopMcpLaunch,
+  makeResolveEnabledDesktopMcp,
+} from "../../desktopControl/desktopMcpLaunch.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import {
   normalizeAcpRegistryCommands,
   normalizeAcpRegistryLiveConfiguration,
   normalizeAcpRegistryWebUrl,
@@ -67,6 +72,12 @@ export interface AcpRegistryAdapterV2Options {
   readonly runtimeCoordinator?: AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator["Service"];
   readonly serverConfig: ServerConfig.ServerConfig["Service"];
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
+  /**
+   * MT Code: resolves the munim-computer-use (`mt-desktop`) MCP server when
+   * Computer Use is enabled; re-read per session. Registry agents (Devin and
+   * the rest) launch stdio MCP servers from `session/new`.
+   */
+  readonly resolveDesktopMcp?: () => Effect.Effect<DesktopMcpLaunch | undefined>;
   readonly makeRuntime?: (
     input: AcpAdapterV2RuntimeInput,
   ) => Effect.Effect<
@@ -255,6 +266,9 @@ export function makeAcpRegistryAdapterV2(options: AcpRegistryAdapterV2Options) {
         }
       : {}),
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
+    ...(options.resolveDesktopMcp === undefined
+      ? {}
+      : { resolveDesktopMcp: options.resolveDesktopMcp }),
   });
 }
 
@@ -290,6 +304,13 @@ export const AcpRegistryAdapterV2Driver: ProviderAdapterDriver<
       const runtimeCoordinator = yield* Effect.serviceOption(
         AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator,
       );
+      // MT Code: Computer Use needs server settings; narrow layers omit it.
+      const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+      const resolveDesktopMcp = Option.isSome(serverSettings)
+        ? yield* makeResolveEnabledDesktopMcp().pipe(
+            Effect.provideService(ServerSettings.ServerSettingsService, serverSettings.value),
+          )
+        : undefined;
       return makeAcpRegistryAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
@@ -304,6 +325,7 @@ export const AcpRegistryAdapterV2Driver: ProviderAdapterDriver<
           : {}),
         serverConfig,
         selfInvocation,
+        ...(resolveDesktopMcp === undefined ? {} : { resolveDesktopMcp }),
         nativeLogging: (threadId) =>
           makeNativeLogger({
             nativeEventLogger: providerEventLoggers.native,

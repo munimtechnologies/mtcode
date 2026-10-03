@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 
 import {
   type ChatAttachment,
+  DESKTOP_MCP_SERVER_NAME,
   type ModelSelection,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
@@ -63,6 +64,7 @@ import {
   type AcpMcpOverAcpBridge,
 } from "../../mcp/AcpMcpOverAcpBridge.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import type { DesktopMcpLaunch } from "../../desktopControl/desktopMcpLaunch.ts";
 import {
   applyAcpAgentTerminalUpdate,
   acpContentBlockDisplayText,
@@ -497,6 +499,15 @@ export interface AcpAdapterV2Options {
   };
   readonly nativeLogging?: (threadId: ThreadId) => AcpAdapterV2NativeLogging;
   /**
+   * MT Code: resolves the munim-computer-use (`mt-desktop`) MCP server for a
+   * session when Computer Use is enabled, after any user-config-wins check the
+   * flavor applies. Re-read per session so Settings toggles apply without a
+   * restart.
+   */
+  readonly resolveDesktopMcp?: (input: {
+    readonly cwd: string;
+  }) => Effect.Effect<DesktopMcpLaunch | undefined>;
+  /**
    * Shared with ProviderContinuationService so post-settle wake traffic can start
    * a continuation run. Optional: adapters that omit it keep pre-continuation drop
    * / history-only behavior for null-activeTurn updates.
@@ -678,7 +689,41 @@ interface AcpMcpContext {
   readonly authorization?: string;
 }
 
-function acpMcpContext(threadId: ThreadId | null, self: SelfInvocation): AcpMcpContext {
+/** MT Code: Computer Use (`mt-desktop`) as an ACP stdio MCP server entry. */
+export function acpDesktopMcpServers(
+  desktopMcp: DesktopMcpLaunch | undefined,
+): ReadonlyArray<EffectAcpSchema.McpServer> {
+  if (desktopMcp === undefined) return [];
+  return [
+    {
+      name: DESKTOP_MCP_SERVER_NAME,
+      command: desktopMcp.path,
+      args: [],
+      env: [...desktopMcp.env],
+    },
+  ];
+}
+
+/**
+ * MT Code: the t3-code context plus the session's `mt-desktop` entry. Stdio is
+ * every ACP agent's baseline transport, so it also rides alongside MCP-over-ACP
+ * servers; with none, the agent falls back to `servers`, which carries it.
+ */
+function acpMcpContext(
+  threadId: ThreadId | null,
+  self: SelfInvocation,
+  desktopServers: ReadonlyArray<EffectAcpSchema.McpServer> = [],
+): AcpMcpContext {
+  const context = acpT3McpContext(threadId, self);
+  if (desktopServers.length === 0) return context;
+  return {
+    ...context,
+    servers: [...context.servers, ...desktopServers],
+    acpServers: context.acpServers.length === 0 ? [] : [...context.acpServers, ...desktopServers],
+  };
+}
+
+function acpT3McpContext(threadId: ThreadId | null, self: SelfInvocation): AcpMcpContext {
   if (threadId === null) return { servers: [], acpServers: [] };
   const session = McpProviderSession.readMcpProviderSession(threadId);
   if (session === undefined) {
@@ -722,8 +767,12 @@ function acpMcpServers(
   return acpMcpContext(threadId, self).servers;
 }
 
-function acpMcpActivation(threadId: ThreadId | null, self: SelfInvocation) {
-  const context = acpMcpContext(threadId, self);
+function acpMcpActivation(
+  threadId: ThreadId | null,
+  self: SelfInvocation,
+  desktopServers: ReadonlyArray<EffectAcpSchema.McpServer> = [],
+) {
+  const context = acpMcpContext(threadId, self, desktopServers);
   return { mcpServers: context.servers, acpMcpServers: context.acpServers };
 }
 
@@ -1432,6 +1481,13 @@ export function makeAcpAdapterV2(
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
+        // MT Code: Computer Use (`mt-desktop`) for every runtime this session
+        // spawns, loads, or forks.
+        const desktopMcpServers = acpDesktopMcpServers(
+          options.resolveDesktopMcp === undefined
+            ? undefined
+            : yield* options.resolveDesktopMcp({ cwd: input.runtimePolicy.cwd ?? process.cwd() }),
+        );
         // Persisted ACP threads from before item identity v2 retain their old
         // deterministic ids. Fresh threads scope native ids by instance so
         // separately configured agents cannot collide.
@@ -2011,7 +2067,7 @@ export function makeAcpAdapterV2(
           onTermination: AcpAdapterV2RuntimeInput["onTermination"] = () =>
             handleRuntimeTerminationAtGeneration(runtimeGeneration),
         ): AcpAdapterV2RuntimeInput => {
-          const mcpContext = acpMcpContext(threadId, self);
+          const mcpContext = acpMcpContext(threadId, self, desktopMcpServers);
           return {
             cwd: input.runtimePolicy.cwd ?? process.cwd(),
             runtimePolicy: input.runtimePolicy,
@@ -6092,7 +6148,7 @@ export function makeAcpAdapterV2(
           if (initialFailure !== undefined) {
             return yield* initialFailure;
           }
-          const activationOptions = acpMcpActivation(threadId, self);
+          const activationOptions = acpMcpActivation(threadId, self, desktopMcpServers);
           prepareTerminalEnvironment(threadId, sessionId);
           const activated = canLoadSession
             ? yield* runtime.loadSession(sessionId, activationOptions)
@@ -7667,7 +7723,11 @@ export function makeAcpAdapterV2(
                     prepareTerminalEnvironment(snapshotInput.providerThread.appThreadId, sessionId);
                     const activated = yield* runtime.loadSession(
                       sessionId,
-                      acpMcpActivation(snapshotInput.providerThread.appThreadId, self),
+                      acpMcpActivation(
+                        snapshotInput.providerThread.appThreadId,
+                        self,
+                        desktopMcpServers,
+                      ),
                     );
                     rememberTerminalEnvironment(
                       activated.sessionId,
@@ -7830,7 +7890,7 @@ export function makeAcpAdapterV2(
                   prepareTerminalEnvironment(forkInput.targetThreadId);
                   const forked = yield* runtime.forkSession(
                     sourceSessionId,
-                    acpMcpActivation(forkInput.targetThreadId, self),
+                    acpMcpActivation(forkInput.targetThreadId, self, desktopMcpServers),
                   );
                   rememberTerminalEnvironment(forked.sessionId, forkInput.targetThreadId);
                   yield* Ref.set(activeSessionId, forked.sessionId);
