@@ -181,11 +181,19 @@ swap_install() {
     if codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_STAGING" >/dev/null 2>&1; then
       echo "Mac signed: $SIGN_IDENTITY"
     else
-      echo "Mac signing failed — permission prompts will return on each rebuild" >&2
+      UNSIGNED_REASON="Mac signing failed (is the login keychain locked?)"
     fi
   else
-    echo "no Developer ID identity found — leaving the ad-hoc signature" >&2
+    UNSIGNED_REASON="no Developer ID identity found"
   fi
+  # An ad-hoc build runs as "Electron" with a per-build code hash, so macOS
+  # forgets every permission grant and prompts again. Keep the signed app that
+  # is already installed instead.
+  if [[ -n "${UNSIGNED_REASON:-}" && "${T3_ALLOW_UNSIGNED_MAC_INSTALL:-}" != "1" ]]; then
+    rm -rf "$APP_STAGING"
+    return 1
+  fi
+  [[ -n "${UNSIGNED_REASON:-}" ]] && echo "$UNSIGNED_REASON — installing ad-hoc build anyway" >&2
 
   xattr -dr com.apple.quarantine "$APP_STAGING" 2>/dev/null || true
 
@@ -268,7 +276,11 @@ if [[ -z "$APP" ]]; then
   fail "no .app in $DMG"
 fi
 
-swap_install "$APP"
+if ! swap_install "$APP"; then
+  hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force || true
+  relaunch_t3 || true
+  fail "$UNSIGNED_REASON — kept the installed app; permission grants would not survive an ad-hoc build (T3_ALLOW_UNSIGNED_MAC_INSTALL=1 overrides)"
+fi
 hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force || true
 
 relaunch_t3

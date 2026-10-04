@@ -48,6 +48,13 @@ personal_mt_resolve_version() {
   published=$(personal_mt_published_version)
   if [[ -n "$published" ]]; then
     candidate=$(personal_mt_max_version "$candidate" "$published")
+  elif [[ "${T3_MT_ALLOW_OFFLINE_VERSION:-}" != "1" ]]; then
+    # No published version means gh could not reach GitHub (a locked keychain
+    # under launchd at night, or no network). The fallback is the stale
+    # package.json version: on 2026-10-04 that built and installed 0.0.46 on
+    # every machine. Refuse instead.
+    echo "could not read the published MT Code version from GitHub; refusing to fall back to apps/desktop/package.json ($pkg). Set T3_MT_ALLOW_OFFLINE_VERSION=1 to override." >&2
+    return 1
   fi
 
   # A deliberate jump, e.g. 0.0.99 -> 0.1.0: T3_MT_RELEASE_VERSION=0.1.0 on the
