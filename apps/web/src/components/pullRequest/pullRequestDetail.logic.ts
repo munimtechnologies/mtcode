@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import {
   PullRequestDetail,
+  PullRequestOperationError,
   pullRequestHostOf,
   type PullRequestAction,
   type PullRequestActor,
@@ -26,6 +27,8 @@ import {
   type VcsRef,
 } from "@t3tools/contracts";
 import {
+  legacyThreadPullRequestKey,
+  resolveThreadCurrentPullRequestLink,
   threadPullRequestKeysEqual,
   visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
@@ -387,6 +390,33 @@ export function pullRequestPanelContext(
     legacy.number === surface.number
     ? "thread"
     : "page";
+}
+
+export function threadPullRequestPanelTarget(thread: {
+  readonly projectId: string;
+  readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
+  readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  readonly branchPullRequest?: ThreadLinkedPullRequest | null | undefined;
+}) {
+  const current = resolveThreadCurrentPullRequestLink(thread.pullRequests ?? []);
+  const legacy = thread.linkedPullRequest;
+  if (
+    current !== null &&
+    legacy != null &&
+    threadPullRequestKeysEqual(current, legacyThreadPullRequestKey(legacy))
+  ) {
+    return legacy;
+  }
+  if (current !== null) {
+    return {
+      projectId: thread.projectId,
+      host: current.host,
+      repository: current.repository,
+      number: current.number,
+      url: current.url,
+    };
+  }
+  return legacy ?? thread.branchPullRequest ?? null;
 }
 
 /** Names where a pull-request task will land, without letting each surface guess independently. */
@@ -1501,6 +1531,12 @@ export function buildAddSelectionToAgentHandoff(input: {
     prompt: bounded(input.request),
     reviewComments: [pullRequestContextComment(input, []), { ...input.comment, text: "" }],
   };
+}
+
+const isPullRequestOperationError = Schema.is(PullRequestOperationError);
+
+export function isPullRequestNotFound(failure: unknown): boolean {
+  return isPullRequestOperationError(failure) && failure.reason === "not-found";
 }
 
 /**
