@@ -43,6 +43,7 @@ import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
+  probeClaudeWorkspaceSnapshot,
 } from "../Layers/ClaudeProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
@@ -74,7 +75,6 @@ import {
   makeClaudeEnvironment,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
-import { discoverClaudeSkills } from "./ClaudeSkills.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -227,22 +227,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         processEnv,
       );
 
-      const workspaceCapabilitiesCache = yield* Cache.make({
-        capacity: 8,
-        timeToLive: CAPABILITIES_PROBE_TTL,
-        lookup: (workspaceCwd: string) =>
-          Effect.all(
-            {
-              probe: probeClaudeCapabilities(effectiveConfig, processEnv, workspaceCwd),
-              skills: discoverClaudeSkills(effectiveConfig, workspaceCwd, processEnv),
-            },
-            { concurrency: 2 },
-          ).pipe(
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-            Effect.provideService(Path.Path, path),
-          ),
-      });
-
       // Start the TTL-gated refresh without delaying provider readiness. The
       // next check observes a remote manifest after the background fetch lands.
       const checkProvider = modelManifest.refreshInBackground.pipe(
@@ -309,16 +293,28 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ),
       );
 
+      const snapshotForCwd = (workspaceCwd: string) =>
+        snapshot.getSnapshot.pipe(
+          Effect.flatMap((machineSnapshot) =>
+            probeClaudeWorkspaceSnapshot(
+              effectiveConfig,
+              machineSnapshot,
+              workspaceCwd,
+              processEnv,
+            ),
+          ),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
+      // The fork's workspace-capabilities RPC reads upstream's per-cwd snapshot.
       const listWorkspaceCapabilities = (workspaceCwd: string) =>
-        Effect.gen(function* () {
-          const { probe, skills } = yield* Cache.get(workspaceCapabilitiesCache, workspaceCwd);
-          if (!probe) {
-            yield* Cache.invalidate(workspaceCapabilitiesCache, workspaceCwd);
-            const currentSnapshot = yield* snapshot.getSnapshot;
-            return { slashCommands: currentSnapshot.slashCommands, skills };
-          }
-          return { slashCommands: probe.slashCommands, skills };
-        });
+        snapshotForCwd(workspaceCwd).pipe(
+          Effect.orElseSucceed(() => undefined),
+          Effect.flatMap((workspace) =>
+            workspace ? Effect.succeed(workspace) : snapshot.getSnapshot,
+          ),
+          Effect.map(({ slashCommands, skills }) => ({ slashCommands, skills })),
+        );
       // Same rules as Codex: serialised on the config directory that holds the
       // login, one request id kept until Claude answers (a cooldown or rate
       // limit is an answer), then a re-probe.
@@ -393,17 +389,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         enabled,
         snapshot,
         invalidateCaches: Cache.invalidateAll(capabilitiesProbeCache),
-        snapshotForCwd: (cwd: string) =>
-          !effectiveConfig.enabled
-            ? snapshot.getSnapshot
-            : Effect.all([
-                snapshot.getSnapshot,
-                discoverClaudeSkills(effectiveConfig, cwd, processEnv),
-              ]).pipe(
-                Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
-                Effect.provideService(FileSystem.FileSystem, fileSystem),
-                Effect.provideService(Path.Path, path),
-              ),
+        snapshotForCwd,
         orchestrationAdapter,
         textGeneration,
         listWorkspaceCapabilities,
