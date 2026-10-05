@@ -1,7 +1,15 @@
 // Used by second-instance argv and macOS open-url to find the custom-scheme
 // URL the already-running desktop window should load.
+// Only the app's own host: the protocol handler serves nothing else, so loading
+// e.g. a `<scheme>://threads/...` thread link (same scheme in non-MT builds,
+// handled by DesktopDeepLink) or any other host would blank the main window.
 export function isDesktopProtocolUrl(value: string, scheme: string): boolean {
-  return value.startsWith(`${scheme}://`);
+  if (!value.startsWith(`${scheme}://`)) return false;
+  try {
+    return new URL(value).host === "app";
+  } catch {
+    return false;
+  }
 }
 
 export function isDesktopClerkOAuthCallback(value: string, scheme: string): boolean {
