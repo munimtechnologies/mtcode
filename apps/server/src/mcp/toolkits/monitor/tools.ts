@@ -1,7 +1,7 @@
 import * as Context from "effect/Context";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
-import { McpSchema, Tool, Toolkit } from "effect/unstable/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as MonitorSession from "../../MonitorSession.ts";
 

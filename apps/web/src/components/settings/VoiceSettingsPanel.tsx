@@ -12,7 +12,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect, useState } from "react";
 
 import { usePrimaryEnvironment } from "../../state/environments";

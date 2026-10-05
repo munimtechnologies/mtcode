@@ -5,7 +5,7 @@ import {
   type ComputerViewStreamEvent,
 } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
@@ -103,7 +103,7 @@ export function createComputerViewEnvironmentAtoms<R, E>(
       idleTtlMs: 0,
       subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.computerViewStream>) =>
         subscribe(WS_METHODS.computerViewStream, input).pipe(
-          Stream.scan(EMPTY_COMPUTER_VIEW_STATE, applyComputerViewStreamEvent),
+          Stream.scan(() => EMPTY_COMPUTER_VIEW_STATE, applyComputerViewStreamEvent),
         ),
     }),
     sendInput: createEnvironmentRpcCommand(runtime, {

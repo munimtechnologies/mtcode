@@ -9,8 +9,8 @@ import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hos
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 /** Bundle / window names electron-builder ships for stable and nightly. */
 // MT names come first so a Munim install is found before any legacy T3 bundle

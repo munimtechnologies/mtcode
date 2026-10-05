@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { McpSchema, Tool } from "effect/unstable/ai";
+import { McpSchema, Tool } from "effect/ai";
 
 import { ComputerToolkit } from "./computers/tools.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit } from "./preview/tools.ts";

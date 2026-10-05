@@ -12,7 +12,7 @@ import type { ServerProviderUsageLimits, ServerProviderUsageWindow } from "@t3to
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import {
   readLocalCursorExportAuth,

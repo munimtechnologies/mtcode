@@ -5,8 +5,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as HttpClient from "effect/http/HttpClient";
+import { ChildProcessSpawner } from "effect/process";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {

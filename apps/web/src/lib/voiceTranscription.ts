@@ -1,6 +1,6 @@
 import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
 import { runPrimaryRawHttp } from "./runtime";

@@ -2,7 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
@@ -208,9 +208,7 @@ describe("DesktopSavedEnvironments", () => {
     withSavedEnvironments(
       Effect.gen(function* () {
         const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        yield* seedSavedEnvironmentRegistry(
-          Encoding.encodeBase64(textEncoder.encode("enc:bearer-token")),
-        );
+        yield* seedSavedEnvironmentRegistry(Base64.encode(textEncoder.encode("enc:bearer-token")));
 
         assert.deepEqual(
           yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
@@ -248,9 +246,7 @@ describe("DesktopSavedEnvironments", () => {
     withSavedEnvironments(
       Effect.gen(function* () {
         const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        yield* seedSavedEnvironmentRegistry(
-          Encoding.encodeBase64(textEncoder.encode("enc:bearer-token")),
-        );
+        yield* seedSavedEnvironmentRegistry(Base64.encode(textEncoder.encode("enc:bearer-token")));
 
         assert.deepEqual(
           yield* savedEnvironments.getSecret(savedRegistryRecord.environmentId),
@@ -267,9 +263,7 @@ describe("DesktopSavedEnvironments", () => {
       Effect.gen(function* () {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        yield* seedSavedEnvironmentRegistry(
-          Encoding.encodeBase64(textEncoder.encode("enc:bearer-token")),
-        );
+        yield* seedSavedEnvironmentRegistry(Base64.encode(textEncoder.encode("enc:bearer-token")));
 
         const error = yield* savedEnvironments
           .getSecret(savedRegistryRecord.environmentId)

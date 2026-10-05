@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { McpSchema, McpServer } from "effect/unstable/ai";
+import { McpSchema, McpServer } from "effect/ai";
 import { McpInvocationContext, requireMcpCapability } from "./McpInvocationContext.ts";
 import { MonitorToolkitRegistrationLive } from "./McpHttpServer.ts";
 import * as MonitorSession from "./MonitorSession.ts";

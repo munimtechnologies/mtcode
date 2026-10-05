@@ -4,8 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
-import { HttpClientError } from "effect/unstable/http";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
+import { HttpClientError } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";

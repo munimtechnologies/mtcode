@@ -1,8 +1,8 @@
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import type * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as HttpClient from "effect/http/HttpClient";
+import * as Socket from "effect/socket/Socket";
 
 import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { makeRelayClientTracingLayer } from "@t3tools/shared/relayTracing";

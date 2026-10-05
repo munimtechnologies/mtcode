@@ -17,7 +17,7 @@ import {
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { environmentCatalog } from "~/connection/catalog";

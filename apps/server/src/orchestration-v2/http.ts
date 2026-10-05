@@ -15,8 +15,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import {
   annotateEnvironmentRequest,

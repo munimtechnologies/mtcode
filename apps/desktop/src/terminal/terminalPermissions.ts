@@ -2,7 +2,7 @@ import type { ExternalTerminalId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 export function terminalAutomationApp(terminal: ExternalTerminalId, platform: string) {
   if (platform !== "darwin") return null;

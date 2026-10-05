@@ -33,8 +33,8 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
-import * as Ndjson from "effect/unstable/encoding/Ndjson";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as Ndjson from "effect/encoding/Ndjson";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   buildComputerViewFrame,
