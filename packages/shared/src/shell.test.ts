@@ -875,17 +875,19 @@ effectIt.layer(NodeServices.layer)("resolveWindowsEnvironment", (it) => {
               ].join(";"),
           ),
         ).toEqual({
+          // Persistent PATH leads, then the shell/inherited PATH; known CLI
+          // directories only fill gaps at the end (upstream #8748).
           PATH: [
+            "C:\\Users\\testuser\\AppData\\Local\\Microsoft\\WinGet\\Links",
+            "C:\\Users\\testuser\\AppData\\Local\\cursor-agent",
+            "C:\\Windows\\System32",
             "C:\\Users\\testuser\\AppData\\Roaming\\npm",
             "C:\\Users\\testuser\\AppData\\Local\\Programs\\nodejs",
             "C:\\Users\\testuser\\AppData\\Local\\Volta\\bin",
             "C:\\Users\\testuser\\AppData\\Local\\pnpm",
-            "C:\\Users\\testuser\\AppData\\Local\\cursor-agent",
             "C:\\Users\\testuser\\.local\\bin",
             "C:\\Users\\testuser\\.bun\\bin",
             "C:\\Users\\testuser\\scoop\\shims",
-            "C:\\Users\\testuser\\AppData\\Local\\Microsoft\\WinGet\\Links",
-            "C:\\Windows\\System32",
           ].join(";"),
         });
       }),
