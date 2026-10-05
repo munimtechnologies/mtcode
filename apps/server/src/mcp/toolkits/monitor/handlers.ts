@@ -9,18 +9,21 @@ const invoke = Effect.fn("MonitorToolkit.invoke")(function* (
 ) {
   const scope = yield* McpInvocationContext.McpInvocationContext;
   const sessions = yield* MonitorSession.MonitorSessions;
-  if (!scope.capabilities.has("monitor"))
+  if (!scope.capabilities.has("monitor") || scope.thread === undefined)
     return yield* new MonitorSession.MonitorCapabilityError({});
-  return yield* sessions.invoke(scope.providerSessionId, operation, processId);
+  return yield* sessions.invoke(scope.thread.providerSessionId, operation, processId);
 });
 
 export const MonitorToolkitHandlersLive = MonitorToolkit.toLayer({
   monitor_start: ({ command }) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
-      if (!scope.capabilities.has("monitor"))
+      if (!scope.capabilities.has("monitor") || scope.thread === undefined)
         return yield* new MonitorSession.MonitorCapabilityError({});
-      return yield* (yield* MonitorSession.MonitorSessions).start(scope.providerSessionId, command);
+      return yield* (yield* MonitorSession.MonitorSessions).start(
+        scope.thread.providerSessionId,
+        command,
+      );
     }),
   monitor_unsubscribe: ({ processId }) => invoke("unsubscribe", processId),
 });

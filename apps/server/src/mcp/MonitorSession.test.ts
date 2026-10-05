@@ -8,13 +8,18 @@ import { MonitorToolkitRegistrationLive } from "./McpHttpServer.ts";
 import * as MonitorSession from "./MonitorSession.ts";
 import { CodexBackgroundTasks } from "../provider/Layers/CodexBackgroundTasks.ts";
 
-const scope = {
-  environmentId: EnvironmentId.make("monitor-test"),
+const thread = {
   threadId: ThreadId.make("monitor-test"),
   providerSessionId: "monitor-session",
   providerInstanceId: ProviderInstanceId.make("codex"),
+};
+const scope = {
+  environmentId: EnvironmentId.make("monitor-test"),
   capabilities: new Set(["monitor"] as const),
   issuedAt: 1,
+  requestNamespace: "thread:monitor-test",
+  thread,
+  client: undefined,
 };
 const client = McpSchema.McpServerClient.of({
   clientId: 1,
@@ -43,7 +48,7 @@ it.effect("MCP subscription enables wakes and unsubscribe discards queued events
       source: "unifiedExecStartup",
       command: "watch-ci",
     });
-    yield* (yield* MonitorSession.MonitorSessions).register(scope.providerSessionId, {
+    yield* (yield* MonitorSession.MonitorSessions).register(scope.thread.providerSessionId, {
       start: () =>
         Effect.sync(() => {
           tasks.subscribe("42");
@@ -80,7 +85,7 @@ it.effect("MCP tools reject other sessions, missing capability, and a closed run
     let subscribed = false;
     const call = server.callTool({ name: "monitor_start", arguments: { command: ["watch-ci"] } });
     yield* Effect.gen(function* () {
-      yield* (yield* MonitorSession.MonitorSessions).register(scope.providerSessionId, {
+      yield* (yield* MonitorSession.MonitorSessions).register(scope.thread.providerSessionId, {
         start: () =>
           Effect.sync(() => {
             subscribed = true;
@@ -96,7 +101,7 @@ it.effect("MCP tools reject other sessions, missing capability, and a closed run
         (yield* call.pipe(
           Effect.provideService(McpInvocationContext, {
             ...scope,
-            providerSessionId: "other-session",
+            thread: { ...thread, providerSessionId: "other-session" },
           }),
         )).isError,
       ).toBe(true);

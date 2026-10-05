@@ -72,7 +72,14 @@ const handlers = {
   computer_send: Effect.fn("ComputerTask.computerSend")(function* (input) {
     const invocation = yield* McpInvocationContext.McpInvocationContext;
     const threads = yield* ThreadManagementService.ThreadManagementService;
-    const source = yield* readActiveThread(threads, invocation.threadId);
+    if (invocation.thread === undefined) {
+      return yield* new ComputerTaskError({
+        code: "source_unavailable",
+        detail:
+          "computer_send hands off the calling T3 thread, so it needs an agent running inside T3 Code.",
+      });
+    }
+    const source = yield* readActiveThread(threads, invocation.thread.threadId);
     if (Option.isNone(source)) {
       return yield* new ComputerTaskError({
         code: "source_unavailable",

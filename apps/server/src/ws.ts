@@ -227,6 +227,7 @@ import { makeProjectTransfer } from "./project/ProjectTransfer.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -1276,6 +1277,7 @@ const makeWsRpcLayer = (
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
+      const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const pullRequestRanking = yield* PullRequestRanking.PullRequestRankingService;
       const upstreamTake = yield* UpstreamTake.UpstreamTakeService;
@@ -1729,6 +1731,7 @@ const makeWsRpcLayer = (
             remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
               remoteOpenTargets.resolveTargets(),
             ),
+            directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
             observability: {
               logsDirectoryPath: config.logsDir,
               localTracingEnabled: true,
@@ -2167,36 +2170,9 @@ const makeWsRpcLayer = (
         [WS_METHODS.serverUninstallAcpRegistryManagedBinary]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverUninstallAcpRegistryManagedBinary,
-            serverSettings
-              .withSettingsSnapshot((settings) =>
-                acpRegistryCatalog.uninstallManagedBinary(
-                  input,
-                  Effect.succeed(
-                    Object.values(settings.providerInstances).some((instance) => {
-                      if (
-                        instance.driver !== "acpRegistry" ||
-                        instance.config === null ||
-                        typeof instance.config !== "object"
-                      ) {
-                        return false;
-                      }
-                      return (instance.config as Record<string, unknown>).agentId === input.agentId;
-                    }),
-                  ),
-                ),
-              )
-              .pipe(
-                Effect.mapError((cause) =>
-                  AcpRegistrySupport.isAcpRegistryError(cause)
-                    ? cause
-                    : new AcpRegistrySupport.AcpRegistryError({
-                        reason: "install_failed",
-                        detail: `Could not read provider settings while checking references for ACP Registry agent ${input.agentId}.`,
-                        cause,
-                      }),
-                ),
-                Effect.mapError(AcpRegistrySupport.toAcpRegistryOperationError),
-              ),
+            acpRegistryCatalog
+              .uninstallManagedBinary(input)
+              .pipe(Effect.mapError(AcpRegistrySupport.toAcpRegistryOperationError)),
             {
               "rpc.aggregate": "server",
               "acp_registry.agent_id": input.agentId,

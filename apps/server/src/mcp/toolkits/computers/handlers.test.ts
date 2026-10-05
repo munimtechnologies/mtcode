@@ -58,11 +58,15 @@ const project: ProjectStore.ProjectRow = {
 
 const invocation = {
   environmentId,
-  threadId: sourceThreadId,
-  providerSessionId: "provider-session-computers",
-  providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities: new Set<never>(),
   issuedAt: 1,
+  requestNamespace: `thread:${sourceThreadId}`,
+  thread: {
+    threadId: sourceThreadId,
+    providerSessionId: "provider-session-computers",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
 };
 
 const client = McpSchema.McpServerClient.of({

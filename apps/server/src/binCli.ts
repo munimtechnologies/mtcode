@@ -15,11 +15,11 @@ import { authCommand } from "./cli/auth.ts";
 import { appCommand } from "./cli/app.ts";
 import { connectCommand } from "./cli/connect.ts";
 import { tryLaunchDesktopApp } from "./cli/desktopLaunch.ts";
-import { pairCommand } from "./cli/pair.ts";
+import { findAliveServerRuntimeCandidates, pairCommand } from "./cli/pair.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { openLiveProjectIfPresent, projectCommand } from "./cli/project.ts";
-import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { updateCommand } from "./cli/update.ts";
 import { uninstallCommand } from "./cli/uninstall.ts";
 import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
@@ -46,6 +46,14 @@ const openProjectViaDesktopOrLiveServer = Effect.fn("openProjectViaDesktopOrLive
     // desktop/server runtime file before we launch/poll.
     if (yield* openLiveProjectIfPresent({ ...flags, clearOnFailure: false })) {
       return true;
+    }
+    // A live server that could not open the project: launching the desktop app
+    // would not help, so let the server command refuse to start over it.
+    const { candidates } = yield* findAliveServerRuntimeCandidates(
+      Option.getOrUndefined(flags.baseDir),
+    );
+    if (candidates.length > 0) {
+      return false;
     }
 
     // No live backend: try the installed desktop app, then attach once it is up.
@@ -110,10 +118,16 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
         ) {
           return;
         }
-        return yield* runServerCommand(flags);
+        return yield* runDefaultServerCommand(flags);
       }),
     ),
     Command.withSubcommands([
+      Command.make("help").pipe(
+        Command.withDescription("Show command help."),
+        Command.withHandler(() =>
+          Effect.fail(new CliError.ShowHelp({ commandPath: ["t3"], errors: [] })),
+        ),
+      ),
       acpMcpBridgeCommand,
       acpMcpCallCommand,
       startCommand,

@@ -139,7 +139,8 @@ export function acpRegistrySnapshotReadiness(
         installed: false,
         version: null,
         status: "warning",
-        message: "Select an ACP Registry agent before starting a thread.",
+        message:
+          "Select an ACP Registry agent or configure a local ACP executable before starting a thread.",
       };
     case "not_found":
       return {
@@ -160,7 +161,10 @@ export function acpRegistrySnapshotReadiness(
         installed: false,
         version: inspection.version,
         status: "error",
-        message: `ACP Registry agent '${inspection.agentId}' requires '${inspection.runner}' on this environment's PATH.`,
+        message:
+          inspection.distribution === "local"
+            ? "Local ACP executable is not available on this environment's PATH."
+            : `ACP executable '${inspection.runner}' is not available on this environment's PATH.`,
       };
     case "unprepared":
       return {
@@ -197,11 +201,14 @@ function baseSnapshot(
     readonly documentationUrl?: string;
     readonly message?: string;
     readonly probe?: AcpRegistryConfigurationProbeResult;
+    readonly probeError?: AcpRegistryOperationError;
   },
 ): ServerProvider {
   const iconUrl =
-    resolveOfficialAcpRegistryIconUrl(input.probe?.probe.icon) ??
-    officialAcpRegistryIconUrlForAgentId(input.settings.agentId);
+    input.settings.source === "local"
+      ? null
+      : (resolveOfficialAcpRegistryIconUrl(input.probe?.probe.icon) ??
+        officialAcpRegistryIconUrlForAgentId(input.settings.agentId));
   return {
     instanceId: input.instanceId,
     driver: DRIVER_KIND,
@@ -226,7 +233,9 @@ function baseSnapshot(
         input.installed &&
         (input.probe
           ? input.probe.probe.authMethods.length > 0
-          : input.settings.agentId.length > 0),
+          : input.settings.source === "local"
+            ? (input.probeError?.authMethods?.length ?? 0) > 0
+            : input.settings.agentId.length > 0),
     },
     ...(input.message ? { message: input.message } : {}),
     models: modelsFromDiscovery(input.probe?.probe, input.settings.customModels),
@@ -634,7 +643,9 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
           const publishEnrichment = (
             Option.isSome(runtimeCoordinator)
               ? runtimeCoordinator.value.runBackgroundProbe(
-                  effectiveConfig.agentId,
+                  effectiveConfig.source === "local"
+                    ? `local:${instanceId}`
+                    : effectiveConfig.agentId,
                   enrichProviderCached(snapshot),
                 )
               : enrichProviderCached(snapshot).pipe(Effect.map(Option.some))
