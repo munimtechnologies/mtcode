@@ -5,6 +5,7 @@ import {
   T3_CODE_DARK_THEME_COLORS,
   getThemeColorsForAppearance,
   MOBILE_DEFAULT_THEME_ID,
+  MT_CODE_THEME_ID,
   MOBILE_THEME_IDS as SHARED_MOBILE_THEME_IDS,
   type MobileThemeId as SharedMobileThemeId,
   type ThemeAppearance,
@@ -14,7 +15,6 @@ import {
   STANDARD_THEME_PREVIEW_COLORS,
   type ThemePreviewColors,
 } from "@t3tools/shared/themePreview";
-import { getProductName } from "./branding";
 
 export const DEFAULT_MOBILE_THEME_ID = MOBILE_DEFAULT_THEME_ID;
 export const MOBILE_THEME_IDS = [...SHARED_MOBILE_THEME_IDS, "material-you"] as const;
@@ -27,9 +27,14 @@ export const MOBILE_THEME_OPTIONS: ReadonlyArray<{
   readonly id: MobileThemeId;
   readonly label: string;
 }> = [
-  { id: DEFAULT_MOBILE_THEME_ID, label: getProductName() },
+  { id: DEFAULT_MOBILE_THEME_ID, label: "T3 Code" },
   { id: "material-you", label: "Material You" },
-  ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as MobileThemeId, label: theme.label })),
+  // The MT Code palette ships to web and desktop only: mobile has no theme
+  // classes for it, and normalizeMobileThemeId would discard the choice.
+  ...BUILT_IN_THEMES.filter((theme) => theme.id !== MT_CODE_THEME_ID).map((theme) => ({
+    id: theme.id as MobileThemeId,
+    label: theme.label,
+  })),
 ];
 
 // Closed set: every key `createMobileThemeVariables` writes. Reads of a

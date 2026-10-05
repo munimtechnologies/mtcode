@@ -6,6 +6,7 @@ import {
   T3_CODE_LIGHT_THEME_COLORS,
   T3_CODE_DARK_THEME_COLORS,
   MOBILE_THEME_IDS,
+  MT_CODE_THEME_ID,
   getThemeColorsForAppearance,
 } from "@t3tools/shared/themePalettes";
 import { readDefaultMobileThemeVariables } from "./mobileTheme.test-support";
@@ -19,6 +20,7 @@ import {
   flattenThemeColor,
   getMobileThemePreviewColors,
   getMobileThemeVariables,
+  MOBILE_THEME_OPTIONS,
   normalizeMobileThemeId,
   normalizeMobileThemeMode,
   resolveMobileThemeIds,
@@ -68,8 +70,15 @@ describe("mobile themes", () => {
     );
   });
 
+  it("does not offer the desktop-only MT Code palette on mobile", () => {
+    expect(MOBILE_THEME_OPTIONS.map((option) => option.id)).not.toContain(MT_CODE_THEME_ID);
+  });
+
   it("shares all built-in desktop palettes", () => {
-    expect(BUILT_IN_THEMES.map((theme) => theme.id)).toEqual(BUILT_IN_THEME_IDS);
+    // The MT Code palette is desktop/web only (see MT_CODE_THEME_ID).
+    expect(
+      BUILT_IN_THEMES.map((theme) => theme.id).filter((id) => id !== MT_CODE_THEME_ID),
+    ).toEqual(BUILT_IN_THEME_IDS);
     for (const themeId of BUILT_IN_THEME_IDS) {
       expect(getMobileThemeVariables(themeId, "light")["--color-screen"]).toMatch(/^#/);
       expect(getMobileThemeVariables(themeId, "dark")["--color-screen"]).toMatch(/^#/);

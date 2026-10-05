@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+// branding reads expo-constants, whose native runtime cannot load under Vitest.
+vi.mock("expo-constants", () => ({ default: { expoConfig: null } }));
 
 import {
   buildPairingUrl,
