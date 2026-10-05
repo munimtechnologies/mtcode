@@ -92,6 +92,9 @@ import Migration0062 from "./Migrations/067_ProjectionThreadTurnQueueRecurrence.
 import Migration0063 from "./Migrations/053_PullRequestFilesViewed.ts";
 import Migration0064 from "./Migrations/055_OrchestrationV2.ts";
 import Migration0065 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
+// Upstream 057/058; registered as the next free fork ids.
+import Migration0066 from "./Migrations/057_ScheduledTaskWebhooks.ts";
+import Migration0067 from "./Migrations/058_WebhookRelayDeliveries.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -169,6 +172,9 @@ export const migrationEntries = [
   [63, "PullRequestFilesViewed", Migration0063],
   [64, "OrchestrationV2", Migration0064],
   [65, "RemoveRedundantProjectionIndexes", Migration0065],
+  // Upstream 057/058 (webhook tasks, #15085/#15086); registered as the next free fork ids.
+  [66, "ScheduledTaskWebhooks", Migration0066],
+  [67, "WebhookRelayDeliveries", Migration0067],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -1975,6 +1975,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     linkState: primaryCloudLinkState,
     managedTunnelActive,
     publishAgentActivity,
+    holdWebhooksWhileOffline,
     operationError,
     reconcileCloudState,
   } = useCloudLinkController();
@@ -2038,6 +2039,25 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     setIsUpdatingPreference(false);
   };
 
+  const updateHoldWebhooks = async (enabled: boolean) => {
+    setIsUpdatingPreference(true);
+    const ok = await reconcileCloudState({
+      managedTunnel: managedTunnelActive,
+      publish: publishAgentActivity,
+      holdWebhooksWhileOffline: enabled,
+    });
+    if (ok) {
+      toastManager.add({
+        type: "success",
+        title: enabled ? "Webhooks held while offline" : "Webhooks no longer held",
+        description: enabled
+          ? "T3 Connect keeps webhook requests for up to 24 hours while this environment is offline."
+          : "Requests to an offline environment now fail. Anything already held is still delivered.",
+      });
+    }
+    setIsUpdatingPreference(false);
+  };
+
   return (
     <>
       {window.desktopBridge ? (
@@ -2081,6 +2101,21 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           />
         }
       />
+      {managedTunnelActive ? (
+        <SettingsRow
+          title={searchableSetting("hold-webhooks-while-offline").title}
+          description="Keep webhook requests for up to 24 hours while this environment is offline, then deliver them. Off: T3 Connect only forwards requests and stores nothing."
+          control={
+            <CloudLinkSwitch
+              ariaLabel="Hold webhook requests while this environment is offline"
+              checked={holdWebhooksWhileOffline}
+              disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
+              disabledReason={sessionDisabledReason}
+              onCheckedChange={(enabled) => void updateHoldWebhooks(enabled)}
+            />
+          }
+        />
+      ) : null}
     </>
   );
 }

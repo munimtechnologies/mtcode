@@ -27,7 +27,9 @@ import {
   CommandId,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
+  AuthOrchestrationOperateScope,
   type AuthEnvironmentScope,
+  type ScheduledTaskListResult,
   AuthSessionId,
   ClientConnectionMethod,
   ClientDeviceType,
@@ -1355,6 +1357,14 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const relayClient = yield* RelayClient.RelayClient;
+      // A webhook URL starts agent runs, so only sessions that may operate
+      // see it; read-only sessions still see the task itself.
+      const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
+        currentSession.scopes.includes(AuthOrchestrationOperateScope)
+          ? result
+          : {
+              tasks: result.tasks.map(({ webhook: _webhook, ...task }) => task),
+            };
       // RpcScopeAuthorization checks each RPC's declared scope before its handler
       // runs. This covers the one RPC whose scope depends on its input.
       const authorizeEffect = <A, E, R>(
@@ -2110,13 +2120,17 @@ const makeWsRpcLayer = (
             },
           ),
         [WS_METHODS.scheduledTasksList]: (_input) =>
-          observeRpcEffect(WS_METHODS.scheduledTasksList, scheduledTasks.list(), {
-            "rpc.aggregate": "scheduledTasks",
-          }),
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksList,
+            scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
+            { "rpc.aggregate": "scheduledTasks" },
+          ),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
-          observeRpcStream(WS_METHODS.scheduledTasksSubscribe, scheduledTasks.subscribeList(), {
-            "rpc.aggregate": "scheduledTasks",
-          }),
+          observeRpcStream(
+            WS_METHODS.scheduledTasksSubscribe,
+            scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
+            { "rpc.aggregate": "scheduledTasks" },
+          ),
         [WS_METHODS.scheduledTasksUpsert]: (input) =>
           observeRpcEffect(WS_METHODS.scheduledTasksUpsert, scheduledTasks.upsert(input), {
             "rpc.aggregate": "scheduledTasks",
@@ -2136,6 +2150,24 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "scheduledTasks",
             "scheduled_task.id": input.id,
           }),
+        [WS_METHODS.scheduledTasksRotateWebhookToken]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksRotateWebhookToken,
+            scheduledTasks.rotateWebhookToken(input),
+            { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+          ),
+        [WS_METHODS.scheduledTasksListWebhookDeliveries]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksListWebhookDeliveries,
+            scheduledTasks.listWebhookDeliveries(input),
+            { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+          ),
+        [WS_METHODS.scheduledTasksGetWebhookDelivery]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.scheduledTasksGetWebhookDelivery,
+            scheduledTasks.getWebhookDelivery(input),
+            { "rpc.aggregate": "scheduledTasks", "scheduled_task.id": input.id },
+          ),
         [WS_METHODS.serverProbe]: (_input) =>
           observeRpcEffect(WS_METHODS.serverProbe, Effect.succeed({}), {
             "rpc.aggregate": "server",
@@ -3566,6 +3598,7 @@ const makeWsRpcLayer = (
               if (
                 input.resource._tag === "attachment" ||
                 input.resource._tag === "native-app-icon" ||
+                input.resource._tag === "tool-output-image" ||
                 // GitHub media names the repository it authenticates through itself.
                 input.resource._tag === "github-media" ||
                 (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))

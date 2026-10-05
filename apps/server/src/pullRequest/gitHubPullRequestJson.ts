@@ -362,6 +362,7 @@ function toReactions(
 
 const RawCommentSchema = Schema.Struct({
   id: Schema.String,
+  lastEditedAt: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(RawActorSchema)),
   body: Schema.optional(Schema.String),
   createdAt: Schema.String,
@@ -372,6 +373,7 @@ const RawCommentSchema = Schema.Struct({
 
 const RawReviewSchema = Schema.Struct({
   id: Schema.String,
+  lastEditedAt: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(RawActorSchema)),
   body: Schema.optional(Schema.String),
   state: Schema.optional(Schema.NullOr(Schema.String)),
@@ -491,6 +493,7 @@ const RawReviewThreadsSchema = Schema.Struct({
                 Schema.Struct({
                   id: Schema.optional(Schema.NullOr(Schema.String)),
                   author: Schema.optional(Schema.NullOr(RawActorSchema)),
+                  lastEditedAt: Schema.optional(Schema.NullOr(Schema.String)),
                   reactionGroups: RawReactionGroupsSchema,
                 }),
               ),
@@ -508,6 +511,7 @@ const RawReviewThreadsSchema = Schema.Struct({
                 Schema.Struct({
                   id: Schema.optional(Schema.NullOr(Schema.String)),
                   author: Schema.optional(Schema.NullOr(RawActorSchema)),
+                  lastEditedAt: Schema.optional(Schema.NullOr(Schema.String)),
                   reactionGroups: RawReactionGroupsSchema,
                 }),
               ),
@@ -886,7 +890,7 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
           comments(first: 10) {
             totalCount
             pageInfo { hasNextPage endCursor }
-            nodes { id author { __typename login avatarUrl } body createdAt url ${REACTION_GROUPS_FIELDS} }
+            nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
           }
         }
       }
@@ -895,9 +899,9 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
       author { __typename login avatarUrl }
       ${REACTION_GROUPS_FIELDS}
       comments(first: ${GRAPHQL_PAGE_SIZE}) {
-        nodes { id author { __typename login avatarUrl } ${REACTION_GROUPS_FIELDS} }
+        nodes { id lastEditedAt author { __typename login avatarUrl } ${REACTION_GROUPS_FIELDS} }
       }
-      reviews(first: ${GRAPHQL_PAGE_SIZE}) { nodes { id author { __typename login avatarUrl } ${REACTION_GROUPS_FIELDS} } }
+      reviews(first: ${GRAPHQL_PAGE_SIZE}) { nodes { id lastEditedAt author { __typename login avatarUrl } ${REACTION_GROUPS_FIELDS} } }
       reviewRequests(first: 50) {
         nodes {
           requestedReviewer {
@@ -943,7 +947,7 @@ export const REVIEW_THREAD_COMMENTS_GRAPHQL_QUERY = `query($owner: String!, $nam
       pullRequest { id }
       comments(first: ${GRAPHQL_PAGE_SIZE}, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id author { __typename login avatarUrl } body createdAt url ${REACTION_GROUPS_FIELDS} }
+        nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
       }
     }
   }
@@ -1619,6 +1623,7 @@ function toComments(raw: {
     author: toActor(comment.author),
     body: comment.body ?? "",
     createdAt: comment.createdAt,
+    editedAt: comment.lastEditedAt ?? null,
     url: trimmed(comment.url),
     path: null,
     reviewState: null,
@@ -1643,6 +1648,7 @@ function toComments(raw: {
         author: toActor(review.author),
         body: review.body ?? "",
         createdAt: submittedAt,
+        editedAt: review.lastEditedAt ?? null,
         url: trimmed(review.url),
         path: null,
         reviewState,
@@ -2178,6 +2184,7 @@ export interface GitHubReviewThreadComments {
   readonly reactions: ReadonlyArray<PullRequestReaction>;
   /** Reactions by node id, for the comments and reviews the `gh` JSON read carries no reaction on. */
   readonly reactionsById: ReadonlyMap<string, ReadonlyArray<PullRequestReaction>>;
+  readonly editedAtById: ReadonlyMap<string, string>;
   /**
    * Everyone on the review: those still asked and those who have already answered. Whoever has
    * reviewed is no longer an outstanding request, so asking only for requests reports nobody on
@@ -2227,6 +2234,7 @@ export interface GitHubReviewThreadPage {
    * for without any. Only ids with a reaction are here; the rest carry none.
    */
   readonly reactionsById: ReadonlyMap<string, ReadonlyArray<PullRequestReaction>>;
+  readonly editedAtById: ReadonlyMap<string, string>;
   readonly reviewers: ReadonlyArray<PullRequestActor>;
   readonly avatarsByLogin: ReadonlyMap<string, string>;
   readonly botLogins: ReadonlySet<string>;
@@ -2257,6 +2265,7 @@ export function reviewThreadConversation(
       author: comment.author,
       body: comment.body,
       createdAt: comment.createdAt,
+      editedAt: comment.editedAt ?? null,
       url: comment.url,
       path: thread.path,
       reviewState: null,
@@ -2356,6 +2365,7 @@ export function decodeReviewThreadsJson(
             author: toActor(comment.author),
             body: comment.body ?? "",
             createdAt: comment.createdAt,
+            editedAt: comment.lastEditedAt ?? null,
             url: trimmed(comment.url),
             reactions: toReactions(comment.reactionGroups, viewer),
           })),
@@ -2422,12 +2432,15 @@ export function decodeReviewThreadsJson(
     });
   }
   const reactionsById = new Map<string, ReadonlyArray<PullRequestReaction>>();
+  const editedAtById = new Map<string, string>();
   for (const node of [
     ...(pullRequest.comments?.nodes ?? []),
     ...(pullRequest.reviews?.nodes ?? []),
   ]) {
     const id = trimmed(node.id);
     if (id === null) continue;
+    const editedAt = trimmed(node.lastEditedAt);
+    if (editedAt !== null) editedAtById.set(id, editedAt);
     const reactions = toReactions(node.reactionGroups, viewer);
     if (reactions.length > 0) reactionsById.set(id, reactions);
   }
@@ -2436,6 +2449,7 @@ export function decodeReviewThreadsJson(
     nextCursor: nextCursorOf(threads.pageInfo),
     reactions: toReactions(pullRequest.reactionGroups, viewer),
     reactionsById,
+    editedAtById,
     reviewers: [...reviewers.values()],
     avatarsByLogin,
     botLogins,
@@ -2472,6 +2486,7 @@ export function decodeReviewThreadCommentsJson(raw: string): Result.Result<
       author: toActor(comment.author),
       body: comment.body ?? "",
       createdAt: comment.createdAt,
+      editedAt: comment.lastEditedAt ?? null,
       url: trimmed(comment.url),
       reactions: toReactions(comment.reactionGroups, viewer),
     })),

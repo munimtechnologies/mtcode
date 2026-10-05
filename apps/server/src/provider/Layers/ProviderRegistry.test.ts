@@ -456,6 +456,11 @@ it.layer(Layer.mergeAll(TestServices, ServerSettingsModule.layerTest(), TestHttp
           ]);
           assert.deepStrictEqual(status.slashCommands.slice(1), [
             {
+              name: "goal",
+              description: "Set a goal Codex keeps working toward until it is done",
+              input: { hint: "Objective, or pause, resume, clear" },
+            },
+            {
               name: "feedback",
               description: "Send this thread and Codex logs to OpenAI",
               input: { hint: "Describe the issue (optional)" },
