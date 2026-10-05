@@ -368,9 +368,8 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
       // removed. Keep the workspace outside the scoped directory and let it
       // go with a retrying removal once the child has gone.
       const workspaceCwd = yield* fs.makeTempDirectory({ prefix: "t3-claude-probe-cwd-" });
-      // Node's own retry rather than an Effect schedule: it.effect runs on a
-      // TestClock, so a scheduled retry would wait for time nobody advances.
-      // If the child still holds the directory after that, an empty temp
+      // Node's own retry rather than an Effect schedule keeps the cleanup
+      // independent of the test clock. If the child still holds the directory after that, an empty temp
       // directory is left behind rather than failing the test for it.
       yield* Effect.addFinalizer(() =>
         Effect.promise(() =>
@@ -383,15 +382,19 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
         ),
       );
 
-      const capabilities = yield* probeClaudeCapabilities(
-        decodeClaudeSettings({ binaryPath: executablePath }),
-        {
-          ...process.env,
-          T3_PROBE_INVOCATION_PATH: invocationPath,
-          T3_PROBE_STALL_USAGE: "true",
-          ENABLE_CLAUDEAI_MCP_SERVERS: "true",
-        },
-        workspaceCwd,
+      // Real clock: only the probe's own usage deadline releases the stalled
+      // request, and a TestClock that nobody advances never reaches it.
+      const capabilities = yield* TestClock.withLive(
+        probeClaudeCapabilities(
+          decodeClaudeSettings({ binaryPath: executablePath }),
+          {
+            ...process.env,
+            T3_PROBE_INVOCATION_PATH: invocationPath,
+            T3_PROBE_STALL_USAGE: "true",
+            ENABLE_CLAUDEAI_MCP_SERVERS: "true",
+          },
+          workspaceCwd,
+        ),
       );
 
       assert.deepEqual(capabilities, {
