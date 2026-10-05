@@ -40,6 +40,10 @@ createInterface({input:process.stdin}).on('line', l => {
         send({id:'tool-2',method:'item/tool/call',params:{tool:'ask_selected_agent',arguments:{prompt:'Ask Claude for the result'}}});
         send({id:'tool-3',method:'item/tool/call',params:{tool:'ask_selected_agent',arguments:{prompt:'Ask Claude for the result'}}});
       }
+      // A different follow-up question right after the first answer.
+      if(${JSON.stringify(mode)}==='followup') {
+        setTimeout(() => send({id:'tool-2',method:'item/tool/call',params:{tool:'ask_selected_agent',arguments:{prompt:'Now ask Claude a follow-up'}}}), 200);
+      }
     }
   }
   if(m.method==='thread/realtime/appendSpeech') { send({id:m.id,result:{}}); writeFileSync(${JSON.stringify(spokenPath)}, JSON.stringify(m.params)); }
@@ -101,6 +105,18 @@ it("runs one turn when GPT-Live repeats a handoff for the same request", async (
   release("Claude's answer");
   await answer;
   expect(asked).toBe(1);
+});
+
+it("asks the agent a different follow-up instead of replaying the last answer", async () => {
+  const asked: string[] = [];
+  const { session } = await fixture("followup", async (prompt) => {
+    asked.push(prompt);
+    return "Claude's answer";
+  });
+  await session.start("offer-sdp");
+  await expect
+    .poll(() => asked, { timeout: 2_000 })
+    .toEqual(["Ask Claude for the result", "Now ask Claude a follow-up"]);
 });
 
 it("hands the agent reply back into the conversation", async () => {
