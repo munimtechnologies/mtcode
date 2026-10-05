@@ -71,6 +71,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
+import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
 import {
   isThreadHistoryUserTurn,
   isThreadHistoryTurnStart,
@@ -1550,6 +1551,25 @@ function itemCountThroughRun(input: {
     }
   }
   return count;
+}
+
+/**
+ * Threads that some shell row forks from at a run. Only these need run
+ * ordinals and per-run item counts, to count the inherited prefix, so a thread
+ * nobody forked from never pays for a scan of its run history.
+ */
+function shellForkSourceIds(
+  rows: ReadonlyArray<{ readonly forked_from_run_source_thread_id: string | null }>,
+): ReadonlyArray<ThreadId> {
+  return [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.forked_from_run_source_thread_id === null
+          ? []
+          : [ThreadId.make(row.forked_from_run_source_thread_id)],
+      ),
+    ),
+  ];
 }
 
 function visibleItemCountForShell(input: {
@@ -4539,13 +4559,37 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       );
 
     const getThreadAttachmentIds: ProjectionStoreV2Shape["getThreadAttachmentIds"] = (threadId) =>
-      sql<{ id: string }>`
+      Effect.all([
+        sql<{ id: string }>`
       SELECT DISTINCT json_extract(attachment.value, '$.id') AS id
       FROM orchestration_v2_projection_messages AS message,
         json_each(message.payload_json, '$.attachments') AS attachment
       WHERE message.thread_id = ${threadId}
-    `.pipe(
-        Effect.map((rows) => rows.map((row) => row.id)),
+    `,
+        // Pages published by html_render live in the attachment store too.
+        sql<{ payload_json: string }>`
+      SELECT payload_json
+      FROM orchestration_v2_projection_turn_items
+      WHERE thread_id = ${threadId}
+        AND type = 'dynamic_tool'
+        AND payload_json LIKE '%htmlRender%'
+    `,
+      ]).pipe(
+        Effect.map(([messages, renders]) => [
+          ...new Set([
+            ...messages.map((row) => row.id),
+            ...threadHtmlRenderAttachmentIds(
+              threadId,
+              renders.map((row) => {
+                const item = parseEncodedPayload(row.payload_json);
+                return {
+                  toolName: typeof item.toolName === "string" ? item.toolName : null,
+                  output: item.output,
+                };
+              }),
+            ),
+          ]),
+        ]),
         Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
       );
 
@@ -4946,13 +4990,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND plan.kind = 'proposed_plan'
                   AND plan.status = 'active'
               ) AS has_actionable_proposed_plan,
+              -- Count per run on the covering (thread_id, run_id) index, then
+              -- look up each run once, instead of one run lookup per item.
               (
-                SELECT COUNT(*)
-                FROM orchestration_v2_projection_turn_items i
+                SELECT COALESCE(SUM(per_run.item_count), 0)
+                FROM (
+                  SELECT i.run_id, COUNT(*) AS item_count
+                  FROM orchestration_v2_projection_turn_items i
+                  WHERE i.thread_id = t.thread_id
+                  GROUP BY i.run_id
+                ) per_run
                 LEFT JOIN orchestration_v2_projection_runs r
-                  ON r.run_id = i.run_id
-                WHERE i.thread_id = t.thread_id
-                  AND (i.run_id IS NULL OR r.status <> 'rolled_back')
+                  ON r.run_id = per_run.run_id
+                WHERE per_run.run_id IS NULL OR r.status <> 'rolled_back'
               ) AS item_count,
               (
                 SELECT COUNT(*)
@@ -5434,14 +5484,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             }
             const threadRows = [...rowsByThreadId.values()];
             const threadIds = [...rowsByThreadId.keys()];
+            const forkSourceIds = shellForkSourceIds(threadRows);
             const readForThreadIds = <A>(
               read: (ids: ReadonlyArray<ThreadId>) => Effect.Effect<ReadonlyArray<A>, unknown>,
-            ) =>
-              threadIds.length === 0 ? Effect.succeed([] as ReadonlyArray<A>) : read(threadIds);
+              ids: ReadonlyArray<ThreadId> = threadIds,
+            ) => (ids.length === 0 ? Effect.succeed([] as ReadonlyArray<A>) : read(ids));
             const [runRows, itemCountRows, sequenceRows, providerThreadRows, pendingTurnItemRows] =
               yield* Effect.all([
-                readForThreadIds(selectShellRunRows),
-                readForThreadIds(selectShellRunItemCounts),
+                readForThreadIds(selectShellRunRows, forkSourceIds),
+                readForThreadIds(selectShellRunItemCounts, forkSourceIds),
                 sql<{ readonly snapshot_sequence: number | null }>`
             SELECT MAX(sequence) AS snapshot_sequence
             FROM orchestration_events
@@ -5528,10 +5579,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             }
 
             const threadIds = [...rowsByThreadId.keys()];
+            const forkSourceIds = shellForkSourceIds([...rowsByThreadId.values()]);
             const [runRows, itemCountRows, providerThreadRows, pendingTurnItemRows] =
               yield* Effect.all([
-                selectShellRunRows(threadIds),
-                selectShellRunItemCounts(threadIds),
+                forkSourceIds.length === 0
+                  ? Effect.succeed([] as ReadonlyArray<ShellRunRow>)
+                  : selectShellRunRows(forkSourceIds),
+                forkSourceIds.length === 0
+                  ? Effect.succeed([] as ReadonlyArray<ShellRunItemCountRow>)
+                  : selectShellRunItemCounts(forkSourceIds),
                 selectShellProviderThreadRows(threadIds),
                 selectShellPendingTurnItemRows(threadIds),
               ]);
@@ -5848,17 +5904,21 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           ),
         ),
       getThreadAttachmentIds: (threadId) =>
-        service
-          .getThreadProjection(threadId)
-          .pipe(
-            Effect.map((projection) => [
-              ...new Set(
-                projection.messages.flatMap((message) =>
-                  message.attachments.map((attachment) => attachment.id),
+        service.getThreadProjection(threadId).pipe(
+          Effect.map((projection) => [
+            ...new Set([
+              ...projection.messages.flatMap((message) =>
+                message.attachments.map((attachment) => attachment.id),
+              ),
+              ...threadHtmlRenderAttachmentIds(
+                threadId,
+                projection.turnItems.flatMap((item) =>
+                  item.type === "dynamic_tool" ? [item] : [],
                 ),
               ),
             ]),
-          ),
+          ]),
+        ),
       getThreadRecords: (threadId, fields, filter) =>
         Effect.gen(function* () {
           const projection = (yield* Ref.get(replayState)).projections.get(threadId);

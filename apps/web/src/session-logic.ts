@@ -20,6 +20,8 @@ import {
   formatReadToolLabel,
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
+import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import { htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -131,6 +133,14 @@ export type TimelineEntry = (
       readonly kind: "proposed-plan";
       readonly createdAt: string;
       readonly proposedPlan: ProposedPlan;
+    }
+  | {
+      /** A page a completed `html_render` call published, shown where the call happened. */
+      readonly id: string;
+      readonly kind: "html-render";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly htmlRender: HtmlRenderReference;
     }
   | {
       readonly id: string;
@@ -706,6 +716,22 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         kind: "proposed-plan",
         createdAt,
         proposedPlan,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const htmlRender =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? htmlRenderFromToolItem(item)
+        : undefined;
+    if (htmlRender !== undefined) {
+      entries.push({
+        id: item.id,
+        kind: "html-render",
+        createdAt,
+        runId: item.runId,
+        htmlRender,
         ...attemptMetadata,
       });
       continue;

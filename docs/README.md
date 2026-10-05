@@ -16,6 +16,7 @@
 - [Voice](./user/voice.md)
 - [Voice dictation](./user/voice-dictation.md)
 - [SnapShots](./user/snap-shot.md)
+- [Visual replies](./user/html-renders.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Import Claude Code and Codex conversations](./user/import-conversations.md)
 - [Branch a conversation](./user/branching.md)
