@@ -127,7 +127,7 @@ Everything else T3 Code does — multi-provider agent control, checkpoints and d
 
 Full docs live in [docs/](./docs):
 
-- [Install and first run](./docs/user/install.md)
+- [Install and first run](#download) (the inherited [`t3` CLI install guide](./docs/user/install.md) installs upstream T3 Code, not MT Code)
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Desktop notifications](./docs/user/desktop-notifications.md)
