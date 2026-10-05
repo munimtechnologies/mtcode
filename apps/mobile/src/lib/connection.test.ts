@@ -30,6 +30,9 @@ vi.mock("react-native", () => ({
 
 vi.mock("expo-device", () => mobileDevice);
 
+// branding reads expo-constants, whose native runtime cannot load under Vitest.
+vi.mock("expo-constants", () => ({ default: { expoConfig: null } }));
+
 describe("mobile remote connection records", () => {
   afterEach(() => {
     mobilePlatform.OS = "ios";
