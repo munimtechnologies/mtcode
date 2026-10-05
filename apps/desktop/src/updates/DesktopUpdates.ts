@@ -752,6 +752,23 @@ export const make = Effect.gen(function* () {
     );
   }).pipe(Effect.withSpan("desktop.updates.startPollers"));
 
+  // electron-updater emits update-available from inside checkForUpdates, while
+  // that check still holds the action reservation; a download started right
+  // away would be refused. Wait for the check to release it first.
+  const awaitCheckRelease = Effect.scoped(
+    Effect.gen(function* () {
+      const actionCompletions = yield* PubSub.subscribe(finishedUpdateActions);
+      while (true) {
+        const activeAction = yield* Ref.get(activeUpdateActionRef);
+        if (Option.isNone(activeAction) || activeAction.value !== "check") return;
+        const finished = yield* PubSub.take(actionCompletions).pipe(
+          Effect.timeoutOption(PREPARED_INSTALL_CHECK_WAIT),
+        );
+        if (Option.isNone(finished)) return;
+      }
+    }),
+  );
+
   const handleUpdateAvailable = Effect.fn("desktop.updates.handleUpdateAvailable")(function* (
     raw: unknown,
   ) {
@@ -792,6 +809,7 @@ export const make = Effect.gen(function* () {
             omittedReleaseCount,
           });
           // Personal fork: download as soon as an update is available (no rocket click).
+          yield* awaitCheckRelease;
           const downloadResult = yield* downloadAvailableUpdate;
           yield* logUpdaterInfo("auto-download finished", {
             version: info.version,
