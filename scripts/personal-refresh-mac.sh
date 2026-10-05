@@ -48,6 +48,11 @@ export T3CODE_DESKTOP_DISTRO=munim
 
 # Align package versions like upstream's release workflow, so the bundled
 # server and web report this version instead of the stale package.json one.
+# Restore them on any exit so a failed build cannot leave the checkout dirty.
+restore_stamped_versions() {
+  git -C "$REPO" checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json || true
+}
+trap restore_stamped_versions EXIT
 node scripts/update-release-package-versions.ts "$T3CODE_DESKTOP_VERSION"
 
 pnpm dist:desktop:dmg:arm64

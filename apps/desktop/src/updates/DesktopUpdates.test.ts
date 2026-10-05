@@ -156,6 +156,39 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("auto-downloads an update announced while its check still runs", () =>
+    Effect.gen(function* () {
+      // electron-updater emits update-available from inside checkForUpdates,
+      // while the check still holds the action reservation.
+      const checkStarted = yield* Deferred.make<void>();
+      const releaseCheck = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseCheck)),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          const checkFiber = yield* updates.check("manual").pipe(Effect.forkScoped);
+          yield* Deferred.await(checkStarted);
+          harness.emit("update-available", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          yield* Deferred.succeed(releaseCheck, undefined);
+          yield* Fiber.join(checkFiber);
+          yield* flushCallbacks;
+
+          const state = yield* updates.getState;
+          assert.equal(state.status, "downloading");
+          assert.equal(state.availableVersion, "1.2.4");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
   it.effect("enables full changelog release notes on latest and nightly", () => {
     const harness = makeHarness();
 

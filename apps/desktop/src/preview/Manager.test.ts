@@ -2848,15 +2848,17 @@ describe("PreviewManager", () => {
           .pipe(Effect.forkChild({ startImmediately: true }));
         expect(evaluate.pollUnsafe()).toBeUndefined();
 
-        yield* TestClock.adjust(4_000);
+        // The fork bounds each compositor grab at AUTOMATION_CAPTURE_TIMEOUT_MS
+        // and reattaches once before giving up (see automationSnapshot).
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS);
+        yield* TestClock.adjust(PreviewManager.AUTOMATION_CAPTURE_TIMEOUT_MS);
         const exit = yield* Fiber.join(snapshot);
         expect(Exit.isFailure(exit)).toBe(true);
-        expect(capturePage).toHaveBeenCalledTimes(3);
+        expect(capturePage).toHaveBeenCalledTimes(2);
         if (Exit.isSuccess(exit)) return;
         const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
         expect(error).toMatchObject({
-          _tag: "PreviewOperationError",
-          operation: "automationSnapshot.capturePage",
+          _tag: "PreviewCaptureUnavailableError",
           tabId: "tab_1",
           webContentsId: 42,
           cause: { _tag: "TimeoutError" },

@@ -148,7 +148,12 @@ describe("electron development launcher", () => {
     // The source icons are real repo paths, joined for the host.
     assert.match(development.sourceIconPath, /assets[\\/]dev[\\/]blueprint-macos-1024\.png$/);
     assert.equal(development.generatedIconPath, "/runtime/icon-dev.icns");
-    assert.match(production.sourceIconPath, /assets[\\/]prod[\\/]black-macos-1024\.png$/);
+    // Personal builds use the Munim icon (munim distro) or the Nightly look,
+    // falling back to the stock production icon when neither asset exists.
+    assert.match(
+      production.sourceIconPath,
+      /assets[\\/](?:munim[\\/]munim|nightly[\\/]nightly|prod[\\/]black)-macos-1024\.png$/,
+    );
     assert.equal(production.generatedIconPath, "/runtime/icon-prod.icns");
   });
 });

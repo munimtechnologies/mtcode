@@ -16,7 +16,7 @@ export function ExternalTerminalSetting() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pendingRef = useRef(false);
-  const bridge = window.desktopBridge;
+  const bridge = typeof window === "undefined" ? undefined : window.desktopBridge;
   if (!bridge?.openTerminal) return null;
   const platform = bridge.getClientPlatform?.() ?? "";
   const options = EXTERNAL_TERMINALS.filter(({ platforms }) => platforms.includes(platform));

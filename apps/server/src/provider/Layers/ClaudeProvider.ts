@@ -157,10 +157,9 @@ const readClaudeRateLimitTier: Effect.Effect<
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
-  const candidates = [
-    ...(configDir ? [path.join(configDir, ".claude.json")] : []),
-    path.join(NodeOS.homedir(), ".claude.json"),
-  ];
+  // Like the CLI: with CLAUDE_CONFIG_DIR set, the account file lives there and
+  // the home-directory file belongs to a different (default) login.
+  const candidates = [path.join(configDir || NodeOS.homedir(), ".claude.json")];
   for (const file of candidates) {
     const parsed = yield* fs
       .readFileString(file)

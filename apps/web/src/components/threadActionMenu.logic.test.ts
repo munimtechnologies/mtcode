@@ -78,7 +78,6 @@ describe("buildThreadActionMenuItems", () => {
   it("offers the way back to all projects once the list is scoped", () => {
     const items = buildThreadActionMenuItems({
       ...baseState,
-      supports: { ...baseState.supports, autoSettleOptOut: false },
       projectFilter: { label: "Beta Project", isActive: true },
     });
     const filterIndex = items.findIndex((candidate) => candidate.id === "filter-by-project");

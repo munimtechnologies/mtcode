@@ -165,8 +165,14 @@ APPLESCRIPT
 swap_install() {
   local source_app="$1"
 
+  # Called as `if ! swap_install`, so errexit is off in here: every step that
+  # must not be skipped returns on failure itself.
   rm -rf "$APP_STAGING" "$APP_BACKUP"
-  ditto "$source_app" "$APP_STAGING"
+  if ! ditto "$source_app" "$APP_STAGING"; then
+    rm -rf "$APP_STAGING"
+    INSTALL_ERROR="could not copy the new app (disk full?)"
+    return 1
+  fi
 
   SIGN_IDENTITY="${T3_PERSONAL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')}"
   # Release DMGs arrive Developer ID signed, hardened and notarized. Re-signing
@@ -197,10 +203,17 @@ swap_install() {
 
   xattr -dr com.apple.quarantine "$APP_STAGING" 2>/dev/null || true
 
-  if [[ -d "$APP_PATH" ]]; then
-    mv "$APP_PATH" "$APP_BACKUP"
+  if [[ -d "$APP_PATH" ]] && ! mv "$APP_PATH" "$APP_BACKUP"; then
+    # Moving staging onto an app that is still there would nest it inside it.
+    rm -rf "$APP_STAGING"
+    INSTALL_ERROR="could not move the installed app aside"
+    return 1
   fi
-  mv "$APP_STAGING" "$APP_PATH"
+  if ! mv "$APP_STAGING" "$APP_PATH"; then
+    [[ -d "$APP_BACKUP" && ! -e "$APP_PATH" ]] && mv "$APP_BACKUP" "$APP_PATH"
+    INSTALL_ERROR="could not move the new app into place; restored the previous one"
+    return 1
+  fi
   rm -rf "$APP_BACKUP" \
     "/Applications/T3 Code.app" \
     "/Applications/T3 Code (Nightly).app" \
@@ -279,6 +292,9 @@ fi
 if ! swap_install "$APP"; then
   hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force || true
   relaunch_t3 || true
+  if [[ -n "${INSTALL_ERROR:-}" ]]; then
+    fail "Mac install failed: $INSTALL_ERROR"
+  fi
   fail "$UNSIGNED_REASON — kept the installed app; permission grants would not survive an ad-hoc build (T3_ALLOW_UNSIGNED_MAC_INSTALL=1 overrides)"
 fi
 hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force || true

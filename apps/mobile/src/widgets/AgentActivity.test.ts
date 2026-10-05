@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
+// branding reads expo-constants, whose native runtime cannot load under Vitest.
+vi.mock("expo-constants", () => ({ default: { expoConfig: null } }));
+
 vi.mock("@expo/ui/swift-ui", () => ({
   HStack: "HStack",
   Image: "Image",

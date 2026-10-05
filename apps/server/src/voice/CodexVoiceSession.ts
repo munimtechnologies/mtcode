@@ -61,6 +61,8 @@ export class CodexVoiceSession {
   private delegation: Promise<string> | undefined;
   private notices: string[] = [];
   private delivered: string | undefined;
+  /** The request `delivered` answers; only a repeat of it may reuse that answer. */
+  private deliveredPrompt: string | undefined;
   private deliveredAt = 0;
   private ready: { resolve: (sdp: string) => void; reject: (error: Error) => void } | undefined;
   private readonly pending = new Map<
@@ -160,12 +162,14 @@ export class CodexVoiceSession {
    * tool call for the minute an agent turn can take, so a late answer comes back
    * as conversation context and GPT-Live tells the user in its own words.
    */
-  private deliver(text: string): void {
+  private deliver(text: string, prompt: string): void {
     if (this.closed || !this.threadId || text.trim().length === 0) return;
     // One reply per answer: GPT-Live raises several pings for one question and
-    // each waits on the same turn, so without this it would say it twice.
-    if (this.delivered === text) return;
+    // each waits on the same turn, so without this it would say it twice. A
+    // different question that happens to get the same answer is still spoken.
+    if (this.delivered === text && this.deliveredPrompt === prompt) return;
     this.delivered = text;
+    this.deliveredPrompt = prompt;
     this.deliveredAt = Date.now();
     this.notices.push("Agent replied; telling you now");
     // A beat first: pushing speech while GPT-Live is still finishing its own
@@ -204,7 +208,13 @@ export class CodexVoiceSession {
       const reply = (text: string) =>
         this.send({ id, result: { success: true, contentItems: [{ type: "inputText", text }] } });
 
-      if (this.delivered !== undefined && Date.now() - this.deliveredAt < REPEAT_PING_MS) {
+      // Only a repeat of the request just answered reuses the answer; a new
+      // question asked within the window must still reach the agent.
+      if (
+        this.delivered !== undefined &&
+        this.deliveredPrompt === prompt.trim() &&
+        Date.now() - this.deliveredAt < REPEAT_PING_MS
+      ) {
         this.notices.push("Repeat ping; reused the answer already given");
         reply(`The agent already answered: ${this.delivered}`);
         return;
@@ -220,11 +230,13 @@ export class CodexVoiceSession {
         "Asked the agent. Say one short line telling the user you are on it. Their answer will arrive as a message; tell them then.",
       );
       this.notices.push("Asked the agent; waiting for its reply");
+      const askedPrompt = prompt.trim();
       void this.ask(prompt).then(
-        (text) => this.deliver(text),
+        (text) => this.deliver(text, askedPrompt),
         (error) =>
           this.deliver(
             `It could not finish: ${error instanceof Error ? error.message : "unknown error"}`,
+            askedPrompt,
           ),
       );
     } catch (error) {

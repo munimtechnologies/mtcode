@@ -56,6 +56,16 @@ describe("extractDesktopProtocolUrl", () => {
       scheme: "t3code-dev",
       expected: "t3code-dev://app/",
     },
+    {
+      name: "ignores thread deep links and other hosts the window cannot load",
+      argv: [
+        "t3code://app/kept",
+        "t3code://threads/00000000-0000-4000-8000-000000000000/thread-1",
+        "t3code://evil/anything",
+      ],
+      scheme: "t3code",
+      expected: "t3code://app/kept",
+    },
   ])("$name", ({ argv, scheme, expected }) => {
     assert.equal(extractDesktopProtocolUrl(argv, scheme), expected);
   });
