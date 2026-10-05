@@ -115,6 +115,16 @@ export const make = Effect.gen(function* () {
         updated_at = excluded.updated_at
     `,
   });
+  // expo_push_token is UNIQUE, and the upsert only resolves a device_id
+  // conflict: a token re-registered under a new device id would fail the insert
+  // and leave the stale row receiving the pushes. The newest registration wins.
+  const releasePushToken = SqlSchema.void({
+    Request: Schema.Struct({ deviceId: Schema.String, expoPushToken: Schema.String }),
+    execute: ({ deviceId, expoPushToken }) => sql`
+      DELETE FROM self_hosted_push_devices
+      WHERE expo_push_token = ${expoPushToken} AND device_id <> ${deviceId}
+    `,
+  });
   const deleteDevice = SqlSchema.void({
     Request: Schema.Struct({ deviceId: Schema.String }),
     execute: ({ deviceId }) =>
@@ -132,7 +142,12 @@ export const make = Effect.gen(function* () {
 
   const register: SelfHostedPushNotifications["Service"]["register"] = (input) =>
     DateTime.now.pipe(
-      Effect.flatMap((now) => upsertDevice({ ...input, updatedAt: DateTime.formatIso(now) })),
+      Effect.flatMap((now) =>
+        releasePushToken({ deviceId: input.deviceId, expoPushToken: input.expoPushToken }).pipe(
+          Effect.andThen(upsertDevice({ ...input, updatedAt: DateTime.formatIso(now) })),
+          sql.withTransaction,
+        ),
+      ),
       Effect.mapError(
         (cause) => new SelfHostedPushNotificationError({ operation: "register", cause }),
       ),
