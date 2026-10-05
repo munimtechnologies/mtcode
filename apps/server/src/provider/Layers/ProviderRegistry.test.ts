@@ -3,6 +3,7 @@ import * as CodexInstallation from "../CodexInstallation.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
+import { afterEach, beforeEach, vi } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -3186,7 +3187,6 @@ it.layer(Layer.mergeAll(TestServices, ServerSettingsModule.layerTest(), TestHttp
                 "claudeAgent",
                 "codex",
                 "cursor",
-                "devin",
                 "grok",
                 "opencode",
                 "pi",
@@ -3218,6 +3218,15 @@ it.layer(Layer.mergeAll(TestServices, ServerSettingsModule.layerTest(), TestHttp
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      // The subscription label reads the account's rate-limit tier from
+      // .claude.json; point it at a missing config dir so the host's own
+      // login (e.g. a Max 20x account) cannot change the expected labels.
+      beforeEach(() => {
+        vi.stubEnv("CLAUDE_CONFIG_DIR", "/nonexistent/t3-test-claude-config");
+      });
+      afterEach(() => {
+        vi.unstubAllEnvs();
+      });
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
