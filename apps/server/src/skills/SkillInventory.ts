@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema";
 
 import { discoverClaudeSkills } from "../provider/Drivers/ClaudeSkills.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
-import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 

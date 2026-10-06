@@ -25,17 +25,17 @@ import * as VcsDriverRegistry from "./VcsDriverRegistry.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 import { runVcsDriverContractSuite } from "./testing/VcsDriverContractHarness.ts";
 
-const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-contract-",
 });
-const GitContractLayer = Layer.mergeAll(GitVcsDriver.vcsLayer, GitVcsDriver.layer).pipe(
+const layerGitContract = Layer.mergeAll(GitVcsDriver.layerVcs, GitVcsDriver.layer).pipe(
   Layer.provide(Layer.orDie(ServerSettings.layerTest())),
-  Layer.provide(ServerConfigLayer),
+  Layer.provide(layerServerConfig),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),
 );
-const GitCaptureContractLayer = Layer.merge(
-  GitContractLayer,
+const layerGitCaptureContract = Layer.merge(
+  layerGitContract,
   ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer)),
 );
 
@@ -71,7 +71,7 @@ type GitContractError = GitCommandError | PlatformError.PlatformError;
 runVcsDriverContractSuite<GitVcsDriver.GitVcsDriver, GitContractError>({
   name: "Git",
   kind: "git",
-  layer: GitContractLayer,
+  layer: layerGitContract,
   fixture: {
     createRepo: (cwd) =>
       Effect.gen(function* () {
@@ -132,7 +132,7 @@ it.effect("captures a checkpoint without expiring a split index the repository s
     yield* runGit(cwd, ["ls-files", "--cached"]);
     yield* runGit(cwd, ["status", "--porcelain"]);
     assert.isTrue(yield* fileSystem.exists(path.join(cwd, ".git", "index")));
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 const makeCheckpointFixture = Effect.fn("makeCheckpointFixture")(function* (
   driver: Effect.Success<ReturnType<typeof GitVcsDriver.makeVcsDriverShape>>,
@@ -198,7 +198,7 @@ it.effect("checkpoint capture skips untracked nested repositories without a comm
       yield* fileSystem.readFileString(path.join(cwd, nested, "private.txt")),
       "nested\n",
     );
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint recovery discovers nested HEAD independently of inherited GIT_DIR", () =>
@@ -226,7 +226,7 @@ it.effect("checkpoint recovery discovers nested HEAD independently of inherited 
     assert.strictEqual((yield* git(["show", `${checkpointRef}:file.txt`])).stdout, "unstaged\n");
     assert.strictEqual((yield* git(["ls-tree", "-r", checkpointRef, "--", "empty"])).stdout, "");
     assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git", "index")), originalIndex);
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint capture still fails when a clean filter rejects a file", () =>
@@ -250,7 +250,7 @@ it.effect("checkpoint capture still fails when a clean filter rejects a file", (
     assert.strictEqual(result._tag, "Failure");
     assert.deepEqual(yield* fileSystem.readFile(path.join(cwd, ".git", "index")), originalIndex);
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint capture refuses a truncated nested repository listing", () =>
@@ -280,7 +280,7 @@ it.effect("checkpoint capture refuses a truncated nested repository listing", ()
 
     assert.strictEqual(result._tag, "Failure");
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint recovery refuses excessive candidates before probing", () =>
@@ -321,7 +321,7 @@ it.effect("checkpoint recovery refuses excessive candidates before probing", () 
     if (result._tag === "Failure") assert.strictEqual(result.failure, stageError);
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
     assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git", "index")), originalIndex);
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect.each([
@@ -427,7 +427,7 @@ it.effect.each([
         assert.isFalse(yield* fs.exists(`${index}.lock`));
       }
       assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git", "index")), originalIndex);
-    }).pipe(Effect.scoped, Effect.provide(GitCaptureContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitCaptureContract)),
 );
 
 it.effect.each(["discovery", "probe", "retry"] as const)(
@@ -516,7 +516,7 @@ it.effect.each(["discovery", "probe", "retry"] as const)(
       assert.isFalse(yield* fs.exists(`${privateIndex!}.lock`));
       assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
       assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git", "index")), originalIndex);
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint recovery preserves interruption and removes the private index", () =>
@@ -550,7 +550,7 @@ it.effect("checkpoint recovery preserves interruption and removes the private in
     assert.isDefined(privateIndex);
     assert.isFalse(yield* fs.exists(privateIndex!));
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint capture does not rerun clean filters for unchanged indexed files", () =>
@@ -583,7 +583,7 @@ it.effect("checkpoint capture does not rerun clean filters for unchanged indexed
     assert.strictEqual((yield* git(["show", `${checkpointRef}:file.txt`])).stdout, "changed\n");
     assert.strictEqual((yield* git(["show", `${checkpointRef}:stable.txt`])).stdout, "unchanged\n");
     assert.deepEqual(yield* fileSystem.readFile(path.join(cwd, ".git", "index")), originalIndex);
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect.each(
@@ -681,7 +681,7 @@ it.effect.each(
           "working outside\n",
         );
       }
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint capture keeps the legacy path when Git lacks add --sparse", () =>
@@ -721,7 +721,7 @@ it.effect("checkpoint capture keeps the legacy path when Git lacks add --sparse"
     yield* captureDriver.checkpoints.captureCheckpoint({ cwd, checkpointRef });
     assert.strictEqual((yield* git(["show", `${checkpointRef}:file.txt`])).stdout, "unstaged\n");
     assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git/index")), originalIndex);
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect.each(["normal", "flags", "sparse"] as const)(
@@ -775,7 +775,7 @@ it.effect.each(["normal", "flags", "sparse"] as const)(
       if (indexMode !== "flags")
         assert.strictEqual(yield* fs.readFileString(path.join(cwd, ".git/reads")), "");
       assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git/index")), originalIndex);
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect.each([1_700_000_000, 1_700_000_000.9999])(
@@ -805,7 +805,7 @@ it.effect.each([1_700_000_000, 1_700_000_000.9999])(
       assert.strictEqual((yield* git(["show", `${checkpointRef}:file.txt`])).stdout, "after!\n");
       assert.deepEqual(yield* fileSystem.readFile(indexPath), originalIndex);
       assert.deepEqual((yield* fileSystem.stat(indexPath)).mtime, originalIndexMtime);
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 it.effect.each(
   [false, true].flatMap((nested) =>
@@ -902,7 +902,7 @@ it.effect.each(
           "working outside\n",
         );
       }
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint capture preserves racy edits made after resetting the index", () =>
@@ -945,7 +945,7 @@ it.effect("checkpoint capture preserves racy edits made after resetting the inde
     assert.strictEqual((yield* git(["show", `${checkpointRef}:file.txt`])).stdout, "staged\n");
     assert.deepEqual(yield* fileSystem.readFile(indexPath), originalIndex);
     assert.deepEqual((yield* fileSystem.stat(indexPath)).mtime, originalIndexMtime);
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect.each(
@@ -1023,7 +1023,7 @@ it.effect.each(
         "added in second turn\n",
       );
       assert.deepEqual(yield* fileSystem.readFile(path.join(cwd, ".git", "index")), originalIndex);
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect.each(["missing", "invalid"] as const)(
@@ -1050,7 +1050,7 @@ it.effect.each(["missing", "invalid"] as const)(
       } else {
         assert.strictEqual(yield* fileSystem.readFileString(indexPath), "invalid index");
       }
-    }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("restores empty checkpoints without changing paths outside the workspace", () =>
@@ -1114,7 +1114,7 @@ it.effect("restores empty checkpoints without changing paths outside the workspa
         assert.strictEqual(staged.stdout.trim(), "outside.txt");
       }
     }
-  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("GitVcsDriver forwards execute env to the VCS process", () => {

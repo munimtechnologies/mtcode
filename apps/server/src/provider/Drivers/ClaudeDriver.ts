@@ -28,7 +28,7 @@ import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGenerat
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
-import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import {
   createClaudeAdapterV2,
   type ClaudeAdapterV2DriverEnv,
@@ -36,15 +36,15 @@ import {
 import * as ServerSettings from "../../serverSettings.ts";
 import { PtyAdapter } from "../../terminal/PtyAdapter.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeClaudeScopedLimitNames } from "../Layers/claudeUsageLimits.ts";
-import * as ClaudeResetCredits from "../Layers/claudeResetCredits.ts";
-import * as ResetCreditCoordinator from "../Layers/resetCreditCoordinator.ts";
+import { makeClaudeScopedLimitNames } from "../claudeUsageLimits.ts";
+import * as ClaudeResetCredits from "../claudeResetCredits.ts";
+import * as ResetCreditCoordinator from "../resetCreditCoordinator.ts";
 import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
   probeClaudeWorkspaceSnapshot,
-} from "../Layers/ClaudeProvider.ts";
+} from "../ClaudeProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";

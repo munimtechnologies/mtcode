@@ -24,7 +24,7 @@ import * as MonitorSession from "../../mcp/MonitorSession.ts";
 import {
   CodexBackgroundTasks,
   supportsCodexMonitoring,
-} from "../../provider/Layers/CodexBackgroundTasks.ts";
+} from "../../provider/CodexBackgroundTasks.ts";
 import { backgroundWorkNotification } from "../Notification.ts";
 import type { ProviderAdapterV2TurnMessage } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";

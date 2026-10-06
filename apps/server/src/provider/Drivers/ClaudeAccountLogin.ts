@@ -29,7 +29,7 @@ import {
 
 import type { ServerSettingsService } from "../../serverSettings.ts";
 import type { PtyAdapter } from "../../terminal/PtyAdapter.ts";
-import { deriveProviderInstanceConfigMap } from "../Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../ProviderInstanceRegistryHydration.ts";
 import type { ProviderAccountLoginFlow, ProviderAccountLoginSupport } from "../ProviderDriver.ts";
 import { resolveAppDisplayName } from "../../appDisplayName.ts";
 

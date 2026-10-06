@@ -156,7 +156,7 @@ function signHealthResponse(
   };
 }
 
-function connectorTestLayer(
+function layerConnectorTest(
   execute: (
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>,
@@ -191,6 +191,7 @@ function makeAllocations(
     origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
     updatedAt: "2026-05-25T00:00:00.000Z",
     generation: 1,
+    tunnelReleasedAt: null,
   },
 ): ManagedEndpointAllocations.ManagedEndpointAllocations["Service"] {
   return {
@@ -268,7 +269,7 @@ describe("EnvironmentConnector", () => {
         });
       }).pipe(
         Effect.provide(
-          connectorTestLayer(execute, {
+          layerConnectorTest(execute, {
             links: {
               ...links,
               getForUser: (input) => waitForPeer.pipe(Effect.andThen(links.getForUser(input))),
@@ -327,7 +328,7 @@ describe("EnvironmentConnector", () => {
           label: "Connector Test Environment",
         },
       });
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("rejects manual endpoints before sending a health request", () => {
@@ -360,7 +361,7 @@ describe("EnvironmentConnector", () => {
       expect(requestCount).toBe(0);
     }).pipe(
       Effect.provide(
-        connectorTestLayer(execute, {
+        layerConnectorTest(execute, {
           links: makeLinks({
             endpoint: {
               httpBaseUrl: "https://127.0.0.1/",
@@ -425,7 +426,7 @@ describe("EnvironmentConnector", () => {
       expect(requestCount).toBe(0);
     }).pipe(
       Effect.provide(
-        connectorTestLayer(execute, {
+        layerConnectorTest(execute, {
           links: makeLinks({
             endpoint: {
               httpBaseUrl: "https://attacker.example.test/",
@@ -469,7 +470,7 @@ describe("EnvironmentConnector", () => {
       expect(requestCount).toBe(0);
     }).pipe(
       Effect.provide(
-        connectorTestLayer(execute, {
+        layerConnectorTest(execute, {
           allocations: makeAllocations({
             userId: "user_123",
             environmentId: "env-connector-test",
@@ -481,6 +482,7 @@ describe("EnvironmentConnector", () => {
             origin: null,
             updatedAt: "2026-05-25T00:00:00.000Z",
             generation: 1,
+            tunnelReleasedAt: null,
           }),
         }),
       ),
@@ -520,7 +522,7 @@ describe("EnvironmentConnector", () => {
       if (result._tag === "Failure") {
         expect(result.cause.toString()).toContain("EnvironmentMintResponseInvalid");
       }
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("reports offline status when the managed endpoint health request fails", () => {
@@ -551,7 +553,38 @@ describe("EnvironmentConnector", () => {
         error: "Managed endpoint health request failed: Environment is unavailable.",
         traceId: expect.any(String),
       });
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+      expect(result).not.toHaveProperty("offlineReason");
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
+  });
+
+  it.effect("reports a released tunnel as the reason an environment is offline", () => {
+    const execute = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response("tunnel not found", { status: 530 })),
+      );
+    const allocations = makeAllocations({
+      userId: "user_123",
+      environmentId: "env-connector-test",
+      hostname: "env.example.test",
+      tunnelId: "tunnel-id",
+      tunnelName: "tunnel-name",
+      dnsRecordId: "dns-record-id",
+      readyAt: "2026-05-25T00:00:00.000Z",
+      origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      updatedAt: "2026-05-25T00:00:00.000Z",
+      generation: 2,
+      tunnelReleasedAt: "2026-05-26T00:00:00.000Z",
+    });
+
+    return Effect.gen(function* () {
+      const connector = yield* EnvironmentConnector.EnvironmentConnector;
+      const result = yield* connector.status({
+        userId: "user_123",
+        environmentId: "env-connector-test",
+      });
+
+      expect(result).toMatchObject({ status: "offline", offlineReason: "tunnel_released" });
+    }).pipe(Effect.provide(layerConnectorTest(execute, { allocations })));
   });
 
   it.effect("rejects health responses with a mismatched top-level environment id", () => {
@@ -582,7 +615,7 @@ describe("EnvironmentConnector", () => {
       if (result._tag === "Failure") {
         expect(result.cause.toString()).toContain("EnvironmentMintResponseInvalid");
       }
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("rejects health responses with an unsigned top-level descriptor mutation", () => {
@@ -618,7 +651,7 @@ describe("EnvironmentConnector", () => {
       if (result._tag === "Failure") {
         expect(result.cause.toString()).toContain("EnvironmentMintResponseInvalid");
       }
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("rejects health responses when the linked environment public key is malformed", () => {
@@ -646,7 +679,7 @@ describe("EnvironmentConnector", () => {
       }
     }).pipe(
       Effect.provide(
-        connectorTestLayer(execute, {
+        layerConnectorTest(execute, {
           links: makeLinks({
             environmentPublicKey: "not a pem public key",
           }),
@@ -697,7 +730,7 @@ describe("EnvironmentConnector", () => {
           wsBaseUrl: "wss://env.example.test/ws",
         },
       });
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("only accepts mint responses signed by the user's linked environment key", () => {
@@ -726,7 +759,7 @@ describe("EnvironmentConnector", () => {
       if (result._tag === "Failure") {
         expect(result.cause.toString()).toContain("EnvironmentMintResponseInvalid");
       }
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("rejects mint responses when the linked environment public key is malformed", () => {
@@ -755,7 +788,7 @@ describe("EnvironmentConnector", () => {
       }
     }).pipe(
       Effect.provide(
-        connectorTestLayer(execute, {
+        layerConnectorTest(execute, {
           links: makeLinks({
             environmentPublicKey: "not a pem public key",
           }),
@@ -791,7 +824,7 @@ describe("EnvironmentConnector", () => {
       if (result._tag === "Failure") {
         expect(result.cause.toString()).toContain("EnvironmentMintResponseInvalid");
       }
-    }).pipe(Effect.provide(connectorTestLayer(execute)));
+    }).pipe(Effect.provide(layerConnectorTest(execute)));
   });
 
   it.effect("times out hung managed endpoint mint requests", () => {
@@ -828,6 +861,6 @@ describe("EnvironmentConnector", () => {
           timeoutMs: EnvironmentConnector.ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS,
         });
       }
-    }).pipe(Effect.provide(Layer.merge(TestClock.layer(), connectorTestLayer(execute))));
+    }).pipe(Effect.provide(Layer.merge(TestClock.layer(), layerConnectorTest(execute))));
   });
 });

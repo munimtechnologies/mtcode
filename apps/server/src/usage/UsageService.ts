@@ -43,10 +43,11 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
+import { writeFileStringAtomically } from "../atomicWrite.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import { hasEnabledCursorInstance } from "./cursorAppData.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
@@ -254,6 +255,11 @@ export const make = Effect.gen(function* () {
   const scanCachePath = path.join(config.stateDir, SCAN_CACHE_FILE_NAME);
   const legacyScanCachePath = path.join(config.stateDir, LEGACY_SCAN_CACHE_FILE_NAME);
   const cursorExportCacheDir = config.stateDir;
+  const writeCacheFile = (filePath: string, contents: string) =>
+    writeFileStringAtomically({ filePath, contents }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
   let rates: RateTable = new Map();
   let ratesFetchedAtMs: number | null = null;
   let ratesStatus: UsagePricing["status"] = "unavailable";
@@ -317,7 +323,7 @@ export const make = Effect.gen(function* () {
     ratesStatus = "fresh";
 
     yield* encodeRatesCache({ fetchedAtMs: now, document: fetched }).pipe(
-      Effect.flatMap((serialized) => fileSystem.writeFileString(ratesCachePath, serialized)),
+      Effect.flatMap((contents) => writeCacheFile(ratesCachePath, contents)),
       Effect.ignoreCause,
     );
   });
@@ -546,8 +552,8 @@ export const make = Effect.gen(function* () {
   );
 
   const writeScanCache = makeScanCacheWriter();
-  // Scans with different windows can finish together; two writes interleaved
-  // in one file would corrupt it.
+  // Scans with different windows can finish together; serializing the writes
+  // keeps an older snapshot from landing after a newer one.
   const persistLock = yield* Semaphore.make(1);
 
   const persistScanCache = Effect.fn("UsageService.persistScanCache")(function* () {
@@ -559,7 +565,7 @@ export const make = Effect.gen(function* () {
     yield* Effect.sync(() =>
       writeScanCache(fileCache, { sources: Object.fromEntries(sourceCache) }),
     ).pipe(
-      Effect.flatMap((serialized) => fileSystem.writeFileString(scanCachePath, serialized)),
+      Effect.flatMap((contents) => writeCacheFile(scanCachePath, contents)),
       // A cache we cannot write is a slower next start, not a failed read.
       Effect.catchCause(() =>
         Effect.sync(() => {

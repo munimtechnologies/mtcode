@@ -21,7 +21,7 @@ import * as HttpTraceContext from "effect/http/HttpTraceContext";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as HttpApiError from "effect/http-api/HttpApiError";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
-import { httpHeaderRedactionLayer } from "@t3tools/shared/httpObservability";
+import * as HttpObservability from "@t3tools/shared/httpObservability";
 
 import {
   RelayApi,
@@ -88,28 +88,6 @@ export const RELAY_HTTP_ROUTER_CONFIG = {
   maxParamLength: 512,
 } as const;
 
-const relayCorsAllowedMethods = ["GET", "POST", "DELETE", "OPTIONS"] as const;
-const relayCorsAllowedHeaders = [
-  "authorization",
-  "b3",
-  "traceparent",
-  "content-type",
-  "dpop",
-] as const;
-const relayCorsExposedHeaders = ["traceparent", "www-authenticate"] as const;
-
-const relayCorsHeaders = {
-  "access-control-allow-origin": "*",
-  "access-control-expose-headers": relayCorsExposedHeaders.join(","),
-} as const;
-
-const relayCorsPreflightHeaders = {
-  ...relayCorsHeaders,
-  "access-control-allow-methods": relayCorsAllowedMethods.join(","),
-  "access-control-allow-headers": relayCorsAllowedHeaders.join(","),
-  "access-control-max-age": "86400",
-} as const;
-
 const decodeManagedTunnelRecoveryProof = Schema.decodeUnknownEffect(
   RelayManagedEndpointRecoveryProofPayload,
 );
@@ -146,7 +124,17 @@ const appendRelayTraceContextResponseHeader = Effect.gen(function* () {
   );
 }).pipe(Effect.ignore);
 
-export const relayCors = HttpRouter.middleware(
+const relayCorsMiddleware = HttpMiddleware.cors({
+  allowedMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["authorization", "b3", "traceparent", "content-type", "dpop"],
+  exposedHeaders: ["traceparent", "www-authenticate"],
+  maxAge: 86_400,
+});
+
+// The CORS headers come from a pre-response handler, so they reach every response
+// the request sends: handler failures and defects, and the deadline 504 that
+// `traceRelayHttpRequest` produces outside the router.
+export const layerCors = HttpRouter.middleware(
   Effect.fnUntraced(function* <E, R>(
     httpEffect: Effect.Effect<
       HttpServerResponse.HttpServerResponse,
@@ -159,25 +147,18 @@ export const relayCors = HttpRouter.middleware(
     if (isRelayHookPath(request.url)) {
       return yield* httpEffect;
     }
-    if (request.method === "OPTIONS") {
-      return HttpServerResponse.empty({
-        status: 204,
-        headers: relayCorsPreflightHeaders,
-      });
-    }
-    const response = yield* httpEffect;
-    return HttpServerResponse.setHeaders(response, relayCorsHeaders);
+    return yield* relayCorsMiddleware(httpEffect);
   }),
   { global: true },
 );
 
-export const relayNotFoundRoute = HttpRouter.add(
+export const layerNotFoundRoute = HttpRouter.add(
   "*",
   "/*",
   HttpServerResponse.empty({ status: 404 }),
 );
 
-export const relayDocsRedirectRoute = HttpRouter.add(
+export const layerDocsRedirectRoute = HttpRouter.add(
   "GET",
   "/",
   HttpServerResponse.redirect("/docs"),
@@ -247,8 +228,12 @@ export const traceRelayHttpRequest = <E, R>(
       Effect.andThen(relayRequestDeadline(httpEffect)),
     );
     if (!isRelayHookPath(request.url)) {
-      // HttpMiddleware finalizes its span on the dispatcher; do not close a request-scoped exporter first.
-      return yield* HttpMiddleware.tracer(traced).pipe(Effect.ensuring(Effect.yieldNow));
+      return yield* HttpMiddleware.tracer(traced).pipe(
+        // The worker turns its own request span off; this one is ours.
+        Effect.provideService(HttpMiddleware.TracerDisabledWhen, () => false),
+        // HttpMiddleware finalizes its span on the dispatcher; do not close a request-scoped exporter first.
+        Effect.ensuring(Effect.yieldNow),
+      );
     }
     // Hook URLs carry a secret token: the tracer and deadline log see a redacted
     // request, while the route itself still receives the original. A webhook
@@ -272,7 +257,7 @@ export const traceRelayHttpRequest = <E, R>(
       ),
     ).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, redacted),
-      // The worker disables its own span for hook paths; this one is ours.
+      // The worker turns its own request span off; this one is ours.
       Effect.provideService(HttpMiddleware.TracerDisabledWhen, () => false),
       Effect.ensuring(Effect.yieldNow),
     );
@@ -280,7 +265,7 @@ export const traceRelayHttpRequest = <E, R>(
 
 // Webhook senders put shared secrets and signatures in headers such as
 // x-hub-signature-256, stripe-signature, x-gitlab-token and x-webhook-key.
-const webhookHeaderRedactionLayer = Layer.effect(
+const layerWebhookHeaderRedaction = Layer.effect(
   Headers.CurrentRedactedNames,
   Effect.map(Headers.CurrentRedactedNames, (names) => [
     ...names,
@@ -304,7 +289,7 @@ export const traceRelayHttpRequestWith = <E, R, LayerError, LayerRequirements>(
     Effect.provide(
       Layer.merge(
         tracerLayer,
-        webhookHeaderRedactionLayer.pipe(Layer.provide(httpHeaderRedactionLayer)),
+        layerWebhookHeaderRedaction.pipe(Layer.provide(HttpObservability.layer)),
       ),
     ),
   );
@@ -319,7 +304,7 @@ export const withoutCapturedParentSpan = <A, E, R>(
     return effect.pipe(Effect.ensuring(Effect.sync(() => fiber.setContext(context))));
   });
 
-export const relayClientAuthLayer = Layer.effect(
+export const layerClientAuth = Layer.effect(
   RelayClientAuth,
   Effect.gen(function* () {
     const config = yield* RelayConfiguration.RelayConfiguration;
@@ -358,7 +343,7 @@ export const relayClientAuthLayer = Layer.effect(
   }),
 );
 
-export const relayEnvironmentAuthLayer = Layer.effect(
+export const layerEnvironmentAuth = Layer.effect(
   RelayEnvironmentAuth,
   Effect.gen(function* () {
     const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
@@ -391,7 +376,7 @@ export const relayEnvironmentAuthLayer = Layer.effect(
   }),
 );
 
-export const relayDpopClientAuthLayer = Layer.effect(
+export const layerDpopClientAuth = Layer.effect(
   RelayDpopClientAuth,
   Effect.gen(function* () {
     const relayTokens = yield* RelayTokens.RelayTokens;
@@ -438,7 +423,7 @@ function readHttpAuthorizationCredential(credential: Redacted.Redacted<string>):
   return Redacted.value(credential).trimStart();
 }
 
-export const metadataApi = HttpApiBuilder.group(
+export const layerMetadataApi = HttpApiBuilder.group(
   RelayApi,
   "metadata",
   Effect.fnUntraced(function* (handlers) {
@@ -472,7 +457,7 @@ export const metadataApi = HttpApiBuilder.group(
   }),
 );
 
-export const healthApi = HttpApiBuilder.group(
+export const layerHealthApi = HttpApiBuilder.group(
   RelayApi,
   "health",
   Effect.fnUntraced(function* (handlers) {
@@ -768,7 +753,7 @@ export const recoverEnvironmentTunnelRecord = Effect.fn(
   };
 });
 
-export const mobileApi = HttpApiBuilder.group(
+export const layerMobileApi = HttpApiBuilder.group(
   RelayApi,
   "mobile",
   Effect.fnUntraced(function* (handlers) {
@@ -825,7 +810,7 @@ export const mobileApi = HttpApiBuilder.group(
   }),
 );
 
-export const clientApi = HttpApiBuilder.group(
+export const layerClientApi = HttpApiBuilder.group(
   RelayApi,
   "client",
   Effect.fnUntraced(function* (handlers) {
@@ -1006,7 +991,7 @@ export const clientApi = HttpApiBuilder.group(
   }),
 );
 
-export const tokenApi = HttpApiBuilder.group(
+export const layerTokenApi = HttpApiBuilder.group(
   RelayApi,
   "token",
   Effect.fnUntraced(function* (handlers) {
@@ -1068,7 +1053,7 @@ export const tokenApi = HttpApiBuilder.group(
   }),
 );
 
-export const dpopClientApi = HttpApiBuilder.group(
+export const layerDpopClientApi = HttpApiBuilder.group(
   RelayApi,
   "dpopClient",
   Effect.fnUntraced(function* (handlers) {
@@ -1171,7 +1156,7 @@ export const dpopClientApi = HttpApiBuilder.group(
   }),
 );
 
-export const serverApi = HttpApiBuilder.group(
+export const layerServerApi = HttpApiBuilder.group(
   RelayApi,
   "server",
   Effect.fnUntraced(function* (handlers) {

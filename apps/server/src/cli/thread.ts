@@ -353,7 +353,7 @@ const withLiveServerRuntime =
     effect.pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.mergeAll(EnvironmentAuth.runtimeLayer, WorkspacePaths.layer).pipe(
+        Layer.mergeAll(EnvironmentAuth.layerRuntime, WorkspacePaths.layer).pipe(
           Layer.provideMerge(FetchHttpClient.layer),
           Layer.provide(ServerConfig.layer(config)),
           Layer.provide(

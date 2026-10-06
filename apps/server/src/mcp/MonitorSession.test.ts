@@ -6,7 +6,7 @@ import { McpSchema, McpServer } from "effect/ai";
 import { McpInvocationContext, requireMcpCapability } from "./McpInvocationContext.ts";
 import { MonitorToolkitRegistrationLive } from "./McpHttpServer.ts";
 import * as MonitorSession from "./MonitorSession.ts";
-import { CodexBackgroundTasks } from "../provider/Layers/CodexBackgroundTasks.ts";
+import { CodexBackgroundTasks } from "../provider/CodexBackgroundTasks.ts";
 
 const thread = {
   threadId: ThreadId.make("monitor-test"),

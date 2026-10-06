@@ -348,14 +348,14 @@ describe("ssh tunnel scripts", () => {
         return makeSuccessfulProcess('loaded nvm default\n{"remotePort":3774}\n');
       }),
     );
-    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
-    const processLayer = Layer.merge(NodeServices.layer, spawnerLayer);
+    const layerSpawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const layerProcess = Layer.merge(NodeServices.layer, layerSpawner);
 
     return Effect.gen(function* () {
       const result = yield* SshTunnel.launchOrReuseRemoteServer(target, undefined, ARCHIVE);
       assert.equal(result.remotePort, 3774);
       assert.deepEqual(spawnedCommands[0]?.slice(-5, -1), ["sh", "-l", "-s", "--"]);
-    }).pipe(Effect.provide(processLayer));
+    }).pipe(Effect.provide(layerProcess));
   });
 
   it.effect("allows cold remote launches to exceed the default SSH command timeout", () => {
@@ -368,8 +368,8 @@ describe("ssh tunnel scripts", () => {
     const spawner = ChildProcessSpawner.make(() =>
       Effect.succeed(makeDelayedSuccessfulProcess('{"remotePort":3774}\n', 75_000)),
     );
-    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
-    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer, TestClock.layer());
+    const layerSpawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const layerProcess = Layer.mergeAll(NodeServices.layer, layerSpawner, TestClock.layer());
 
     return Effect.gen(function* () {
       const fiber = yield* Effect.forkChild(
@@ -380,7 +380,7 @@ describe("ssh tunnel scripts", () => {
 
       const result = yield* Fiber.join(fiber);
       assert.equal(result.remotePort, 3774);
-    }).pipe(Effect.provide(processLayer));
+    }).pipe(Effect.provide(layerProcess));
   });
 
   it.effect("gives cold archive launches a larger budget than node-script launches", () => {
@@ -393,8 +393,8 @@ describe("ssh tunnel scripts", () => {
     const spawner = ChildProcessSpawner.make(() =>
       Effect.succeed(makeDelayedSuccessfulProcess('{"remotePort":3774}\n', 800_000)),
     );
-    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
-    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer, TestClock.layer());
+    const layerSpawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const layerProcess = Layer.mergeAll(NodeServices.layer, layerSpawner, TestClock.layer());
 
     return Effect.gen(function* () {
       const fiber = yield* Effect.forkChild(
@@ -405,7 +405,7 @@ describe("ssh tunnel scripts", () => {
 
       const result = yield* Fiber.join(fiber);
       assert.equal(result.remotePort, 3774);
-    }).pipe(Effect.provide(processLayer));
+    }).pipe(Effect.provide(layerProcess));
   });
 
   it("allows the remote port picker to run without a state file path", () => {
@@ -476,12 +476,12 @@ describe("ssh tunnel scripts", () => {
 `),
       ),
     );
-    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
-    const processLayer = Layer.merge(NodeServices.layer, spawnerLayer);
+    const layerSpawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const layerProcess = Layer.merge(NodeServices.layer, layerSpawner);
     return Effect.gen(function* () {
       const result = yield* SshTunnel.issueRemotePairingToken(target, undefined, ARCHIVE);
       assert.equal(result.credential, "LCL4R2TPHDKQ");
-    }).pipe(Effect.provide(processLayer));
+    }).pipe(Effect.provide(layerProcess));
   });
 
   it.effect("accepts pretty-printed pairing JSON after remote shell startup noise", () => {
@@ -504,12 +504,12 @@ describe("ssh tunnel scripts", () => {
 `),
       ),
     );
-    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
-    const processLayer = Layer.merge(NodeServices.layer, spawnerLayer);
+    const layerSpawner = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+    const layerProcess = Layer.merge(NodeServices.layer, layerSpawner);
     return Effect.gen(function* () {
       const result = yield* SshTunnel.issueRemotePairingToken(target, undefined, ARCHIVE);
       assert.equal(result.credential, "LCL4R2TPHDKQ");
-    }).pipe(Effect.provide(processLayer));
+    }).pipe(Effect.provide(layerProcess));
   });
 
   it.effect.each(["successful stop", "failed stop"] as const)(

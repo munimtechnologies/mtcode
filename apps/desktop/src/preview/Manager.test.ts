@@ -1,4 +1,5 @@
 import * as NodeVM from "node:vm";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { it as effectIt } from "@effect/vitest";
 import { DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER } from "@t3tools/contracts";
 import type {
@@ -234,7 +235,7 @@ vi.mock("electron", () => ({
   },
 }));
 
-const browserSessionLayer = Layer.succeed(
+const layerBrowserSession = Layer.succeed(
   BrowserSession.BrowserSession,
   BrowserSession.BrowserSession.of({
     getPartition: () => Effect.succeed("persist:t3code-preview-test"),
@@ -245,7 +246,7 @@ const browserSessionLayer = Layer.succeed(
   }),
 );
 
-const environmentLayer = Layer.succeed(
+const layerEnvironment = Layer.succeed(
   DesktopEnvironment.DesktopEnvironment,
   DesktopEnvironment.DesktopEnvironment.of({
     browserArtifactsDir: "/tmp/t3/dev/browser-artifacts",
@@ -256,7 +257,7 @@ const environmentLayer = Layer.succeed(
   } as DesktopEnvironment.DesktopEnvironment["Service"]),
 );
 
-const fileSystemLayer = FileSystem.layerNoop({
+const layerFileSystem = FileSystem.layerNoop({
   makeDirectory: (path) =>
     Effect.sync(() => {
       mkdir(path);
@@ -275,10 +276,11 @@ const layer = PreviewManager.layer.pipe(
       shutdown: Effect.void,
     }),
   ),
-  Layer.provideMerge(browserSessionLayer),
-  Layer.provideMerge(environmentLayer),
-  Layer.provideMerge(fileSystemLayer),
+  Layer.provideMerge(layerBrowserSession),
+  Layer.provideMerge(layerEnvironment),
+  Layer.provideMerge(layerFileSystem),
   Layer.provideMerge(Path.layer),
+  Layer.provideMerge(NodeCrypto.layer),
   Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
 );
 const encodePreviewManagerError = Schema.encodeSync(PreviewManager.PreviewManagerError);

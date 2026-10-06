@@ -29,8 +29,8 @@ import {
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { expandHomePath } from "../../pathExpansion.ts";
-import { codexAppServerArgs, resolveCodexLaunchArgs } from "../Layers/codexLaunchArgs.ts";
-import { buildCodexInitializeParams } from "../Layers/CodexProvider.ts";
+import { codexAppServerArgs, resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
+import { buildCodexInitializeParams } from "../CodexProvider.ts";
 import type { ProviderAccountLoginFlow, ProviderAccountLoginSupport } from "../ProviderDriver.ts";
 
 const LOGIN_FORCE_KILL_AFTER = "2 seconds" as const;

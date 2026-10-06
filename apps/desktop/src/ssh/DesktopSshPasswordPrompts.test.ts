@@ -86,7 +86,7 @@ function makeTestWindow(
   };
 }
 
-function makeElectronWindowLayer(window: ReturnType<typeof makeTestWindow>["window"]) {
+function layerElectronWindow(window: ReturnType<typeof makeTestWindow>["window"]) {
   return Layer.succeed(
     ElectronWindow.ElectronWindow,
     ElectronWindow.ElectronWindow.of({
@@ -106,9 +106,9 @@ function makeElectronWindowLayer(window: ReturnType<typeof makeTestWindow>["wind
   );
 }
 
-function makeLayer(window: ReturnType<typeof makeTestWindow>["window"]) {
+function layer(window: ReturnType<typeof makeTestWindow>["window"]) {
   return DesktopSshPasswordPrompts.layer({ passwordPromptTimeoutMs: 1_000 }).pipe(
-    Layer.provide(makeElectronWindowLayer(window)),
+    Layer.provide(layerElectronWindow(window)),
     Layer.provide(NodeServices.layer),
     Layer.provideMerge(TestClock.layer()),
   );
@@ -142,7 +142,7 @@ describe("DesktopSshPasswordPrompts", () => {
 
       yield* prompts.resolve({ requestId: request.requestId, password: "secret" });
       assert.equal(yield* Fiber.join(fiber), "secret");
-    }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
+    }).pipe(Effect.provide(layer(testWindow.window)), Effect.scoped);
   });
 
   it.effect("times out pending renderer prompts with a typed error", () => {
@@ -164,7 +164,7 @@ describe("DesktopSshPasswordPrompts", () => {
       const error = yield* Fiber.join(fiber).pipe(Effect.flip);
       assert.instanceOf(error, DesktopSshPasswordPrompts.DesktopSshPromptTimedOutError);
       assert.equal(error.destination, "devbox");
-    }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
+    }).pipe(Effect.provide(layer(testWindow.window)), Effect.scoped);
   });
 
   it.effect("cleans up a prompt that fails during renderer delivery", () => {
@@ -195,7 +195,7 @@ describe("DesktopSshPasswordPrompts", () => {
         .resolve({ requestId, password: "secret" })
         .pipe(Effect.flip);
       assert.instanceOf(resolveError, DesktopSshPasswordPrompts.DesktopSshPromptExpiredError);
-    }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
+    }).pipe(Effect.provide(layer(testWindow.window)), Effect.scoped);
   });
 
   it.effect("keeps a submitted password when a later presentation step fails", () => {
@@ -224,7 +224,7 @@ describe("DesktopSshPasswordPrompts", () => {
       assert.equal(password, "secret");
       assert.equal(testWindow.isFocused(), false);
       assert.equal(testWindow.closedListenerCount(), 0);
-    }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
+    }).pipe(Effect.provide(layer(testWindow.window)), Effect.scoped);
   });
 
   it.effect("classifies a failed initial window availability check", () => {
@@ -245,6 +245,6 @@ describe("DesktopSshPasswordPrompts", () => {
       assert.equal(error.operation, "check-window-before-request");
       assert.equal(error.requestId, null);
       assert.deepEqual(testWindow.sentMessages, []);
-    }).pipe(Effect.provide(makeLayer(testWindow.window)), Effect.scoped);
+    }).pipe(Effect.provide(layer(testWindow.window)), Effect.scoped);
   });
 });

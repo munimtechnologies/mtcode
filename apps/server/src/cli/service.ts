@@ -14,7 +14,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { resolveAppDisplayName } from "../appDisplayName.ts";
 
-export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) => {
+export const layer = (config: ServerConfig.ServerConfig["Service"]) => {
   const input = {
     baseDir: config.baseDir,
     logsDir: config.logsDir,
@@ -121,7 +121,7 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
-  return yield* run.pipe(Effect.provide(bootServiceLayer(config)));
+  return yield* run.pipe(Effect.provide(layer(config)));
 });
 
 /** Windows only. The blink at sign-in looks alarming until you know what it is. */

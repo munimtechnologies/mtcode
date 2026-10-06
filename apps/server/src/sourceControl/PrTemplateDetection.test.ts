@@ -28,7 +28,7 @@ const TEMPLATE_DIRECTORIES = [
   "docs/PULL_REQUEST_TEMPLATE",
 ] as const;
 
-const PrTemplateDetectionTestLayer = GitVcsDriver.layer.pipe(
+const layerPrTemplateDetectionTest = GitVcsDriver.layer.pipe(
   Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), {
@@ -61,7 +61,7 @@ const runWithTempDirectory = <A, E, R>(
       yield* runGit(cwd, ["config", "user.name", "Test User"]);
       return yield* test(cwd);
     }),
-  ).pipe(Effect.provide(PrTemplateDetectionTestLayer));
+  ).pipe(Effect.provide(layerPrTemplateDetectionTest));
 
 const writeTemplate = (cwd: string, relativePath: string, contents: string) =>
   Effect.gen(function* () {

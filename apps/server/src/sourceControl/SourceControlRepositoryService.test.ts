@@ -54,12 +54,12 @@ function processOutput(): GitVcsDriver.ExecuteGitResult {
   };
 }
 
-function makeLayer(input: {
+function layer(input: {
   readonly provider?: SourceControlProvider.SourceControlProvider["Service"];
   readonly git?: Partial<GitVcsDriver.GitVcsDriver["Service"]>;
   readonly fileSystem?: FileSystem.FileSystem;
 }) {
-  const serviceLayer = SourceControlRepositoryService.layer.pipe(
+  const layerService = SourceControlRepositoryService.layer.pipe(
     Layer.provide(
       Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
         resolveLink: () => undefined,
@@ -89,11 +89,11 @@ function makeLayer(input: {
   );
 
   return input.fileSystem
-    ? serviceLayer.pipe(
+    ? layerService.pipe(
         Layer.provide(Layer.succeed(FileSystem.FileSystem, input.fileSystem)),
         Layer.provideMerge(NodePath.layer),
       )
-    : serviceLayer.pipe(Layer.provideMerge(NodeServices.layer));
+    : layerService.pipe(Layer.provideMerge(NodeServices.layer));
 }
 
 it.effect("looks up repositories through the requested provider without search", () => {
@@ -116,7 +116,7 @@ it.effect("looks up repositories through the requested provider without search",
 
     assert.deepStrictEqual(result, { provider: "github", ...CLONE_URLS });
     assert.deepStrictEqual(calls, [{ cwd: "/workspace", repository: "octocat/t3code" }]);
-  }).pipe(Effect.provide(makeLayer({ provider })));
+  }).pipe(Effect.provide(layer({ provider })));
 });
 
 it.effect("preserves provider failures without deriving the repository message from them", () => {
@@ -149,7 +149,7 @@ it.effect("preserves provider failures without deriving the repository message f
       "Source control repository operation lookupRepository failed for github: The source control operation could not be completed.",
     );
     assert.strictEqual(error.cause, providerCause);
-  }).pipe(Effect.provide(makeLayer({ provider })));
+  }).pipe(Effect.provide(layer({ provider })));
 });
 
 it.effect("clones a looked-up repository into the requested destination", () =>
@@ -184,7 +184,7 @@ it.effect("clones a looked-up repository into the requested destination", () =>
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layer({
           git: {
             execute: (input) =>
               Effect.sync(() => {
@@ -227,7 +227,7 @@ it.effect("enables password prompting for SSH clones", () =>
       ]);
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layer({
           git: {
             execute: (input) =>
               Effect.sync(() => {
@@ -273,7 +273,7 @@ it.effect("reports clone progress from git's stderr and keeps its error text on 
       );
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layer({
           git: {
             execute: (input) =>
               Effect.gen(function* () {
@@ -321,7 +321,7 @@ it.effect("strips embedded credentials from the remote URL it reports", () =>
       });
     }).pipe(
       Effect.provide(
-        makeLayer({
+        layer({
           git: {
             execute: (input) =>
               Effect.sync(() => {
@@ -363,7 +363,7 @@ it.effect("discards only a directory git wrote to", () =>
       assert.include(replacedError.detail, "could not be inspected");
       // A destination that never got created is nothing to discard.
       yield* service.discardClone(path.join(parent, "missing"));
-    }).pipe(Effect.provide(makeLayer({})));
+    }).pipe(Effect.provide(layer({})));
 
     // The partial clone is emptied but its directory (the workspace root) stays.
     assert.deepStrictEqual(yield* fs.readDirectory(partial), []);
@@ -389,7 +389,7 @@ it.effect("redacts query tokens and userinfo containing '@' from reported URLs",
         destinationPath: path.join(parent, "b"),
       });
       assert.equal(nested.remoteUrl, "https://github.com/octocat/t3code.git");
-    }).pipe(Effect.provide(makeLayer({})));
+    }).pipe(Effect.provide(layer({})));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -415,7 +415,7 @@ it.effect("preserves destination probe failures instead of treating them as miss
     assert.strictEqual(error.cause, fileSystemCause);
   }).pipe(
     Effect.provide(
-      makeLayer({
+      layer({
         fileSystem: FileSystem.makeNoop({
           exists: () => Effect.fail(fileSystemCause),
           makeDirectory: () => Effect.void,
@@ -479,7 +479,7 @@ it.effect("publishes by creating the repository, adding a remote, and pushing up
     ]);
   }).pipe(
     Effect.provide(
-      makeLayer({
+      layer({
         provider,
         git: {
           ensureRemote: (input) =>
@@ -525,7 +525,7 @@ it.effect("publishes to the remote name returned by ensureRemote", () => {
     assert.deepStrictEqual(pushCalls, [{ cwd: "/workspace", remoteName: "origin-1" }]);
   }).pipe(
     Effect.provide(
-      makeLayer({
+      layer({
         git: {
           ensureRemote: () => Effect.succeed("origin-1"),
           pushCurrentBranch: (cwd, _fallbackBranch, options) =>
@@ -562,7 +562,7 @@ it.effect("does not enable SSH authentication for HTTPS publishing", () => {
     assert.equal(pushOptions[0]?.sshAuthentication, undefined);
   }).pipe(
     Effect.provide(
-      makeLayer({
+      layer({
         git: {
           pushCurrentBranch: (_cwd, _fallbackBranch, options = {}) =>
             Effect.sync(() => {
@@ -603,7 +603,7 @@ it.effect("publish succeeds with status remote_added when the local repo has no 
     assert.strictEqual(pushCalls, 0);
   }).pipe(
     Effect.provide(
-      makeLayer({
+      layer({
         git: {
           execute: (input) =>
             input.args[0] === "rev-parse"

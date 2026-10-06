@@ -109,13 +109,13 @@ function runShellEnvironment(input: {
   readonly persistentPath?: string;
   readonly harvest?: ShellEnvironmentHarvest;
 }) {
-  const environmentLayer = Layer.succeed(
+  const layerEnvironment = Layer.succeed(
     DesktopEnvironment.DesktopEnvironment,
     DesktopEnvironment.DesktopEnvironment.of({
       platform: input.platform,
     } as DesktopEnvironment.DesktopEnvironment["Service"]),
   );
-  const spawnerLayer = Layer.succeed(
+  const layerSpawner = Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       if (input.failure !== undefined) return Effect.fail(input.failure);
@@ -123,7 +123,7 @@ function runShellEnvironment(input: {
       return Effect.succeed(typeof result === "string" ? makeProcess(result) : result);
     }),
   );
-  const persistentPathLayer = Layer.succeed(WindowsPersistentPath, () => input.persistentPath);
+  const layerPersistentPath = Layer.succeed(WindowsPersistentPath, () => input.persistentPath);
 
   const program = Effect.gen(function* () {
     const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
@@ -131,9 +131,9 @@ function runShellEnvironment(input: {
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
-        persistentPathLayer,
+        layerPersistentPath,
         DesktopShellEnvironment.layer.pipe(
-          Layer.provide(Layer.mergeAll(environmentLayer, NodeServices.layer, spawnerLayer)),
+          Layer.provide(Layer.mergeAll(layerEnvironment, NodeServices.layer, layerSpawner)),
         ),
       ),
     ),
@@ -353,7 +353,7 @@ describe("DesktopShellEnvironment", () => {
       PATH: "/usr/bin",
     };
     const commands: string[] = [];
-    const testClockLayer = TestClock.layer();
+    const layerTestClock = TestClock.layer();
 
     return Effect.gen(function* () {
       const fiber = yield* runShellEnvironment({
@@ -385,7 +385,7 @@ describe("DesktopShellEnvironment", () => {
 
       assert.deepEqual(commands, ["/bin/zsh", "/bin/launchctl"]);
       assert.equal(env.PATH, "/opt/homebrew/bin:/usr/bin");
-    }).pipe(Effect.provide(testClockLayer));
+    }).pipe(Effect.provide(layerTestClock));
   });
 
   it.effect("loads PowerShell profile environment on Windows", () =>
