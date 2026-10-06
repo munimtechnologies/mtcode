@@ -45,14 +45,13 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import * as ServerConfig from "../config.ts";
-import { expandHomePathWith } from "../pathExpansion.ts";
-import * as ServerSettings from "../serverSettings.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -937,9 +936,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const path = yield* Path.Path;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig.ServerConfig;
-  // MT Code: the worktree base-directory setting. Optional so hosts without the
-  // settings service (tests, narrow layers) keep the default worktrees dir.
-  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
   const crypto = yield* Crypto.Crypto;
   const hostPlatform = yield* HostProcessPlatform;
   const sshAskpassDirectory = yield* Effect.cached(
@@ -3745,33 +3741,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const targetBranch = input.newRefName ?? input.refName;
     const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
-    // git resolves a relative worktree path against its cwd; mirror that so
-    // the copy step and the returned path always point at the real location.
-    const worktreePath = path.resolve(
-      input.cwd,
-      input.path ??
-        path.join(
-          expandHomePathWith(
-            (Option.isSome(serverSettings)
-              ? (yield* serverSettings.value.getSettings.pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new GitCommandError({
-                        operation: "GitVcsDriver.createWorktree",
-                        command: "git",
-                        cwd: input.cwd,
-                        detail: "Failed to read server settings.",
-                        cause,
-                      }),
-                  ),
-                )).worktreeBaseDirectory
-              : undefined) || worktreesDir,
-            path,
-          ),
-          repoName,
-          sanitizedBranch,
-        ),
-    );
+    let worktreePath = input.path;
+    if (worktreePath == null) {
+      const parentDir = resolveWorktreesDirectory(
+        options?.worktreesDirectory ?? "",
+        worktreesDir,
+        path,
+      );
+      if (parentDir === null) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.createWorktree",
+          command: "git worktree add",
+          cwd: input.cwd,
+          detail: `The worktree location "${options?.worktreesDirectory}" must be an absolute folder on this machine, not a drive root. Change it in Settings → Storage.`,
+        });
+      }
+      worktreePath = path.join(parentDir, repoName, sanitizedBranch);
+    }
+    // MT Code: git resolves a relative worktree path against its cwd; mirror
+    // that so the copy step and the returned path point at the real location.
+    worktreePath = path.resolve(input.cwd, worktreePath);
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];

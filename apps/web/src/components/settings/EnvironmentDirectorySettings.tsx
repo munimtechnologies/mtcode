@@ -1,6 +1,5 @@
 import { ChevronRightIcon } from "lucide-react";
 
-import { APP_BASE_NAME } from "../../branding";
 import { useEnvironmentOperateAccess } from "../../hooks/useEnvironmentOperateAccess";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import type { EnvironmentPresentation } from "../../state/environments";
@@ -30,8 +29,6 @@ export function EnvironmentDirectoryRows({
           ? "Your session cannot edit settings."
           : null;
   const disabled = disabledReason !== null;
-  const supportsWorktreeDirectory =
-    environment.serverConfig?.environment.capabilities.worktreeBaseDirectory === true;
   // Older servers don't report defaults; Add Project opens at "~/" there.
   const defaults = environment.serverConfig?.environment.defaultDirectories;
 
@@ -60,36 +57,6 @@ export function EnvironmentDirectoryRows({
             placeholder={defaults?.repositories ?? "~"}
             spellCheck={false}
             aria-label="Repositories directory"
-          />
-        }
-      />
-      <SettingsRow
-        title="Worktrees directory"
-        description={
-          supportsWorktreeDirectory
-            ? "New worktrees only. Existing worktrees stay where they are."
-            : "Update this server to set a worktrees directory."
-        }
-        status={disabledReason}
-        aria-disabled={disabled || !supportsWorktreeDirectory || undefined}
-        resetAction={
-          !disabled && supportsWorktreeDirectory && settings.worktreeBaseDirectory !== "" ? (
-            <SettingResetButton
-              label="worktrees directory"
-              onClick={() => updateSettings({ worktreeBaseDirectory: "" })}
-            />
-          ) : null
-        }
-        control={
-          <DraftInput
-            size="sm"
-            className="w-full sm:w-72"
-            value={settings.worktreeBaseDirectory}
-            onCommit={(worktreeBaseDirectory) => updateSettings({ worktreeBaseDirectory })}
-            disabled={disabled || !supportsWorktreeDirectory}
-            placeholder={defaults?.worktrees ?? `${APP_BASE_NAME} default`}
-            spellCheck={false}
-            aria-label="Worktrees directory"
           />
         }
       />

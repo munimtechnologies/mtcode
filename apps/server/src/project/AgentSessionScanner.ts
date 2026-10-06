@@ -51,6 +51,7 @@ import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { expandHomePath } from "../pathExpansion.ts";
+import { managedWorktreesDirectories } from "../worktreesDirectory.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   createTranscriptJsonReader,
@@ -1205,15 +1206,16 @@ export const make = Effect.gen(function* () {
   let cachedCandidates: ReadonlyArray<RawCandidate> | null = null;
 
   const readWorktreesDirectories = serverSettings.getSettings.pipe(
-    Effect.map((settings) =>
-      path.resolve(expandHomePath(settings.worktreeBaseDirectory || worktreesDir)),
-    ),
-    Effect.flatMap((directory) =>
-      fileSystem.realPath(directory).pipe(
-        Effect.catchTags({ PlatformError: () => Effect.succeed(directory) }),
-        Effect.map((canonicalDirectory) => [directory, canonicalDirectory]),
+    Effect.map((settings) => managedWorktreesDirectories(settings, worktreesDir, path)),
+    Effect.flatMap((directories) =>
+      Effect.forEach(directories, (directory) =>
+        fileSystem.realPath(directory).pipe(
+          Effect.catchTags({ PlatformError: () => Effect.succeed(directory) }),
+          Effect.map((canonicalDirectory) => [directory, canonicalDirectory]),
+        ),
       ),
     ),
+    Effect.map((pairs) => pairs.flat()),
     Effect.mapError((cause) => new AgentSessionScanError({ operation: "read-settings", cause })),
   );
 

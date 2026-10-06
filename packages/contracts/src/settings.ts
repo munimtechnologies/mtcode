@@ -1428,6 +1428,18 @@ export const ServerSettings = Schema.Struct({
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
   ),
+  /**
+   * Absolute directory new worktrees are created under, e.g. `D:\worktrees`
+   * or `~/worktrees`. Empty uses `<T3 home>/worktrees`.
+   */
+  worktreesDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Custom locations used before the current one. Server-maintained so
+   * worktrees left there stay eligible for cleanup and review diffs.
+   */
+  previousWorktreesDirectories: Schema.Array(TrimmedString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   responseStreamingMode: ResponseStreamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
   ),
@@ -1567,7 +1579,6 @@ export const ServerSettings = Schema.Struct({
   worktreeBranchPrefix: WorktreeBranchPrefix.pipe(
     Schema.withDecodingDefault(Effect.succeed("t3code")),
   ),
-  worktreeBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /**
    * Null defers to the repository's t3.json, then to recursive. A value
    * picked on a newer server decodes as null here rather than failing the
@@ -1867,6 +1878,7 @@ export const ServerSettingsPatch = Schema.Struct({
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
+  worktreesDirectory: Schema.optionalKey(TrimmedString),
   // Server settings
   environmentLabel: Schema.optionalKey(TrimmedString.check(Schema.isMaxLength(40))),
   sidebarArtwork: Schema.optionalKey(SidebarArtworkSelection),
@@ -1928,7 +1940,6 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeBranchPrefix: Schema.optionalKey(WorktreeBranchPrefix),
-  worktreeBaseDirectory: Schema.optionalKey(TrimmedString),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),

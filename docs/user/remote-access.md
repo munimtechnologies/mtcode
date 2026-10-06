@@ -66,20 +66,15 @@ another link to share.
 
 On web and desktop, open **Settings → Connections → Default directories** for
 this machine, or expand **Default directories** in a remote environment's card.
-Each field shows the machine's default until you type a path. Set the
+The field shows the machine's default until you type a path. Set the
 repositories directory to start Add Project and repository cloning in that
-folder. Set the worktree directory to choose where new worktrees are created,
-grouped by repository and branch.
+folder. The path belongs to the selected machine and applies from every
+connected client, including mobile. Clear the field to restore the default, the
+home directory.
 
-These paths belong to the selected machine and apply from every connected
-client, including mobile. Use an absolute worktree path, or a path under that
-machine's home directory such as `~/worktrees`. It cannot be the root of the
-filesystem, your home directory itself, or a directory that contains your home
-directory. Changing it does not move existing worktrees, and threads whose
-worktree lives in a directory you no longer have set here cannot show diffs
-until you set that directory again. Clear either field to restore its default:
-the home directory for Add Project, or T3 Code's worktrees directory for new
-worktrees.
+To choose where new worktrees are created, use **Settings → Storage**. MT Code
+refuses a worktree location that is your home directory or a directory that
+contains it.
 
 ### Reach one machine several ways
 

@@ -840,69 +840,6 @@ it.effect("backs off and logs failed fetch attempts across linked worktrees", ()
   ).pipe(Effect.provide(CoreDepsLayer.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
-it.effect(
-  "applies current worktree defaults to new worktrees while preserving explicit and existing paths",
-  () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const fs = yield* FileSystem.FileSystem;
-      const config = yield* ServerConfig.ServerConfig;
-      const settings = yield* ServerSettings.ServerSettingsService;
-      const driver = yield* GitVcsDriver.GitVcsDriver;
-      const cwd = yield* makeTmpDir();
-      const { initialBranch } = yield* initRepoWithCommit(cwd);
-      const create = (newRefName: string, target: string | null = null) =>
-        driver.createWorktree({ cwd, refName: initialBranch, newRefName, path: target });
-      const fallback = yield* create("feature/default");
-      assert.equal(
-        fallback.worktree.path,
-        path.join(config.worktreesDir, path.basename(cwd), "feature-default"),
-      );
-
-      const customRoot = yield* makeTmpDir("git-custom-worktrees-");
-      yield* settings.updateSettings({ worktreeBaseDirectory: customRoot });
-      const custom = yield* create("feature/custom");
-      assert.equal(
-        custom.worktree.path,
-        path.join(customRoot, path.basename(cwd), "feature-custom"),
-      );
-      assert.isTrue(yield* fs.exists(custom.worktree.path));
-
-      const otherRoot = yield* makeTmpDir("git-other-worktrees-");
-      const homeRelative = "~/" + path.relative(expandHomePath("~"), otherRoot);
-      yield* settings.updateSettings({ worktreeBaseDirectory: homeRelative });
-      const changed = yield* create("feature/changed");
-      assert.equal(
-        changed.worktree.path,
-        path.join(otherRoot, path.basename(cwd), "feature-changed"),
-      );
-      assert.equal(
-        yield* git(custom.worktree.path, ["branch", "--show-current"]),
-        "feature/custom",
-      );
-
-      const explicitPath = path.join(customRoot, "explicit");
-      const explicit = yield* create("feature/explicit", explicitPath);
-      assert.equal(explicit.worktree.path, explicitPath);
-
-      yield* settings.updateSettings({ worktreeBaseDirectory: "" });
-      const reset = yield* create("feature/reset");
-      assert.equal(
-        reset.worktree.path,
-        path.join(config.worktreesDir, path.basename(cwd), "feature-reset"),
-      );
-      yield* driver.removeWorktree({ cwd, path: custom.worktree.path, force: true });
-      assert.isFalse(yield* fs.exists(custom.worktree.path));
-    }).pipe(
-      Effect.provide(
-        GitVcsDriver.layer.pipe(
-          Layer.provideMerge(CoreDepsLayer),
-          Layer.provideMerge(NodeServices.layer),
-        ),
-      ),
-    ),
-);
-
 it.effect.each([
   {
     name: "HTTPS credentials",
@@ -3175,6 +3112,45 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         assert.equal(created.worktree.path, worktreePath);
         assert.equal(yield* fileSystem.exists(worktreePath), true);
+      }),
+    );
+
+    it.effect("creates worktrees under the configured worktrees directory", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const worktreesDirectory = yield* makeTmpDir("custom-worktrees-");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree(
+          { cwd, path: null, refName: initialBranch, newRefName: "feature/custom-dir" },
+          { worktreesDirectory },
+        );
+        const expected = pathService.join(
+          worktreesDirectory,
+          pathService.basename(cwd),
+          "feature-custom-dir",
+        );
+        assert.equal(created.worktree.path, expected);
+        assert.equal(yield* fileSystem.exists(expected), true);
+
+        const error = yield* driver
+          .createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "feature/relative-dir" },
+            { worktreesDirectory: "relative/worktrees" },
+          )
+          .pipe(Effect.flip);
+        assert.match(error.detail, /must be an absolute folder on this machine/);
+
+        const rootError = yield* driver
+          .createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "feature/root-dir" },
+            { worktreesDirectory: "/" },
+          )
+          .pipe(Effect.flip);
+        assert.match(rootError.detail, /not a drive root/);
       }),
     );
 

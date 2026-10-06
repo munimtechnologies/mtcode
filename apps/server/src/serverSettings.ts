@@ -143,30 +143,27 @@ export const isFilesystemRoot = (directory: string, path: Path.Path) => {
  * guard authorizes everything under this directory, so the home directory and
  * anything containing it (including the filesystem root) are refused: they
  * would expose every repository on the machine to a review-scoped client.
- * Symlinks are not followed here; the guard repeats the check on real paths.
+ * Symlinks are not followed here.
  */
-const worktreeBaseDirectoryIssue = (value: string, path: Path.Path): string | null => {
-  if (value === "") return null;
-  if (value.includes("\0") || !path.isAbsolute(expandHomePathWith(value, path))) {
-    return "Worktree directory must be an absolute path or start with ~/.";
-  }
-  const resolved = path.resolve(expandHomePathWith(value, path));
-  if (isFilesystemRoot(resolved, path)) {
-    return "Worktree directory cannot be a filesystem root.";
-  }
+const worktreesDirectoryIssue = (value: string, path: Path.Path): string | null => {
+  // MT Code: upstream's worktreesDirectory already treats relative paths and
+  // filesystem roots as unusable (and settings may sync from another OS), so
+  // only the home-containment rule is enforced here.
+  if (value === "" || value.includes("\0")) return null;
+  const expanded = expandHomePathWith(value, path);
+  if (!path.isAbsolute(expanded)) return null;
+  const resolved = path.resolve(expanded);
   if (isWithinDirectory(path.resolve(expandHomePathWith("~", path)), resolved, path)) {
     return "Worktree directory cannot be your home directory or a directory containing it.";
   }
   return null;
 };
 
-const worktreeBaseDirectorySchema = (path: Path.Path) =>
-  Schema.String.check(
-    Schema.makeFilter((value) => worktreeBaseDirectoryIssue(value, path) ?? true),
-  );
+const worktreesDirectorySchema = (path: Path.Path) =>
+  Schema.String.check(Schema.makeFilter((value) => worktreesDirectoryIssue(value, path) ?? true));
 
-const assertWorktreeBaseDirectory = (value: string, path: Path.Path) =>
-  Schema.decodeUnknownEffect(worktreeBaseDirectorySchema(path))(value).pipe(
+const assertWorktreesDirectory = (value: string, path: Path.Path) =>
+  Schema.decodeUnknownEffect(worktreesDirectorySchema(path))(value).pipe(
     Effect.asVoid,
     Effect.mapError(
       (cause) =>
@@ -194,7 +191,7 @@ const normalizeServerSettings = (
           cause,
         }),
     ),
-    Effect.tap((settings) => assertWorktreeBaseDirectory(settings.worktreeBaseDirectory, path)),
+    Effect.tap((settings) => assertWorktreesDirectory(settings.worktreesDirectory, path)),
   );
 
 function providerEnvironmentSecretName(input: {
@@ -858,16 +855,16 @@ const make = Effect.gen(function* () {
     // A bad directory must not take every setting down with it. Fall back to
     // the default worktrees directory, the way a malformed file falls back to
     // defaults, and leave the strict check to writes where the user sees it.
-    const directoryIssue = worktreeBaseDirectoryIssue(restored.worktreeBaseDirectory, pathService);
+    const directoryIssue = worktreesDirectoryIssue(restored.worktreesDirectory, pathService);
     if (directoryIssue !== null) {
-      yield* Effect.logWarning("ignoring worktreeBaseDirectory in settings.json, using default", {
+      yield* Effect.logWarning("ignoring worktreesDirectory in settings.json, using default", {
         path: settingsPath,
-        worktreeBaseDirectory: restored.worktreeBaseDirectory,
+        worktreesDirectory: restored.worktreesDirectory,
         issue: directoryIssue,
       });
     }
     const loaded = foldProviderInstanceEnabledFlags(
-      directoryIssue === null ? restored : { ...restored, worktreeBaseDirectory: "" },
+      directoryIssue === null ? restored : { ...restored, worktreesDirectory: "" },
     );
     const folded = settingsFileTrusted
       ? foldLegacyProjectSettings(loaded, legacyProjectRows)
@@ -1215,7 +1212,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const current = yield* getSettingsFromCache;
         const updated = yield* update(current);
-        yield* assertWorktreeBaseDirectory(updated.worktreeBaseDirectory, pathService);
+        yield* assertWorktreesDirectory(updated.worktreesDirectory, pathService);
         const persisted = yield* persistProviderEnvironmentSecrets(current, updated);
         const next = yield* normalizeServerSettings(persisted.settings, pathService);
         const materialized = yield* Effect.uninterruptibleMask(() =>

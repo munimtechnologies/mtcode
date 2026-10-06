@@ -104,7 +104,7 @@ describe("splitSharedServerPatch", () => {
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
       addProjectBaseDirectory: "/workspace/repos",
-      worktreeBaseDirectory: "/workspace/worktrees",
+      worktreesDirectory: "/workspace/worktrees",
       newWorktreesStartFromOrigin: true,
       createGitHubPullRequestsAsDraft: false,
     });
@@ -119,7 +119,7 @@ describe("splitSharedServerPatch", () => {
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
       addProjectBaseDirectory: "/workspace/repos",
-      worktreeBaseDirectory: "/workspace/worktrees",
+      worktreesDirectory: "/workspace/worktrees",
     });
   });
 });
@@ -373,7 +373,7 @@ describe("findSharedSettingsMismatches", () => {
             ...primarySettings,
             enableAgentBrowserAccess: false,
             addProjectBaseDirectory: "/workspace/repos",
-            worktreeBaseDirectory: "/workspace/worktrees",
+            worktreesDirectory: "/workspace/worktrees",
             defaultThreadEnvMode:
               primarySettings.defaultThreadEnvMode === "local" ? "worktree" : "local",
           },

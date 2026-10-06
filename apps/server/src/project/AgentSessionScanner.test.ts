@@ -61,7 +61,7 @@ const makeScannerTestLayer = (input: ScannerTestInput) =>
     Layer.provide(
       Layer.mergeAll(
         ServerSettings.layerTest({
-          worktreeBaseDirectory: input.worktreeBaseDirectory ?? "",
+          worktreesDirectory: input.worktreeBaseDirectory ?? "",
           providers: {
             claudeAgent: { homePath: input.claudeHomePath },
             codex: { homePath: input.codexHomePath },
