@@ -20,7 +20,7 @@ import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as Persistence from "../platform/persistence.ts";
-import { config as environmentConfig, runStream } from "../rpc/client.ts";
+import { config as environmentConfig, runStreamGuarded, RpcPermissionGuard } from "../rpc/client.ts";
 import {
   createRuntimeCommand,
   runInEnvironment,
@@ -28,6 +28,7 @@ import {
   type AtomCommandResult,
 } from "./runtime.ts";
 import { resolveSshPasswordPrompt, type SshPasswordPromptHandler } from "./sshPasswordPrompts.ts";
+import { createCommandPermissions } from "./commandPermissions.ts";
 import { vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
 
@@ -517,7 +518,7 @@ export function createVcsActionManager<R, E>(
                 .sourceControlSshPasswordPrompts === true
                 ? WS_METHODS.gitRunStackedActionWithPrompts
                 : WS_METHODS.gitRunStackedAction;
-            return yield* consumeVcsActionProgress(runStream(method, rpcInput), {
+            return yield* consumeVcsActionProgress(runStreamGuarded(method, rpcInput), {
               target,
               transportActionId,
               actionId: input.actionId,
@@ -546,6 +547,10 @@ export function createVcsActionManager<R, E>(
             });
           }),
         ).pipe(
+          Effect.provideService(RpcPermissionGuard, {
+            authorize: (id, method, payload) =>
+              createCommandPermissions(runtime, method).authorize(registry, id, payload),
+          }),
           Effect.ensuring(invalidateCachedVcsRefs(registry, target)),
           Effect.tap(() => clearOwnedState),
           Effect.tapError((error) =>

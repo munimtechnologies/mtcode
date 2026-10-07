@@ -172,6 +172,7 @@ export function UsagePage() {
           // `phase` for its connection coverage copy.
           phase: "connected" as const,
           isPending: false,
+          canReadDiagnostics: true,
           error: null,
           summary: null,
           needsCursorKeychainAccess: false,
@@ -211,6 +212,9 @@ export function UsagePage() {
   // Costs are omitted rather than shown as zero when pricing could not load.
   const costUnavailable = merged.pricingStatus === "unavailable";
   const formatCost = (value: number) => formatUsageCost(merged.pricingStatus, value);
+  const canReadDiagnostics = selectedEnvironments.some(
+    (environment) => environment.canReadDiagnostics,
+  );
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -433,7 +437,7 @@ export function UsagePage() {
           onClick={refreshWindow}
           aria-label={showingLimits ? "Refresh limits" : "Refresh usage"}
           aria-busy={isRefreshing}
-          disabled={isRefreshing}
+          disabled={isRefreshing || (!showingLimits && !canReadDiagnostics)}
           size="icon-sm"
           variant="ghost"
         >
@@ -496,7 +500,7 @@ export function UsagePage() {
           onClick={refreshWindow}
           aria-label={showingLimits ? "Refresh limits" : "Refresh usage"}
           aria-busy={isRefreshing}
-          disabled={isRefreshing}
+          disabled={isRefreshing || (!showingLimits && !canReadDiagnostics)}
           size="icon-sm"
           variant="ghost"
         >
@@ -539,6 +543,15 @@ export function UsagePage() {
               />
             ) : isPending ? (
               <UsageSkeleton />
+            ) : !canReadDiagnostics ? (
+              <div className="space-y-2 py-12 text-center text-sm text-muted-foreground">
+                {selectedEnvironments.map((environment) => (
+                  <p key={environment.environmentId}>
+                    {selectedEnvironments.length > 1 ? `${environment.label}: ` : null}
+                    {environment.error}
+                  </p>
+                ))}
+              </div>
             ) : (
               <>
                 {sourceMessages.map((message) => (
@@ -1116,7 +1129,15 @@ function UsageCoverageNotice({
         environment.phase === "offline" ||
         environment.phase === "error"),
   );
-  const failed = environments.filter((environment) => environment.error !== null);
+  // Each failure states its reason (a denied grant and a failed scan need
+  // different fixes). Environments already listed as settling or unavailable
+  // are not repeated.
+  const failed = environments.filter(
+    (environment) =>
+      environment.error !== null &&
+      !settling.includes(environment) &&
+      !unavailable.includes(environment),
+  );
   const mismatchByEnvironment = new Map(
     contractMismatches.map((mismatch) => [mismatch.environmentId, mismatch]),
   );
@@ -1173,7 +1194,9 @@ function UsageCoverageNotice({
         </span>
       ))}
       {failed.map((environment) => (
-        <span key={environment.environmentId}>{environment.label} could not report usage.</span>
+        <span key={environment.environmentId}>
+          {environment.label}: {environment.error}
+        </span>
       ))}
       {incompatible.map(({ environment, mismatch }) => (
         <span key={environment.environmentId}>

@@ -132,7 +132,7 @@ describe("ssh command", () => {
   );
 
   it.effect("reconnects when forwarding changes without orphaning remote launch state", () =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const target = {
         alias: "devbox",
         hostname: "devbox.example.com",
@@ -142,8 +142,32 @@ describe("ssh command", () => {
       const forwardingTarget = { ...target, forwardAgent: true } as const;
 
       assert.notEqual(targetConnectionKey(target), targetConnectionKey(forwardingTarget));
-      assert.equal(remoteStateKey(target), remoteStateKey(forwardingTarget));
-    }),
+      assert.equal(yield* remoteStateKey(target), yield* remoteStateKey(forwardingTarget));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  // Remote servers store state under this key, so it must not change across releases.
+  it.effect("derives a stable remote state key", () =>
+    Effect.gen(function* () {
+      assert.equal(
+        yield* remoteStateKey({
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: "julius",
+          port: 2222,
+        }),
+        "711bc738002d72fd",
+      );
+      assert.equal(
+        yield* remoteStateKey({
+          alias: "fixture",
+          hostname: "fixture",
+          username: null,
+          port: null,
+        }),
+        "326264c4f08c8a0c",
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("reads the last non-empty ssh output line", () =>

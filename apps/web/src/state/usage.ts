@@ -9,6 +9,7 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
+  AuthDiagnosticsReadScope,
   USAGE_CONTRACT_VERSION,
   type EnvironmentId,
   type UsageBucket,
@@ -16,6 +17,7 @@ import {
   type UsageSummaryInput,
 } from "@t3tools/contracts";
 import { needsCursorKeychainAccess, refreshUsage } from "@t3tools/client-runtime/state/usage";
+import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
@@ -25,6 +27,7 @@ import { environmentCatalog } from "../connection/catalog";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
+import { environmentSession, readEnvironmentScope } from "./session";
 import {
   getEnvironmentUsageLoadingState,
   type EnvironmentUsageOption,
@@ -34,7 +37,11 @@ export type { EnvironmentUsageOption } from "./usageEnvironmentScope";
 
 export interface EnvironmentUsageStatus extends EnvironmentUsageOption {
   readonly isPending: boolean;
-  /** A connected usage query failed. Connection coverage uses `phase`. */
+  readonly canReadDiagnostics: boolean;
+  /**
+   * A connected usage query failed, or this connection may not read usage.
+   * Connection coverage uses `phase`.
+   */
   readonly error: string | null;
   readonly summary: UsageSummary | null;
   readonly needsCursorKeychainAccess: boolean;
@@ -67,6 +74,33 @@ const usageByWindowAtom = Atom.family((key: string) =>
     for (const option of options) {
       const { environmentId } = option;
       const connectionResult = get(environmentCatalog.stateAtom(environmentId));
+      const sessionResult = get(environmentSession.sessionStateAtom(environmentId));
+      const session = Option.getOrNull(AsyncResult.value(sessionResult));
+      const access = resolveUsageAccess({
+        connectionPhase: option.phase,
+        session,
+        hasSessionError: sessionResult._tag === "Failure",
+      });
+      if (!access.canReadDiagnostics) {
+        // A session that has not arrived yet waits only through the first
+        // connection attempt, like the usage query below, so a down machine
+        // cannot hold the dashboard open.
+        const awaitingSession = session === null && sessionResult._tag !== "Failure";
+        const isPending = awaitingSession
+          ? (option.phase === "available" && connectionResult.waiting) ||
+            option.phase === "connecting" ||
+            option.phase === "connected"
+          : access.isPending;
+        environments.push({
+          ...option,
+          ...access,
+          isPending,
+          error: awaitingSession && isPending ? null : access.error,
+          summary: null,
+          needsCursorKeychainAccess: false,
+        });
+        continue;
+      }
       // Keep reading the environment-scoped atom while disconnected so a prior
       // successful value remains visible. Wait through the first connection attempt,
       // then treat retries as terminal coverage so a down machine cannot block the UI.
@@ -79,6 +113,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
           (option.phase === "available" && connectionResult.waiting) ||
           option.phase === "connecting" ||
           (option.phase === "connected" && result.waiting),
+        canReadDiagnostics: true,
         error: failed ? "This environment could not report usage." : null,
         summary,
         needsCursorKeychainAccess: needsCursorKeychainAccess(
@@ -182,7 +217,15 @@ export function useUsage(
         registry: appAtomRegistry,
         server: serverEnvironment,
         presentations: environmentPresentations,
-        environmentIds: selectedEnvironments.map(({ environmentId }) => environmentId),
+        // Only environments this connection may read; the others report a
+        // permission error instead of a stale or failed rescan.
+        environmentIds: selectedEnvironments
+          .filter(
+            (environment) =>
+              environment.canReadDiagnostics &&
+              readEnvironmentScope(environment.environmentId, AuthDiagnosticsReadScope),
+          )
+          .map(({ environmentId }) => environmentId),
         input: nextInput ?? (JSON.parse(windowKey) as UsageAtomKey).input,
       }),
     [selectedEnvironments, windowKey],

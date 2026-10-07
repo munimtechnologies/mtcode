@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as MonitorSession from "../../MonitorSession.ts";
 import { MonitorToolkit } from "./tools.ts";
 
@@ -14,8 +15,8 @@ const invoke = Effect.fn("MonitorToolkit.invoke")(function* (
   return yield* sessions.invoke(scope.thread.providerSessionId, operation, processId);
 });
 
-export const MonitorToolkitHandlersLive = MonitorToolkit.toLayer({
-  monitor_start: ({ command }) =>
+export const MonitorToolkitHandlersLive = McpToolAccess.toLayer(MonitorToolkit, {
+  monitor_start: McpToolAccess.actsAsCaller(({ command }) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       if (!scope.capabilities.has("monitor") || scope.thread === undefined)
@@ -25,5 +26,8 @@ export const MonitorToolkitHandlersLive = MonitorToolkit.toLayer({
         command,
       );
     }),
-  monitor_unsubscribe: ({ processId }) => invoke("unsubscribe", processId),
+  ),
+  monitor_unsubscribe: McpToolAccess.actsAsCaller(({ processId }) =>
+    invoke("unsubscribe", processId),
+  ),
 });

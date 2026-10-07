@@ -963,6 +963,7 @@ interface StagePackageJson {
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
+  readonly license: string;
   readonly homepage: string;
   readonly author: string;
   readonly main: string;
@@ -2988,6 +2989,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
+    // electron-builder 26 defaults to its legacy AppImage runtime, which
+    // dynamically loads the system libfuse2 library. Pin the static runtime so
+    // the AppImage also launches on distributions that only provide FUSE 3.
+    buildConfig.toolsets = { appimage: "1.0.3" };
+    const path = yield* Path.Path;
+    const repoRoot = yield* RepoRoot;
     buildConfig.linux = {
       // The .deb is built from the same unpacked app after the AppImage.
       // electron-builder lists both in latest-linux.yml and writes
@@ -3016,6 +3023,18 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
     };
     buildConfig.deb = {
+      // FPM runs outside the staged app directory, so source paths must be absolute.
+      // AppStream consumers associate this metadata with our t3code.desktop entry.
+      // The metainfo file describes the official t3code.desktop entry, so the
+      // Munim distro (mtcode.desktop) ships without it.
+      fpm: [
+        ...(distro.id === "default"
+          ? [
+              `${path.join(repoRoot, "apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml")}=/usr/share/metainfo/com.t3tools.t3code.metainfo.xml`,
+            ]
+          : []),
+        `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/${distro.packageName}/copyright`,
+      ],
       // Electron's runtime libraries. Debian 13 and Ubuntu 24.04 renamed some
       // for 64-bit time; the old name is the fallback for older releases.
       depends: [
@@ -3973,6 +3992,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     packageManager: rootPackageJson.packageManager,
     description: distro.description,
+    // The repository is Apache-2.0 since the MT Code relicense (LICENSE-MIT
+    // keeps the original T3 Code notice).
+    license: "Apache-2.0",
+    // Required by the .deb control file.
     homepage: "https://github.com/munimtechnologies/mtcode",
     author: distro.author,
     main: "apps/desktop/dist-electron/boot.cjs",

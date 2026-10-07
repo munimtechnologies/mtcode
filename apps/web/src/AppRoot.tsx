@@ -2,7 +2,6 @@ import { RouterProvider } from "@tanstack/react-router";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { ComputerTaskHosts } from "./components/computers/ComputerTaskHosts";
-import { PreviewAutomationHosts } from "./components/preview/PreviewAutomationHosts";
 import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import { VoiceSessionProvider } from "./components/voice/VoiceSession";
@@ -20,7 +19,6 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       <AppIconSync />
       <VoiceSessionProvider>
         <RouterProvider router={router} />
-        <PreviewAutomationHosts />
         <ComputerTaskHosts />
         <ElectronBrowserHost />
         <QuitHoldOverlay />

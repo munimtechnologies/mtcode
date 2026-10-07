@@ -9,6 +9,7 @@ export function SearchOptionButton(props: {
   readonly onClick: () => void;
   readonly children: ReactNode;
   readonly className?: string;
+  readonly disabled?: boolean;
 }) {
   return (
     <Tooltip>
@@ -24,6 +25,7 @@ export function SearchOptionButton(props: {
             size="compact"
             variant="ghost"
             onClick={props.onClick}
+            disabled={props.disabled}
           />
         }
       >

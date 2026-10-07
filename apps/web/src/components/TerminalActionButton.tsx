@@ -1,5 +1,6 @@
 import type { ComponentType, MouseEventHandler, ReactNode } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import { cn } from "~/lib/utils";
 
 interface TerminalActionButtonProps {
   readonly icon?: ComponentType<{ className?: string }>;
@@ -8,6 +9,7 @@ interface TerminalActionButtonProps {
   readonly onClick: () => void;
   readonly onMouseDown?: MouseEventHandler<HTMLButtonElement>;
   readonly children?: ReactNode;
+  readonly disabled?: boolean;
 }
 
 export const TerminalActionButton = ({
@@ -17,6 +19,7 @@ export const TerminalActionButton = ({
   onClick,
   onMouseDown,
   children,
+  disabled,
 }: TerminalActionButtonProps) => (
   <Popover>
     <PopoverTrigger
@@ -24,10 +27,11 @@ export const TerminalActionButton = ({
       render={
         <button
           type="button"
-          className={className}
-          onClick={onClick}
+          className={cn(className, disabled && "opacity-45 cursor-not-allowed")}
+          onClick={disabled ? undefined : onClick}
           onMouseDown={onMouseDown}
           aria-label={label}
+          aria-disabled={disabled}
         />
       }
     >

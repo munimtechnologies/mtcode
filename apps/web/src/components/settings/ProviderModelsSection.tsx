@@ -232,6 +232,8 @@ interface ProviderModelsSectionProps {
    * removed) via `onChange`.
    */
   readonly customModels: ReadonlyArray<CustomModelDefinition>;
+  readonly canManageCustomModels: boolean;
+  readonly canWritePreferences?: boolean;
   /** Server-returned model slugs hidden from the model picker. */
   readonly hiddenModels: ReadonlyArray<string>;
   /** Model slugs favorited for this provider instance. */
@@ -337,6 +339,8 @@ export function ProviderModelsSection({
   driverKind,
   models,
   customModels,
+  canManageCustomModels,
+  canWritePreferences = true,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -448,7 +452,7 @@ export function ProviderModelsSection({
   };
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     setDrag(null);
-    if (!over) return;
+    if (!canWritePreferences || !over) return;
     const result = resolveModelListDrop({
       items: sortableIds,
       activeId: String(active.id),
@@ -476,7 +480,7 @@ export function ProviderModelsSection({
   }, [displayModels]);
 
   const handleAdd = () => {
-    if (driverKind === "antigravity") return;
+    if (!canManageCustomModels || driverKind === "antigravity") return;
     const normalized = normalizeCustomModelSlug(input);
     if (!normalized) {
       setError("Enter a model slug.");
@@ -512,6 +516,7 @@ export function ProviderModelsSection({
   };
 
   const handleRemove = (slug: string) => {
+    if (!canManageCustomModels) return;
     if (editingSlug === slug) setEditingSlug(null);
     onChange(customModels.filter((entry) => entry.slug !== slug));
     onModelPreferencesChange({
@@ -523,12 +528,13 @@ export function ProviderModelsSection({
   };
 
   const handleSaveEdit = (next: CustomModelDefinition) => {
+    if (!canManageCustomModels) return;
     onChange(customModels.map((entry) => (entry.slug === next.slug ? next : entry)));
     setEditingSlug(null);
   };
 
   const setHidden = (slug: string, isHidden: boolean) => {
-    if (isHidden === hiddenModelSet.has(slug)) return;
+    if (!canWritePreferences || isHidden === hiddenModelSet.has(slug)) return;
     onModelPreferencesChange({
       hiddenModels: isHidden
         ? [...hiddenModels, slug]
@@ -538,6 +544,7 @@ export function ProviderModelsSection({
   };
 
   const handleToggleFavorite = (slug: string) => {
+    if (!canWritePreferences) return;
     onFavoriteModelsChange(
       favoriteModelSet.has(slug)
         ? favoriteModels.filter((model) => model !== slug)
@@ -577,6 +584,7 @@ export function ProviderModelsSection({
             variant="ghost-muted"
             {...dragHandle.attributes}
             {...dragHandle.listeners}
+            disabled={!canWritePreferences}
             aria-label={`Drag to reorder ${model.name}`}
             className="cursor-grab touch-none active:cursor-grabbing"
           >
@@ -598,6 +606,7 @@ export function ProviderModelsSection({
                     ? "text-yellow-500 hover:text-yellow-600"
                     : "text-muted-foreground/40 hover:text-muted-foreground",
                 )}
+                disabled={!canWritePreferences}
                 onClick={() => handleToggleFavorite(model.slug)}
                 aria-label={`${isFavorite ? "Remove" : "Add"} ${model.name} ${
                   isFavorite ? "from" : "to"
@@ -647,10 +656,12 @@ export function ProviderModelsSection({
                     <Button
                       size="icon-micro"
                       variant="ghost-muted"
+                      disabled={!canManageCustomModels}
                       aria-label={`Edit ${model.slug}`}
-                      onClick={() =>
-                        setEditingSlug((current) => (current === model.slug ? null : model.slug))
-                      }
+                      onClick={() => {
+                        if (!canManageCustomModels) return;
+                        setEditingSlug((current) => (current === model.slug ? null : model.slug));
+                      }}
                     />
                   }
                 >
@@ -664,6 +675,7 @@ export function ProviderModelsSection({
                     <Button
                       size="icon-micro"
                       variant="ghost-muted"
+                      disabled={!canManageCustomModels}
                       aria-label={`Remove ${model.slug}`}
                       onClick={() => handleRemove(model.slug)}
                     />
@@ -682,7 +694,7 @@ export function ProviderModelsSection({
               <Switch
                 size="sm"
                 checked={!isHidden}
-                disabled={model.isCustom}
+                disabled={!canWritePreferences || model.isCustom}
                 onCheckedChange={(checked) => setHidden(model.slug, !checked)}
                 aria-label={`Show ${model.name} in the model picker`}
               />
@@ -702,7 +714,7 @@ export function ProviderModelsSection({
 
   const renderEditor = (model: ServerProviderModel) => {
     const entry =
-      model.isCustom && editingSlug === model.slug
+      canManageCustomModels && model.isCustom && editingSlug === model.slug
         ? customModels.find((entry) => entry.slug === model.slug)
         : undefined;
     if (!entry) return null;
@@ -872,7 +884,7 @@ export function ProviderModelsSection({
         )}
       </div>
 
-      {driverKind === "antigravity" ? null : isAdding ? (
+      {driverKind === "antigravity" || !canManageCustomModels ? null : isAdding ? (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <Input
             id={`provider-instance-${instanceId}-custom-model`}

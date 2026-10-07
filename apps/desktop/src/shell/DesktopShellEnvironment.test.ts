@@ -314,6 +314,7 @@ describe("DesktopShellEnvironment", () => {
           return envOutput({
             PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
             SSH_AUTH_SOCK: "/tmp/secretive.sock",
+            T3CODE_TELEMETRY_ENABLED: "false",
           });
         },
       });
@@ -321,6 +322,7 @@ describe("DesktopShellEnvironment", () => {
       assert.equal(commands[0]?._tag === "StandardCommand" ? commands[0].args[0] : "", "-ilc");
       assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
       assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
+      assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
     }),
   );
 

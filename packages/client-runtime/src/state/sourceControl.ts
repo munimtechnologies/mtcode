@@ -6,7 +6,7 @@ import {
   type SourceControlSshPasswordPromptRequest,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import { Atom } from "effect/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 
 import {
   createAtomCommandScheduler,
@@ -18,7 +18,13 @@ import {
 } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as Persistence from "../platform/persistence.ts";
-import { config as environmentConfig, request, runStream } from "../rpc/client.ts";
+import {
+  config as environmentConfig,
+  requestGuarded,
+  RpcPermissionGuard,
+  runStream,
+} from "../rpc/client.ts";
+import { createCommandPermissions } from "./commandPermissions.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
 import { consumeSshPromptedOperation } from "./sshPasswordPrompts.ts";
@@ -43,23 +49,26 @@ export function createSourceControlEnvironmentAtoms<R, E>(
         mode: "serial",
         key: ({ environmentId }) => environmentId,
       },
-      execute: (target: {
-        readonly environmentId: EnvironmentId;
-        readonly input: SourceControlCloneRepositoryInput;
-        readonly onSshPasswordPrompt?: (
-          request: SourceControlSshPasswordPromptRequest,
-        ) => Promise<string | null>;
-      }) =>
+      execute: (
+        target: {
+          readonly environmentId: EnvironmentId;
+          readonly input: SourceControlCloneRepositoryInput;
+          readonly onSshPasswordPrompt?: (
+            request: SourceControlSshPasswordPromptRequest,
+          ) => Promise<string | null>;
+        },
+        registry: AtomRegistry.AtomRegistry,
+      ) =>
         runInEnvironment(
           target.environmentId,
           Effect.gen(function* () {
             const onSshPasswordPrompt = target.onSshPasswordPrompt;
             if (onSshPasswordPrompt === undefined) {
-              return yield* request(WS_METHODS.sourceControlCloneRepository, target.input);
+              return yield* requestGuarded(WS_METHODS.sourceControlCloneRepository, target.input);
             }
             const serverConfig = yield* environmentConfig;
             if (serverConfig.environment.capabilities.sourceControlSshPasswordPrompts !== true) {
-              return yield* request(WS_METHODS.sourceControlCloneRepository, target.input);
+              return yield* requestGuarded(WS_METHODS.sourceControlCloneRepository, target.input);
             }
             return yield* consumeSshPromptedOperation(
               target.environmentId,
@@ -67,7 +76,12 @@ export function createSourceControlEnvironmentAtoms<R, E>(
               runStream(WS_METHODS.sourceControlCloneRepositoryWithPrompts, target.input),
               onSshPasswordPrompt,
             );
-          }),
+          }).pipe(
+            Effect.provideService(RpcPermissionGuard, {
+              authorize: (id, method, payload) =>
+                createCommandPermissions(runtime, method).authorize(registry, id, payload),
+            }),
+          ),
         ),
     }),
     // Clone-backed project creation. The RPC returns once the project exists
@@ -126,12 +140,12 @@ export function createSourceControlEnvironmentAtoms<R, E>(
           Effect.gen(function* () {
             const onSshPasswordPrompt = target.onSshPasswordPrompt;
             if (onSshPasswordPrompt === undefined) {
-              return yield* request(WS_METHODS.sourceControlPublishRepository, target.input);
+              return yield* requestGuarded(WS_METHODS.sourceControlPublishRepository, target.input);
             }
 
             const serverConfig = yield* environmentConfig;
             if (serverConfig.environment.capabilities.sourceControlSshPasswordPrompts !== true) {
-              return yield* request(WS_METHODS.sourceControlPublishRepository, target.input);
+              return yield* requestGuarded(WS_METHODS.sourceControlPublishRepository, target.input);
             }
 
             return yield* consumeSshPromptedOperation(
@@ -140,7 +154,12 @@ export function createSourceControlEnvironmentAtoms<R, E>(
               runStream(WS_METHODS.sourceControlPublishRepositoryWithPrompts, target.input),
               onSshPasswordPrompt,
             );
-          }),
+          }).pipe(
+            Effect.provideService(RpcPermissionGuard, {
+              authorize: (id, method, payload) =>
+                createCommandPermissions(runtime, method).authorize(registry, id, payload),
+            }),
+          ),
         ).pipe(
           Effect.ensuring(
             invalidateCachedVcsRefs(registry, {

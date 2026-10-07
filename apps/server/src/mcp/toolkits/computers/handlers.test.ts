@@ -14,6 +14,8 @@ import * as Option from "effect/Option";
 import { McpSchema, McpServer } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
@@ -26,20 +28,17 @@ const environmentId = EnvironmentId.make("environment-mac");
 const projectId = ProjectId.make("project-t3");
 const sourceThreadId = ThreadId.make("thread-source");
 
-const source = {
-  id: sourceThreadId,
+// A caller in the middle of a turn: computer_send acts as the calling thread,
+// so the access gate refuses one whose run has ended.
+const source: OrchestrationV2ThreadShell = {
+  ...McpToolAccessTestkit.liveThreadShell(sourceThreadId, { runtimeMode: "approval-required" }),
   projectId,
   title: "Source Agent",
   modelSelection: {
     instanceId: ProviderInstanceId.make("codex"),
     model: "gpt-5-codex",
   },
-  runtimeMode: "approval-required",
-  interactionMode: "default",
-  branch: null,
-  worktreePath: null,
-  archivedAt: null,
-} as unknown as OrchestrationV2ThreadShell;
+};
 
 const project: ProjectStore.ProjectRow = {
   projectId,
@@ -114,7 +113,7 @@ function makeTestLayer(dispatched: Array<OrchestrationV2ServerCommand>) {
   } satisfies ServerEnvironment.ServerEnvironment["Service"];
 
   return McpServer.toolkit(ComputerToolkit).pipe(
-    Layer.provide(ComputerToolkitHandlersLive),
+    Layer.provide(McpToolAccess.HandlersLayer.layer(ComputerToolkitHandlersLive)),
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(ComputerTaskBroker.layer),
     Layer.provideMerge(Layer.succeed(ThreadManagementService.ThreadManagementService, threads)),

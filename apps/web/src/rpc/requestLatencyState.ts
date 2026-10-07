@@ -29,7 +29,6 @@ interface PendingRpcAckRequest {
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
 const untrackedRpcAckMethods = new Set<string>([
-  WS_METHODS.previewAutomationConnect,
   WS_METHODS.computersConnect,
   WS_METHODS.serverGetUsageSummary,
 ]);

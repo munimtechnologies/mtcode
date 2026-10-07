@@ -286,6 +286,7 @@ export const make = Effect.gen(function* () {
         : {}),
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
       ...(desktopMcpPath === undefined ? {} : { computerView: true }),
+      serverBrowser: true,
     },
   };
 

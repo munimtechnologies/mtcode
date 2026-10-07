@@ -139,6 +139,9 @@ export function UsageRouteScreen() {
       ),
     ),
   ];
+  const canReadDiagnostics = selectedEnvironments.some(
+    (environment) => environment.canReadDiagnostics,
+  );
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -288,10 +291,12 @@ export function UsageRouteScreen() {
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         refreshControl={
-          <RefreshControl
-            refreshing={showingLimits ? limits.refreshing : refreshingUsage}
-            onRefresh={showingLimits ? () => void limits.refresh() : refreshWindow}
-          />
+          showingLimits || canReadDiagnostics ? (
+            <RefreshControl
+              refreshing={showingLimits ? limits.refreshing : refreshingUsage}
+              onRefresh={showingLimits ? () => void limits.refresh() : refreshWindow}
+            />
+          ) : undefined
         }
       >
         <SegmentedControl options={TAB_OPTIONS} selected={tab} onSelect={setTab} role="tab" />
@@ -336,12 +341,16 @@ export function UsageRouteScreen() {
               </View>
               <ChatGptUsageSummary selectedEnvironmentIds={selectedEnvironmentIds} />
               {/* Reports partial coverage, failures, stale servers, duplicate
-                  transcript directories and missing pricing in one place. */}
-              <UsageCoverageNotice
-                environments={selectedEnvironments}
-                merged={merged}
-                isPartial={isPartial}
-              />
+                  transcript directories and missing pricing in one place. When
+                  no selected environment grants usage, the body below already
+                  explains each one. */}
+              {canReadDiagnostics ? (
+                <UsageCoverageNotice
+                  environments={selectedEnvironments}
+                  merged={merged}
+                  isPartial={isPartial}
+                />
+              ) : null}
               {isPending || (usableEnvironmentCount === 0 && isPartial) ? (
                 <Text className="py-16 text-center text-base text-foreground-muted">
                   Scanning provider transcripts…
@@ -352,6 +361,20 @@ export function UsageRouteScreen() {
                     ? "Connect an environment to see usage."
                     : "Select an environment to see usage."}
                 </Text>
+              ) : !canReadDiagnostics ? (
+                // Each environment explains itself: a denied grant and a failed
+                // access check are different problems.
+                <View className="gap-2 py-16">
+                  {selectedEnvironments.map((environment) => (
+                    <Text
+                      key={environment.environmentId}
+                      className="text-center text-base text-foreground-muted"
+                    >
+                      {selectedEnvironments.length > 1 ? `${environment.label}: ` : null}
+                      {environment.error}
+                    </Text>
+                  ))}
+                </View>
               ) : usableEnvironmentCount === 0 ? (
                 <Text className="py-16 text-center text-base text-foreground-muted">
                   {selectedEnvironmentIds === null
@@ -899,10 +922,11 @@ function usageEnvironmentStatus(environment: EnvironmentUsageStatus): string {
           : "clientBehind",
     });
   }
+  // The reason matters: a denied grant and a failed scan need different fixes.
+  if (environment.error)
+    return environment.summary ? `${environment.error} Showing saved totals.` : environment.error;
   if (!environment.isConnected)
     return environment.summary ? "Disconnected · showing saved usage" : "Waiting for connection…";
-  if (environment.error)
-    return environment.summary ? "Usage unavailable · showing saved totals" : "Usage unavailable";
   if (isUsageLoading(environment))
     return environment.summary ? "Updating usage…" : "Loading usage…";
   return "Usage up to date";
@@ -928,7 +952,15 @@ function UsageCoverageNotice(props: {
         environment.phase === "offline" ||
         environment.phase === "error"),
   );
-  const failed = props.environments.filter((environment) => environment.error !== null);
+  // A denied grant and a failed scan need different fixes, so each failure
+  // states its reason. Environments already listed as settling or unavailable
+  // are not repeated.
+  const failed = props.environments.filter(
+    (environment) =>
+      environment.error !== null &&
+      !settling.includes(environment) &&
+      !unavailable.includes(environment),
+  );
   const mismatchByEnvironment = new Map(
     props.merged.contractMismatches.map((mismatch) => [mismatch.environmentId, mismatch]),
   );
@@ -991,7 +1023,7 @@ function UsageCoverageNotice(props: {
       ))}
       {failed.map((environment) => (
         <Text key={environment.environmentId} className="text-sm text-foreground-muted">
-          {environment.label} could not report usage.
+          {environment.label}: {environment.error}
         </Text>
       ))}
       {incompatible.map(({ environment, mismatch }) => (

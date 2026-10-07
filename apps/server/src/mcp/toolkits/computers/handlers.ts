@@ -5,12 +5,13 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { resolveComputer } from "./resolve.ts";
-import { ComputerToolkit } from "./tools.ts";
+import { ComputerSendInput, ComputerToolkit } from "./tools.ts";
 
 const isComputerTaskError = Schema.is(ComputerTaskError);
 const TITLE_MAX = 80;
@@ -58,8 +59,7 @@ const readActiveThread = Effect.fn("ComputerTask.readActiveThread")(function* (
   return Option.filter(Option.fromNullishOr(thread), ({ archivedAt }) => archivedAt === null);
 });
 
-const handlers = {
-  computer_list: Effect.fn("ComputerTask.computerList")(function* () {
+const computerList = Effect.fn("ComputerTask.computerList")(function* () {
     const broker = yield* ComputerTaskBroker.ComputerTaskBroker;
     const environment = yield* ServerEnvironment.ServerEnvironment;
     const descriptor = yield* environment.getDescriptor;
@@ -68,8 +68,11 @@ const handlers = {
       thisEnvironmentId: descriptor.environmentId,
       computers,
     };
-  }),
-  computer_send: Effect.fn("ComputerTask.computerSend")(function* (input) {
+});
+
+const computerSend = Effect.fn("ComputerTask.computerSend")(function* (
+  input: typeof ComputerSendInput.Type,
+) {
     const invocation = yield* McpInvocationContext.McpInvocationContext;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     if (invocation.thread === undefined) {
@@ -197,10 +200,15 @@ const handlers = {
       runtimeMode: source.value.runtimeMode,
       interactionMode: source.value.interactionMode,
     });
-  }),
-} satisfies Parameters<typeof ComputerToolkit.toLayer>[0];
+});
 
-export const ComputerToolkitHandlersLive = ComputerToolkit.toLayer(handlers);
+const handlers = {
+  computer_list: McpToolAccess.reads(() => computerList()),
+  // Starts a thread on behalf of the caller, so only a live T3 thread may.
+  computer_send: McpToolAccess.actsAsCaller((input) => computerSend(input)),
+} satisfies McpToolAccess.Handlers<typeof ComputerToolkit.tools>;
+
+export const ComputerToolkitHandlersLive = McpToolAccess.toLayer(ComputerToolkit, handlers);
 
 export const __testing = {
   formatComputerTaskMessage,

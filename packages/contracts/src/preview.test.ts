@@ -18,9 +18,7 @@ import {
   PreviewAutomationOpenInput,
   PreviewAutomationResizeInput,
   PreviewAutomationResizeResult,
-  PreviewAutomationSnapshotInput,
   PreviewAutomationStatus,
-  PreviewAutomationWaitForInput,
 } from "./previewAutomation.ts";
 
 const decodePreviewEvent = Schema.decodeUnknownSync(PreviewEvent);
@@ -38,8 +36,6 @@ const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus)
 const decodeSetViewportInput = Schema.decodeUnknownSync(
   DesktopPreviewAutomationSetViewportInputSchema,
 );
-const decodeSnapshotInput = Schema.decodeUnknownSync(PreviewAutomationSnapshotInput);
-const decodeWaitForInput = Schema.decodeUnknownSync(PreviewAutomationWaitForInput);
 
 describe("PreviewAutomationOpenInput", () => {
   it.each(["default", "incognito", "profile-feature-a"])(
@@ -271,26 +267,6 @@ describe("DesktopPreviewAutomationSetViewportInputSchema", () => {
     });
     expect(() => decodeSetViewportInput({ tabId: "tab-1", width: 800 })).toThrow();
     expect(() => decodeSetViewportInput({ tabId: "tab-1" })).toThrow();
-  });
-});
-
-describe("PreviewAutomationSnapshotInput", () => {
-  it("defaults to a slim snapshot and accepts extra diagnostic slices", () => {
-    expect(decodeSnapshotInput({})).toEqual({});
-    expect(decodeSnapshotInput({ include: ["ax", "console", "network"] }).include).toEqual([
-      "ax",
-      "console",
-      "network",
-    ]);
-    expect(() => decodeSnapshotInput({ include: ["screenshot"] })).toThrow();
-  });
-});
-
-describe("PreviewAutomationWaitForInput", () => {
-  it("defaults text and locators to the main landmark", () => {
-    expect(decodeWaitForInput({ text: "Dashboard" })).toEqual({ text: "Dashboard" });
-    expect(decodeWaitForInput({ text: "Dashboard", scope: "document" }).scope).toBe("document");
-    expect(() => decodeWaitForInput({ scope: "main" })).toThrow();
   });
 });
 

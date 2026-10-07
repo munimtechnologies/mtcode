@@ -30,10 +30,13 @@ import * as Persistence from "../platform/persistence.ts";
 import {
   config as environmentConfig,
   request,
+  requestGuarded,
+  RpcPermissionGuard,
   runStream,
   subscribe,
   type EnvironmentRpcInput,
 } from "../rpc/client.ts";
+import { createCommandPermissions } from "./commandPermissions.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 import { consumeSshPromptedOperation } from "./sshPasswordPrompts.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
@@ -323,11 +326,11 @@ export function createVcsEnvironmentAtoms<R, E>(
           Effect.gen(function* () {
             const onSshPasswordPrompt = target.onSshPasswordPrompt;
             if (onSshPasswordPrompt === undefined) {
-              return yield* request(WS_METHODS.vcsPull, target.input);
+              return yield* requestGuarded(WS_METHODS.vcsPull, target.input);
             }
             const serverConfig = yield* environmentConfig;
             if (serverConfig.environment.capabilities.sourceControlSshPasswordPrompts !== true) {
-              return yield* request(WS_METHODS.vcsPull, target.input);
+              return yield* requestGuarded(WS_METHODS.vcsPull, target.input);
             }
             return yield* consumeSshPromptedOperation(
               target.environmentId,
@@ -335,7 +338,12 @@ export function createVcsEnvironmentAtoms<R, E>(
               runStream(WS_METHODS.vcsPullWithPrompts, target.input),
               onSshPasswordPrompt,
             );
-          }),
+          }).pipe(
+            Effect.provideService(RpcPermissionGuard, {
+              authorize: (id, method, payload) =>
+                createCommandPermissions(runtime, method).authorize(registry, id, payload),
+            }),
+          ),
         ).pipe(Effect.ensuring(invalidateRefs(target, registry))),
     }),
     refreshStatus: createEnvironmentRpcCommand(runtime, {

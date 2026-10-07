@@ -19,7 +19,6 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import {
   createAtomCommandScheduler,
-  createEnvironmentCommand,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
@@ -364,7 +363,8 @@ export function createPullRequestEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.projectId, input.repository, input.number]),
       },
     }),
-    runAction: createEnvironmentCommand(runtime, {
+    runAction: createEnvironmentRpcCommand(runtime, {
+      tag: WS_METHODS.pullRequestsRunAction,
       label: "environment-data:pull-requests:run-action",
       // Preparation belongs to the write's lane. Refreshable queries would restart it after
       // every preceding action, and preparing outside the lane could reorder the clicks.
@@ -372,8 +372,6 @@ export function createPullRequestEnvironmentAtoms<R, E>(
         input: PullRequestActionInput & {
           readonly resolveMergeMethod?: (detail: PullRequestDetail) => PullRequestMergeMethod;
         },
-        registry,
-        environmentId,
       ) =>
         Effect.gen(function* () {
           const { resolveMergeMethod, ...actionInput } = input;
@@ -413,9 +411,10 @@ export function createPullRequestEnvironmentAtoms<R, E>(
             });
             preparedInput = { ...actionInput, mergeMethod };
           }
-          yield* routedRequest(WS_METHODS.pullRequestsRunAction, preparedInput);
-          registry.refresh(preview({ environmentId, input: actionInput }));
+          return yield* routedRequest(WS_METHODS.pullRequestsRunAction, preparedInput);
         }),
+      onSuccess: ({ environmentId, input }, registry) =>
+        Effect.sync(() => registry.refresh(preview({ environmentId, input }))),
       scheduler: commandScheduler,
       concurrency: serialPerEnvironment,
     }),

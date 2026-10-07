@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import { McpSchema, McpServer } from "effect/ai";
 import { McpInvocationContext, requireMcpCapability } from "./McpInvocationContext.ts";
 import { MonitorToolkitRegistrationLive } from "./McpHttpServer.ts";
+import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
 import * as MonitorSession from "./MonitorSession.ts";
 import { CodexBackgroundTasks } from "../provider/CodexBackgroundTasks.ts";
 
@@ -36,6 +37,8 @@ const client = McpSchema.McpServerClient.of({
 const TestLayer = MonitorToolkitRegistrationLive.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(MonitorSession.layer),
+  // The monitor tools act as the calling thread, which must be mid-run.
+  Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
 );
 
 it.effect("MCP subscription enables wakes and unsubscribe discards queued events", () =>

@@ -1,4 +1,5 @@
 import {
+  AuthSettingsWriteScope,
   ENVIRONMENT_MACHINE_KINDS,
   isEnvironmentMachineKind,
   resolveEnvironmentMachineKind,
@@ -6,8 +7,8 @@ import {
   type ServerConfig,
 } from "@t3tools/contracts";
 
-import { useEnvironmentOperateAccess } from "../../hooks/useEnvironmentOperateAccess";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import { useEnvironmentScope } from "../../state/session";
 import { ENVIRONMENT_MACHINE_KIND_LABELS, EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   MenuItem,
@@ -33,7 +34,7 @@ export function resolveEnvironmentIconPickerLock(input: {
   if (input.serverConfig.environment.capabilities.environmentIcon !== true) {
     return "This environment's server is too old to keep an icon. Update it to choose one.";
   }
-  if (input.operateAccess === "denied") {
+  if (input.operateAccess !== "granted") {
     return "Your session on this environment cannot change its settings.";
   }
   return null;
@@ -54,7 +55,9 @@ export function EnvironmentIconMenu({
   readonly serverConfig: ServerConfig | null;
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const operateAccess = useEnvironmentOperateAccess(environmentId);
+  const operateAccess = useEnvironmentScope(environmentId, AuthSettingsWriteScope)
+    ? "granted"
+    : "denied";
   const lock = resolveEnvironmentIconPickerLock({ serverConfig, operateAccess });
   // With no detection the server falls back to "server", so picking that
   // kind clears the override the same way picking the detected kind does.

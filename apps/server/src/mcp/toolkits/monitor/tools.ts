@@ -1,9 +1,11 @@
+import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as MonitorSession from "../../MonitorSession.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 
 // MCP's discovery predicate is synchronous; read the authenticated request
 // context from its current fiber rather than trusting client-supplied metadata.
@@ -18,6 +20,14 @@ const monitoringEnabled = () => {
       false)
   );
 };
+
+/** What a monitor tool fails with, including the access gate's refusal. */
+const failure = Schema.Union([MonitorSession.MonitorError, OrchestratorMcpFailure]);
+const dependencies = [
+  McpInvocationContext.McpInvocationContext,
+  ThreadManagementService.ThreadManagementService,
+  MonitorSession.MonitorSessions,
+];
 
 const parameters = Schema.Struct({
   processId: Schema.String.annotate({
@@ -36,8 +46,8 @@ const MonitorStartTool = Tool.make("monitor_start", {
     }),
   }),
   success: Schema.Struct({ monitorId: Schema.String, status: Schema.Literal("scheduled") }),
-  failure: MonitorSession.MonitorError,
-  dependencies: [McpInvocationContext.McpInvocationContext, MonitorSession.MonitorSessions],
+  failure,
+  dependencies,
 })
   .annotate(Tool.Title, "Monitor background process")
   .annotate(Tool.Destructive, true)
@@ -50,8 +60,8 @@ const MonitorUnsubscribeTool = Tool.make("monitor_unsubscribe", {
     "Unsubscribe from the background process selected by processId and discard its pending wakes. The process continues running.",
   parameters,
   success,
-  failure: MonitorSession.MonitorError,
-  dependencies: [McpInvocationContext.McpInvocationContext, MonitorSession.MonitorSessions],
+  failure,
+  dependencies,
 })
   .annotate(Tool.Title, "Unsubscribe from background process")
   .annotate(Tool.Destructive, false)

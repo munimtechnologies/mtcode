@@ -3,6 +3,7 @@ import {
   ComputerListResult,
   ComputerTaskError,
   ComputerTaskSendResult,
+  OrchestratorMcpFailure,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -26,7 +27,10 @@ const dependencies = [
   Crypto.Crypto,
 ];
 
-const ComputerSendInput = Schema.Struct({
+/** What computer_send fails with, including the access gate's refusal. */
+const ComputerSendFailure = Schema.Union([ComputerTaskError, OrchestratorMcpFailure]);
+
+export const ComputerSendInput = Schema.Struct({
   computer: TrimmedNonEmptyString.annotate({
     description:
       "Target computer: environment id, label, SSH host (user@host), or 'this' for the machine this chat is already on.",
@@ -67,7 +71,7 @@ export const ComputerSendTool = Tool.make("computer_send", {
     "Start a new T3 thread on another connected computer (or this one) with the given task. The receiving agent runs on that machine, so it has that computer's files, terminal, and Computer Use desktop. Use computer_list to discover ids and labels. This does not move this chat or share its transcript; include everything the recipient needs.",
   parameters: ComputerSendInput,
   success: ComputerTaskSendResult,
-  failure: ComputerTaskError,
+  failure: ComputerSendFailure,
   dependencies,
 })
   .annotate(Tool.Title, "Send task to computer")
