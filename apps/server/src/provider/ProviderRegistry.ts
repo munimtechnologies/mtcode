@@ -29,6 +29,7 @@
  */
 import {
   defaultInstanceIdForDriver,
+  isProviderWorkspaceSnapshotCurrent,
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
@@ -37,6 +38,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -1078,13 +1080,20 @@ export const layer = Layer.effect(
       const workspaceSnapshotOf = (candidate: ServerProvider | undefined) =>
         candidate?.workspaceSnapshots?.find((s) => s.cwd === input.cwd);
       const scannedFrom = workspaceSnapshotOf(provider);
+      const now = yield* DateTime.now;
       if (
         !provider ||
         !provider.enabled ||
-        (!input.fresh && scannedFrom && !scannedFrom.slashCommandsPending)
+        (!input.fresh &&
+          scannedFrom &&
+          !scannedFrom.slashCommandsPending &&
+          isProviderWorkspaceSnapshotCurrent(scannedFrom, DateTime.toEpochMillis(now)))
       ) {
         return providers;
       }
+      // Drivers spread their machine snapshot, whose `checkedAt` is the last
+      // health check. The TTL needs the time this scan started reading files.
+      const scannedAt = DateTime.formatIso(now);
       const instance = yield* instanceRegistry.getInstance(input.instanceId);
       if (!instance?.snapshotForCwd) return providers;
       const claimed = yield* Ref.modify(workspaceRefreshesRef, (refreshes) => {
@@ -1116,7 +1125,10 @@ export const layer = Layer.effect(
                     currentProviders.map((candidate) =>
                       candidate.instanceId === input.instanceId &&
                       Equal.equals(workspaceSnapshotOf(candidate), scannedFrom)
-                        ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, scopedSnapshot)
+                        ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, {
+                            ...scopedSnapshot,
+                            checkedAt: scannedAt,
+                          })
                         : candidate,
                     ),
                   );

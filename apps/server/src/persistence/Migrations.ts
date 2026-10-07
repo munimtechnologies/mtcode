@@ -95,6 +95,8 @@ import Migration0065 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts"
 // Upstream 057/058; registered as the next free fork ids.
 import Migration0066 from "./Migrations/057_ScheduledTaskWebhooks.ts";
 import Migration0067 from "./Migrations/058_WebhookRelayDeliveries.ts";
+// Upstream 059; registered as the next free fork id.
+import Migration0068 from "./Migrations/059_McpAppModelContext.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -175,6 +177,8 @@ export const migrationEntries = [
   // Upstream 057/058 (webhook tasks, #15085/#15086); registered as the next free fork ids.
   [66, "ScheduledTaskWebhooks", Migration0066],
   [67, "WebhookRelayDeliveries", Migration0067],
+  // Upstream 059 (MCP app model context); registered as the next free fork id.
+  [68, "McpAppModelContext", Migration0068],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

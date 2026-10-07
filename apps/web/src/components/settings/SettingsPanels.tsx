@@ -70,6 +70,7 @@ import {
   HOSTED_APP_CHANNEL_LABEL,
 } from "../../branding";
 import { IS_NIGHTLY_BUILD, NightlyMobileBetaRow } from "../NightlyMobileBeta";
+import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -539,6 +540,7 @@ function AboutVersionSection() {
         />
       ) : null}
       {showNightlyMobileBeta ? <NightlyMobileBetaRow /> : null}
+      {hasDesktopBridge ? <CliCommandSettingsRow /> : null}
     </>
   );
 }

@@ -548,6 +548,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["custom prompt generated names naming style regenerate text generation"],
   },
   {
+    id: "cli-command",
+    title: "t3 command",
+    to: "/settings/general",
+    searchTerms: ["cli terminal shell path install command line"],
+    desktopOnly: true,
+  },
+  {
     id: "privacy-policy",
     title: "Privacy policy",
     to: "/settings/general",

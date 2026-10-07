@@ -13,7 +13,7 @@ import {
 } from "../agent-awareness/selfHostedNotifications";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { NativeHeaderToolbar } from "../../native/StackHeader";
+import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { getBrandMark, getProductName } from "../../lib/branding";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
@@ -41,14 +41,19 @@ export function SettingsRouteScreen() {
 
   return (
     <>
+      {Platform.OS === "ios" ? (
+        <NativeStackScreenOptions options={{ headerBackVisible: !layout.usesSplitView }} />
+      ) : null}
       {Platform.OS === "ios" && layout.usesSplitView ? (
-        <NativeHeaderToolbar placement="left">
-          <NativeHeaderToolbar.Button
-            accessibilityLabel="Go back"
-            icon="chevron.left"
-            onPress={() => navigation.goBack()}
-          />
-        </NativeHeaderToolbar>
+        <>
+          <NativeHeaderToolbar placement="left">
+            <NativeHeaderToolbar.Button
+              accessibilityLabel="Go back"
+              icon="chevron.left"
+              onPress={() => navigation.goBack()}
+            />
+          </NativeHeaderToolbar>
+        </>
       ) : null}
       <SettingsEnvironmentFilterHeader closeSettings />
       {Platform.OS === "android" ? (

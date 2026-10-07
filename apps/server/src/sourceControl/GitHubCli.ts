@@ -183,6 +183,7 @@ export interface GitHubPullRequestSummary {
   readonly url: string;
   readonly baseRefName: string;
   readonly headRefName: string;
+  readonly headSha?: string;
   readonly state?: "open" | "closed" | "merged";
   readonly isDraft?: boolean;
   readonly closedAt?: string | null;
@@ -338,7 +339,7 @@ type PullRequestListState = "open" | "closed" | "merged" | "all";
 
 /** The pull request fields every read selects, in GraphQL. */
 const PULL_REQUEST_NODE_SELECTION =
-  "number title url baseRefName headRefName state isDraft mergedAt closedAt updatedAt isCrossRepository headRepository { name nameWithOwner } headRepositoryOwner { login }";
+  "number title url baseRefName headRefName headRefOid state isDraft mergedAt closedAt updatedAt isCrossRepository headRepository { name nameWithOwner } headRepositoryOwner { login }";
 const GRAPHQL_STATES: Record<PullRequestListState, ReadonlyArray<string>> = {
   open: ["OPEN"],
   closed: ["CLOSED"],
@@ -353,8 +354,17 @@ const HEAD_LOOKUPS_PER_DOCUMENT = 50;
 /**
  * How long a head lookup waits for company. Branch discovery reaches GitHub only after each
  * branch's own git reads, so lookups started together arrive tens of milliseconds apart.
+ * A background sweep's lookups spread over up to ~300ms, and every document costs a point no
+ * matter how few heads it holds, so reads without reserve wait longer.
  */
 const HEAD_LOOKUP_BATCH_WINDOW = "50 millis";
+const BACKGROUND_HEAD_LOOKUP_BATCH_WINDOW = "500 millis";
+/**
+ * Background documents fill up under the longer window, and a failed document fails every head
+ * in it. Fifty `main`-like heads of a hundred pull requests each took up to ~10s, GitHub's own
+ * processing limit; twenty-five took ~7s.
+ */
+const BACKGROUND_HEAD_LOOKUPS_PER_DOCUMENT = 25;
 /** A full document is 5,000 rows of well under 2 KB each. */
 const HEAD_LOOKUP_MAX_RESPONSE_BYTES = 16_000_000;
 /**
@@ -706,9 +716,13 @@ export const make = Effect.gen(function* () {
         ),
       );
     },
-  }).pipe(
+  }).pipe(RequestResolver.batchN(HEAD_LOOKUPS_PER_DOCUMENT));
+  const interactiveHeadResolver = headResolver.pipe(
     RequestResolver.setDelay(HEAD_LOOKUP_BATCH_WINDOW),
-    RequestResolver.batchN(HEAD_LOOKUPS_PER_DOCUMENT),
+  );
+  const backgroundHeadResolver = headResolver.pipe(
+    RequestResolver.batchN(BACKGROUND_HEAD_LOOKUPS_PER_DOCUMENT),
+    RequestResolver.setDelay(BACKGROUND_HEAD_LOOKUP_BATCH_WINDOW),
   );
 
   const listByHead = Effect.fn("GitHubCli.listByHead")(function* (input: {
@@ -734,7 +748,7 @@ export const make = Effect.gen(function* () {
         limit: ownerMatch ? OWNER_HEAD_SCAN_LIMIT : limit,
         allowReserve: input.allowReserve,
       }),
-      headResolver,
+      input.allowReserve ? interactiveHeadResolver : backgroundHeadResolver,
     );
     if (!ownerMatch) return rows;
     const headOwner = ownerMatch[1]!.toLowerCase();

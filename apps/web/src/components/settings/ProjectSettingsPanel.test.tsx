@@ -130,6 +130,8 @@ vi.mock("../ui/toast", () => ({
   toastManager: { add: vi.fn() },
   stackedThreadToast: (value: unknown) => value,
 }));
+// MT Code: the transfer dialog pulls in the live connection runtime this suite stubs out.
+vi.mock("./ProjectTransferDialog", () => ({ ProjectTransferDialog: () => null }));
 vi.mock("../ui/button", () => ({ Button: "button" }));
 vi.mock("../ui/input", () => ({ Input: "input" }));
 vi.mock("../ui/switch", () => ({ Switch: "input" }));
