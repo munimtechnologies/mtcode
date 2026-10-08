@@ -97,6 +97,8 @@ import Migration0066 from "./Migrations/057_ScheduledTaskWebhooks.ts";
 import Migration0067 from "./Migrations/058_WebhookRelayDeliveries.ts";
 // Upstream 059; registered as the next free fork id.
 import Migration0068 from "./Migrations/059_McpAppModelContext.ts";
+// Upstream 060; registered as the next free fork id.
+import Migration0069 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -179,6 +181,7 @@ export const migrationEntries = [
   [67, "WebhookRelayDeliveries", Migration0067],
   // Upstream 059 (MCP app model context); registered as the next free fork id.
   [68, "McpAppModelContext", Migration0068],
+  [69, "ThreadSnapshotWindowIndexes", Migration0069],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
