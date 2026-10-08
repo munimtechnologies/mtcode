@@ -165,6 +165,7 @@ import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClien
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as CursorUsageReader from "./usage/cursorUsageReader.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as CodexPluginMarketplace from "./plugins/CodexPluginMarketplace.ts";
 import { pluginMarketplaceHttpApiLayer } from "./plugins/http.ts";
@@ -241,7 +242,10 @@ const layerBackground = BackgroundPolicy.layer.pipe(
   Layer.provideMerge(ComputerHistoryService.layer.pipe(Layer.provideMerge(layerServerSettings))),
 );
 
-const layerUsage = UsageService.layer.pipe(Layer.provide(layerServerSettings));
+const layerUsage = UsageService.layer.pipe(
+  Layer.provide(layerServerSettings),
+  Layer.provide(CursorUsageReader.layer),
+);
 
 const layerResourceDiagnostics = Layer.mergeAll(
   HostResources.layer,

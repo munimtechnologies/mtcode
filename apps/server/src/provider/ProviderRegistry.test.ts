@@ -3228,6 +3228,7 @@ it.layer(
               "codex",
               "cursor",
               "grok",
+              "muse",
               "opencode",
               "pi",
             ]);
@@ -3237,6 +3238,9 @@ it.layer(
             // name from the desktop app), so assert against the same source
             // the message is built from.
             assert.strictEqual(cursorProvider?.message, providerDisabledMessage("Cursor"));
+            const museProvider = providers.find((provider) => provider.driver === "muse");
+            assert.strictEqual(museProvider?.enabled, false);
+            assert.strictEqual(museProvider?.status, "disabled");
             assert.strictEqual(cursorSpawned, false);
           }).pipe(Effect.provide(runtimeServices));
         }),

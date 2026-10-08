@@ -1124,12 +1124,34 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     // A cold transcript scan is measured in seconds, so cache the result while
     // bounding each device so a disconnected registration cannot pin the view.
+    // Slow sources answer from cache first: that summary stays on screen, with
+    // the query waiting, until one `awaitRefresh` request replaces it.
     usageSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:usage-summary",
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
       timeout: "30 seconds",
       refreshTrigger: ({ environmentId }) => usageScanSettingsAtom(environmentId),
+      execute: (input, emit) =>
+        request(WS_METHODS.serverGetUsageSummary, input).pipe(
+          Effect.flatMap((summary) =>
+            summary.sources.some((source) => source.refreshing === true)
+              ? emit(summary).pipe(
+                  Effect.andThen(
+                    request(WS_METHODS.serverGetUsageSummary, { ...input, awaitRefresh: true }),
+                  ),
+                  // The cached summary is still the best data, and a failure
+                  // would read as the environment not reporting usage at all.
+                  Effect.catch((error) =>
+                    Effect.logWarning("Could not refresh slow usage sources.").pipe(
+                      Effect.annotateLogs({ ...safeErrorLogAttributes(error) }),
+                      Effect.as(summary),
+                    ),
+                  ),
+                )
+              : Effect.succeed(summary),
+          ),
+        ),
     }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
