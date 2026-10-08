@@ -5,13 +5,13 @@
  * A user can configure several instances of the same driver through
  * `settings.providerInstances` (e.g. `codex_work` + `codex_personal`), each
  * with its own home directory. The scan must read every one of those homes,
- * not just the legacy single-instance `settings.providers.<kind>` blob.
+ * plus the unconfigured default slot.
  *
- * Precedence mirrors `deriveProviderInstanceConfigMap`: explicit
- * `providerInstances` entries always win, and the legacy blob only fills the
- * default slot (instance id === driver kind) when no explicit entry claims it
- * — regardless of that entry's driver, so an id claimed by another driver
- * still suppresses the legacy blob exactly as the registry does.
+ * Precedence mirrors the provider registry: explicit `providerInstances`
+ * entries always win, and driver defaults only fill the default slot
+ * (instance id === driver kind) when no explicit entry claims it —
+ * regardless of that entry's driver, so an id claimed by another driver
+ * still suppresses the default exactly as the registry does.
  *
  * @module usageHomes
  */
@@ -29,7 +29,7 @@ type HomeScanProvider = Extract<UsageProviderKind, "claude" | "codex">;
 const DRIVER_BY_PROVIDER = {
   claude: "claudeAgent",
   codex: "codex",
-} as const satisfies Record<HomeScanProvider, keyof ServerSettings["providers"]>;
+} as const satisfies Record<HomeScanProvider, string>;
 
 /**
  * The provider's home environment variable. An instance can configure its
@@ -105,7 +105,8 @@ export function listProviderHomeCandidates(
   }
 
   if (!defaultSlotClaimed) {
-    candidates.push({ config: settings.providers[driver], homeEnvValue: inheritedHome });
+    // An unconfigured default slot runs on driver defaults, as in the registry.
+    candidates.push({ config: {}, homeEnvValue: inheritedHome });
   }
   return candidates;
 }

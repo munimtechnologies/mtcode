@@ -13,11 +13,14 @@ it.layer(NodeServices.layer)("resolveCodexVoiceCommand", (it) => {
   it.effect("starts the configured Codex install as an app-server", () =>
     Effect.gen(function* () {
       const settings = decodeSettings({
-        providers: {
-          codex: {
-            binaryPath: "/opt/codex/bin/codex",
-            homePath: "/tmp/codex-home",
-            launchArgs: "--enable voice_preview",
+        providerInstances: {
+          [ProviderInstanceId.make("codex")]: {
+            driver: "codex",
+            config: {
+              binaryPath: "/opt/codex/bin/codex",
+              homePath: "/tmp/codex-home",
+              launchArgs: "--enable voice_preview",
+            },
           },
         },
       });
@@ -33,8 +36,11 @@ it.layer(NodeServices.layer)("resolveCodexVoiceCommand", (it) => {
   it.effect("prefers the default instance over other enabled Codex instances", () =>
     Effect.gen(function* () {
       const settings = decodeSettings({
-        providers: { codex: { binaryPath: "default-codex" } },
         providerInstances: {
+          [ProviderInstanceId.make("codex")]: {
+            driver: "codex",
+            config: { binaryPath: "default-codex" },
+          },
           [ProviderInstanceId.make("codex-work")]: {
             driver: "codex",
             config: { binaryPath: "work-codex" },

@@ -53,14 +53,14 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import * as ServerConfig from "../config.ts";
-import { expandHomePath } from "../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ServerSettings from "../serverSettings.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import { hasEnabledCursorInstance } from "./cursorAppData.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { resolveAntigravityInstanceDirectories } from "../provider/antigravityAuthSupport.ts";
-import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { listProviderHomeCandidates, scanHomePath } from "./usageHomes.ts";
 import { readOpenCodeUsage as readOpenCodeNativeUsage } from "./opencodeUsageReader.ts";
 import { makeAntigravityUsageCache, readAntigravityUsage } from "./antigravityUsageReader.ts";
@@ -1050,9 +1050,7 @@ export const make = Effect.gen(function* () {
         roots,
         (dir) =>
           Effect.gen(function* () {
-            const result = yield* Effect.promise(() =>
-              readOpenCodeNativeUsage(dir, windowStartMs),
-            );
+            const result = yield* Effect.promise(() => readOpenCodeNativeUsage(dir, windowStartMs));
             return {
               provider: "opencode",
               dir,

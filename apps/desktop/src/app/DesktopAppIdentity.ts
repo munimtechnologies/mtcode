@@ -91,6 +91,10 @@ export const make = Effect.gen(function* () {
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;
+    // Electron removes spaces from this name to build the native User-Agent
+    // product token, but leaves parentheses intact. MT Code's display name is
+    // the bare product name (no "(Alpha)" suffix), so it is already a valid
+    // token and stays the runtime name, as before upstream #17264.
     yield* electronApp.setName(environment.displayName);
     yield* electronApp.setAboutPanelOptions({
       applicationName: environment.displayName,

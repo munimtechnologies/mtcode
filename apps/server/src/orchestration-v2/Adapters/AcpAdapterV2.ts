@@ -64,8 +64,8 @@ import {
   makeAcpMcpOverAcpBridge,
   type AcpMcpOverAcpBridge,
 } from "../../mcp/AcpMcpOverAcpBridge.ts";
-import { mcpToolPresentation } from "../../provider/McpToolPresentation.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import type { DesktopMcpLaunch } from "../../desktopControl/desktopMcpLaunch.ts";
 import {
   applyAcpAgentTerminalUpdate,
@@ -99,17 +99,20 @@ import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
-} from "../../provider/T3OrchestrationInstructions.ts";
+} from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import { type ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { type ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
 import {
   type BackgroundWork,
   type BackgroundWorkReport,
   backgroundWorkNotification,
 } from "../Notification.ts";
-import { makeProviderFailure, makeProviderRetryTurnItem } from "../ProviderFailure.ts";
-import { acpSelectionTransition } from "../ProviderSelectionTransition.ts";
+import {
+  makeProviderFailure,
+  makeProviderRetryTurnItem,
+} from "@t3tools/provider-core/server/failure";
+import { acpSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
@@ -119,7 +122,7 @@ import {
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 export const ACP_PROTOCOL = "acp.ndjson-jsonrpc" as const;
 

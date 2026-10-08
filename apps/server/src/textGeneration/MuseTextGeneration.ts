@@ -27,14 +27,14 @@ import {
   buildPrContentPrompt,
   buildPullRequestRankingPrompt,
   buildThreadTitlePrompt,
-} from "./TextGenerationPrompts.ts";
+} from "@t3tools/provider-core/server/textGenerationPrompts";
 import {
   clampPullRequestRankings,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
-} from "./TextGenerationUtils.ts";
+} from "@t3tools/provider-core/server/textGenerationUtils";
 
 const SessionStarted = Schema.Struct({ session: Schema.Struct({ sessionId: Schema.String }) });
 const ItemNotification = Schema.Struct({
@@ -344,19 +344,20 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
       return { title: sanitizeThreadTitle(generated.title) };
     });
   // Fork: AI ranking of upstream pull requests for the PR picker.
-  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] =
-    Effect.fn("MuseTextGeneration.rankPullRequests")(function* (input) {
-      const generated = yield* runMuseJson({
-        operation: "rankPullRequests",
-        ...buildPullRequestRankingPrompt({
-          repository: input.repository,
-          intoRepository: input.intoRepository,
-          candidates: input.candidates,
-        }),
-        modelSelection: input.modelSelection,
-      });
-      return { rankings: clampPullRequestRankings(generated.rankings) };
+  const rankPullRequests: TextGeneration.TextGeneration["Service"]["rankPullRequests"] = Effect.fn(
+    "MuseTextGeneration.rankPullRequests",
+  )(function* (input) {
+    const generated = yield* runMuseJson({
+      operation: "rankPullRequests",
+      ...buildPullRequestRankingPrompt({
+        repository: input.repository,
+        intoRepository: input.intoRepository,
+        candidates: input.candidates,
+      }),
+      modelSelection: input.modelSelection,
     });
+    return { rankings: clampPullRequestRankings(generated.rankings) };
+  });
   return {
     generateCommitMessage,
     generatePrContent,

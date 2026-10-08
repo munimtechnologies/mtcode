@@ -33,7 +33,7 @@ import {
   clampPercent,
   makeUnavailableUsageLimits,
   makeUsageLimits,
-} from "./providerUsageLimits.ts";
+} from "@t3tools/provider-core/server/usageLimits";
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 export const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";

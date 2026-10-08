@@ -7,23 +7,20 @@ import { listProviderHomeCandidates, scanHomePath } from "./usageHomes.ts";
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 
 describe("listProviderHomeCandidates", () => {
-  it("falls back to the legacy provider blob when no instance claims the default slot", () => {
-    const settings = decodeServerSettings({
-      providers: { codex: { homePath: "~/.codex-legacy" } },
-    });
+  it("runs the unclaimed default slot on driver defaults", () => {
+    const settings = decodeServerSettings({});
 
     const codex = listProviderHomeCandidates(settings, "codex", {});
     expect(codex).toHaveLength(1);
-    expect(codex[0]?.config).toMatchObject({ homePath: "~/.codex-legacy" });
+    expect(codex[0]?.config).toEqual({});
 
     const claude = listProviderHomeCandidates(settings, "claude", {});
     expect(claude).toHaveLength(1);
-    expect(claude[0]?.config).toMatchObject({ homePath: "" });
+    expect(claude[0]?.config).toEqual({});
   });
 
-  it("prefers an explicit default-slot instance over the legacy blob", () => {
+  it("prefers an explicit default-slot instance over driver defaults", () => {
     const settings = decodeServerSettings({
-      providers: { codex: { homePath: "~/.codex-legacy" } },
       providerInstances: {
         codex: { driver: "codex", config: { homePath: "~/.codex-t3/work" } },
       },
@@ -72,11 +69,10 @@ describe("listProviderHomeCandidates", () => {
     expect(codex[0]).toEqual({ config: {}, homeEnvValue: null });
   });
 
-  it("suppresses the legacy blob when another driver claims the default slot", () => {
+  it("suppresses driver defaults when another driver claims the default slot", () => {
     // The registry keys default-slot suppression on the instance id alone, so
-    // an id claimed by a different driver still hides the legacy blob.
+    // an id claimed by a different driver still hides the default slot.
     const settings = decodeServerSettings({
-      providers: { codex: { homePath: "~/.codex-legacy" } },
       providerInstances: {
         codex: { driver: "claudeAgent", config: { homePath: "~/.claude-in-codex-slot" } },
       },

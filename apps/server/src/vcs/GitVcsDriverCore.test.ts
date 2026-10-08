@@ -32,7 +32,7 @@ import {
 import { SshPasswordPrompt } from "@t3tools/ssh/auth";
 import * as ServerConfig from "../config.ts";
 import { gitCommandDuration } from "../observability/Metrics.ts";
-import { expandHomePath } from "../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   makeGitVcsDriverCore,

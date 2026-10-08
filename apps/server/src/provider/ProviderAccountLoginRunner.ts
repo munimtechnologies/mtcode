@@ -27,7 +27,7 @@ import {
   type ServerProviderUpdatedPayload,
 } from "@t3tools/contracts";
 
-import type { ProviderAccountLoginFlow } from "./ProviderDriver.ts";
+import type { ProviderAccountLoginFlow } from "@t3tools/provider-core/server/driver";
 
 /**
  * How long a driver may take to hand back its flow (spawn its CLI, negotiate,

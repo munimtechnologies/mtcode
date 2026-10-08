@@ -25,9 +25,9 @@ import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import { makeClaudeTextGeneration } from "../../textGeneration/ClaudeTextGeneration.ts";
-import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { ProviderHost } from "@t3tools/provider-core/server/ProviderHost";
 import * as ServerConfig from "../../config.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import {
   createClaudeAdapterV2,
@@ -45,29 +45,29 @@ import {
   probeClaudeCapabilities,
   probeClaudeWorkspaceSnapshot,
 } from "../ClaudeProvider.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as ModelManifest from "../ModelManifest.ts";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
+} from "@t3tools/provider-core/server/driver";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
+} from "@t3tools/provider-core/server/snapshotSettings";
 import { makeClaudeAccountLogin } from "./ClaudeAccountLogin.ts";
 import {
   makeClaudeCapabilitiesCacheKey,
@@ -100,7 +100,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 
 export type ClaudeDriverEnv =
   | ClaudeAdapterV2DriverEnv
-  | BackgroundPolicy.BackgroundPolicy
+  | ProviderHost
   | ChildProcessSpawner.ChildProcessSpawner
   | ResetCreditCoordinator.ResetCreditCoordinator
   | Crypto.Crypto
@@ -133,6 +133,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const { cwd } = yield* ServerConfig.ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
       const resetCreditCoordinator = yield* ResetCreditCoordinator.ResetCreditCoordinator;
+      const host = yield* ProviderHost;
+      // MT Code: in-app account login writes provider settings, which the
+      // narrower ProviderHost cannot do, so it keeps the full settings service.
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       // MT Code: provider account login drives `claude /login` in a PTY. Optional
       // so runtimes without a terminal layer (tests, narrow hosts) still build.
@@ -256,7 +259,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         Effect.provideService(Path.Path, path),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClaudeSettings>>({
         resolveMaintenance,
         getSettings: snapshotSettings.getSettings,

@@ -62,13 +62,19 @@ const layerScannerTest = (input: ScannerTestInput) =>
       Layer.mergeAll(
         ServerSettings.layerTest({
           worktreesDirectory: input.worktreeBaseDirectory ?? "",
-          providers: {
-            claudeAgent: { homePath: input.claudeHomePath },
-            codex: { homePath: input.codexHomePath },
+          // Default slots point at the fixture homes; explicit test instances
+          // replace a slot with the same id.
+          providerInstances: {
+            [ProviderInstanceId.make("claudeAgent")]: {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              config: { homePath: input.claudeHomePath },
+            },
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: { homePath: input.codexHomePath },
+            },
+            ...input.providerInstances,
           },
-          ...(input.providerInstances === undefined
-            ? {}
-            : { providerInstances: input.providerInstances }),
         }),
         ServerConfig.layerTest(
           input.claudeHomePath,
@@ -536,7 +542,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
-    it.effect("uses explicit provider instance homes instead of overridden legacy homes", () =>
+    it.effect("uses explicit default-slot homes instead of the fixture homes", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const claudeHomePath = yield* makeTempDir("t3code-claude-legacy-");

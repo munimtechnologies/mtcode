@@ -34,9 +34,9 @@ import {
   resolveLatestProviderVersion,
   type ProviderMaintenanceCommandAction,
   ProviderVersionCache,
-} from "./providerMaintenance.ts";
-import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
-import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+} from "@t3tools/provider-core/server/maintenanceResolver";
+import type { ProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
+import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
 import { resolveAppDisplayName } from "../appDisplayName.ts";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 

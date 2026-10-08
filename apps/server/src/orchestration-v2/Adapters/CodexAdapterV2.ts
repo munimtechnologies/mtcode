@@ -1,5 +1,5 @@
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
-import { historyResponseItems } from "../ContextHandoffBudget.ts";
+import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
   mcpToolPresentation,
@@ -12,7 +12,7 @@ import {
   completeCodexTurnTokenUsage,
   type CodexTurnTokenUsageState,
 } from "../../provider/CodexTurnTokenUsage.ts";
-import type { ServerProviderShape } from "../../provider/ServerProvider.ts";
+import type { ServerProviderShape } from "@t3tools/provider-core/server/snapshot";
 import type { CodexEffectiveRuntime } from "../../provider/CodexManagedRuntime.ts";
 import { buildCodexInitializeParams } from "../../provider/CodexProvider.ts";
 import {
@@ -96,7 +96,7 @@ import {
 import * as ServerSettings from "../../serverSettings.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
@@ -120,8 +120,8 @@ import {
   codexLaunchArgv,
   resolveCodexLaunchArgs,
 } from "../../provider/codexLaunchArgs.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as MonitorSession from "../../mcp/MonitorSession.ts";
 import { makeCodexMonitorRuntime } from "./CodexMonitorRuntime.ts";
 import {
@@ -135,19 +135,19 @@ import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
-import { IdAllocatorV2, type IdAllocatorV2Shape } from "../IdAllocator.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
+import { IdAllocatorV2, type IdAllocatorV2Shape } from "@t3tools/provider-core/server/IdAllocator";
 import {
   type ProviderContinuationRequest,
   ProviderContinuationRequests,
-} from "../ProviderContinuationRequests.ts";
+} from "@t3tools/provider-core/server/continuationRequests";
 import { backgroundWorkNotification } from "../Notification.ts";
 import {
   makeProviderFailure,
   makeProviderFailureTurnItem,
   makeProviderRetryTurnItem,
-} from "../ProviderFailure.ts";
-import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
+} from "@t3tools/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
@@ -175,7 +175,7 @@ import {
   type ProviderAdapterV2InterruptInput,
   type ProviderAdapterV2SteerInput,
   type ProviderAdapterV2TurnInput,
-} from "../ProviderAdapter.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,

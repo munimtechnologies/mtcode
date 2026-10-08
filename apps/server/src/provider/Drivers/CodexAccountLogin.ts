@@ -28,10 +28,13 @@ import {
 } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
-import { expandHomePath } from "../../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
 import { buildCodexInitializeParams } from "../CodexProvider.ts";
-import type { ProviderAccountLoginFlow, ProviderAccountLoginSupport } from "../ProviderDriver.ts";
+import type {
+  ProviderAccountLoginFlow,
+  ProviderAccountLoginSupport,
+} from "@t3tools/provider-core/server/driver";
 
 const LOGIN_FORCE_KILL_AFTER = "2 seconds" as const;
 

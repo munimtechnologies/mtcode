@@ -23,7 +23,7 @@ import {
   clampPercent,
   makeUnavailableUsageLimits,
   makeUsageLimits,
-} from "./providerUsageLimits.ts";
+} from "@t3tools/provider-core/server/usageLimits";
 
 export const CURSOR_USAGE_SUMMARY_URL = "https://cursor.com/api/usage-summary";
 

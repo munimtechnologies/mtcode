@@ -26,16 +26,15 @@ import { ChildProcessSpawner } from "effect/process";
 
 import * as OpenCode2TextGeneration from "../../textGeneration/OpenCode2TextGeneration.ts";
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
-import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { ProviderHost } from "@t3tools/provider-core/server/ProviderHost";
 import * as ServerConfig from "../../config.ts";
 import * as OpenCodeAdapterV2 from "../../orchestration-v2/Adapters/OpenCodeAdapterV2.ts";
 import * as OpenCode2AdapterV2 from "../../orchestration-v2/Adapters/OpenCode2AdapterV2.ts";
-import type { ProviderAdapterV2Shape } from "../../orchestration-v2/ProviderAdapter.ts";
-import * as ServerSettings from "../../serverSettings.ts";
+import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
 import type { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { loadOpenCodeUsageLimits } from "../openCodeSubscriptionUsageLimits.ts";
-import { makeUsageLimits } from "../providerUsageLimits.ts";
+import { makeUsageLimits } from "@t3tools/provider-core/server/usageLimits";
 import { readOpenCodeGoUsageLimits } from "../openCodeUsageLimits.ts";
 import {
   checkOpenCodeProviderStatus,
@@ -47,7 +46,7 @@ import {
   openCodeSkillsToServerProviderSkills,
   openCodeCommandsToServerProviderSlashCommands,
 } from "../OpenCodeProvider.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as OpenCodeRuntime from "../opencodeRuntime.ts";
 import {
   makeOpenCodeRuntimeProbe,
@@ -61,9 +60,9 @@ import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
+} from "@t3tools/provider-core/server/driver";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
@@ -71,12 +70,12 @@ import {
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
+} from "@t3tools/provider-core/server/snapshotSettings";
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
@@ -180,15 +179,14 @@ function selectOpenCodeRuntimeTextGeneration(
 
 export type OpenCodeDriverEnv =
   | OpenCodeAdapterV2.OpenCodeAdapterV2DriverEnv
-  | BackgroundPolicy.BackgroundPolicy
+  | ProviderHost
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | OpenCodeRuntime.OpenCodeRuntime
   | Path.Path
-  | ServerConfig.ServerConfig
-  | ServerSettings.ServerSettingsService;
+  | ServerConfig.ServerConfig;
 
 export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
   driverKind: DRIVER_KIND,
@@ -207,7 +205,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const serverConfig = yield* ServerConfig.ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
       const crypto = yield* Crypto.Crypto;
-      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const host = yield* ProviderHost;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -473,7 +471,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
               ),
             );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
         {
           resolveMaintenance,

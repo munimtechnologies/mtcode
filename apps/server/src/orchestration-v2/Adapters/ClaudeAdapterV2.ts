@@ -91,6 +91,7 @@ import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispa
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
 import { compileClaudeModelSelection } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ComputerHistoryService from "../../computerHistory/service.ts";
 import {
   type DesktopMcpLaunch,
@@ -98,7 +99,6 @@ import {
 } from "../../desktopControl/desktopMcpLaunch.ts";
 import { makeClaudeUserDefinesDesktopMcp } from "../../desktopControl/desktopMcpUserConfig.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
 import {
   claudeSignedOutMessage,
   makeClaudeEnvironment,
@@ -117,24 +117,30 @@ import {
   claudeRateLimitEventToUpdate,
   type ClaudeScopedLimitNames,
 } from "../../provider/claudeUsageLimits.ts";
-import type { ServerProviderShape } from "../../provider/ServerProvider.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
+import type { ServerProviderShape } from "@t3tools/provider-core/server/snapshot";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import { mcpToolPresentation, normalizeMcpText } from "../../provider/McpToolPresentation.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import { makeProviderFailure, makeProviderRetryTurnItem } from "../ProviderFailure.ts";
-import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
+import {
+  mcpToolPresentation,
+  normalizeMcpText,
+} from "@t3tools/provider-core/server/mcpToolPresentation";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import {
+  makeProviderFailure,
+  makeProviderRetryTurnItem,
+} from "@t3tools/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { providerMessageTextWithAttachmentPaths } from "../AttachmentPrompt.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
 import { type BackgroundWorkReport, backgroundWorkNotification } from "../Notification.ts";
-import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/continuationRequests";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,

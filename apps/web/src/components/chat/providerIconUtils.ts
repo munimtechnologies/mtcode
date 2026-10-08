@@ -1,4 +1,6 @@
+import { createElement, type SVGProps } from "react";
 import { ProviderDriverKind } from "@t3tools/contracts";
+import { piClient } from "@t3tools/provider-pi/client";
 import {
   AntigravityIcon,
   ClaudeAI,
@@ -8,8 +10,15 @@ import {
   Icon,
   OpenAI,
   OpenCodeIcon,
-  PiAgentIcon,
 } from "../Icons";
+import { ProviderPackageIcon } from "./ProviderPackageIcon";
+
+// Pi's glyph ships with its provider package (upstream #17302).
+const piIcon = piClient.icon;
+const PiAgentIcon: Icon | undefined = piIcon
+  ? (props: SVGProps<SVGSVGElement>) =>
+      createElement(ProviderPackageIcon, { icon: piIcon, ...props })
+  : undefined;
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
   [ProviderDriverKind.make("codex")]: OpenAI,
@@ -17,7 +26,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
   [ProviderDriverKind.make("cursor")]: CursorIcon,
   [ProviderDriverKind.make("grok")]: GrokIcon,
-  [ProviderDriverKind.make("pi")]: PiAgentIcon,
+  ...(PiAgentIcon ? { [ProviderDriverKind.make("pi")]: PiAgentIcon } : {}),
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
   [ProviderDriverKind.make("devin")]: DevinIcon,
 };

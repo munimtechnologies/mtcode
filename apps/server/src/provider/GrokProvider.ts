@@ -32,12 +32,12 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
   ProviderProbeTimeoutError,
-} from "./providerSnapshot.ts";
-import { makeUnavailableUsageLimits } from "./providerUsageLimits.ts";
+} from "@t3tools/provider-core/server/snapshotProbe";
+import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
-} from "./providerMaintenance.ts";
+} from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   GROK_DEFAULT_MODEL_SLUG,
   GROK_SUPPORTED_RUNTIME_MODES,

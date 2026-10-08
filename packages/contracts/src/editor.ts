@@ -29,6 +29,12 @@ type EditorDefinition = {
    * installed, so discovery requires the app bundle instead.
    */
   readonly macRequiresAppBundle?: boolean;
+  /**
+   * JetBrains product code (`IU`, `PY`, ...). JetBrains IDEs open remote
+   * projects through the Toolbox App's `jetbrains://gateway/ssh/...` link,
+   * which uses the code to choose the IDE backend.
+   */
+  readonly jetbrainsProductCode?: string;
 };
 
 export const EDITORS = [
@@ -99,14 +105,23 @@ export const EDITORS = [
     commands: ["idea"],
     launchStyle: "line-column",
     macAppName: "IntelliJ IDEA",
+    jetbrainsProductCode: "IU",
   },
-  { id: "aqua", label: "Aqua", commands: ["aqua"], launchStyle: "line-column", macAppName: "Aqua" },
+  {
+    id: "aqua",
+    label: "Aqua",
+    commands: ["aqua"],
+    launchStyle: "line-column",
+    macAppName: "Aqua",
+    jetbrainsProductCode: "QA",
+  },
   {
     id: "clion",
     label: "CLion",
     commands: ["clion"],
     launchStyle: "line-column",
     macAppName: "CLion",
+    jetbrainsProductCode: "CL",
   },
   {
     id: "datagrip",
@@ -114,6 +129,7 @@ export const EDITORS = [
     commands: ["datagrip"],
     launchStyle: "line-column",
     macAppName: "DataGrip",
+    jetbrainsProductCode: "DB",
   },
   {
     id: "dataspell",
@@ -121,6 +137,7 @@ export const EDITORS = [
     commands: ["dataspell"],
     launchStyle: "line-column",
     macAppName: "DataSpell",
+    jetbrainsProductCode: "DS",
   },
   {
     id: "goland",
@@ -128,6 +145,7 @@ export const EDITORS = [
     commands: ["goland"],
     launchStyle: "line-column",
     macAppName: "GoLand",
+    jetbrainsProductCode: "GO",
   },
   {
     id: "phpstorm",
@@ -135,6 +153,7 @@ export const EDITORS = [
     commands: ["phpstorm"],
     launchStyle: "line-column",
     macAppName: "PhpStorm",
+    jetbrainsProductCode: "PS",
   },
   {
     id: "pycharm",
@@ -142,6 +161,7 @@ export const EDITORS = [
     commands: ["pycharm"],
     launchStyle: "line-column",
     macAppName: "PyCharm",
+    jetbrainsProductCode: "PY",
   },
   {
     id: "rider",
@@ -149,6 +169,7 @@ export const EDITORS = [
     commands: ["rider"],
     launchStyle: "line-column",
     macAppName: "Rider",
+    jetbrainsProductCode: "RD",
   },
   {
     id: "rubymine",
@@ -156,6 +177,7 @@ export const EDITORS = [
     commands: ["rubymine"],
     launchStyle: "line-column",
     macAppName: "RubyMine",
+    jetbrainsProductCode: "RM",
   },
   {
     id: "rustrover",
@@ -163,6 +185,7 @@ export const EDITORS = [
     commands: ["rustrover"],
     launchStyle: "line-column",
     macAppName: "RustRover",
+    jetbrainsProductCode: "RR",
   },
   {
     id: "webstorm",
@@ -170,6 +193,7 @@ export const EDITORS = [
     commands: ["webstorm"],
     launchStyle: "line-column",
     macAppName: "WebStorm",
+    jetbrainsProductCode: "WS",
   },
   { id: "file-manager", label: "File Manager", commands: null, launchStyle: "direct-path" },
 ] as const satisfies ReadonlyArray<EditorDefinition>;
@@ -190,7 +214,8 @@ export const LaunchEditorInput = Schema.Struct({
 });
 export type LaunchEditorInput = typeof LaunchEditorInput.Type;
 
-const remoteSchemeOf = (editor: EditorDefinition): string | undefined => editor.remoteScheme;
+const remoteSchemeOf = (editor: EditorDefinition): string | undefined =>
+  editor.remoteScheme ?? (editor.jetbrainsProductCode === undefined ? undefined : "jetbrains");
 
 /** Editors that can open a remote workspace via an SSH deep link. */
 export const REMOTE_CAPABLE_EDITOR_IDS: ReadonlyArray<EditorId> = EDITORS.flatMap((editor) =>
@@ -204,9 +229,10 @@ export const remoteSchemeForEditor = (id: EditorId): string | undefined => {
 
 /**
  * Builds a `<scheme>://vscode-remote/ssh-remote+<host><path>` deep link (Zed
- * takes `zed://ssh/<host><path>`) that opens `absolutePath` on `host` in the
- * local editor over SSH. Returns undefined for editors without remote
- * deep-link support.
+ * takes `zed://ssh/<host><path>`, JetBrains IDEs a Toolbox App
+ * `jetbrains://gateway/ssh/environment?...` link) that opens `absolutePath` on
+ * `host` in the local editor over SSH. Returns undefined for editors without
+ * remote deep-link support.
  */
 export const buildRemoteOpenUrl = (input: {
   readonly editor: EditorId;
@@ -216,6 +242,18 @@ export const buildRemoteOpenUrl = (input: {
   const scheme = remoteSchemeForEditor(input.editor);
   if (scheme === undefined) {
     return undefined;
+  }
+  const editor = EDITORS.find((candidate) => candidate.id === input.editor);
+  if (editor !== undefined && "jetbrainsProductCode" in editor) {
+    // Like the VS Code link, no user or port: the SSH config entry for `host`
+    // supplies them. A bare product code lets Toolbox pick the backend build.
+    const params = new URLSearchParams({
+      h: input.host,
+      launchIde: "true",
+      ideHint: editor.jetbrainsProductCode,
+      projectHint: input.absolutePath.replaceAll("\\", "/"),
+    });
+    return `${scheme}://gateway/ssh/environment?${params.toString()}`;
   }
   // Windows server paths (`C:\...`) appear as `/C:/...` in vscode-remote URIs.
   const posixPath = input.absolutePath.replaceAll("\\", "/");

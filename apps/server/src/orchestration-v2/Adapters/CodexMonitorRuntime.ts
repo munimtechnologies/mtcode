@@ -26,8 +26,8 @@ import {
   supportsCodexMonitoring,
 } from "../../provider/CodexBackgroundTasks.ts";
 import { backgroundWorkNotification } from "../Notification.ts";
-import type { ProviderAdapterV2TurnMessage } from "../ProviderAdapter.ts";
-import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
+import type { ProviderAdapterV2TurnMessage } from "@t3tools/provider-core/server/ProviderAdapter";
+import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
 
 const isMonitorStoppedError = Schema.is(MonitorSession.MonitorStoppedError);
 

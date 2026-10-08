@@ -45,14 +45,14 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
+import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import {
   type DesktopMcpLaunch,
   makeResolveEnabledDesktopMcp,
 } from "../../desktopControl/desktopMcpLaunch.ts";
 import { makeCursorUserDefinesDesktopMcp } from "../../desktopControl/desktopMcpUserConfig.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { mcpToolPresentation } from "../../provider/McpToolPresentation.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { CursorTransportFailure } from "../../provider/acp/CursorTransportFailure.ts";
 import { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
 import {
@@ -60,22 +60,22 @@ import {
   hasCursorSkillMention,
   rewriteCursorSkillMentions,
 } from "../../provider/Drivers/CursorSkills.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { t3OrchestrationPromptForFirstRun } from "../../provider/T3OrchestrationInstructions.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { t3OrchestrationPromptForFirstRun } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import { makeProviderFailure } from "../ProviderFailure.ts";
-import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
 } from "../AttachmentPrompt.ts";
-import * as ProviderAdapter from "../ProviderAdapter.ts";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
