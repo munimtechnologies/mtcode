@@ -80,6 +80,7 @@ interface EnvironmentSubscriptionAtomOptions<Input, A, E, R> {
   readonly sensitiveInput?: boolean;
   readonly label: string;
   readonly subscribe: (input: Input) => Stream.Stream<A, E, R>;
+  readonly completeWhen?: (value: A) => boolean;
   readonly idleTtlMs?: number;
 }
 
@@ -627,7 +628,11 @@ export function createEnvironmentSubscriptionAtomFamily<R, ER, Input, A, E>(
   const family = Atom.family((key: string) => {
     const target = parseEnvironmentRpcKey<Input>(key);
     return runtime
-      .atom(followStreamInEnvironment(target.environmentId, options.subscribe(target.input)))
+      .atom(
+        followStreamInEnvironment(target.environmentId, options.subscribe(target.input)).pipe(
+          options.completeWhen ? Stream.takeUntil(options.completeWhen) : (stream) => stream,
+        ),
+      )
       .pipe(
         Atom.setIdleTTL(options.idleTtlMs ?? 5 * 60_000),
         Atom.withLabel(
@@ -716,6 +721,7 @@ export function createEnvironmentRpcSubscriptionAtomFamily<
     readonly label: string;
     readonly tag: TTag;
     readonly idleTtlMs?: number;
+    readonly completeWhen?: (value: B) => boolean;
     readonly transform?: (
       stream: Stream.Stream<
         EnvironmentRpcStreamValue<TTag>,
@@ -731,6 +737,7 @@ export function createEnvironmentRpcSubscriptionAtomFamily<
 ) {
   return createEnvironmentSubscriptionAtomFamily(runtime, {
     label: options.label,
+    ...(options.completeWhen === undefined ? {} : { completeWhen: options.completeWhen }),
     ...(options.idleTtlMs === undefined ? {} : { idleTtlMs: options.idleTtlMs }),
     subscribe: (input: EnvironmentRpcInput<TTag>) => {
       const stream = subscribe(options.tag, input);

@@ -3,6 +3,7 @@ import type { Root, RootContent } from "mdast";
 import type {} from "micromark-extension-math";
 import { asciiDigit, markdownLineEnding, markdownSpace } from "micromark-util-character";
 import type { Construct, State } from "micromark-util-types";
+import rehypeRaw from "rehype-raw";
 import remarkMath from "remark-math";
 import type { Plugin } from "unified";
 
@@ -209,3 +210,60 @@ export const remarkChatMath: Plugin<[], Root> = function () {
     return tree;
   };
 };
+
+/** Classes that mark a `code` element as parser-owned math rather than code. */
+export const CHAT_MATH_CLASS_NAMES = ["math-inline", "math-display"] as const;
+
+/** Whether hast properties belong to math produced by {@link remarkChatMath}. */
+export function isChatMathHastProperties(properties: { readonly className?: unknown } | undefined) {
+  const classes = properties?.className;
+  return (
+    Array.isArray(classes) &&
+    classes.some((name) => (CHAT_MATH_CLASS_NAMES as readonly unknown[]).includes(name))
+  );
+}
+
+type ChatMathHastNode = {
+  type?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: ChatMathHastNode[];
+};
+
+/** Parse raw HTML while reserving math rendering and copy metadata for parser-owned nodes. */
+export function rehypeRawMath() {
+  const parseRaw = rehypeRaw({ passThrough: ["chatMath"] });
+  return (...[tree, file]: Parameters<typeof parseRaw>) => {
+    /** Carry parsed math through HTML processing using a node type HTML cannot create. */
+    const protect = (node: ChatMathHastNode) => {
+      if (
+        node.type === "element" &&
+        node.tagName === "code" &&
+        typeof node.properties?.dataMathSource === "string"
+      ) {
+        // Raw HTML can create elements and attributes, but not this AST node type.
+        node.type = "chatMath";
+      }
+      node.children?.forEach(protect);
+    };
+    protect(tree as ChatMathHastNode);
+    const parsed = parseRaw(tree, file);
+    /** Restore parsed math and remove math metadata supplied by raw HTML. */
+    const restore = (node: ChatMathHastNode) => {
+      if (node.type === "chatMath") {
+        node.type = "element";
+      } else if (node.type === "element" && node.properties) {
+        delete node.properties.dataMathSource;
+        const classes = node.properties.className;
+        if (Array.isArray(classes)) {
+          node.properties.className = classes.filter(
+            (name) => !(CHAT_MATH_CLASS_NAMES as readonly unknown[]).includes(name),
+          );
+        }
+      }
+      node.children?.forEach(restore);
+    };
+    restore(parsed as ChatMathHastNode);
+    return parsed;
+  };
+}

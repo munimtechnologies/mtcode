@@ -4,9 +4,9 @@ import remarkParse from "remark-parse";
 import { unified, type Plugin } from "unified";
 import { describe, expect, it } from "vite-plus/test";
 
+import { remarkNormalizeListItemIndentation } from "@t3tools/shared/markdownListIndentation";
+import { remarkChatMath } from "@t3tools/shared/markdownMath";
 import { createIncrementalMarkdownPlugin } from "./markdown-incremental";
-import { remarkNormalizeListItemIndentation } from "./markdown-list-indentation";
-import { remarkChatMath } from "./markdown-math";
 
 function parser() {
   return unified().use(remarkParse).use(remarkGfm).use(remarkChatMath);
