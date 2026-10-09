@@ -122,19 +122,20 @@ require $V2/ClaudeAdapterV2.ts "userDefinesDesktopMcp" "user-config-wins guard o
 require $V2/CodexAdapterV2.ts "makeResolveEnabledDesktopMcp" "Codex driver resolves the desktop MCP"
 require $V2/CodexAdapterV2.ts "codexDesktopMcpAppServerArgs(desktopMcp)" "desktop MCP injected into Codex sessions"
 require $V2/CodexAdapterV2.ts 'argument.includes(`mcp_servers.' "user-config-wins guard on Codex desktop MCP injection (launch args)"
-require $V2/CursorAdapterV2.ts "makeResolveEnabledDesktopMcp" "Cursor driver resolves the desktop MCP"
-require $V2/CursorAdapterV2.ts "cursorSessionMcpServers(turnInput.threadId, sessionDesktopMcp)" "desktop MCP injected into Cursor turns"
-require $V2/CursorAdapterV2.ts "desktopMcp: sessionDesktopMcp" "desktop MCP injected into Cursor agent options"
-require $V2/CursorAdapterV2.ts "makeCursorUserDefinesDesktopMcp" "user-config-wins guard on Cursor desktop MCP injection"
-require $V2/AcpAdapterV2.ts "acpMcpContext(threadId, self, desktopMcpServers)" "desktop MCP injected into ACP runtimes (Grok, ACP registry agents)"
-require $V2/AcpAdapterV2.ts "acpMcpActivation(threadId, self, desktopMcpServers)" "desktop MCP injected into ACP session load/resume"
-require $V2/GrokAdapterV2.ts "makeGrokDesktopMcpHooks" "Grok driver resolves the desktop MCP"
-require $V2/GrokAdapterV2.ts "makeGrokUserDefinesDesktopMcp" "user-config-wins guard on Grok desktop MCP injection"
-require $V2/AcpRegistryAdapterV2.ts "makeResolveEnabledDesktopMcp" "desktop MCP injected into ACP registry agents (Devin etc.)"
-require $V2/OpenCodeAdapterV2.ts "makeOptionalResolveEnabledDesktopMcp()" "OpenCode 1.x driver resolves the desktop MCP"
-require $V2/OpenCodeAdapterV2.ts "name: DESKTOP_MCP_SERVER_NAME," "desktop MCP injected into OpenCode 1.x sessions"
-require $V2/OpenCode2AdapterV2.ts "makeOptionalResolveEnabledDesktopMcp()" "OpenCode 2 adapter resolves the desktop MCP"
-require $V2/OpenCode2AdapterV2.ts "yield\* syncDesktopMcp(directory)" "desktop MCP injected into OpenCode 2 turns"
+require apps/server/src/provider/ProviderHostLive.ts "makeOptionalResolveEnabledDesktopMcp()" "server hands provider packages the desktop MCP via ProviderHost"
+require packages/provider-cursor/src/server/adapter.ts "hostDesktopMcp?.resolve" "Cursor driver resolves the desktop MCP"
+require packages/provider-cursor/src/server/adapter.ts "cursorSessionMcpServers(turnInput.threadId, sessionDesktopMcp)" "desktop MCP injected into Cursor turns"
+require packages/provider-cursor/src/server/adapter.ts "desktopMcp: sessionDesktopMcp" "desktop MCP injected into Cursor agent options"
+require packages/provider-cursor/src/server/adapter.ts 'hostDesktopMcp.userDefines("cursor"' "user-config-wins guard on Cursor desktop MCP injection"
+require packages/provider-acp/src/server/adapter.ts "acpMcpContext(threadId, self, desktopMcpServers)" "desktop MCP injected into ACP runtimes (Grok, ACP registry agents)"
+require packages/provider-acp/src/server/adapter.ts "acpMcpActivation(threadId, self, desktopMcpServers)" "desktop MCP injected into ACP session load/resume"
+require packages/provider-grok/src/server/adapter.ts "grokResolveDesktopMcp(options, host.desktopMcp)" "Grok driver resolves the desktop MCP"
+require packages/provider-grok/src/server/adapter.ts 'hostDesktopMcp.userDefines("grok"' "user-config-wins guard on Grok desktop MCP injection"
+require packages/provider-acp-registry/src/server/adapter.ts "desktopMcp?.resolve" "desktop MCP injected into ACP registry agents (Devin etc.)"
+require packages/provider-opencode/src/server/adapter.ts "host.desktopMcp?.resolve" "OpenCode 1.x driver resolves the desktop MCP"
+require packages/provider-opencode/src/server/adapter.ts "name: DESKTOP_MCP_SERVER_NAME," "desktop MCP injected into OpenCode 1.x sessions"
+require packages/provider-opencode/src/server/v2/adapter.ts "host.desktopMcp?.resolve" "OpenCode 2 adapter resolves the desktop MCP"
+require packages/provider-opencode/src/server/v2/adapter.ts "yield\* syncDesktopMcp(directory)" "desktop MCP injected into OpenCode 2 turns"
 
 # --- Computer-use thread view (9c23b7fa6, eb1bdd5e2) ---
 require apps/server/src/ws.ts "computerViewStream" "computer view RPCs registered"
@@ -234,8 +235,8 @@ require apps/web/src/components/settings/pluginMarketplace/PluginMarketplaceSkil
 # --- Usage limits for every driver (2026-09-16, 20308ea78b) ---
 # Cursor and OpenCode publish subscription windows into upstream's Limits
 # view; the fork-only AccountLimits strip/hover card was removed the same day.
-require apps/server/src/provider/Drivers/CursorDriver.ts "readCursorUsageLimits" "Cursor usage-limit probe wired into CursorProvider"
-require apps/server/src/provider/Drivers/OpenCodeDriver.ts "loadOpenCodeUsageLimits" "OpenCode usage-limit probe wired into OpenCodeProvider"
+require packages/provider-cursor/src/server/driver.ts "readCursorUsageLimits" "Cursor usage-limit probe wired into CursorProvider"
+require packages/provider-opencode/src/server/driver.ts "loadOpenCodeUsageLimits" "OpenCode usage-limit probe wired into OpenCodeProvider"
 
 # --- Usage-limit recovery (upstream #11215 + #9012 port; kept over #12458, 2026-09-18) ---
 require apps/server/src/persistence/Migrations.ts "ProjectionUsageLimitResume" "usage-limit resume migration (fork id 56)"

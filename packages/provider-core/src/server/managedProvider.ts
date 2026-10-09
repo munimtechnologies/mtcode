@@ -17,7 +17,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
-import { ProviderHost } from "./ProviderHost.ts";
+import * as ProviderHost from "./ProviderHost.ts";
 import { ProviderProbeTimeoutError } from "./snapshotProbe.ts";
 import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./usageLimits.ts";
 import type { ServerProviderShape } from "./snapshot.ts";
@@ -61,8 +61,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly refreshInterval?: Duration.Input;
   readonly refreshOnInterval?: boolean;
   readonly checkProviderOnSettingsChange?: (previous: Settings, next: Settings) => boolean;
-}): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope | ProviderHost> {
-  const host = yield* ProviderHost;
+}): Effect.fn.Return<
+  ServerProviderShape,
+  ServerSettingsError,
+  Scope.Scope | ProviderHost.ProviderHost
+> {
+  const host = yield* ProviderHost.ProviderHost;
   const refreshSemaphore = yield* Semaphore.make(1);
   const changesPubSub = yield* Effect.acquireRelease(
     PubSub.unbounded<ServerProvider>(),

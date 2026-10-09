@@ -25,7 +25,7 @@ import {
   CodexBackgroundTasks,
   supportsCodexMonitoring,
 } from "../../provider/CodexBackgroundTasks.ts";
-import { backgroundWorkNotification } from "../Notification.ts";
+import { backgroundWorkNotification } from "@t3tools/provider-core/server/notification";
 import type { ProviderAdapterV2TurnMessage } from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
 

@@ -2,6 +2,7 @@ import type {
   DesktopBridge,
   DesktopNotificationTarget,
   DesktopThreadDeepLinkPayload,
+  DesktopPreviewOpenLinkEvent,
   DesktopPreviewPointerEvent,
   DesktopPreviewRecordingInputEvent,
   DesktopPreviewRecordingFrame,
@@ -548,6 +549,15 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.on(IpcChannels.PREVIEW_POINTER_EVENT_CHANNEL, wrappedListener);
       return () =>
         ipcRenderer.removeListener(IpcChannels.PREVIEW_POINTER_EVENT_CHANNEL, wrappedListener);
+    },
+    onOpenLink: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, linkEvent: unknown) => {
+        if (typeof linkEvent !== "object" || linkEvent === null) return;
+        listener(linkEvent as DesktopPreviewOpenLinkEvent);
+      };
+      ipcRenderer.on(IpcChannels.PREVIEW_OPEN_LINK_CHANNEL, wrappedListener);
+      return () =>
+        ipcRenderer.removeListener(IpcChannels.PREVIEW_OPEN_LINK_CHANNEL, wrappedListener);
     },
   },
 } satisfies DesktopBridge);

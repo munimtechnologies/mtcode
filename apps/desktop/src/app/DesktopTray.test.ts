@@ -82,6 +82,7 @@ const makeDesktopWindowLayer = (onRevealOrCreateMain?: () => Effect.Effect<void>
     dispatchMenuAction: () => Effect.void,
     dispatchSnapShotEvent: () => Effect.void,
     zoomMain: () => Effect.void,
+    runMainContentsCommand: () => Effect.void,
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 

@@ -1,6 +1,6 @@
 import { SettingsGroup } from "./SettingsGroup";
 import { AuthSettingsWriteScope } from "@t3tools/contracts";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { InfoIcon, Undo2Icon } from "lucide-react";
 import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@t3tools/contracts";
@@ -317,6 +317,7 @@ export function SettingsRow({
   const primarySettingsAvailable = usePrimarySettingsAvailable();
   const context = useOptionalSettingsScope();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryEnvironment = usePrimaryEnvironment();
   const primaryCanWrite = useEnvironmentScope(primaryEnvironmentId, AuthSettingsWriteScope);
   const writableIds = useEnvironmentsWithScope(
     context?.connectedEnvironments ?? [],
@@ -422,7 +423,14 @@ export function SettingsRow({
     unavailable && control
       ? inertControl(
           !canWriteSettings
-            ? "This connection does not have permission to change environment settings."
+            ? `This connection lacks permission to change settings on ${
+                context
+                  ? context.connectedEnvironments
+                      .filter((target) => !writableIds.has(target.environmentId))
+                      .map((target) => target.label)
+                      .join(", ") || "the selected environment"
+                  : (primaryEnvironment?.label ?? "the primary environment")
+              }.`
             : context
               ? "Reconnect the selected environment to change this setting."
               : PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,

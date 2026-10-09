@@ -24,7 +24,7 @@ import {
 import * as TextGeneration from "./TextGeneration.ts";
 import { sanitizeThreadTitle } from "@t3tools/provider-core/server/textGenerationUtils";
 import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
-import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import { killQuietly, readPidFile, waitForProcessExit } from "../testUtils/processProbe.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 

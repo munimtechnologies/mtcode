@@ -28,7 +28,7 @@ import {
 } from "@t3tools/contracts";
 
 import type { ServerSettingsService } from "../../serverSettings.ts";
-import type { PtyAdapter } from "../../terminal/PtyAdapter.ts";
+import type { PtyAdapter } from "@t3tools/shared/PtyAdapter";
 import { deriveProviderInstanceConfigMap } from "../ProviderInstanceRegistryHydration.ts";
 import type {
   ProviderAccountLoginFlow,

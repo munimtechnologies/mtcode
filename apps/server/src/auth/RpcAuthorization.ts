@@ -223,6 +223,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   [WS_METHODS.previewList]: AuthOrchestrationReadScope,
   [WS_METHODS.previewClearProfile]: AuthPreviewOperateScope,
+  [WS_METHODS.previewReportProfiles]: AuthPreviewOperateScope,
   [WS_METHODS.previewReportStatus]: AuthPreviewOperateScope,
   // MT Code: a desktop hosting computer tasks starts threads for agents elsewhere.
   [WS_METHODS.computersConnect]: AuthOrchestrationOperateScope,

@@ -85,7 +85,7 @@ import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
-import { notificationTurnItem } from "./Notification.ts";
+import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
 import { isRestartNoteSource } from "./RestartBackgroundNote.ts";
 import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
@@ -121,7 +121,7 @@ import {
   subagentResultForRun,
   delegatedTaskProgress,
   subagentThreadTitle,
-} from "./SubagentProjection.ts";
+} from "@t3tools/provider-core/server/subagentProjection";
 import {
   forkableSourceRunStatusError,
   isForkableSourceRunStatus,

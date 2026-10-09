@@ -34,7 +34,7 @@ import {
   type ClaudeAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { PtyAdapter } from "../../terminal/PtyAdapter.ts";
+import { PtyAdapter } from "@t3tools/shared/PtyAdapter";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeClaudeScopedLimitNames } from "../claudeUsageLimits.ts";
 import * as ClaudeResetCredits from "../claudeResetCredits.ts";
@@ -53,7 +53,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "@t3tools/provider-core/server/driver";
-import { withInstanceIdentity } from "./instanceIdentity.ts";
+import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIdentity";
 import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {

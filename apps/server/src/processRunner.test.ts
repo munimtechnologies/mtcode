@@ -15,7 +15,7 @@ import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hos
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
 import * as ProcessRunner from "./processRunner.ts";
-import { writeFakeCli } from "./testUtils/fakeCli.ts";
+import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import { killQuietly, waitForProcessExit } from "./testUtils/processProbe.ts";
 
 type ChildProcessCommand = {

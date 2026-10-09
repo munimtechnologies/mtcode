@@ -1,32 +1,28 @@
 import { createElement, type SVGProps } from "react";
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { piClient } from "@t3tools/provider-pi/client";
-import {
-  AntigravityIcon,
-  ClaudeAI,
-  CursorIcon,
-  DevinIcon,
-  GrokIcon,
-  Icon,
-  OpenAI,
-  OpenCodeIcon,
-} from "../Icons";
+import { AntigravityIcon, ClaudeAI, DevinIcon, Icon, OpenAI } from "../Icons";
+import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
 
-// Pi's glyph ships with its provider package (upstream #17302).
-const piIcon = piClient.icon;
-const PiAgentIcon: Icon | undefined = piIcon
-  ? (props: SVGProps<SVGSVGElement>) =>
-      createElement(ProviderPackageIcon, { icon: piIcon, ...props })
-  : undefined;
+// Cursor, Grok, OpenCode and Pi glyphs ship with their provider packages.
+const packageIcon = (driver: string): Icon | undefined => {
+  const icon = providerClients.get(ProviderDriverKind.make(driver))?.icon;
+  return icon
+    ? (props: SVGProps<SVGSVGElement>) => createElement(ProviderPackageIcon, { icon, ...props })
+    : undefined;
+};
+
+const packageIcons = Object.fromEntries(
+  ["opencode", "cursor", "grok", "pi"].flatMap((driver) => {
+    const icon = packageIcon(driver);
+    return icon ? [[ProviderDriverKind.make(driver), icon] as const] : [];
+  }),
+) as Partial<Record<ProviderDriverKind, Icon>>;
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
   [ProviderDriverKind.make("codex")]: OpenAI,
   [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
-  [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
-  [ProviderDriverKind.make("cursor")]: CursorIcon,
-  [ProviderDriverKind.make("grok")]: GrokIcon,
-  ...(PiAgentIcon ? { [ProviderDriverKind.make("pi")]: PiAgentIcon } : {}),
+  ...packageIcons,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
   [ProviderDriverKind.make("devin")]: DevinIcon,
 };

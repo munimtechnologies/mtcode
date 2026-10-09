@@ -15,10 +15,9 @@ import * as Path from "effect/Path";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveDesktopMcpPath } from "./desktopMcpBinary.ts";
 
-export type DesktopMcpLaunch = {
-  readonly path: string;
-  readonly env: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-};
+import type { DesktopMcpLaunch } from "@t3tools/provider-core/server/ProviderHost";
+
+export type { DesktopMcpLaunch };
 
 type DesktopControlFlags = {
   readonly enabled: boolean;
