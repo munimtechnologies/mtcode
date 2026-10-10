@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -24,8 +24,8 @@ describe("desktopMcpBinary", () => {
       yield* fileSystem.chmod(binaryPath, 0o755);
 
       const resolved = yield* resolveDesktopMcpPath().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
           MTCODE_DESKTOP_MCP_PATH: binaryPath,
         }),
       );
@@ -53,8 +53,8 @@ describe("desktopMcpBinary", () => {
         }
 
         const resolved = yield* resolveDesktopMcpPath().pipe(
-          Effect.provideService(HostProcessPlatform, platform),
-          Effect.provideService(HostProcessEnvironment, {
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.provideService(HostProcess.Environment, {
             MTCODE_DESKTOP_MCP_PATH: binaryPath,
           }),
         );
@@ -77,14 +77,14 @@ describe("desktopMcpBinary", () => {
       }
 
       const legacyOnly = yield* resolveDesktopMcpPath().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, { T3CODE_DESKTOP_MCP_PATH: legacyPath }),
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, { T3CODE_DESKTOP_MCP_PATH: legacyPath }),
       );
       assert.equal(legacyOnly, legacyPath);
 
       const both = yield* resolveDesktopMcpPath().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
           MTCODE_DESKTOP_MCP_PATH: currentPath,
           T3CODE_DESKTOP_MCP_PATH: legacyPath,
         }),
@@ -106,8 +106,8 @@ describe("desktopMcpBinary", () => {
       yield* fileSystem.chmod(binaryPath, 0o755);
 
       const resolved = yield* resolveDesktopMcpPath().pipe(
-        Effect.provideService(HostProcessPlatform, "linux"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "linux"),
+        Effect.provideService(HostProcess.Environment, {
           HOME: checkout,
           MUNIM_COMPUTER_USE_CHECKOUT: checkout,
         }),
@@ -177,8 +177,8 @@ describe("desktopMcpBinary", () => {
       }
 
       const resolved = yield* resolveDesktopMcpPath().pipe(
-        Effect.provideService(HostProcessPlatform, "linux"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "linux"),
+        Effect.provideService(HostProcess.Environment, {
           HOME: home,
           MUNIM_COMPUTER_USE_CHECKOUT: `${home}/no-checkout`,
           MTCODE_COMPUTER_USE_CACHE: `${home}/no-fetched-release`,
@@ -201,8 +201,8 @@ describe("desktopMcpBinary", () => {
       // when someone points the override at a binary.
       for (const platform of ["freebsd", "aix"] as const) {
         const resolved = yield* resolveDesktopMcpPath().pipe(
-          Effect.provideService(HostProcessPlatform, platform),
-          Effect.provideService(HostProcessEnvironment, {
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.provideService(HostProcess.Environment, {
             MTCODE_DESKTOP_MCP_PATH: binaryPath,
           }),
         );
@@ -219,8 +219,8 @@ describe("desktopMcpBinary", () => {
       });
 
       const resolved = yield* resolveDesktopMcpPath().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
           MTCODE_DESKTOP_MCP_PATH: `${baseDir}/does-not-exist`,
         }),
       );

@@ -31,7 +31,8 @@ import type {
   WebSearchOutput,
 } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { AgentScope } from "@t3tools/shared/AgentScope";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
@@ -109,15 +110,14 @@ import {
 } from "../../provider/ClaudeModelCatalog.ts";
 import {
   boundProviderEventForLogging,
-  type EventNdjsonLogger,
   shouldPersistProviderEvent,
 } from "../../provider/EventNdjsonLogger.ts";
-import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import {
   claudeRateLimitEventToUpdate,
   type ClaudeScopedLimitNames,
 } from "../../provider/claudeUsageLimits.ts";
-import type { ServerProviderShape } from "@t3tools/provider-core/server/snapshot";
+import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
@@ -126,6 +126,7 @@ import {
   normalizeMcpText,
 } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   makeProviderFailure,
@@ -143,7 +144,7 @@ import {
   type BackgroundWorkReport,
   backgroundWorkNotification,
 } from "@t3tools/provider-core/server/notification";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/continuationRequests";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
@@ -186,6 +187,8 @@ export function claudeProviderTurnTokenUsage(
 }
 export const CLAUDE_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CLAUDE_PROVIDER);
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+// Entry extensions the Claude SDK runs through node instead of executing.
+const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 
 export const ClaudeProviderCapabilitiesV2 = {
   sessions: {
@@ -578,7 +581,7 @@ export function loggedClaudeQueryOptions(
 }
 
 export function makeClaudeAgentSdkProtocolLogger(input: {
-  readonly nativeEventLogger: EventNdjsonLogger | undefined;
+  readonly nativeEventLogger: ProviderEventLoggers.EventNdjsonLogger | undefined;
   readonly threadId: ThreadId;
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
 }): ClaudeAgentSdkProtocolLogger | undefined {
@@ -613,6 +616,7 @@ export const layerQueryRunner: Layer.Layer<
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
+    const agentScope = yield* AgentScope;
 
     return ClaudeAgentSdkQueryRunner.of({
       allocateSessionId: crypto.randomUUIDv4.pipe(
@@ -635,11 +639,35 @@ export const layerQueryRunner: Layer.Layer<
           ),
           Stream.toAsyncIterable,
         );
+        // The SDK spawns a native binary as `path ...executableArgs ...sdkArgs`,
+        // which lets the agent scope wrapper go in front of the CLI while the
+        // SDK keeps its own stderr capture and exit reporting. The SDK runs a
+        // script entry through node instead, so those launch unwrapped.
+        const binaryPath = input.options.pathToClaudeCodeExecutable;
+        const launch =
+          binaryPath === undefined ||
+          CLAUDE_SCRIPT_EXTENSIONS.some((ext) => binaryPath.endsWith(ext))
+            ? undefined
+            : yield* agentScope.wrap({
+                command: binaryPath,
+                args: [],
+                name: "claude",
+                threadId: input.threadId,
+                env: input.options.env,
+              });
+        const options =
+          launch === undefined || launch.args.length === 0
+            ? input.options
+            : {
+                ...input.options,
+                pathToClaudeCodeExecutable: launch.command,
+                executableArgs: [...launch.args, ...(input.options.executableArgs ?? [])],
+              };
         const queryRuntime = yield* Effect.try({
           try: () =>
             query({
               prompt,
-              options: input.options,
+              options,
             }),
           catch: (cause) => queryRunnerError(cause, "query"),
         });
@@ -986,7 +1014,7 @@ export const CLAUDE_T3_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 const CLAUDE_T3_MCP_AUTHORIZATION_ENV = "T3_CODE_MCP_AUTHORIZATION";
 
 export function claudeMcpQueryOverrides(input: {
-  readonly threadId: ThreadId;
+  readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly readOnlySandbox: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
 }): {
@@ -994,7 +1022,7 @@ export function claudeMcpQueryOverrides(input: {
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   readonly mcpEnvironment?: Readonly<Record<string, string>>;
 } {
-  const session = McpProviderSession.readMcpProviderSession(input.threadId);
+  const session = input.mcpSession;
   if (session === undefined) {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
@@ -1130,7 +1158,7 @@ function resultTextFromSdkMessage(
 }
 
 function makeProviderThread(input: {
-  readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly providerInstanceId: ProviderInstanceId;
   readonly appThreadId: OrchestrationV2ProviderThread["appThreadId"];
   readonly ownerNodeId?: OrchestrationV2ProviderThread["ownerNodeId"];
@@ -2593,7 +2621,7 @@ function providerFailureFromApiRetry(message: SDKAPIRetryMessage): Orchestration
 }
 
 function buildAssistantArtifacts(input: {
-  readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
   readonly nativeItemId: string;
@@ -3027,10 +3055,10 @@ export interface ClaudeAdapterV2Options {
   readonly fileSystem: FileSystem.FileSystem;
   readonly path: Path.Path;
   readonly crypto: Crypto.Crypto;
-  readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly queryRunner: ClaudeAgentSdkQueryRunnerShape;
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
-  readonly onUsageLimits?: ServerProviderShape["applyUsageLimits"];
+  readonly onUsageLimits?: ManagedServerProvider["applyUsageLimits"];
   /**
    * MT Code: resolves the munim-computer-use (`mt-desktop`) MCP server when
    * Computer Use is enabled; re-read whenever a query opens so Settings
@@ -3052,9 +3080,10 @@ export interface ClaudeAdapterV2Options {
   };
 }
 
-export function makeClaudeAdapterV2(
+export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   adapterOptions: ClaudeAdapterV2Options,
-): ProviderAdapter.ProviderAdapterV2Shape {
+) {
+  const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   const continuationRequests = adapterOptions.continuationRequests ?? {
     offer: () => Effect.void,
@@ -3417,7 +3446,6 @@ export function makeClaudeAdapterV2(
             type: "turn_item.updated",
             driver: CLAUDE_PROVIDER,
             turnItem: makeProviderRetryTurnItem({
-              idAllocator,
               driver: CLAUDE_PROVIDER,
               threadId: context.input.threadId,
               runId: context.input.runId,
@@ -5144,7 +5172,6 @@ export function makeClaudeAdapterV2(
               type: "turn_item.updated",
               driver: CLAUDE_PROVIDER,
               turnItem: makeProviderRetryTurnItem({
-                idAllocator,
                 driver: CLAUDE_PROVIDER,
                 threadId: input.context.input.threadId,
                 runId: input.context.input.runId,
@@ -6150,7 +6177,6 @@ export function makeClaudeAdapterV2(
               type: "turn_item.updated",
               driver: CLAUDE_PROVIDER,
               turnItem: makeProviderRetryTurnItem({
-                idAllocator,
                 driver: CLAUDE_PROVIDER,
                 threadId: context.input.threadId,
                 runId: context.input.runId,
@@ -7326,7 +7352,7 @@ export function makeClaudeAdapterV2(
         ) {
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
           const t3McpOverrides = claudeMcpQueryOverrides({
-            threadId: turnInput.threadId,
+            mcpSession: yield* mcpSessions.read(turnInput.threadId),
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
             ...(queryPolicy.allowedTools === undefined
@@ -8233,13 +8259,14 @@ export function makeClaudeAdapterV2(
         ),
     ),
   });
-}
+});
 
 export type ClaudeAdapterV2DriverEnv =
   | ClaudeAgentSdkQueryRunner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ServerConfig.ServerConfig;
 
@@ -8250,12 +8277,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
   ) {
     const { instanceId, environment, enabled, config } = input;
     const fileSystem = yield* FileSystem.FileSystem;
-    const hostEnvironment = yield* HostProcessEnvironment;
+    const hostEnvironment = yield* HostProcess.Environment;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const queryRunner = yield* ClaudeAgentSdkQueryRunner;
     const serverConfig = yield* ServerConfig.ServerConfig;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-    const baseEnvironment = mergeProviderInstanceEnvironment(environment, hostEnvironment);
+    const baseEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
     const claudeEnvironment = yield* makeClaudeEnvironment(config, baseEnvironment);
     const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
@@ -8275,10 +8302,10 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
         }
       : {};
     const binaryPath = yield* resolveClaudeSdkExecutablePath(
-      expandHomePath(config.binaryPath),
+      expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       claudeEnvironment,
     );
-    return makeClaudeAdapterV2({
+    return yield* makeClaudeAdapterV2({
       instanceId,
       settings: { ...config, enabled, binaryPath },
       environment: claudeEnvironment,
@@ -8321,13 +8348,13 @@ const makeDefaultClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2.layer")(function* 
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostEnvironment = yield* HostProcess.Environment;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const queryRunner = yield* ClaudeAgentSdkQueryRunner;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
 
-  return makeClaudeAdapterV2({
+  return yield* makeClaudeAdapterV2({
     instanceId: CLAUDE_DEFAULT_INSTANCE_ID,
     settings: DEFAULT_CLAUDE_SETTINGS,
     environment: hostEnvironment,
@@ -8348,6 +8375,7 @@ const layer: Layer.Layer<
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ServerConfig.ServerConfig
 > = Layer.effect(ProviderAdapter.ProviderAdapterV2, makeDefaultClaudeAdapterV2());

@@ -8,6 +8,7 @@
  * lives for the duration of the flow's scope, so cancelling the stream
  * aborts the login cleanly.
  */
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -60,7 +61,9 @@ const acquireLoginClient = Effect.fn("acquireLoginClient")(function* (
 ) {
   const spawner = input.spawner;
   const resolvedHomePath =
-    input.config.homePath.trim().length > 0 ? expandHomePath(input.config.homePath) : undefined;
+    input.config.homePath.trim().length > 0
+      ? expandHomePath(input.config.homePath, yield* HostProcess.HomeDirectory)
+      : undefined;
   const environment = {
     ...input.environment,
     ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),

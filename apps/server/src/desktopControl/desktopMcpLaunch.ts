@@ -2,7 +2,7 @@
  * Resolves the desktop MCP binary only when Computer Use is enabled in
  * server settings. Settings lookup failures fail closed (tools omitted).
  */
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   MTCODE_DESKTOP_ENV_PREFIX,
   mtcodeDesktopProfileEnv,
@@ -84,16 +84,16 @@ export const makeResolveEnabledDesktopMcp = Effect.fn(
   const settings = yield* ServerSettings.ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const platform = yield* HostProcessPlatform;
-  const environment = yield* HostProcessEnvironment;
+  const platform = yield* HostProcess.Platform;
+  const environment = yield* HostProcess.Environment;
 
   return () =>
     resolveEnabledDesktopMcp().pipe(
       Effect.provideService(ServerSettings.ServerSettingsService, settings),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
-      Effect.provideService(HostProcessPlatform, platform),
-      Effect.provideService(HostProcessEnvironment, environment),
+      Effect.provideService(HostProcess.Platform, platform),
+      Effect.provideService(HostProcess.Environment, environment),
     );
 });
 

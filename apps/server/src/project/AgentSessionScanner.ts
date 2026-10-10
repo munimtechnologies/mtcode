@@ -44,7 +44,7 @@ import {
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   parseOriginUrlFromGitConfig,
 } from "@t3tools/shared/git";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 
 import * as ServerConfig from "../config.ts";
@@ -630,9 +630,9 @@ export const make = Effect.gen(function* () {
   const worktreesDir = path.resolve(serverConfig.worktreesDir);
   // Windows filesystems are case-insensitive, so path prefix checks there
   // must case fold.
-  const foldWorktreeCase = (yield* HostProcessPlatform) === "win32";
-  const hostEnvironment = yield* HostProcessEnvironment;
-  const homeDir = NodeOS.homedir();
+  const foldWorktreeCase = (yield* HostProcess.Platform) === "win32";
+  const hostEnvironment = yield* HostProcess.Environment;
+  const homeDir = yield* HostProcess.HomeDirectory;
   // `/private/tmp` is what macOS reports for sessions started in `/tmp`.
   const excludedProjectRoots = new Set(
     [homeDir, NodeOS.tmpdir(), "/tmp", "/private/tmp"].map((directory) =>
@@ -919,13 +919,13 @@ export const make = Effect.gen(function* () {
   const resolveClaudeConfigDir = (homePath: string, environmentHome?: string): string => {
     const configured = homePath.trim();
     if (configured.length > 0) {
-      return path.resolve(expandHomePath(configured));
+      return path.resolve(expandHomePath(configured, homeDir));
     }
     const fromEnvironment = environmentHome?.trim() ?? "";
     if (fromEnvironment.length > 0) {
-      return path.resolve(expandHomePath(fromEnvironment));
+      return path.resolve(expandHomePath(fromEnvironment, homeDir));
     }
-    return path.join(NodeOS.homedir(), ".claude");
+    return path.join(homeDir, ".claude");
   };
 
   const discoverClaudeTranscripts = Effect.fn("AgentSessionScanner.discoverClaudeTranscripts")(
@@ -1205,7 +1205,7 @@ export const make = Effect.gen(function* () {
   let cachedCandidates: ReadonlyArray<RawCandidate> | null = null;
 
   const readWorktreesDirectories = serverSettings.getSettings.pipe(
-    Effect.map((settings) => managedWorktreesDirectories(settings, worktreesDir, path)),
+    Effect.map((settings) => managedWorktreesDirectories(settings, worktreesDir, path, homeDir)),
     Effect.flatMap((directories) =>
       Effect.forEach(directories, (directory) =>
         fileSystem.realPath(directory).pipe(
@@ -1239,7 +1239,7 @@ export const make = Effect.gen(function* () {
     const gitIdentities = new Map<string, AgentSessionProjectGit | null>();
 
     for (const candidate of raw) {
-      const expanded = expandHomePath(candidate.cwd.trim());
+      const expanded = expandHomePath(candidate.cwd.trim(), homeDir);
       if (!path.isAbsolute(expanded)) continue;
       const resolved = path.resolve(expanded);
       if (isExcludedProjectPath(resolved, configuredWorktreesDirs)) continue;
@@ -1303,7 +1303,7 @@ export const make = Effect.gen(function* () {
       );
     const importedProjectsByRoot = new Map<string, (typeof importedProjects)[number]>();
     for (const project of importedProjects) {
-      const projectRoot = path.resolve(expandHomePath(project.workspaceRoot));
+      const projectRoot = path.resolve(expandHomePath(project.workspaceRoot, homeDir));
       importedProjectsByRoot.set(normalizeProjectPathForComparison(projectRoot), project);
       importedProjectsByRoot.set(yield* directoryIdentity(projectRoot), project);
     }
@@ -1351,7 +1351,7 @@ export const make = Effect.gen(function* () {
     completedSources: ReadonlyArray<AgentSessionImportSource>,
   ) {
     const configuredWorktreesDirs = yield* readWorktreesDirectories;
-    const root = path.resolve(expandHomePath(workspaceRoot));
+    const root = path.resolve(expandHomePath(workspaceRoot, homeDir));
     const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
     if (
       isExcludedProjectPath(root, configuredWorktreesDirs) ||
@@ -1370,7 +1370,7 @@ export const make = Effect.gen(function* () {
       readonly transcript: RawCandidate["transcripts"][number] & { readonly mtimeMs: number };
     }> = [];
     for (const candidate of candidates) {
-      const expanded = expandHomePath(candidate.cwd.trim());
+      const expanded = expandHomePath(candidate.cwd.trim(), homeDir);
       if (!path.isAbsolute(expanded)) continue;
       const resolved = path.resolve(expanded);
       if ((yield* directoryIdentity(resolved)) !== rootIdentity) continue;
@@ -1466,7 +1466,7 @@ export const make = Effect.gen(function* () {
           if (snapshotCwd === null) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
           }
-          const expandedCwd = expandHomePath(snapshotCwd.trim());
+          const expandedCwd = expandHomePath(snapshotCwd.trim(), homeDir);
           if (
             !path.isAbsolute(expandedCwd) ||
             (yield* directoryIdentity(path.resolve(expandedCwd))) !== rootIdentity

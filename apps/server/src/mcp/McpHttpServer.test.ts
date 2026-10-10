@@ -19,13 +19,27 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
-import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/http";
+import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
+import {
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpRouter,
+  HttpServerResponse,
+} from "effect/http";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as ComputerTaskBroker from "./ComputerTaskBroker.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as PreviewManager from "../preview/Manager.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
+import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
 import * as MonitorSession from "./MonitorSession.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -243,14 +257,14 @@ it.effect.each([
   ).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("tells the agent how to fall back when no desktop app can run the snapshot", () =>
+it.effect("tells the agent how to recover when no preview host can run the snapshot", () =>
   Effect.gen(function* () {
     const snapshot = yield* callSnapshot({});
 
     expect(snapshot.isError).toBe(true);
     const [text] = snapshot.content;
     expect(text?.type === "text" ? text.text : "").toContain(
-      "use a headless browser from the shell",
+      "Retry preview_status, then call preview_open",
     );
     expect(snapshot.structuredContent).toMatchObject({
       error: { _tag: "PreviewAutomationNoAvailableHostError" },
@@ -761,17 +775,38 @@ it.effect("sheds log entries before locators when every list is full", () =>
 it.effect("terminates HTTP MCP sessions with DELETE", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const layerServer = McpServer.layerHttp({
-        name: "MCP termination test",
-        version: "1.0.0",
-        path: "/mcp",
-        protocols: [McpProtocol.v2025_06_18],
-      });
+      const token = "providerTokenWithoutDots";
+      const scope: McpInvocationContext.McpInvocationScope = {
+        environmentId,
+        requestNamespace: "provider-session",
+        thread: {
+          threadId: ThreadId.make("thread-provider"),
+          providerSessionId: "provider-session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const layerServer = McpHttpServer.layerMcpTransport.pipe(
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (presented) =>
+              Effect.succeed(
+                presented === token
+                  ? (scope as McpInvocationContext.McpThreadInvocationScope)
+                  : undefined,
+              ),
+          }),
+        ),
+      );
       yield* HttpRouter.serve(layerServer, {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(Layer.build);
-      const httpClient = yield* HttpClient.HttpClient;
+      const httpClient = (yield* HttpClient.HttpClient).pipe(
+        HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
+      );
 
       const initializeResponse = yield* httpClient.post("/mcp", {
         headers: { accept: "application/json, text/event-stream" },
@@ -1038,9 +1073,17 @@ it.effect("HTTP tool discovery only advertises monitors to monitoring credential
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ComputerTaskBroker.ComputerTaskBroker)({}),
+        Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
+        Layer.mock(PreviewManager.PreviewManager)({}),
+        Layer.mock(ServerSecretStore.ServerSecretStore)({}),
+        Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+        Layer.mock(ThreadSearch.ThreadSearch)({}),
         ServerSettings.layerTest(),
       ).pipe(
-        Layer.provide(
+        Layer.provideMerge(
           Layer.succeed(
             ServerEnvironment.ServerEnvironment,
             ServerEnvironment.ServerEnvironment.of({

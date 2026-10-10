@@ -17,9 +17,10 @@ import type {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { readCustomModelEntries } from "@t3tools/shared/model";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { createProviderVersionAdvisory } from "./maintenanceResolver.ts";
 import { collectUint8StreamText } from "./collectStreamText.ts";
 
@@ -38,7 +39,7 @@ export const isWindowsCommandNotFound = Effect.fn("isWindowsCommandNotFound")(fu
   code: number | null,
   stderr: string,
 ) {
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   if (platform !== "win32") return false;
   if (code === 9009) return true;
   return WINDOWS_COMMAND_NOT_FOUND_PATTERNS.some((pattern) => pattern.test(stderr));

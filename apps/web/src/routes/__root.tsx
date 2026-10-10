@@ -34,6 +34,7 @@ import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPrompt
 import { DesktopNotificationCoordinator } from "../components/desktop/DesktopNotificationCoordinator";
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
+import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkCoordinator";
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { RecentThreadsSwitcher } from "../components/RecentThreadsSwitcher";
@@ -239,6 +240,7 @@ function RootRouteView() {
           <DesktopDeepLinkNavigation />
           {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
           {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
+          {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
           {isElectron ? <RunningThreadKeepAlive /> : null}
           <RelayClientInstallDialog />
           <ConnectOnboardingDialog />

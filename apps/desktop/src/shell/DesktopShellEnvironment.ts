@@ -5,11 +5,13 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
   buildWindowsEnvironmentCaptureCommand,
+  listLoginShellCandidates,
   resolveKnownWindowsCliDirs,
   WindowsPersistentPath,
 } from "@t3tools/shared/shell";
@@ -27,7 +29,6 @@ type EnvironmentPatch = Record<string, string>;
 interface ShellEnvironmentConfig {
   readonly env: NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
-  readonly userShell: Option.Option<string>;
   readonly harvest: ShellEnvironmentHarvest;
 }
 
@@ -173,25 +174,6 @@ const mergePaths = (
   return entries.length > 0 ? Option.some(entries.join(delimiter)) : Option.none();
 };
 
-const listLoginShellCandidates = (config: ShellEnvironmentConfig): ReadonlyArray<string> => {
-  const fallback =
-    config.platform === "darwin" ? "/bin/zsh" : config.platform === "linux" ? "/bin/bash" : "";
-  const seen = new Set<string>();
-  const candidates: string[] = [];
-
-  for (const candidate of [
-    trimNonEmpty(config.env.SHELL),
-    config.userShell,
-    trimNonEmpty(fallback),
-  ]) {
-    if (Option.isNone(candidate) || seen.has(candidate.value)) continue;
-    seen.add(candidate.value);
-    candidates.push(candidate.value);
-  }
-
-  return candidates;
-};
-
 const startMarker = (name: string) => `__T3CODE_ENV_${name}_START__`;
 const endMarker = (name: string) => `__T3CODE_ENV_${name}_END__`;
 
@@ -316,33 +298,49 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
   readonly shell?: boolean;
 }): Effect.fn.Return<string, never, ChildProcessSpawner.ChildProcessSpawner> {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const output = yield* spawner
-    .string(
-      ChildProcess.make(input.command, input.args, {
-        shell: input.shell ?? false,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-        killSignal: "SIGTERM",
-        forceKillAfter: input.forceKillAfter ?? PROCESS_TERMINATE_GRACE,
-      }),
-    )
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new DesktopShellEnvironmentCommandError({
-            probe: input.probe,
-            executable: executableName(input.command),
-            argumentCount: input.args.length,
-            cause,
-          }),
-      ),
-      Effect.catchTags({
-        DesktopShellEnvironmentCommandError: (error) =>
-          logShellEnvironmentCommandError(error).pipe(Effect.as("")),
-      }),
-      Effect.timeoutOption(input.timeout),
-    );
+  const output = yield* Effect.scoped(
+    Effect.gen(function* () {
+      const child = yield* spawner.spawn(
+        ChildProcess.make(input.command, input.args, {
+          shell: input.shell ?? false,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          killSignal: "SIGTERM",
+          forceKillAfter: input.forceKillAfter ?? PROCESS_TERMINATE_GRACE,
+        }),
+      );
+      return yield* Effect.all([Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode], {
+        concurrency: 2,
+      });
+    }),
+  ).pipe(
+    Effect.mapError(
+      (cause) =>
+        new DesktopShellEnvironmentCommandError({
+          probe: input.probe,
+          executable: executableName(input.command),
+          argumentCount: input.args.length,
+          cause,
+        }),
+    ),
+    Effect.filterOrFail(
+      ([, exitCode]) => exitCode === 0,
+      ([, exitCode]) =>
+        new DesktopShellEnvironmentCommandError({
+          probe: input.probe,
+          executable: executableName(input.command),
+          argumentCount: input.args.length,
+          cause: { exitCode },
+        }),
+    ),
+    Effect.map(([stdout]) => stdout),
+    Effect.catchTags({
+      DesktopShellEnvironmentCommandError: (error) =>
+        logShellEnvironmentCommandError(error).pipe(Effect.as("")),
+    }),
+    Effect.timeoutOption(input.timeout),
+  );
   if (Option.isSome(output)) {
     return output.value;
   }
@@ -495,7 +493,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
     const shellEnvironment: EnvironmentPatch = {};
 
     const probeNames = [...LOGIN_SHELL_ENV_NAMES, ...config.harvest.names];
-    for (const shell of listLoginShellCandidates(config)) {
+    for (const shell of listLoginShellCandidates(config.platform, config.env.SHELL)) {
       Object.assign(
         shellEnvironment,
         yield* readLoginShellEnvironment(shell, probeNames, config.platform, config.harvest.mode),
@@ -617,7 +615,6 @@ export const make = Effect.gen(function* () {
     installShellEnvironment({
       env: process.env,
       platform: environment.platform,
-      userShell: Option.none(),
       harvest,
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),

@@ -1,8 +1,4 @@
-import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   desktopMcpPathOverride,
   MUNIM_COMPUTER_USE_RESOURCE_DIR,
@@ -34,12 +30,12 @@ import * as Path from "effect/Path";
  */
 export const resolveDesktopMcpPath = Effect.fn("desktopControl.resolveDesktopMcpPath")(
   function* () {
-    const platform = yield* HostProcessPlatform;
+    const platform = yield* HostProcess.Platform;
     if (platform !== "darwin" && platform !== "win32" && platform !== "linux") {
       return undefined;
     }
 
-    const environment = yield* HostProcessEnvironment;
+    const environment = yield* HostProcess.Environment;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const executableName = munimComputerUseExecutableName(platform);
@@ -230,7 +226,7 @@ const fetchedReleaseBinary = Effect.fn("desktopControl.fetchedReleaseBinary")(fu
   );
   if (manifest === undefined) return undefined;
   const version = manifest.version;
-  const arch = yield* HostProcessArchitecture;
+  const arch = yield* HostProcess.Architecture;
   const key = munimComputerUseAssetKey(input.platform, arch === "arm64" ? "arm64" : "x64");
   const dir = munimComputerUseCacheDir({
     environment: input.environment,

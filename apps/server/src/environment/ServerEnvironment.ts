@@ -4,11 +4,7 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
-import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -17,7 +13,6 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as NodeOS from "node:os";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -195,12 +190,13 @@ export const make = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironmentIdentity;
-  const hostPlatform = yield* HostProcessPlatform;
-  const hostArchitecture = yield* HostProcessArchitecture;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
+  const hostEnvironment = yield* HostProcess.Environment;
+  const hostHomeDirectory = yield* HostProcess.HomeDirectory;
   const environmentLabel = yield* Ref.make("");
   const homeDirectory =
-    hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || NodeOS.homedir().trim();
+    hostEnvironment.HOME?.trim() || hostEnvironment.USERPROFILE?.trim() || hostHomeDirectory.trim();
   const environmentId = yield* identity.getEnvironmentId;
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
@@ -236,7 +232,7 @@ export const make = Effect.gen(function* () {
     // Shown as placeholders, so keep them short: `~` rather than the full home.
     defaultDirectories: {
       repositories: "~",
-      worktrees: collapseHomePath(serverConfig.worktreesDir),
+      worktrees: collapseHomePath(serverConfig.worktreesDir, hostHomeDirectory),
     },
     capabilities: {
       repositoryIdentity: true,
@@ -253,6 +249,7 @@ export const make = Effect.gen(function* () {
       threadMessageSearch: true,
       threadAutoSettlement: true,
       storageCleanup: true,
+      storageCleanupRun: true,
       projectWorktreeCleanup: true,
       threadAutoSettlementScope: true,
       worktreesDirectory: true,

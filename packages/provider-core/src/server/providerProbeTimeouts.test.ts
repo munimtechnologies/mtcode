@@ -6,7 +6,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
-import { HostProcessPlatform, HostProcessWorkingDirectory } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import {
   cursorAboutTimeoutMs,
@@ -34,13 +34,13 @@ describe("providerProbeTimeouts", () => {
     expect(providerVersionProbeTimeoutMsFor(false)).toBe(4_000);
   });
 
-  it.effect("Effect timeout values follow HostProcessPlatform", () =>
+  it.effect("Effect timeout values follow HostProcess.Platform", () =>
     Effect.gen(function* () {
       const winAbout = yield* cursorAboutTimeoutMs.pipe(
-        Effect.provideService(HostProcessPlatform, "win32"),
+        Effect.provideService(HostProcess.Platform, "win32"),
       );
       const linuxAuth = yield* providerAuthProbeTimeoutMs.pipe(
-        Effect.provideService(HostProcessPlatform, "linux"),
+        Effect.provideService(HostProcess.Platform, "linux"),
       );
       expect(winAbout).toBe(45_000);
       expect(linuxAuth).toBe(15_000);
@@ -79,12 +79,12 @@ describe("providerProbeTimeouts", () => {
     }),
   );
 
-  it.effect("resolveProviderProbeCwd uses HostProcessWorkingDirectory as a candidate", () =>
+  it.effect("resolveProviderProbeCwd uses HostProcess.WorkingDirectory as a candidate", () =>
     Effect.gen(function* () {
       const preferredMissing = NodePath.join(NodeOS.tmpdir(), `t3-missing-wd-${Date.now()}`);
       const overrideCwd = NodeOS.tmpdir();
       const viaEffect = yield* resolveProviderProbeCwd(preferredMissing, {}).pipe(
-        Effect.provideService(HostProcessWorkingDirectory, overrideCwd),
+        Effect.provideService(HostProcess.WorkingDirectory, overrideCwd),
       );
       expect(viaEffect).toBe(overrideCwd);
     }),

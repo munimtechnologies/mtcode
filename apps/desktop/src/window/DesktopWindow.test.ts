@@ -57,6 +57,7 @@ import {
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as PreviewPasskeys from "../preview/Passkeys.ts";
 
 const environmentInput = {
   appName: "T3 Code (Alpha)",
@@ -446,6 +447,11 @@ function layerTest(input: {
         } satisfies ElectronShell.ElectronShell["Service"]),
         layerElectronTheme,
         layerElectronWindow,
+        Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+          bridgeEnabled: false,
+          installSessionHandlers: () => {},
+          attachGuest: () => () => {},
+        }),
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: () => Effect.void,
@@ -571,6 +577,11 @@ const makeSplashScenario = (
           } satisfies ElectronShell.ElectronShell["Service"]),
           layerElectronTheme,
           Layer.succeed(ElectronWindow.ElectronWindow, electronWindowShape),
+          Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+            bridgeEnabled: false,
+            installSessionHandlers: () => {},
+            attachGuest: () => () => {},
+          }),
           Layer.mock(PreviewManager.PreviewManager)({
             getBrowserSession: () => Effect.succeed({} as Electron.Session),
             setMainWindow: () => Effect.void,

@@ -66,7 +66,7 @@ const discoverInstanceSkills = Effect.fn("SkillInventory.discoverInstanceSkills"
   FileSystem.FileSystem | Path.Path
 > {
   const config = instance.config ?? {};
-  const processEnv = mergeProviderInstanceEnvironment(instance.environment);
+  const processEnv = yield* mergeProviderInstanceEnvironment(instance.environment);
 
   if (instance.driver === "codex") {
     const decoded = decodeCodexSettings(config);

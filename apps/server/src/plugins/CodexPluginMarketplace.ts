@@ -48,11 +48,7 @@ import {
   type PluginMarketplaceSourceType,
   type PluginMarketplaceHarnessId,
 } from "@t3tools/contracts";
-import {
-  HostProcessEnvironment,
-  HostProcessPlatform,
-  HostProcessWorkingDirectory,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
@@ -1641,9 +1637,9 @@ export const makeWithOptions = (options: PluginMarketplaceOptions = {}) =>
     const httpClient = options.readCursorMarketplaceHtml ? null : yield* HttpClient.HttpClient;
     const cachedSnapshot = yield* Ref.make<CatalogSnapshot | null>(null);
     const snapshotLock = yield* Semaphore.make(1);
-    const platform = options.platform ?? (yield* HostProcessPlatform);
-    const marketplaceCwd = options.cwd ?? (yield* HostProcessWorkingDirectory);
-    const hostEnvironment = yield* HostProcessEnvironment;
+    const platform = options.platform ?? (yield* HostProcess.Platform);
+    const marketplaceCwd = options.cwd ?? (yield* HostProcess.WorkingDirectory);
+    const hostEnvironment = yield* HostProcess.Environment;
     const commandFor = Effect.fn("CodexPluginMarketplace.commandFor")(function* (
       harness: McpOAuthRuntime.McpOAuthHarness,
       fallback: string,
@@ -3840,8 +3836,8 @@ const makeCodexPluginRuntime = (
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const cwd = options.cwd ?? (yield* HostProcessWorkingDirectory);
-    const hostEnvironment = yield* HostProcessEnvironment;
+    const cwd = options.cwd ?? (yield* HostProcess.WorkingDirectory);
+    const hostEnvironment = yield* HostProcess.Environment;
     const withClient = <A, E>(
       operation: CodexPluginRuntimeError["operation"],
       pluginRef: string | undefined,
@@ -4034,7 +4030,7 @@ const makeCodexPluginRuntime = (
 const makePluginProviderCommands = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const path = yield* Path.Path;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostEnvironment = yield* HostProcess.Environment;
 
   const resolve = Effect.fn("PluginProviderCommands.resolve")(function* (
     harness: McpOAuthRuntime.McpOAuthHarness,
@@ -4046,7 +4042,7 @@ const makePluginProviderCommands = Effect.gen(function* () {
     );
     if (matches.length !== 1) return undefined;
     const instance = matches[0]!;
-    const environment = mergeProviderInstanceEnvironment(
+    const environment = yield* mergeProviderInstanceEnvironment(
       instance.environment ?? [],
       hostEnvironment,
     );

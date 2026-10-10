@@ -14,12 +14,12 @@ import * as Option from "effect/Option";
 import { McpSchema, McpServer } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
 import * as ComputerTaskBroker from "../../ComputerTaskBroker.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import { toolkitRegistration } from "../../McpHttpServer.ts";
 import { ComputerToolkitHandlersLive } from "./handlers.ts";
 import { ComputerToolkit } from "./tools.ts";
 
@@ -112,8 +112,7 @@ function makeTestLayer(dispatched: Array<OrchestrationV2ServerCommand>) {
     setEnvironmentLabel: () => Effect.void,
   } satisfies ServerEnvironment.ServerEnvironment["Service"];
 
-  return McpServer.toolkit(ComputerToolkit).pipe(
-    Layer.provide(McpToolAccess.HandlersLayer.layer(ComputerToolkitHandlersLive)),
+  return toolkitRegistration(ComputerToolkit, ComputerToolkitHandlersLive).pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(ComputerTaskBroker.layer),
     Layer.provideMerge(Layer.succeed(ThreadManagementService.ThreadManagementService, threads)),

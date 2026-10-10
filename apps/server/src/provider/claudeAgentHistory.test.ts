@@ -3,7 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import { readClaudeAgentHistory } from "./claudeAgentHistory.ts";
@@ -153,7 +153,7 @@ describe("Claude saved agent history", () => {
       ).status,
     ).toBe("unavailable");
     expect((await read("../../child")).status).toBe("unavailable");
-    if (HostProcessPlatform.defaultValue() !== "win32") {
+    if (HostProcess.Platform.defaultValue() !== "win32") {
       await NodeFSP.symlink(file, NodePath.join(NodePath.dirname(file), "agent-alias.jsonl"));
       expect((await read("alias")).status).toBe("unavailable");
     }

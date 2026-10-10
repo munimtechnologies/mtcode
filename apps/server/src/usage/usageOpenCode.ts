@@ -9,7 +9,7 @@
  *
  * @module usageOpenCode
  */
-import type { UsageRecord } from "./usageTranscripts.ts";
+import type { UsageRecord } from "@t3tools/provider-core/server/usage";
 
 // Kept non-literal so the Node-targeted bundle leaves Bun's runtime module
 // external without asking its resolver to load a module Node cannot provide.

@@ -102,7 +102,9 @@ anything. The command is offered only for providers that appear under **Usage â†
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
 the environment. MT Code also reads usage windows for ChatGPT and Claude subscription sign-ins saved by local OpenCode. It does not refresh those credentials; use OpenCode to renew an expired sign-in. MT Code cannot report limits for external OpenCode servers because their credentials
-belong to the remote server. Cursor reports
+belong to the remote server. OpenCode Go limits need an OpenCode Go API key. A Console sign-in alone
+does not report them. Add your Go API key as `OPENCODE_API_KEY` in the OpenCode instance's
+**Environment variables**, then refresh provider status. Cursor reports
 its monthly allowance, including separate Auto and API usage, using the CLI login or
 `CURSOR_AUTH_TOKEN`. On macOS, this includes the default Keychain login after you enable Cursor
 usage. Keychain login is used for limits only with Cursor's default API endpoint. If you configure

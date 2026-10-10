@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { randomUUID } from "node:crypto";
 import { CommandId, MessageId, VoiceApiError, type ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";

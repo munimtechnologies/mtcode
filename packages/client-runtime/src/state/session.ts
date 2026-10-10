@@ -14,7 +14,6 @@ import { mapRemoteEnvironmentError } from "../connection/errors.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
@@ -77,7 +76,7 @@ export const fetchEnvironmentSessionState = Effect.fn(
     ...input,
     group: "auth",
     method: "GET",
-    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/auth/session"),
+    url: (urls) => urls.session(),
     timeoutMs: input.timeoutMs ?? DEFAULT_SESSION_STATE_TIMEOUT_MS,
     request: ({ client, headers }) => client.session({ headers }),
     // This endpoint returns 200 with authenticated:false for expired credentials.

@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { ServerSettingsError } from "@t3tools/contracts";
 import { MTCODE_DESKTOP_PROFILE, mtcodeDesktopProfileEnv } from "@t3tools/shared/munimComputerUse";
 import { assert, describe, it } from "@effect/vitest";
@@ -22,8 +22,8 @@ describe("resolveEnabledDesktopMcp", () => {
       yield* fileSystem.chmod(binaryPath, 0o755);
 
       const resolved = yield* resolveEnabledDesktopMcp().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
           MTCODE_DESKTOP_MCP_PATH: binaryPath,
         }),
         Effect.provide(ServerSettings.layerTest({ desktopControl: { enabled: false } })),
@@ -44,8 +44,8 @@ describe("resolveEnabledDesktopMcp", () => {
       yield* fileSystem.chmod(binaryPath, 0o755);
 
       const resolved = yield* resolveEnabledDesktopMcp().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
           MTCODE_DESKTOP_MCP_PATH: binaryPath,
         }),
         Effect.provide(
@@ -97,8 +97,8 @@ describe("resolveEnabledDesktopMcp", () => {
       };
 
       const resolved = yield* resolveEnabledDesktopMcp().pipe(
-        Effect.provideService(HostProcessPlatform, "darwin"),
-        Effect.provideService(HostProcessEnvironment, {
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
           MTCODE_DESKTOP_MCP_PATH: binaryPath,
         }),
         Effect.provideService(ServerSettings.ServerSettingsService, failingService as never),

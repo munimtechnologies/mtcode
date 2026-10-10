@@ -11,7 +11,7 @@ import {
   DEEP_LINK_SUBSCRIBE_CHANNEL,
   DEEP_LINK_UNSUBSCRIBE_CHANNEL,
 } from "../ipc/channels.ts";
-import { HostProcessArguments } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -336,7 +336,9 @@ const configureWith = (
     Effect.provideService(DesktopIpc.DesktopIpc, services.desktopIpc),
   );
   if (overrides?.processArguments !== undefined) {
-    program = program.pipe(Effect.provideService(HostProcessArguments, overrides.processArguments));
+    program = program.pipe(
+      Effect.provideService(HostProcess.Arguments, overrides.processArguments),
+    );
   }
   if (overrides?.earlyCapture !== undefined) {
     program = program.pipe(

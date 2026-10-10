@@ -1,10 +1,10 @@
 /**
- * The server's implementation of `ProviderHost`, the only server surface
+ * The server's implementation of `ProviderHost.ProviderHost`, the only server surface
  * provider drivers and adapters may use.
  *
  * @module provider/ProviderHostLive
  */
-import { ProviderHost } from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { ProviderCredentialError } from "@t3tools/provider-core/server/errors";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -26,7 +26,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderCredentialStore from "./ProviderCredentialStore.ts";
 
 export const layer = Layer.effect(
-  ProviderHost,
+  ProviderHost.ProviderHost,
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -55,7 +55,7 @@ export const layer = Layer.effect(
                 Effect.provideService(Path.Path, path.value),
               ),
           };
-    return ProviderHost.of({
+    return ProviderHost.ProviderHost.of({
       ...(desktopMcp === undefined ? {} : { desktopMcp }),
       paths: {
         cwd: config.cwd,

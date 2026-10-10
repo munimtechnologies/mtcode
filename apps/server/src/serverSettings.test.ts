@@ -14,6 +14,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as FileSystem from "effect/FileSystem";
@@ -29,7 +30,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServerConfig from "./config.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as ServerSettingsModule from "./serverSettings.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
@@ -2010,7 +2010,7 @@ it.effect("persists and resets the worktree directory and rejects home or its an
       "~",
       "~/",
       "~/..",
-      path.dirname(expandHomePath("~")),
+      path.dirname(yield* HostProcess.HomeDirectory),
     ]) {
       const failure = yield* settings
         .updateSettings({ worktreesDirectory: rejected })

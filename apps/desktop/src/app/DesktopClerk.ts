@@ -1,4 +1,5 @@
 import { createClerkBridge } from "@clerk/electron";
+import * as NodeURL from "node:url";
 import { storage } from "@clerk/electron/storage";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -12,7 +13,7 @@ import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/code
 import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCallback.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { HostProcessArguments } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -27,6 +28,7 @@ import {
   isDesktopProtocolUrl,
   queuePendingDesktopProtocolUrl,
 } from "./desktopProtocolUrl.ts";
+import * as DesktopWebLinks from "./DesktopWebLinks.ts";
 
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
@@ -65,6 +67,7 @@ export class DesktopClerk extends Context.Service<
       | ElectronApp.ElectronApp
       | ElectronWindow.ElectronWindow
       | DesktopWindow.DesktopWindow
+      | DesktopWebLinks.DesktopWebLinks
       | Scope.Scope
     >;
   }
@@ -139,6 +142,7 @@ export const make = Effect.gen(function* () {
     configure: Effect.gen(function* () {
       const electronApp = yield* ElectronApp.ElectronApp;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const webLinks = yield* DesktopWebLinks.DesktopWebLinks;
 
       // The SDK bridge holds Electron's single-instance lock (acquired at
       // bridge creation) so OAuth deep-link callbacks on Windows/Linux are
@@ -254,13 +258,20 @@ export const make = Effect.gen(function* () {
         );
         return true;
       };
-      const args = yield* HostProcessArguments;
+      const args = yield* HostProcess.Arguments;
       args.some((value) => startProviderAuthHandoff(value));
+      // As the default browser, macOS hands T3 Code every web link through the same event.
+      const openWebLink = (url: string) => {
+        if (!DesktopWebLinks.isWebLink(url)) return false;
+        void runPromise(webLinks.receive(url));
+        return true;
+      };
       // ChatGPT sign-in hand-offs and returns to provider setup are claimed
-      // first; anything else is a desktop deep link for the main window.
+      // first, then web links (default browser); anything else is a desktop
+      // deep link for the main window.
       yield* electronApp.on("open-url", (event, url) => {
         if (typeof url !== "string") return;
-        if (startProviderAuthHandoff(url) || resumeProviderAuth(url)) {
+        if (startProviderAuthHandoff(url) || resumeProviderAuth(url) || openWebLink(url)) {
           (event as { preventDefault?: () => void } | undefined)?.preventDefault?.();
           return;
         }
@@ -269,6 +280,12 @@ export const make = Effect.gen(function* () {
         }
         (event as { preventDefault?: () => void } | undefined)?.preventDefault?.();
         void runPromise(revealAndDispatch(url));
+      });
+      // A browser opens HTML files too, which macOS hands over by path.
+      yield* electronApp.on("open-file", (event: { preventDefault: () => void }, path: string) => {
+        if (!DesktopWebLinks.isWebPageFile(path)) return;
+        event.preventDefault();
+        void runPromise(webLinks.receive(NodeURL.pathToFileURL(path).href));
       });
 
       yield* electronApp.on("second-instance", (_event, argv) => {

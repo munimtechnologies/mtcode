@@ -23,7 +23,7 @@ import type { UsageTokenTotals } from "@t3tools/contracts";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as Effect from "effect/Effect";
 
-import type { UsageRecord } from "./usageTranscripts.ts";
+import type { UsageRecord } from "@t3tools/provider-core/server/usage";
 
 const CURSOR_USAGE_CSV_URL =
   "https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens";

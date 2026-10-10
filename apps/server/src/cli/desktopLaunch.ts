@@ -5,7 +5,7 @@
  */
 import * as NodePath from "node:path";
 
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -111,7 +111,7 @@ const spawnDetachedOk = Effect.fn("desktopLaunch.spawnDetachedOk")(function* (
 
 const resolveWindowsLocalAppData = Effect.fn("desktopLaunch.resolveWindowsLocalAppData")(
   function* () {
-    const env = yield* HostProcessEnvironment;
+    const env = yield* HostProcess.Environment;
     const path = yield* Path.Path;
     const fromEnv = env.LOCALAPPDATA?.trim();
     if (fromEnv) {
@@ -127,7 +127,7 @@ const resolveWindowsLocalAppData = Effect.fn("desktopLaunch.resolveWindowsLocalA
 
 const discoverLinuxDesktopEntryIds = Effect.fn("desktopLaunch.discoverLinuxDesktopEntryIds")(
   function* () {
-    const env = yield* HostProcessEnvironment;
+    const env = yield* HostProcess.Environment;
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
     const home = env.HOME?.trim();
@@ -155,7 +155,7 @@ const discoverLinuxDesktopEntryIds = Effect.fn("desktopLaunch.discoverLinuxDeskt
 
 /** Activate a running desktop app, or launch it if installed. */
 export const tryLaunchDesktopApp = Effect.fn("tryLaunchDesktopApp")(function* () {
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
 
   if (platform === "darwin") {
     for (const name of DESKTOP_APP_NAMES) {

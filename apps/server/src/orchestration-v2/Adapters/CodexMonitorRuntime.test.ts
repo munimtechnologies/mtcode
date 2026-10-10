@@ -8,7 +8,7 @@ import type * as Scope from "effect/Scope";
 
 import * as MonitorSession from "../../mcp/MonitorSession.ts";
 import type { ProviderAdapterV2TurnMessage } from "@t3tools/provider-core/server/ProviderAdapter";
-import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
+import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeCodexMonitorRuntime } from "./CodexMonitorRuntime.ts";
 
 const threadId = ThreadId.make("monitor-thread");

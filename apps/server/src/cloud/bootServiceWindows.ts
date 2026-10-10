@@ -17,11 +17,7 @@
  *   without running its shutdown finalizer.
  */
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
-import {
-  HostProcessArchitecture,
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
@@ -273,9 +269,9 @@ export interface WindowsBootServiceInput {
 export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
   input: WindowsBootServiceInput,
 ) {
-  const hostExecPath = yield* HostProcessExecutablePath;
-  const platform = yield* HostProcessPlatform;
-  const arch = yield* HostProcessArchitecture;
+  const hostExecPath = yield* HostProcess.ExecutablePath;
+  const platform = yield* HostProcess.Platform;
+  const arch = yield* HostProcess.Architecture;
   const httpClient = yield* HttpClient.HttpClient;
   const releaseBaseUrl = Option.getOrUndefined(
     yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),

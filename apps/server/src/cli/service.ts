@@ -1,4 +1,4 @@
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,7 +24,7 @@ export const layer = (config: ServerConfig.ServerConfig["Service"]) => {
   // the Linux path free of any Windows import.
   return Layer.unwrap(
     Effect.gen(function* () {
-      const platform = yield* HostProcessPlatform;
+      const platform = yield* HostProcess.Platform;
       if (platform !== "win32") return BootService.layer(input);
       const windows = yield* Effect.promise(() => import("../cloud/bootServiceWindows.ts"));
       return windows.layer(input);
@@ -143,7 +143,7 @@ const reportReconcileResult = Effect.fn("cli.service.report")(function* (
   yield* Console.log(
     `${result.previouslyInstalled ? "Updated" : "Installed"} ${resolveAppDisplayName()} service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
   );
-  if ((yield* HostProcessPlatform) === "win32") {
+  if ((yield* HostProcess.Platform) === "win32") {
     yield* Console.log(WINDOWS_SERVICE_NOTICE);
   }
 });
@@ -280,7 +280,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
   // A LaunchAgent (macOS) and a Startup shortcut (Windows) both start at
   // login and die at logout; neither has an enable-linger equivalent the way
   // systemd does. Do not promise more than that.
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   const wanted = yield* Prompt.run(
     Prompt.Confirm({
       message: installed

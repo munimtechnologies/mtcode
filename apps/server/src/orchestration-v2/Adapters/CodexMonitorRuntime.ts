@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /**
  * MT Code: the fork's Monitor toolkit (`monitor_start` / `monitor_unsubscribe`)
  * for Codex sessions under orchestration-v2.
@@ -27,7 +28,7 @@ import {
 } from "../../provider/CodexBackgroundTasks.ts";
 import { backgroundWorkNotification } from "@t3tools/provider-core/server/notification";
 import type { ProviderAdapterV2TurnMessage } from "@t3tools/provider-core/server/ProviderAdapter";
-import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
+import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/ProviderContinuationRequests";
 
 const isMonitorStoppedError = Schema.is(MonitorSession.MonitorStoppedError);
 

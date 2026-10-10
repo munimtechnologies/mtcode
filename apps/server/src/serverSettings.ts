@@ -41,6 +41,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -66,7 +67,7 @@ import {
   isModelSelectionProviderEnabled,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
-import { expandHomePathWith } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
 export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
@@ -147,25 +148,30 @@ export const isFilesystemRoot = (directory: string, path: Path.Path) => {
  * would expose every repository on the machine to a review-scoped client.
  * Symlinks are not followed here.
  */
-const worktreesDirectoryIssue = (value: string, path: Path.Path): string | null => {
+const worktreesDirectoryIssue = (value: string, path: Path.Path, home: string): string | null => {
   // MT Code: upstream's worktreesDirectory already treats relative paths and
   // filesystem roots as unusable (and settings may sync from another OS), so
   // only the home-containment rule is enforced here.
   if (value === "" || value.includes("\0")) return null;
-  const expanded = expandHomePathWith(value, path);
+  const expanded = expandHomePath(value, home);
   if (!path.isAbsolute(expanded)) return null;
   const resolved = path.resolve(expanded);
-  if (isWithinDirectory(path.resolve(expandHomePathWith("~", path)), resolved, path)) {
+  if (isWithinDirectory(path.resolve(home), resolved, path)) {
     return "Worktree directory cannot be your home directory or a directory containing it.";
   }
   return null;
 };
 
-const worktreesDirectorySchema = (path: Path.Path) =>
-  Schema.String.check(Schema.makeFilter((value) => worktreesDirectoryIssue(value, path) ?? true));
+const worktreesDirectorySchema = (path: Path.Path, home: string) =>
+  Schema.String.check(
+    Schema.makeFilter((value) => worktreesDirectoryIssue(value, path, home) ?? true),
+  );
 
 const assertWorktreesDirectory = (value: string, path: Path.Path) =>
-  Schema.decodeUnknownEffect(worktreesDirectorySchema(path))(value).pipe(
+  HostProcess.HomeDirectory.pipe(
+    Effect.flatMap((home) =>
+      Schema.decodeUnknownEffect(worktreesDirectorySchema(path, home))(value),
+    ),
     Effect.asVoid,
     Effect.mapError(
       (cause) =>
@@ -917,7 +923,11 @@ const make = Effect.gen(function* () {
     // A bad directory must not take every setting down with it. Fall back to
     // the default worktrees directory, the way a malformed file falls back to
     // defaults, and leave the strict check to writes where the user sees it.
-    const directoryIssue = worktreesDirectoryIssue(restored.worktreesDirectory, pathService);
+    const directoryIssue = worktreesDirectoryIssue(
+      restored.worktreesDirectory,
+      pathService,
+      yield* HostProcess.HomeDirectory,
+    );
     if (directoryIssue !== null) {
       yield* Effect.logWarning("ignoring worktreesDirectory in settings.json, using default", {
         path: settingsPath,

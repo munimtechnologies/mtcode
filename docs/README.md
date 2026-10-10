@@ -20,6 +20,7 @@
 - [Import browser sessions](./user/browser-import.md)
 - [Import Claude Code and Codex conversations](./user/import-conversations.md)
 - [Branch a conversation](./user/branching.md)
+- [Use T3 Code as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)
 - [Product usage data](./user/telemetry.md)

@@ -2,11 +2,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
-import {
-  HostProcessEnvironment,
-  HostProcessWorkingDirectory,
-  isHostWindows,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 /**
  * Provider status probes spawn local CLIs over stdio/ACP.
@@ -20,7 +16,7 @@ import {
  * reported as "Unavailable" during normal machine load.
  *
  * Prefer the Effect forms at probe sites (`yield* providerAuthProbeTimeoutMs`) so
- * platform comes from `HostProcessPlatform` and tests can override it.
+ * platform comes from `HostProcess.Platform` and tests can override it.
  */
 
 /** Pure helpers for message construction and unit tests. */
@@ -46,27 +42,30 @@ export function grokAcpModelDiscoveryTimeoutMsFor(isWindows: boolean): number {
 
 /** Quick `--version` style probes. */
 export const providerVersionProbeTimeoutMs = Effect.map(
-  isHostWindows,
+  HostProcess.isWindows,
   providerVersionProbeTimeoutMsFor,
 );
 
 /**
  * Codex app-server account/model probe.
  */
-export const providerAuthProbeTimeoutMs = Effect.map(isHostWindows, providerAuthProbeTimeoutMsFor);
+export const providerAuthProbeTimeoutMs = Effect.map(
+  HostProcess.isWindows,
+  providerAuthProbeTimeoutMsFor,
+);
 
 /** Cursor `agent about` (version + auth). Measured ~8–12s cold on Windows. */
-export const cursorAboutTimeoutMs = Effect.map(isHostWindows, cursorAboutTimeoutMsFor);
+export const cursorAboutTimeoutMs = Effect.map(HostProcess.isWindows, cursorAboutTimeoutMsFor);
 
 /** Cursor ACP model discovery after about succeeds. */
 export const cursorAcpModelDiscoveryTimeoutMs = Effect.map(
-  isHostWindows,
+  HostProcess.isWindows,
   cursorAcpModelDiscoveryTimeoutMsFor,
 );
 
 /** Grok `agent stdio` ACP initialize for model discovery. */
 export const grokAcpModelDiscoveryTimeoutMs = Effect.map(
-  isHostWindows,
+  HostProcess.isWindows,
   grokAcpModelDiscoveryTimeoutMsFor,
 );
 
@@ -97,7 +96,7 @@ export function isUsableProbeDirectory(path: string): boolean {
  *
  * Pure (sync) form — prefer {@link resolveProviderProbeCwd} Effect for new call sites
  * that already run inside Effect.gen. Pass `workingDirectory` from
- * `HostProcessWorkingDirectory` when available; do not read `process.cwd()` here.
+ * `HostProcess.WorkingDirectory` when available; do not read `process.cwd()` here.
  */
 export function resolveProviderProbeCwdSync(
   preferred?: string | null,
@@ -126,18 +125,18 @@ export function resolveProviderProbeCwdSync(
 }
 
 /**
- * Effect form: env from `HostProcessEnvironment` (unless overridden) and
- * working directory from `HostProcessWorkingDirectory`.
+ * Effect form: env from `HostProcess.Environment` (unless overridden) and
+ * working directory from `HostProcess.WorkingDirectory`.
  */
 export const resolveProviderProbeCwd = Effect.fn("resolveProviderProbeCwd")(function* (
   preferred?: string | null,
   environment?: NodeJS.ProcessEnv,
 ) {
-  const env = environment ?? (yield* HostProcessEnvironment);
-  // HostProcessWorkingDirectory is typed as infallible, but its defaultValue
+  const env = environment ?? (yield* HostProcess.Environment);
+  // HostProcess.WorkingDirectory is typed as infallible, but its defaultValue
   // calls process.cwd() which can throw a defect when cwd is gone. Catch only
   // defects (not fiber interrupts) so cancelled probes still stop promptly.
-  const workingDirectory = yield* Effect.map(HostProcessWorkingDirectory, (cwd) =>
+  const workingDirectory = yield* Effect.map(HostProcess.WorkingDirectory, (cwd) =>
     cwd.trim().length > 0 ? cwd : undefined,
   ).pipe(Effect.catchDefect(() => Effect.succeed(undefined as string | undefined)));
   return resolveProviderProbeCwdSync(preferred, env, workingDirectory);

@@ -16,7 +16,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import * as ExternalLauncher from "./externalLauncher.ts";
 
@@ -24,7 +24,7 @@ import * as ExternalLauncher from "./externalLauncher.ts";
 // directory to a posix-mocked resolver as PATH. On a Windows host the temp
 // path carries a drive letter, so the posix `:` split shatters it; there is
 // no posix executable to find there anyway.
-const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+const windowsHost = HostProcess.Platform.defaultValue() === "win32";
 
 interface MockSpawnResult {
   readonly exitCode?: number;
@@ -91,12 +91,12 @@ const layerTest = (input: {
 
   return Layer.mergeAll(
     ExternalLauncher.layer.pipe(Layer.provide(layerServices)),
-    Layer.succeed(HostProcessPlatform, input.platform),
+    Layer.succeed(HostProcess.Platform, input.platform),
     Layer.succeed(
       SpawnExecutableResolution,
       (command) => input.resolveExecutable?.(command) ?? command,
     ),
-    Layer.succeed(HostProcessEnvironment, input.env ?? {}),
+    Layer.succeed(HostProcess.Environment, input.env ?? {}),
   );
 };
 
@@ -1581,8 +1581,8 @@ it.effect("memoizes editor discovery and refreshes after the cache window", () =
     Effect.provide(
       Layer.mergeAll(
         layerLauncher,
-        Layer.succeed(HostProcessPlatform, "win32"),
-        Layer.succeed(HostProcessEnvironment, {
+        Layer.succeed(HostProcess.Platform, "win32"),
+        Layer.succeed(HostProcess.Environment, {
           PATH: "C:\\t3-editor-discovery-cache-test",
           PATHEXT: ".COM;.EXE;.BAT;.CMD",
         }),
@@ -1642,8 +1642,8 @@ it.effect("keeps scanning after the caller is interrupted and shares that scan",
     Effect.provide(
       Layer.mergeAll(
         layerLauncher,
-        Layer.succeed(HostProcessPlatform, "win32"),
-        Layer.succeed(HostProcessEnvironment, {
+        Layer.succeed(HostProcess.Platform, "win32"),
+        Layer.succeed(HostProcess.Environment, {
           PATH: "C:\\t3-editor-discovery-interrupt-test",
           PATHEXT: ".COM;.EXE;.BAT;.CMD",
         }),

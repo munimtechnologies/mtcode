@@ -1,10 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import {
-  HostProcessArguments,
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -230,9 +226,9 @@ const makeHarness = Effect.fn("test.make_windows_boot_service_harness")(function
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
     Effect.provide(
       Layer.mergeAll(
-        Layer.succeed(HostProcessPlatform, platform),
-        Layer.succeed(HostProcessExecutablePath, "C:\\node.exe"),
-        Layer.succeed(HostProcessArguments, ["C:\\node.exe", path.join(home, "bin.mjs")]),
+        Layer.succeed(HostProcess.Platform, platform),
+        Layer.succeed(HostProcess.ExecutablePath, "C:\\node.exe"),
+        Layer.succeed(HostProcess.Arguments, ["C:\\node.exe", path.join(home, "bin.mjs")]),
         Layer.succeed(
           HttpClient.HttpClient,
           HttpClient.make(() => Effect.die("no release download expected")),

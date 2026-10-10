@@ -43,7 +43,10 @@ export const resolveCodexVoiceCommand = Effect.fn("voice.resolveCodexVoiceComman
   const [, instance] = selected;
   const config = decodeCodexSettings(instance.config ?? {});
   if (Option.isNone(config)) return Option.none();
-  const environment = mergeProviderInstanceEnvironment(instance.environment ?? [], hostEnvironment);
+  const environment = yield* mergeProviderInstanceEnvironment(
+    instance.environment ?? [],
+    hostEnvironment,
+  );
   const layout = yield* resolveCodexHomeLayout(config.value);
   const launchArgs = resolveCodexLaunchArgs(config.value.launchArgs, environment);
   return Option.some({

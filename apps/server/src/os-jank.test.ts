@@ -1,7 +1,16 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import { CommandAvailability, WindowsShellEnvironment } from "@t3tools/shared/shell";
+import * as Effect from "effect/Effect";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Observe the existing synchronous shell probe without launching the user's login shell.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
-import { assert, it } from "vite-plus/test";
+import { assert, it, vi } from "vite-plus/test";
 
-import { hydratePosixEnvironment, hydratePosixHome } from "./os-jank.ts";
+import { fixPath, hydratePosixEnvironment, hydratePosixHome } from "./os-jank.ts";
+
+vi.mock("node:child_process", { spy: true });
 
 it("hydrates HOME for minimal service environments from the user account", () => {
   const env: NodeJS.ProcessEnv = {};
@@ -121,3 +130,77 @@ it("keeps the inherited environment when every candidate shell fails", () => {
   assert.equal(env.EDITOR, "vi");
   assert.equal(env.PATH, "/usr/bin");
 });
+
+effectIt.effect.each(["darwin", "linux"] as const)(
+  "keeps the prepared PATH and still hydrates HOME on %s",
+  (platform) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => vi.spyOn(NodeChildProcess, "execFileSync")),
+      (probe) =>
+        Effect.gen(function* () {
+          probe.mockImplementation(() => {
+            throw new Error("The prepared environment must not launch another shell");
+          });
+          const env: NodeJS.ProcessEnv = { PATH: "/prepared/bin:/usr/bin" };
+
+          yield* fixPath({ shellEnvironmentPrepared: true }).pipe(
+            Effect.provideService(HostProcess.Platform, platform),
+            Effect.provideService(HostProcess.Environment, env),
+            Effect.provide(NodeServices.layer),
+          );
+
+          assert.equal(probe.mock.calls.length, 0);
+          assert.equal(env.PATH, "/prepared/bin:/usr/bin");
+          assert.equal(env.HOME, NodeOS.userInfo().homedir);
+        }),
+      (probe) => Effect.sync(() => probe.mockRestore()),
+    ),
+);
+
+effectIt.effect("hydrates PATH when the desktop handoff is absent", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      vi
+        .spyOn(NodeChildProcess, "execFileSync")
+        // The fork imports the whole login-shell environment (`env -0`), not just PATH.
+        .mockReturnValue("__T3CODE_ENV_ALL_START__\nPATH=/opt/tools/bin\0__T3CODE_ENV_ALL_END__\n"),
+    ),
+    (probe) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
+
+        yield* fixPath().pipe(
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(HostProcess.Environment, env),
+          Effect.provide(NodeServices.layer),
+        );
+
+        assert.equal(probe.mock.calls.length, 1);
+        assert.equal(env.PATH, "/opt/tools/bin:/usr/bin");
+      }),
+    (probe) => Effect.sync(() => probe.mockRestore()),
+  ),
+);
+
+effectIt.effect("repairs Windows PATH even when the desktop marks it prepared", () =>
+  Effect.gen(function* () {
+    const env: NodeJS.ProcessEnv = { PATH: "C:\\Windows" };
+    const commands: string[] = [];
+
+    yield* fixPath({ shellEnvironmentPrepared: true }).pipe(
+      Effect.provideService(HostProcess.Platform, "win32"),
+      Effect.provideService(HostProcess.Environment, env),
+      Effect.provideService(WindowsShellEnvironment, () => ({ PATH: "C:\\Tools" })),
+      Effect.provideService(CommandAvailability, (command) =>
+        Effect.sync(() => {
+          commands.push(command);
+          return true;
+        }),
+      ),
+      Effect.provide(NodeServices.layer),
+    );
+
+    assert.deepEqual(commands, ["node"]);
+    assert.equal(env.PATH, "C:\\Tools;C:\\Windows");
+  }),
+);

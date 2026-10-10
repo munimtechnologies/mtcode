@@ -8,7 +8,7 @@ import * as NodeSqlite from "node:sqlite";
 
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { mergeUsage } from "@t3tools/shared/usageMerge";
 import {
   EnvironmentId,
@@ -25,6 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
 import * as Scheduler from "effect/Scheduler";
 import * as Schema from "effect/Schema";
@@ -33,8 +34,14 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as CursorUsageReader from "./cursorUsageReader.ts";
-import type { UsageRecord } from "./usageTranscripts.ts";
+import * as CursorAccountReader from "@t3tools/provider-cursor/server/CursorAccountReader";
+import * as CursorKeychain from "@t3tools/provider-cursor/server/CursorKeychain";
+import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsageAccounts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
+import * as AntigravityUsage from "../provider/Drivers/AntigravityUsage.ts";
+import * as ProviderHostLive from "../provider/ProviderHostLive.ts";
+import type { UsageRecord } from "@t3tools/provider-core/server/usage";
 import * as UsageService from "./UsageService.ts";
 import { readGrokHomeOverride } from "./UsageService.ts";
 
@@ -97,6 +104,27 @@ const setup = Effect.gen(function* () {
   };
 });
 
+const layerCursorUsageAccounts = <E, R>(
+  reader: Layer.Layer<CursorAccountReader.CursorAccountReader, E, R>,
+) => Layer.fresh(CursorUsageAccounts.layer).pipe(Layer.provide(reader));
+
+/**
+ * A service with its own Cursor account caches over `read`, as a fresh server
+ * process has. `awaitPersisted` also waits for the account cache writes.
+ */
+const makeWithCursor = (read: CursorAccountReader.CursorAccountReader["Service"]["read"]) =>
+  Effect.gen(function* () {
+    const context = yield* Layer.build(
+      layerCursorUsageAccounts(Layer.succeed(CursorAccountReader.CursorAccountReader, { read })),
+    );
+    const accounts = Context.get(context, CursorUsageAccounts.CursorUsageAccounts);
+    const service = yield* UsageService.make.pipe(Effect.provideContext(context));
+    return {
+      ...service,
+      awaitPersisted: Effect.andThen(service.awaitPersisted, accounts.awaitPersisted),
+    };
+  });
+
 const layerService = (input: {
   readonly prefix: string;
   readonly home: string;
@@ -107,10 +135,18 @@ const layerService = (input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
 }) =>
-  ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
+  layerCursorUsageAccounts(
+    CursorAccountReader.layer.pipe(Layer.provide(CursorKeychain.layer)),
+  ).pipe(
+    Layer.provideMerge(AntigravityUsage.layer),
+    Layer.provideMerge(ProviderHostLive.layer),
+    Layer.provideMerge(Layer.mock(BackgroundPolicy.BackgroundPolicy)({})),
+    Layer.provideMerge(Layer.mock(ServerSecretStore.ServerSecretStore)({})),
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), NodePath.join(input.home, input.prefix)),
+    ),
     Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(CursorUsageReader.layer),
-    Layer.provideMerge(Layer.succeed(HostProcessPlatform, input.platform ?? "linux")),
+    Layer.provideMerge(Layer.succeed(HostProcess.Platform, input.platform ?? "linux")),
     Layer.provideMerge(ServerSettings.layerTest(input.settings)),
     Layer.provideMerge(
       Layer.succeed(
@@ -126,7 +162,7 @@ const layerService = (input: {
       ),
     ),
     Layer.provideMerge(
-      Layer.succeed(HostProcessEnvironment, {
+      Layer.succeed(HostProcess.Environment, {
         HOME: input.home,
         GROK_HOME: NodePath.join(input.home, "grok"),
         // Point OpenCode discovery inside the fixture. Without this the scan
@@ -379,9 +415,7 @@ describe("UsageService", () => {
       const gate = yield* Deferred.make<void>();
       cursor.state.gate = gate;
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make.pipe(
-          Effect.provideService(CursorUsageReader.CursorAccountReader, { read: cursor.read }),
-        );
+        const service = yield* makeWithCursor(cursor.read);
         // Cold: nothing cached yet, so Cursor answers empty while it refreshes.
         const cold = yield* service.readSummary(WINDOW);
         assert.strictEqual(cursorSource(cold)?.refreshing, true);
@@ -436,9 +470,7 @@ describe("UsageService", () => {
         { timestampMs: CURSOR_NOW - HOUR_MS / 2, outputTokens: 7 },
       ];
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make.pipe(
-          Effect.provideService(CursorUsageReader.CursorAccountReader, { read: cursor.read }),
-        );
+        const service = yield* makeWithCursor(cursor.read);
         const read = (input: UsageSummaryInput) =>
           service.readSummary({ ...input, awaitRefresh: true });
         assert.strictEqual(totalOutputTokens(yield* read(WINDOW)), 19);
@@ -485,9 +517,7 @@ describe("UsageService", () => {
       const cursor = makeFakeCursor();
       cursor.state.events = [{ timestampMs: CURSOR_NOW - HOUR_MS * 3, outputTokens: 5 }];
       yield* Effect.gen(function* () {
-        const service = yield* UsageService.make.pipe(
-          Effect.provideService(CursorUsageReader.CursorAccountReader, { read: cursor.read }),
-        );
+        const service = yield* makeWithCursor(cursor.read);
         yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
 
         yield* TestClock.adjust(Duration.minutes(2));
@@ -528,17 +558,13 @@ describe("UsageService", () => {
         { timestampMs: CURSOR_NOW - 3 * HOUR_MS, outputTokens: 7 },
       ];
       yield* Effect.gen(function* () {
-        const first = yield* UsageService.make.pipe(
-          Effect.provideService(CursorUsageReader.CursorAccountReader, { read: before.read }),
-        );
+        const first = yield* makeWithCursor(before.read);
         const original = yield* first.readSummary({ ...WINDOW, awaitRefresh: true });
         yield* first.awaitPersisted;
 
         const after = makeFakeCursor();
         after.state.events = before.state.events;
-        const restarted = yield* UsageService.make.pipe(
-          Effect.provideService(CursorUsageReader.CursorAccountReader, { read: after.read }),
-        );
+        const restarted = yield* makeWithCursor(after.read);
         const restored = yield* restarted.readSummary(WINDOW);
         assert.isUndefined(cursorSource(restored)?.refreshing);
         assert.deepStrictEqual(restored.buckets, original.buckets);
@@ -820,6 +846,8 @@ describe("UsageService", () => {
                 },
                 [ProviderInstanceId.make("grok-work")]: {
                   driver: ProviderDriverKind.make("grok"),
+                  // An undecodable config must not hide history Grok reads by home alone.
+                  config: { customModels: "not-a-list" },
                   environment: [{ name: "GROK_HOME", value: grokHome, sensitive: false }],
                 },
               },
@@ -981,6 +1009,34 @@ describe("UsageService", () => {
           summary.sources.find((source) => source.fingerprint.provider === "grok")?.fingerprint
             .resolvedHomePath,
           NodePath.join(home, "grok", "sessions"),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live.skipIf(HostProcess.Platform.defaultValue() === "win32" || process.getuid?.() === 0)(
+    "reports unreadable transcripts as partial and recovers once they can be read",
+    () =>
+      Effect.gen(function* () {
+        const { transcript, settings, home } = yield* setup;
+        const unreadable = NodePath.join(NodePath.dirname(transcript), "other.jsonl");
+        yield* Effect.promise(async () => {
+          await NodeFSP.writeFile(transcript, claudeLine(1, 5));
+          await NodeFSP.writeFile(unreadable, claudeLine(2, 7));
+          await NodeFSP.chmod(unreadable, 0);
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* UsageService.make;
+          const partial = yield* service.readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(partial), 5);
+          assert.strictEqual(partial.sources[0]?.status, "partial");
+
+          yield* Effect.promise(() => NodeFSP.chmod(unreadable, 0o600));
+          const healthy = yield* service.readSummary(WINDOW);
+          assert.strictEqual(totalOutputTokens(healthy), 12);
+          assert.strictEqual(healthy.sources[0]?.status, "ok");
+          assert.isNull(healthy.sources[0]?.message);
+        }).pipe(
+          Effect.provide(layerService({ prefix: "usage-service-unreadable", home, settings })),
         );
       }).pipe(Effect.scoped),
   );
@@ -1345,7 +1401,7 @@ describe("UsageService", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.live.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "keeps a newer cached read when a slower scan of another window finishes later",
     () =>
       Effect.gen(function* () {
@@ -1376,7 +1432,7 @@ describe("UsageService", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.live.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "keeps the later read when a scan that read earlier finishes first",
     () =>
       Effect.gen(function* () {
