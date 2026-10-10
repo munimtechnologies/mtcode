@@ -189,6 +189,7 @@ import {
   PullRequestDiffFileContentsResult,
   PullRequestFilesViewedResult,
   PullRequestInvalidateInput,
+  PullRequestReportStateInput,
   PullRequestListInput,
   PullRequestListResult,
   PullRequestListStatsInput,
@@ -627,6 +628,7 @@ export const WS_METHODS = {
   pullRequestsUpstreamRelease: "pullRequests.upstreamRelease",
   pullRequestsMergeUpstreamRelease: "pullRequests.mergeUpstreamRelease",
   pullRequestsInvalidate: "pullRequests.invalidate",
+  pullRequestsReportState: "pullRequests.reportState",
   pullRequestsSubscribeRefreshes: "pullRequests.subscribeRefreshes",
   pullRequestsReviewerCandidates: "pullRequests.reviewerCandidates",
   pullRequestsRequestReviewers: "pullRequests.requestReviewers",
@@ -1314,6 +1316,12 @@ const WsPullRequestsSetReactionRpc = Rpc.make(WS_METHODS.pullRequestsSetReaction
 
 const WsPullRequestsInvalidateRpc = Rpc.make(WS_METHODS.pullRequestsInvalidate, {
   payload: PullRequestInvalidateInput,
+  success: Schema.Void,
+  error: PullRequestRpcError,
+});
+
+const WsPullRequestsReportStateRpc = Rpc.make(WS_METHODS.pullRequestsReportState, {
+  payload: PullRequestReportStateInput,
   success: Schema.Void,
   error: PullRequestRpcError,
 });
@@ -2251,6 +2259,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsSetThreadResolutionRpc,
   WsPullRequestsSetReactionRpc,
   WsPullRequestsInvalidateRpc,
+  WsPullRequestsReportStateRpc,
   WsPullRequestsSubscribeRefreshesRpc,
   WsPullRequestsReviewerCandidatesRpc,
   WsPullRequestsRequestReviewersRpc,

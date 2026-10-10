@@ -28,6 +28,8 @@ const HEAD_REF_TEMPLATE: Record<SourceControlProviderKind, ((n: number) => strin
   // Forgejo mirrors Gitea, which publishes a pull request's head the way
   // GitHub does.
   forgejo: (n) => `refs/pull/${n}/head`,
+  // GitCafe checks out a pull request's own branch; it publishes no head ref.
+  gitcafe: null,
   unknown: null,
 };
 
