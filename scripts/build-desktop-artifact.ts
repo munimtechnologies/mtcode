@@ -3067,6 +3067,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         // fails before the system ever asks you.
         NSLocationWhenInUseUsageDescription: `${productName} uses your approximate location to paint the sidebar artwork with your local daylight and weather.`,
         NSLocalNetworkUsageDescription: `${productName} connects to devices on your local network for remote environments and commands run by terminals and coding agents.`,
+        // macOS 26 offers Messages/Mail codes in every text field unless opted out.
+        NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true,
         NSScreenCaptureUsageDescription:
           "T3 Code captures the active window when you use the window capture shortcut.",
         // macOS lists an app under Default web browser only when it opens web

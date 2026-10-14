@@ -1176,6 +1176,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleAfterDays",
   "sidebarAutoSettlePinnedThreads",
   "sidebarAutoSettleScope",
+  "sidebarAutoSettleKeepPullRequests",
   "continueThreadsAfterServerUpdate",
   "responseStreamingMode",
 ] as const;
@@ -1225,6 +1226,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettlePinnedThreads: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleScope: Schema.optionalKey(Schema.Literals(["all", "without-pr"])),
+  sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   providerInstances: Schema.optionalKey(
@@ -1411,6 +1413,9 @@ export const ServerSettings = Schema.Struct({
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarAutoSettleScope: Schema.Literals(["all", "without-pr"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("all")),
+  ),
+  sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Pinned threads stay active by default: a pin is an explicit keep-active
@@ -1823,6 +1828,7 @@ export const ServerSettingsPatch = Schema.Struct({
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleScope: Schema.optionalKey(Schema.Literals(["all", "without-pr"])),
+  sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettlePinnedThreads: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),

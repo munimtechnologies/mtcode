@@ -841,7 +841,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       // `sharedindex.*` and — under `splitIndex.sharedIndexExpire` — deletes the
       // one `.git/index` still points at. Hence TEMP_INDEX_CONFIG_ARGS on the
       // commands below; the regression test covers it.
-      const indexId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+      const indexId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const tempIndexPath = path.join(gitCommonDir, `t3-checkpoint-index-${indexId}`);
       const commitEnv: NodeJS.ProcessEnv = {
         ...process.env,

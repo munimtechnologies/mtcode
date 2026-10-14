@@ -26,6 +26,7 @@ import {
 import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import {
+  readProject,
   readProjects,
   readThreadShell,
   readThreadShells,
@@ -175,6 +176,10 @@ export function useNewThreadHandler() {
       // thread (it may differ from the requested one after retargeting).
       const targetServerSettings =
         environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
+      // Removal can land while the project file is read; a draft opened
+      // after that belongs to a project that no longer exists.
+      const abandonedSinceRequest = () =>
+        routeChangedSinceRequest() || (project !== undefined && readProject(projectRef) === null);
       // The resolver applies project overrides and, until the server has
       // folded them, the aggregate's own legacy fields.
       const projectSettings = resolveProjectSettings(
@@ -303,7 +308,7 @@ export function useNewThreadHandler() {
             workspaceContext = pickExplicitWorkspaceOptions(workspaceOptions);
           } else if (!isDraftAlreadyOpen) {
             const defaultEnvMode = await resolveDefaultEnvMode();
-            if (routeChangedSinceRequest()) {
+            if (abandonedSinceRequest()) {
               return null;
             }
             // The await yields. If the draft was opened (a concurrent
@@ -447,7 +452,7 @@ export function useNewThreadHandler() {
       const createdAt = new Date().toISOString();
       return (async () => {
         const initialEnvMode = workspaceOptions?.envMode ?? (await resolveDefaultEnvMode());
-        if (routeChangedSinceRequest()) {
+        if (abandonedSinceRequest()) {
           return null;
         }
         // The await yields, so a concurrent invocation may have registered a

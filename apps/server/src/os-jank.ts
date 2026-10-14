@@ -56,6 +56,12 @@ export function hydratePosixEnvironment(
   if (mergedPath) {
     env.PATH = mergedPath;
   }
+  // mise's record of the PATH entries it added. It must travel with the
+  // shell's PATH, or `mise x` can rebuild PATH behind a same-named wrapper
+  // (`exec mise x claude -- claude`) that then re-runs itself forever.
+  if (shellPath && shellEnvironment?.__MISE_DIFF) {
+    env.__MISE_DIFF = shellEnvironment.__MISE_DIFF;
+  }
 }
 
 export function hydratePosixHome(

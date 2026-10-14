@@ -218,6 +218,9 @@ export function codexProviderTurnTokenUsage(
 }
 const DEFAULT_CODEX_SETTINGS = Schema.decodeSync(CodexSettings)({});
 const CODEX_ASSISTANT_DELTA_FLUSH_INTERVAL_MS = 50;
+// Each plan flush stores the whole plan three times (node, plan, turn item), so
+// flush at the cadence clients already see for assistant text.
+const CODEX_PLAN_DELTA_FLUSH_INTERVAL_MS = 400;
 const CodexBackgroundTerminalTerminateResponse = Schema.Struct({
   terminated: Schema.Boolean,
 });
@@ -1340,10 +1343,19 @@ export class CodexAppServerClientFactory extends Context.Service<
 
 /**
  * Config overrides sent with every `thread/start`, `thread/resume` and `thread/fork`.
- * Codex 0.152 made the `update_plan` checklist tool opt-in; T3 renders it as the
- * todo list. Codex layers these above the user's and project's `config.toml`.
+ * Codex layers these above the user's and project's `config.toml`.
+ *
+ * - Codex 0.152 made the `update_plan` checklist tool opt-in; T3 renders it as
+ *   the todo list.
+ * - Codex waits this long for MCP servers before the first model request and
+ *   leaves out any server still starting (default 1 s, too short for cold
+ *   `npx`/`uvx` servers). 10 s covers most slow starts, and a hung server
+ *   delays only the first turn of a session by 10 s, not its 30 s timeout.
  */
-export const CODEX_THREAD_CONFIG = { "tools.update_plan.enabled": true } as const;
+export const CODEX_THREAD_CONFIG = {
+  "tools.update_plan.enabled": true,
+  mcp_optional_startup_grace_ms: 10_000,
+} as const;
 
 /** MT Code: a thread whose cwd is the home folder is a computer-wide thread. */
 export function isComputerHomeCwd(cwd: string, homeDirectory: string = NodeOS.homedir()): boolean {
@@ -1993,8 +2005,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const providerRetries = yield* Ref.make(
           new Map<ProviderTurnId, ActiveCodexProviderRetry>(),
         );
-        // Streamed plan text per plan item, dropped when the item completes.
-        const planDeltas = new Map<string, string>();
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
         const pendingRuntimeRequests = yield* Ref.make(
           new Map<string, PendingCodexRuntimeRequest>(),
@@ -4077,6 +4087,43 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             return { node, plan, turnItem };
           });
 
+        // Streamed plan text, flushed at most once per interval. A turn that ends
+        // early leaves its partial plan streaming, as an unfinished plan item.
+        const planDeltas = yield* makeProviderTextDeltaCoalescer({
+          flushIntervalMs: CODEX_PLAN_DELTA_FLUSH_INTERVAL_MS,
+          emit: (update) =>
+            Effect.gen(function* () {
+              const resolved = yield* resolveItemEventContext(update.turnId);
+              if (resolved === undefined) return;
+              const interrupted = (yield* Ref.get(terminalizedNonCompletedNativeTurns)).has(
+                update.turnId,
+              );
+              const artifacts = yield* buildProposedPlanArtifacts({
+                context: resolved.context,
+                nativeItemId: update.itemId,
+                // A finished proposal stays active until Implement consumes it.
+                status: "active",
+                markdown: update.text,
+                completed: update.completed && !interrupted,
+              });
+              yield* emitProviderEvent({
+                type: "node.updated",
+                driver: CODEX_PROVIDER,
+                node: artifacts.node,
+              });
+              yield* emitProviderEvent({
+                type: "plan.updated",
+                driver: CODEX_PROVIDER,
+                plan: artifacts.plan,
+              });
+              yield* emitProviderEvent({
+                type: "turn_item.updated",
+                driver: CODEX_PROVIDER,
+                turnItem: artifacts.turnItem,
+              });
+            }).pipe(Effect.orDie),
+        });
+
         const buildTodoListArtifacts = (input: {
           readonly context: ActiveCodexTurnContext;
           readonly nativeItemId: string;
@@ -4374,28 +4421,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
             yield* completeProviderRetry(context, yield* DateTime.now);
-            const markdown = `${planDeltas.get(payload.itemId) ?? ""}${payload.delta}`;
-            planDeltas.set(payload.itemId, markdown);
-            const artifacts = yield* buildProposedPlanArtifacts({
-              context,
-              nativeItemId: payload.itemId,
-              status: "active",
-              markdown,
-            });
-            yield* emitProviderEvent({
-              type: "node.updated",
-              driver: CODEX_PROVIDER,
-              node: artifacts.node,
-            });
-            yield* emitProviderEvent({
-              type: "plan.updated",
-              driver: CODEX_PROVIDER,
-              plan: artifacts.plan,
-            });
-            yield* emitProviderEvent({
-              type: "turn_item.updated",
-              driver: CODEX_PROVIDER,
-              turnItem: artifacts.turnItem,
+            yield* planDeltas.append({
+              turnId: payload.turnId,
+              itemId: payload.itemId,
+              delta: payload.delta,
             });
           }).pipe(Effect.orDie),
         );
@@ -5045,33 +5074,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }
 
             if (payload.item.type === "plan") {
-              const markdown =
-                payload.item.text.length > 0
-                  ? payload.item.text
-                  : (planDeltas.get(payload.item.id) ?? "");
-              planDeltas.delete(payload.item.id);
-              // A finished proposal stays active until Implement consumes it.
-              const artifacts = yield* buildProposedPlanArtifacts({
-                context,
-                nativeItemId: payload.item.id,
-                status: "active",
-                markdown,
-                completed: true,
-              });
-              yield* emitProviderEvent({
-                type: "node.updated",
-                driver: CODEX_PROVIDER,
-                node: artifacts.node,
-              });
-              yield* emitProviderEvent({
-                type: "plan.updated",
-                driver: CODEX_PROVIDER,
-                plan: artifacts.plan,
-              });
-              yield* emitProviderEvent({
-                type: "turn_item.updated",
-                driver: CODEX_PROVIDER,
-                turnItem: artifacts.turnItem,
+              yield* planDeltas.complete({
+                turnId: payload.turnId,
+                itemId: payload.item.id,
+                ...(payload.item.text.length > 0 ? { finalText: payload.item.text } : {}),
               });
               return;
             }
@@ -5909,6 +5915,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               }
               yield* agentMessageDeltas.flushTurn(input.nativeTurnId);
               yield* reasoningDeltas.flushTurn(input.nativeTurnId);
+              yield* planDeltas.flushTurn(input.nativeTurnId);
               for (const [key, part] of reasoningParts) {
                 if (part.turnId === input.nativeTurnId) reasoningParts.delete(key);
               }

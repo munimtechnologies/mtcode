@@ -17,7 +17,9 @@ import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Crypto from "effect/Crypto";
 import * as FileSystem from "effect/FileSystem";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
@@ -84,6 +86,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import * as ServerOwnership from "./serverOwnership.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as SelfHostedPushNotifications from "./notifications/SelfHostedPushNotifications.ts";
 import { notificationsHttpApiLayer } from "./notifications/http.ts";
@@ -185,11 +188,7 @@ import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementSer
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
 import * as RunFinalizationService from "./orchestration-v2/RunFinalizationService.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
-import {
-  clearPersistedServerRuntimeState,
-  makePersistedServerRuntimeState,
-  persistServerRuntimeState,
-} from "./serverRuntimeState.ts";
+import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -799,6 +798,8 @@ const layerMakeRoutes = Layer.mergeAll(
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
+    // Before anything opens the database: one server per T3 home.
+    const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const layerActivation = Layer.succeed(ServerActivation.ServerActivation, awaitActivation);
@@ -818,38 +819,30 @@ const layerMakeServer = Layer.unwrap(
       }),
     );
     const layerRuntimeState = Layer.effectDiscard(
-      Effect.acquireRelease(
-        Effect.gen(function* () {
-          yield* Deferred.succeed(runtimeStateParked, undefined).pipe(Effect.orDie);
-          yield* awaitActivation;
-          const server = yield* HttpServer.HttpServer;
-          const address = server.address;
-          if (typeof address === "string" || !("port" in address)) {
-            return;
-          }
+      Effect.gen(function* () {
+        yield* Deferred.succeed(runtimeStateParked, undefined).pipe(Effect.orDie);
+        yield* awaitActivation;
+        const server = yield* HttpServer.HttpServer;
+        const address = server.address;
+        if (typeof address === "string" || !("port" in address)) {
+          return;
+        }
 
-          const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
-          const state = yield* makePersistedServerRuntimeState({
-            config,
-            port: address.port,
-            serviceManaged: launcher.managed,
-          });
-          yield* persistServerRuntimeState({
-            path: config.serverRuntimeStatePath,
-            state,
-          }).pipe(
+        const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
+        const state = yield* makePersistedServerRuntimeState({
+          config,
+          port: address.port,
+          serviceManaged: launcher.managed,
+        });
+        // Ownership release removes this record.
+        yield* ownership
+          .publish(state)
+          .pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Failed to persist server runtime state", { cause }),
             ),
           );
-        }),
-        () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to clear server runtime state", { cause }),
-            ),
-          ),
-      ),
+      }),
     );
     const layerTailscaleServe = config.tailscaleServeEnabled
       ? Layer.effectDiscard(
@@ -1172,7 +1165,7 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(layerPlatformServices),
     );
   }),
-);
+).pipe(Layer.provide(ProcessRunner.layer));
 
 // The CLI supplies configuration.
 // Annotated: inferring this from the CLI walks the whole layer graph at once and
@@ -1180,5 +1173,9 @@ const layerMakeServer = Layer.unwrap(
 export const runServer: Effect.Effect<
   never,
   Layer.Error<typeof layerMakeServer>,
-  FileSystem.FileSystem | Path.Path | ServerConfig.ServerConfig
+  | ChildProcessSpawner.ChildProcessSpawner
+  | Crypto.Crypto
+  | FileSystem.FileSystem
+  | Path.Path
+  | ServerConfig.ServerConfig
 > = Layer.launch(layerMakeServer);

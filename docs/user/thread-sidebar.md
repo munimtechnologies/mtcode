@@ -171,16 +171,11 @@ By default, environments settle inactive threads after three days and settle
 threads whose pull request merged. A closed pull request can also settle an idle
 thread. Work in progress, pending questions or approvals, live background work,
 and pinned threads prevent automatic settlement. An open pull request does not
-prevent inactivity settlement, but an old closed or merged pull request does not
+prevent inactivity settlement unless you turn on **Keep threads with a PR** in
+**Settings → General**, but an old closed or merged pull request does not
 settle work you resumed after it closed. Only your own messages count as
 resuming. A turn that finished background work or a pull request watch starts on
 its own does not.
-
-For inactivity settlement, choose **All threads**, **Threads without a PR**,
-or **Off** in **Settings → General**. Threads without a PR excludes threads with
-PRs linked manually (including older links), created through the app, linked by
-an agent, associated through a stack, or detected from the branch. Dismissed
-stack PRs do not count. Merge and close settlement still follows the PR rules.
 
 To keep one thread out of the settled shelf no matter how long it sits idle, open its menu,
 choose **Auto-settle behavior**, and pick **Disabled**. The current option is checked. Pick

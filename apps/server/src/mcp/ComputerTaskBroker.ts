@@ -177,7 +177,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
     host: ComputerTaskHost,
   ) {
     const queue = yield* Queue.unbounded<ComputerTaskStreamEvent>();
-    const connectionId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const connectionId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
     yield* Queue.offer(queue, { type: "connected", connectionId });
     const connection: ClientConnection = {
       clientId: host.clientId,
@@ -276,7 +276,7 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
 
   const send: ComputerTaskBroker["Service"]["send"] = Effect.fn("ComputerTaskBroker.send")(
     function* (request) {
-      const requestId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+      const requestId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const deferred = yield* Deferred.make<ComputerTaskSendResult, ComputerTaskError>();
       const route = yield* SynchronizedRef.modify(state, (current) => {
         const client = pickClientForComputer(current.clients, request.computer.environmentId);

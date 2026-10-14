@@ -3265,6 +3265,11 @@ function ProposedPlanTimelineRow({
 
 function HtmlRenderTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "html-render" }> }) {
   const ctx = use(TimelineRowCtx);
+  const { onAppFullscreenChange } = ctx;
+  const onFullscreenChange = useCallback(
+    (fullscreen: boolean) => onAppFullscreenChange(row.id, fullscreen),
+    [onAppFullscreenChange, row.id],
+  );
 
   return (
     <div className="min-w-0 px-1">
@@ -3274,7 +3279,7 @@ function HtmlRenderTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "htm
         environmentId={ctx.activeThreadEnvironmentId}
         htmlRender={row.htmlRender}
         threadRef={ctx.threadRef ?? undefined}
-        onOpen={ctx.onFileOpen}
+        onFullscreenChange={onFullscreenChange}
       />
     </div>
   );
@@ -5702,8 +5707,10 @@ function remarkThoughtPreview(fallback: string) {
 function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
   const ctx = use(TimelineRowCtx);
   const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+  const isStreaming = (entry: TimelineWorkEntry) =>
+    isWorking && entry.runId === latestRunId && entry.toolLifecycleStatus === "inProgress";
   return (
-    <WorkLogDetails>
+    <WorkLogDetails followLive={entries.some(isStreaming)}>
       {entries.map((entry) => (
         <ChatMarkdown
           key={entry.id}
@@ -5712,9 +5719,7 @@ function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWor
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
           skills={ctx.skills}
-          isStreaming={
-            isWorking && entry.runId === latestRunId && entry.toolLifecycleStatus === "inProgress"
-          }
+          isStreaming={isStreaming(entry)}
           headingLevelOffset={MESSAGE_HEADING_LEVEL}
           onUseArtifactTemplate={ctx.onUseArtifactTemplate}
           onImageExpand={ctx.onImageExpand}

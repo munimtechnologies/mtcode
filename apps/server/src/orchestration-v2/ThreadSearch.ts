@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 /** Carries no query text: search input is user content. */
 export class ThreadSearchError extends Schema.TaggedError<ThreadSearchError>()(
@@ -181,20 +182,25 @@ export const make = Effect.gen(function* () {
         pattern: `%${escapeLikePattern(input.query)}%`,
         limit: input.limit ?? 50,
       };
+      // The scan reads every message, so run it on the reader worker rather
+      // than the event loop.
       const rows: ReadonlyArray<typeof SearchRow.Type & { readonly messageId?: MessageId }> =
-        yield* (
-          input.threadId === undefined
-            ? searchRows(request)
-            : searchThreadMessageRows({ ...request, threadId: input.threadId })
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ThreadSearchError({
-                operation: Schema.isSchemaError(cause) ? "decode" : "query",
-                cause,
-              }),
-          ),
-        );
+        yield* sql
+          .withTransaction(
+            input.threadId === undefined
+              ? searchRows(request)
+              : searchThreadMessageRows({ ...request, threadId: input.threadId }),
+          )
+          .pipe(
+            NodeSqliteClient.readOnly,
+            Effect.mapError(
+              (cause) =>
+                new ThreadSearchError({
+                  operation: Schema.isSchemaError(cause) ? "decode" : "query",
+                  cause,
+                }),
+            ),
+          );
       return {
         matches: rows.map((row) => ({
           threadId: row.threadId,

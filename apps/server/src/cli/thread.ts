@@ -152,7 +152,7 @@ export class ThreadModelAmbiguousError extends Schema.TaggedError<ThreadModelAmb
 }
 
 const threadCommandUuid = Crypto.Crypto.pipe(
-  Effect.flatMap((crypto) => crypto.randomUUIDv4),
+  Effect.flatMap((crypto) => crypto.randomUUIDv4()),
   Effect.orDie,
 );
 

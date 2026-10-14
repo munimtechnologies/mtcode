@@ -1,6 +1,5 @@
 import { ConnectionTraceId } from "./ConnectionTraceId";
 import { SymbolView } from "../../components/AppSymbol";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
@@ -26,12 +25,13 @@ import { serverEnvironment } from "../../state/server";
 import { ConnectionFormField } from "./ConnectionFormField";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
 import { useEnvironmentSessionState } from "../../state/session";
+import { environmentStatusText } from "./environmentStatusText";
 
 function connectionStatusLabel(environment: ConnectedEnvironmentSummary): string | null {
   if (!environment.isEnabled && environment.connectionState !== "unsupported") {
     return "Off";
   }
-  return connectionStatusText({
+  return environmentStatusText({
     phase: environment.connectionState,
     error: environment.connectionError,
     traceId: environment.connectionErrorTraceId,
