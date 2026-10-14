@@ -188,19 +188,20 @@ effectIt.effect("keeps mise's PATH record with the login shell PATH", () =>
       vi
         .spyOn(NodeChildProcess, "execFileSync")
         .mockReturnValue(
-          [
-            "__T3CODE_ENV_PATH_START__",
-            "/home/me/.local/bin:/mise/installs/claude/latest:/mise/shims",
-            "__T3CODE_ENV_PATH_END__",
-            "__T3CODE_ENV___MISE_DIFF_START__",
-            "mise-diff",
-            "__T3CODE_ENV___MISE_DIFF_END__",
-          ].join("\n"),
+          "__T3CODE_ENV_ALL_START__\n" +
+            "PATH=/home/me/.local/bin:/mise/installs/claude/latest:/mise/shims\0" +
+            "__MISE_DIFF=mise-diff\0" +
+            "__T3CODE_ENV_ALL_END__\n",
         ),
     ),
     () =>
       Effect.gen(function* () {
-        const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
+        // A stale record from the launching process must not outlive the PATH it described.
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/bash",
+          PATH: "/usr/bin",
+          __MISE_DIFF: "stale-diff",
+        };
 
         yield* fixPath().pipe(
           Effect.provideService(HostProcess.Platform, "linux"),

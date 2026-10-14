@@ -739,10 +739,10 @@ describe("DesktopUpdates", () => {
       Effect.gen(function* () {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
+        // A finished download installs on its own, handing the version over.
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
 
-        assert.isTrue((yield* updates.install).accepted);
         assert.deepEqual(
           recordsAtStop.map((record) => JSON.parse(record)),
           [{ fromVersion: "1.2.3", targetVersion: "1.2.4" }],
@@ -767,7 +767,8 @@ describe("DesktopUpdates", () => {
         harness.emit("update-available", { version: "1.2.4" });
         yield* flushCallbacks;
         const state = yield* updates.getState;
-        assert.equal(state.status, "available");
+        // An available update starts downloading at once.
+        assert.equal(state.status, "downloading");
         assert.equal(state.notAppliedVersion, "1.2.4");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
