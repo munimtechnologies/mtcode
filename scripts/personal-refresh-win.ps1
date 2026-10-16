@@ -192,6 +192,13 @@ Log ("HEAD=" + (git rev-parse --short HEAD) + " " + (git log -1 --oneline))
 # pnpm writes progress to stderr; with Stop that becomes a terminating error.
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
+# The stamp script imports workspace packages, so a clone without node_modules
+# (cleaned to free disk) must install before it, not only inside the build.
+& pnpm install --frozen-lockfile *>> $log
+if ($LASTEXITCODE -ne 0) {
+  Log "dependency install failed exit=$LASTEXITCODE"
+  exit $LASTEXITCODE
+}
 # Align package versions like upstream's release workflow, so the bundled
 # server and web report this version instead of the stale package.json one.
 & node scripts/update-release-package-versions.ts $env:T3CODE_DESKTOP_VERSION *>> $log
