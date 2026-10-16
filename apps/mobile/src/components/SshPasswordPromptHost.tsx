@@ -4,7 +4,7 @@ import { Modal, Pressable, View } from "react-native";
 import type { SourceControlSshPasswordPromptRequest } from "@t3tools/contracts";
 
 import { useThemeColor } from "../lib/useThemeColor";
-import { AppText, AppTextInput } from "./AppText";
+import { AppText, AppTextInput } from "./ui/AppText";
 import { sshPasswordPromptBroker } from "./sshPasswordPromptBroker";
 import { getSshPasswordPromptTiming } from "./sshPasswordPromptTiming";
 

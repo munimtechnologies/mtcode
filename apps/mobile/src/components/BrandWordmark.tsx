@@ -2,7 +2,7 @@ import type { ColorValue } from "react-native";
 
 import { getBrandMark } from "../lib/branding";
 import { T3Wordmark } from "./T3Wordmark";
-import { AppText as Text } from "./AppText";
+import { AppText as Text } from "./ui/AppText";
 
 /**
  * Wordmark for navigation headers: the T3 SVG, or plain text for any other

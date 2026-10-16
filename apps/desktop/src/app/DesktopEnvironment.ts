@@ -106,10 +106,10 @@ function resolveDesktopAppStageLabel(input: {
   }
 
   if (input.singleReleaseChannel) {
-    return "Alpha";
+    return "Beta";
   }
 
-  return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Alpha";
+  return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Beta";
 }
 
 export function resolveDesktopAppBranding(input: {

@@ -129,6 +129,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadAutoSettlement: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(Schema.Boolean),
   storageCleanupRun: Schema.optionalKey(Schema.Boolean),
+  /** Server streams database size and reclaimable space for the Storage settings notice. */
+  databaseStorage: Schema.optionalKey(Schema.Boolean),
   /** Server checks OTLP endpoints for the telemetry export settings. */
   otlpEndpointCheck: Schema.optionalKey(Schema.Boolean),
   projectWorktreeCleanup: Schema.optionalKey(Schema.Boolean),
@@ -236,6 +238,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       can answer computerView.stream / computerView.input (live remote view).
       Absent on older servers and on machines without the binary. */
   computerView: Schema.optionalKey(Schema.Boolean),
+  /** Server answers orchestration.subscribeCommandOutput. Absent on older servers,
+      which never send command output, so clients must not subscribe. */
+  commandOutputStreaming: Schema.optionalKey(Schema.Boolean),
   /** Server hosts preview tabs in its own headless Chromium (`runtime:
       "server"`) and streams them over `/api/preview-stream`. Clients
       without a local browser runtime open server tabs here. */

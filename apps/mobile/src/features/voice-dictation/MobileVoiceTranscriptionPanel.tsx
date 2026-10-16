@@ -1,7 +1,7 @@
 import { ActivityIndicator, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
-import { ControlPill } from "../../components/ControlPill";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ControlPill } from "../../components/ui/ControlPill";
 import type { MobileVoiceTranscriptionStatus } from "./useMobileVoiceTranscription";
 
 const WAVEFORM_BAR_IDS = Array.from({ length: 24 }, (_, index) => `voice-waveform-${index}`);

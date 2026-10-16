@@ -1,10 +1,11 @@
 import type { VoiceTranscriptionProvider } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
+import * as Dialog from "../../components/ui/Dialog";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import {
   MOBILE_VOICE_TRANSCRIPTION_PROVIDERS,
@@ -66,14 +67,14 @@ export function SettingsVoiceDictationRouteScreen() {
         provider: draftProvider,
         providers: draftProviders,
       });
-      Alert.alert(
+      Dialog.alert(
         providerSettings.apiKey.trim() ? "Voice dictation enabled" : "Voice dictation disabled",
         providerSettings.apiKey.trim()
           ? `The microphone now uses ${providerConfig.label} with ${providerSettings.model.trim()}.`
           : `No ${providerConfig.label} API key is selected, so the microphone is hidden.`,
       );
     } catch (cause) {
-      Alert.alert(
+      Dialog.alert(
         "Could not save voice dictation",
         cause instanceof Error ? cause.message : "Try again.",
       );

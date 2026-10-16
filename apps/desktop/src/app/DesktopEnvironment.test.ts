@@ -226,7 +226,7 @@ describe("DesktopEnvironment", () => {
 
       assert.equal(environment.branding.baseName, "MT Code");
       assert.equal(environment.branding.displayName, "MT Code");
-      assert.equal(environment.branding.stageLabel, "Alpha");
+      assert.equal(environment.branding.stageLabel, "Beta");
       assert.equal(environment.defaultDesktopSettings.updateChannel, "latest");
     });
   });

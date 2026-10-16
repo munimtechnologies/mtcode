@@ -24,13 +24,13 @@ const resolvedStageLabel =
   injectedDesktopAppBranding?.stageLabel ??
   import.meta.env.VITE_APP_STAGE_LABEL?.trim() ??
   (APP_HAS_UPDATE_TRACKS ? HOSTED_APP_CHANNEL_LABEL : null) ??
-  (import.meta.env.DEV ? "Dev" : "Alpha");
+  (import.meta.env.DEV ? "Dev" : "Beta");
 
 export const APP_STAGE_LABEL =
   !APP_HAS_UPDATE_TRACKS && resolvedStageLabel === "Nightly"
     ? import.meta.env.DEV
       ? "Dev"
-      : "Alpha"
+      : "Beta"
     : resolvedStageLabel;
 export const APP_DISPLAY_NAME =
   injectedDesktopAppBranding?.displayName ??

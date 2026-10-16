@@ -1,4 +1,4 @@
-import { PermissionUpdateNotice } from "./components/PermissionUpdateNotice";
+import { PermissionUpdateNotice } from "./features/connection/PermissionUpdateNotice";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
@@ -11,8 +11,8 @@ import { createStaticNavigation } from "@react-navigation/native";
 import { RegistryContext } from "@effect/atom-react";
 import { ComputerTaskHosts } from "./components/ComputerTaskHosts";
 import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
-import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { SshPasswordPromptHost } from "./components/SshPasswordPromptHost";
+import * as Dialog from "./components/ui/Dialog";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { SelfHostedNotificationsProvider } from "./features/agent-awareness/SelfHostedNotificationsProvider";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
@@ -23,9 +23,8 @@ import {
 } from "./features/settings/appearance/AppearancePreferencesProvider";
 import { RootStack } from "./Stack";
 import { appAtomRegistry } from "./state/atom-registry";
-import { OverlayPortalHost } from "./components/OverlayPortal";
+import { OverlayPortalHost } from "./components/ui/OverlayPortal";
 import { getAppScheme, getAppSchemeDev, getAppSchemePreview } from "./lib/branding";
-import { useThemeColor } from "./lib/useThemeColor";
 import { shouldHandleAppLink } from "./lib/appLinking";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
@@ -108,7 +107,7 @@ function AppContent() {
                   <IncomingShareProvider>
                     <Navigation linking={appLinking} theme={navigationTheme} />
                   </IncomingShareProvider>
-                  <ConfirmDialogHost />
+                  <Dialog.Host />
                   <SshPasswordPromptHost />
                   <ComputerTaskHosts />
                   <ThreadArrangementHost />

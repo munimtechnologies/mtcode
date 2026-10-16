@@ -1,5 +1,6 @@
+import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { ChatGptUsageSummary } from "./ChatGptUsageSummary";
-import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { EnvironmentId, USAGE_CONTRACT_VERSION, type UsageProviderKind } from "@t3tools/contracts";
 import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { cursorKeychainAccessEnvironments } from "@t3tools/client-runtime/state/usage";
@@ -30,7 +31,7 @@ import {
   type MergedUsage,
 } from "@t3tools/shared/usageMerge";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from "react-native";
+import { Platform, Pressable, RefreshControl, View } from "react-native";
 import Animated, {
   FadeIn,
   ReduceMotion,
@@ -41,8 +42,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SegmentedControl } from "../../components/SegmentedControl";
-import { AppText as Text } from "../../components/AppText";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
+import { AppText as Text } from "../../components/ui/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
@@ -54,8 +55,8 @@ import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
 import { UsageLimitsSection } from "./UsageLimitsPooled";
-import { ControlPillMenu } from "../../components/ControlPill";
-import { SymbolView } from "../../components/AppSymbol";
+import { Menu } from "../../components/ui/Menu";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import type { UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors, useUsageMixColors } from "./usageProviders";
 
@@ -253,7 +254,7 @@ export function UsageRouteScreen() {
   const environmentFilter = useMemo(
     () =>
       showEnvironmentFilter ? (
-        <ControlPillMenu
+        <Menu
           accessible
           accessibilityRole="button"
           accessibilityLabel="Filter usage environments"
@@ -271,7 +272,7 @@ export function UsageRouteScreen() {
           >
             <SymbolView name={filterIcon} size={22} tintColorClassName="accent-icon" />
           </Pressable>
-        </ControlPillMenu>
+        </Menu>
       ) : null,
     [showEnvironmentFilter, environmentActions, selectEnvironment, filterIcon],
   );
@@ -457,7 +458,7 @@ function UsageUpdating({
           pointerEvents="none"
           className="absolute right-4 top-4 h-5 max-w-[55%] flex-row items-center gap-1.5"
         >
-          <ActivityIndicator size="small" colorClassName="accent-adaptive-sky-600-400" />
+          <AppActivityIndicator size="small" colorClassName="accent-adaptive-sky-600-400" />
           <Text className="shrink text-sm text-adaptive-sky-600-400" numberOfLines={1}>
             {label}
           </Text>

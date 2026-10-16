@@ -1,8 +1,10 @@
-import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import * as Dialog from "../../components/ui/Dialog";
+import { Toolbar } from "../../components/ui/Toolbar";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAuth, useUser } from "@clerk/expo";
 import { useNavigation } from "@react-navigation/native";
 import { useCallback, useSyncExternalStore } from "react";
-import { Alert, Linking, Platform, View } from "react-native";
+import { Linking, Platform, View } from "react-native";
 import { deriveProjectGroupLabel } from "@t3tools/client-runtime/state/project-grouping";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,7 +15,7 @@ import {
 } from "../agent-awareness/selfHostedNotifications";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { getBrandMark, getProductName } from "../../lib/branding";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
@@ -46,13 +48,13 @@ export function SettingsRouteScreen() {
       ) : null}
       {Platform.OS === "ios" && layout.usesSplitView ? (
         <>
-          <NativeHeaderToolbar placement="left">
-            <NativeHeaderToolbar.Button
+          <Toolbar placement="left">
+            <Toolbar.Button
               accessibilityLabel="Go back"
               icon="chevron.left"
               onPress={() => navigation.goBack()}
             />
-          </NativeHeaderToolbar>
+          </Toolbar>
         </>
       ) : null}
       <SettingsEnvironmentFilterHeader closeSettings />
@@ -125,14 +127,14 @@ function LocalSettingsRouteScreen() {
   const handleNotificationsChange = useCallback((enabled: boolean) => {
     if (enabled) {
       void requestSelfHostedNotificationPermission().catch((error: unknown) => {
-        Alert.alert(
+        Dialog.alert(
           "Notifications unavailable",
           error instanceof Error ? error.message : "Could not enable notifications.",
         );
       });
       return;
     }
-    Alert.alert(
+    Dialog.alert(
       "Disable notifications",
       `Open Android settings to disable notifications for ${getProductName()}.`,
       [

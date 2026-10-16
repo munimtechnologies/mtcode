@@ -61,6 +61,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,
+  deviceHubReadiness,
   PlatformStatus,
   platformSetupStatus,
   deviceHubDescription,
@@ -624,6 +625,35 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
   );
 }
 
+function PullRequestLinksOpenInAppSetting() {
+  const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsRow
+      {...searchableSetting("pull-request-links-open-in-app")}
+      description="Clicking a pull request link opens it in T3 Code. Turn off to open pull request links like any other link, on GitHub or your git host."
+      resetAction={
+        openInApp ? null : (
+          <SettingResetButton
+            label="open pull requests in T3 Code"
+            onClick={() => updateSettings({ pullRequestLinksOpenInApp: true })}
+          />
+        )
+      }
+      control={
+        <Switch
+          checked={openInApp}
+          onCheckedChange={(checked) =>
+            updateSettings({ pullRequestLinksOpenInApp: Boolean(checked) })
+          }
+          aria-label="Open pull requests in T3 Code"
+        />
+      }
+    />
+  );
+}
+
 function DeviceIntegrationSettings() {
   const { search, environment: selected } = useSettingsScope();
   const settings = useScopedSettings();
@@ -664,7 +694,7 @@ function DeviceIntegrationControls({
   const [pending, setPending] = useState<
     "hub" | "check" | "agent" | "update-hub" | "update-agent" | null
   >(null);
-  const busy = state.hostStatus === "installing" || state.hostStatus === "starting";
+  const { ready: hubReady, busy } = deviceHubReadiness(state);
   const localPlatformsUnavailable = state.hosts.some(
     (host) => host.kind === "local" && !host.platforms.some((platform) => platform.available),
   );
@@ -674,7 +704,7 @@ function DeviceIntegrationControls({
   if (
     enabled &&
     !platformsRevealed &&
-    (state.hostStatus === "ready" || localPlatformsUnavailable) &&
+    (hubReady || localPlatformsUnavailable) &&
     pending !== "hub"
   ) {
     setPlatformsRevealed(true);
@@ -1556,6 +1586,7 @@ export function IntegrationsSettingsPanel() {
         ) : (
           previewDefaults
         )}
+        <PullRequestLinksOpenInAppSetting />
       </SettingsSection>
       <DeviceIntegrationSettings />
     </SettingsPageContainer>

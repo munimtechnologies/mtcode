@@ -1,3 +1,4 @@
+import { doctorCommand } from "./cli/doctor.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Console from "effect/Console";
@@ -18,6 +19,7 @@ import { connectCommand } from "./cli/connect.ts";
 import { tryLaunchDesktopApp } from "./cli/desktopLaunch.ts";
 import { findAliveServerRuntimeCandidates, pairCommand } from "./cli/pair.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
+import { keepOutboundFetchOnHttp1 } from "./outboundHttp.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { openLiveProjectIfPresent, projectCommand } from "./cli/project.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
@@ -149,6 +151,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       servicePreflightCommand,
       themeCommand,
       traceCommand,
+      doctorCommand,
       triageCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
@@ -157,6 +160,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
 export const cli = makeCli();
 
 export function runCli() {
+  keepOutboundFetchOnHttp1();
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(layerCliRuntime),

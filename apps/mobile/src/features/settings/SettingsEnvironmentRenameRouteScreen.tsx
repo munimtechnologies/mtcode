@@ -3,9 +3,10 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import * as Dialog from "../../components/ui/Dialog";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -38,7 +39,7 @@ export function SettingsEnvironmentRenameRouteScreen({
           candidate.environmentLabel === nextLabel,
       );
     if (duplicate) {
-      Alert.alert(
+      Dialog.alert(
         "Duplicate environment name",
         `Another environment is already named "${nextLabel}". Use this name for both environments?`,
         [
@@ -63,7 +64,7 @@ export function SettingsEnvironmentRenameRouteScreen({
       return;
     }
     const error = Cause.squash(result.cause);
-    Alert.alert(
+    Dialog.alert(
       "Could not rename environment",
       error instanceof Error ? error.message : "The environment name was not saved.",
     );
