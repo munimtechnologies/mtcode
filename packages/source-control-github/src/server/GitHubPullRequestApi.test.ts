@@ -53,6 +53,7 @@ const coreResponse = (pullRequest: Readonly<Record<string, unknown>> = {}) => ({
         autoMergeRequest: null,
         headRefName: "feature",
         baseRefName: "main",
+        baseRefOid: "def456",
         headRefOid: "abc123",
         state: "OPEN",
         createdAt: "2026-07-01T00:00:00Z",

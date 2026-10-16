@@ -750,6 +750,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         NSMicrophoneUsageDescription: "T3 Code uses the microphone for voice dictation.",
         NSLocalNetworkUsageDescription:
           "T3 Code connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
+        NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true,
         NSScreenCaptureUsageDescription:
           "T3 Code captures the active window when you use the window capture shortcut.",
         CFBundleDocumentTypes: [

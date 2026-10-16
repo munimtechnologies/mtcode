@@ -509,6 +509,7 @@ describe("pull request detail decoding", () => {
             closedAt: null,
             headRefName: "feat/detail",
             baseRefName: "main",
+            baseRefOid: "def456",
             headRefOid: "abc123",
             isCrossRepository: false,
             headRepositoryOwner: null,
