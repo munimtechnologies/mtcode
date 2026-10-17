@@ -55,7 +55,6 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   draftId?: DraftId;
   activeThreadTitle: string;
-  /** Drafts have no server thread yet, so the title carries no action menu. */
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
@@ -65,10 +64,6 @@ interface ChatHeaderProps {
   onOpenProjectSettings?: (() => void) | undefined;
 }
 
-/**
- * Rename commit rule shared with the sidebar's inline rename: trim, reject
- * empty (the caller toasts), and skip the mutation when nothing changed.
- */
 export function resolveRenameCommit(input: {
   readonly title: string;
   readonly originalTitle: string;
@@ -79,12 +74,10 @@ export function resolveRenameCommit(input: {
   return { action: "commit", title: trimmed };
 }
 
-// How long a click on the thread title waits before opening the action menu,
-// so a double-click-to-rename can cancel it first. Only the native desktop
-// menu needs this: it swallows input while open, so the wait must cover the
-// OS double-click interval. The browser fallback menu keeps seeing DOM
-// events (the second click dismisses it and dblclick still fires), so it
-// opens immediately.
+// How long a click on the thread title waits before opening the action menu, so
+// a double-click-to-rename can cancel it first. Only the native desktop menu
+// needs this: it swallows input while open, so the wait must cover the OS
+// double-click interval.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
 
 /**
@@ -156,9 +149,6 @@ export const ChatHeader = memo(function ChatHeader({
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  // Inline rename, keyed by thread: navigating away drops an in-progress
-  // rename instead of committing stale text. Cleared on thread change (not
-  // just hidden) so returning to the thread doesn't revive the old draft.
   const [renaming, setRenaming] = useState<{
     threadId: ThreadId;
     environmentId: EnvironmentId;
@@ -178,14 +168,10 @@ export const ChatHeader = memo(function ChatHeader({
     renaming.environmentId === activeThreadEnvironmentId
       ? renaming.title
       : null;
-  // Leaving rename swaps the input back for the title, which needs a fresh fit.
   const isRenamingTitle = renamingTitle !== null;
   useEffect(() => {
     const list = breadcrumbContainerRef.current?.querySelector("ol");
     if (!list || !parentThreadLink) return;
-    // Measure the untruncated labels, including a collapsed parent's hidden
-    // text, so expanding and collapsing never change the fit calculation.
-    // Width-capped labels (the project) never grow, so their overflow is skipped.
     const measure = () => {
       const gap = Number.parseFloat(getComputedStyle(list).columnGap) || 0;
       const width = Array.from(list.children).reduce(
@@ -267,8 +253,6 @@ export const ChatHeader = memo(function ChatHeader({
     clearTimeout(titleMenuTimerRef.current);
     titleMenuTimerRef.current = null;
   }, []);
-  // Drop a pending menu-open when the thread changes or the header unmounts,
-  // so it can never fire for a thread the user already left.
   useEffect(
     () => () => {
       cancelPendingTitleMenu();
@@ -283,18 +267,13 @@ export const ChatHeader = memo(function ChatHeader({
   }, [cancelPendingTitleMenu, openMenu]);
   const openMenuFromTitle = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
-      // The trailing click of a double-click belongs to rename, not the menu.
       if (isTrailingDoubleClick(event.detail)) return;
-      // Keyboard activation and the explicit chevron affordance can never be
-      // the first half of a double-click, so they open without waiting.
       const clickedChevron =
         (event.target as HTMLElement).closest("[data-thread-title-chevron]") !== null;
       if (event.detail === 0 || clickedChevron || window.desktopBridge === undefined) {
         openTitleMenuNow();
         return;
       }
-      // Stay pending long enough for dblclick to cancel the open before the
-      // native menu appears and swallows the second click.
       cancelPendingTitleMenu();
       titleMenuTimerRef.current = window.setTimeout(() => {
         titleMenuTimerRef.current = null;
@@ -306,7 +285,6 @@ export const ChatHeader = memo(function ChatHeader({
   const handleTitleDoubleClick = useCallback(
     (event: ReactMouseEvent) => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      // The chevron is the explicit menu affordance; only the title text renames.
       if ((event.target as HTMLElement).closest("[data-thread-title-chevron]") !== null) return;
       cancelPendingTitleMenu();
       closeMenu();

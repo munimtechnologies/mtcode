@@ -149,10 +149,7 @@ export function useSelectedThreadGitActions() {
   );
 
   // Shell updates replace the selected thread object many times per second while a
-  // turn streams, so key the refresh on primitives. The server publishes status after
-  // each turn finishes; this only seeds status when the selection or cwd changes, and
-  // again on reconnect because the server's cached status can miss changes made while
-  // the app was away.
+  // turn streams, so key the refresh on primitives.
   const selectedEnvironmentId = selectedThread?.environmentId ?? null;
   const selectedThreadId = selectedThread?.id ?? null;
   const hasSelectedThreadProject = selectedThreadProject !== null;

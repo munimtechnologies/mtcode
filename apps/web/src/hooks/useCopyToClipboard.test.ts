@@ -42,6 +42,11 @@ const hooks = vi.hoisted(() => {
         slots[index] = { effectCleanup: effect() };
       }
     },
+    // Layout effects without deps run on every render (useStableCallback relies on this).
+    useLayoutEffect(effect: () => void | (() => void)): void {
+      nextIndex();
+      effect();
+    },
     useRef<T>(initialValue: T): { current: T } {
       const index = nextIndex();
       if (slots[index] === undefined) {
@@ -71,6 +76,7 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useCallback: hooks.useCallback,
     useEffect: hooks.useEffect,
+    useLayoutEffect: hooks.useLayoutEffect,
     useRef: hooks.useRef,
     useState: hooks.useState,
   };
@@ -196,7 +202,6 @@ describe("writeTextToClipboard", () => {
       });
 
       const pendingCopy = writeTextToClipboard("remote command", "command");
-      // The fallback must run during the original user gesture, before any await.
       expect(execCommand).toHaveBeenCalledWith("copy");
       if (result === "success") {
         await expect(pendingCopy).resolves.toBe(true);

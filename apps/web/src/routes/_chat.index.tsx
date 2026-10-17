@@ -129,8 +129,6 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  // First-run routing to the welcome wizard happens in FirstRunGate at the
-  // root, before this route ever renders.
   return <NoProjectsHero />;
 }
 

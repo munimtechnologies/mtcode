@@ -1,17 +1,4 @@
 /**
- * webPreferences override applied to every preview `<webview>` element via
- * its `webpreferences="..."` attribute. Single source of truth so all guest
- * surfaces inherit the same security posture.
- *
- * Lives in its own electron-free module so the value is unit-testable
- * without importing `Manager.ts` (which transitively imports
- * `electron` and blows up under vitest).
- *
- * - `contextIsolation=false`: the picker preload needs to share `globalThis`
- *   with the page so react-grab/bippy can read the React DevTools hook
- *   (`__REACT_DEVTOOLS_GLOBAL_HOOK__`) and resolve component names. Without
- *   this every pick comes back with `componentName: null` even on dev React
- *   apps.
  * - `sandbox=true`: keeps the OS-level renderer sandbox enabled. Critical
  *   when paired with `contextIsolation=false` — without sandbox, the preload
  *   has full Node access (`require`, `fs`, `child_process`, ...) and that

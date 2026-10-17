@@ -159,7 +159,6 @@ const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 export { isWindowsCommandNotFound } from "@t3tools/provider-core/server/snapshotProbe";
 
-// Untraced: no attributes, and its time is the runProcessCore span. Errors fail that span.
 const collectText = Effect.fnUntraced(function* (input: {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -274,7 +273,6 @@ function finalizeRunProcess<R>(
   );
 }
 
-/** The executable name without its directory, recorded as `process.command` on process spans. */
 export const commandName = (command: string) => command.replace(/^.*[\\/]/, "");
 
 const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (

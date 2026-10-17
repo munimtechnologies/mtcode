@@ -150,20 +150,6 @@ index 4d135c4..dae4744 100644
      if #available(iOS 18.0, *) {
        LiveActivityBanner(context: context, nodes: nodes)
      } else if let node = nodes["banner"] as? [String: Any] {
-diff --git a/scripts/build-layout-registry.mjs b/scripts/build-layout-registry.mjs
-index d52a60e..fa9bd77 100644
---- a/scripts/build-layout-registry.mjs
-+++ b/scripts/build-layout-registry.mjs
-@@ -154,6 +154,8 @@ function createLayoutRegistry(expectedWidgets, capturedLayouts) {
-   return registry;
- }
- 
--if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-+// Compare real paths: pnpm exposes the package through a symlink, so the
-+// invoked path and import.meta.url differ while naming the same file.
-+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fs.realpathSync(__filename)) {
-   await main();
- }
 diff --git a/src/Widgets.types.ts b/src/Widgets.types.ts
 index 690d069..ffab6f3 100644
 --- a/src/Widgets.types.ts

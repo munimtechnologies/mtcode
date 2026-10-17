@@ -71,7 +71,6 @@ describe("attachmentStore", () => {
       "thread-1",
       chatAttachmentStableKey("message-1", 0, imageA),
     );
-    // Editing the queued message keeps its id, and the new upload is first in its batch.
     const edited = createDeterministicAttachmentId(
       "thread-1",
       chatAttachmentStableKey("message-1", 0, imageB),
@@ -143,8 +142,6 @@ describe("attachmentStore", () => {
     expect(attachmentFileExtension("report.PDF")).toBe(".pdf");
     expect(attachmentFileExtension("report")).toBe(".bin");
     expect(attachmentFileExtension("report.extensiontoolong")).toBe(".bin");
-    // ".part" is the in-flight upload suffix; storing it would make the file
-    // look like a stale partial to the sweep.
     expect(attachmentFileExtension("archive.part")).toBe(".bin");
     expect(createAttachmentId("x".repeat(80), ".abcdefghij")?.length).toBeLessThanOrEqual(128);
   });

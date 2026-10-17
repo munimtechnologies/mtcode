@@ -27,9 +27,6 @@ import {
   serializeAssistantCitation,
 } from "@t3tools/shared/assistantCitations";
 
-// The composer draft's `modelSelectionByProvider` and
-// `stickyModelSelectionByProvider` maps are keyed by `ProviderInstanceId`
-// in production; these aliases keep the legacy-key migration tests concise.
 const CODEX_INSTANCE = ProviderInstanceId.make("codex");
 const CODEX_SECONDARY_INSTANCE = ProviderInstanceId.make("codex_secondary");
 const CLAUDE_AGENT_INSTANCE = ProviderInstanceId.make("claudeAgent");
@@ -580,8 +577,6 @@ describe("composerDraftStore file attachments", () => {
 
   it("persists a pending file as a needs-reattach marker instead of dropping it", () => {
     const store = useComposerDraftStore.getState();
-    // No setFileUpload: the upload never finished, so there is no attachment
-    // id and the File handle cannot serialize.
     store.addFiles(threadRef, [makeFile("file-pending")]);
 
     const persistApi = useComposerDraftStore.persist as unknown as {
@@ -719,14 +714,10 @@ describe("composerDraftStore file attachments", () => {
 
   it("replaces a needs-reattach marker when the same file is picked again", () => {
     const store = useComposerDraftStore.getState();
-    // A hydrated marker: same metadata as the original pick, no bytes and no
-    // server-side upload.
     const marker: ComposerFileAttachment = { ...makeFile("file-marker"), file: null };
     store.addFiles(threadRef, [marker]);
     expect(store.getComposerDraft(threadRef)?.files.every(composerFileNeedsReattach)).toBe(true);
 
-    // Following the "Attach again" instruction produces a fresh id with the
-    // exact metadata the dedup key hashes.
     const repicked = makeFile("file-repicked");
     store.addFiles(threadRef, [repicked]);
 
@@ -770,10 +761,6 @@ describe("composerDraftStore file attachments", () => {
     store.addFiles(threadRef, [marker]);
     expect(store.getComposerDraft(threadRef)?.files.every(composerFileNeedsReattach)).toBe(true);
 
-    // A stash restore carries a finished server-side upload instead of bytes.
-    // Matching metadata must replace the marker, not be dropped as a
-    // duplicate: the marker cannot send, and the restored ids are the only
-    // valid copy.
     const restored: ComposerFileAttachment = {
       ...makeFile("file-restored"),
       file: null,
@@ -1694,7 +1681,6 @@ describe("composerDraftStore project draft thread mapping", () => {
   it("keeps a draft with an open page when remapping a project to a new draft thread", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
-    // A link another app opened: the composer is empty, but the page is not.
     applyPreviewServerSnapshot(scopeThreadRef(TEST_ENVIRONMENT_ID, threadId), {
       threadId,
       tabId: "tab-link",
@@ -1707,7 +1693,6 @@ describe("composerDraftStore project draft thread mapping", () => {
       store.setProjectDraftThreadId(projectRef, otherDraftId, { threadId: otherThreadId });
 
       expect(useComposerDraftStore.getState().getDraftThread(draftId)?.threadId).toBe(threadId);
-      // It survives a reload too, so the page is still there when the app comes back.
       const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
       expect(persisted.draftThreadsByThreadKey[draftId]?.threadId).toBe(threadId);
     } finally {
@@ -1722,12 +1707,9 @@ describe("composerDraftStore project draft thread mapping", () => {
 
     store.setProjectDraftThreadId(projectRef, otherDraftId, { threadId: otherThreadId });
 
-    // The mapping moved to the fresh draft...
     expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)?.threadId).toBe(
       otherThreadId,
     );
-    // ...but the invested draft survives with its content for the sidebar
-    // draft rows to surface.
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.threadId).toBe(threadId);
     expect(draftByKey(draftId)?.prompt).toBe("keep me around");
   });
@@ -1736,8 +1718,6 @@ describe("composerDraftStore project draft thread mapping", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
     store.setPrompt(draftId, "invested");
-    // The remap leaves the invested draft alive unmapped; project removal
-    // must still sweep it, or its sidebar row outlives the project.
     store.setProjectDraftThreadId(projectRef, otherDraftId, { threadId: otherThreadId });
 
     store.clearProjectDraftThreadId(projectRef);
@@ -2216,7 +2196,6 @@ describe("composerDraftStore modelSelection", () => {
     });
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
 
-    // Last writer defines intent: a later seed clears the marker.
     store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"), {
       replaceOptions: true,
     });
@@ -2231,11 +2210,8 @@ describe("composerDraftStore modelSelection", () => {
         .setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"), {
           explicit: true,
         });
-      // Land the debounced persist write.
       await vi.advanceTimersByTimeAsync(300);
 
-      // Hydrate from the same storage the store persists into and verify the
-      // marker survives the partialize → decode → merge path.
       resetComposerDraftStore();
       await useComposerDraftStore.persist.rehydrate();
       expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
@@ -2434,7 +2410,6 @@ describe("composerDraftStore modelSelection", () => {
   it("does not clear other provider options when setting options for a single provider", () => {
     const store = useComposerDraftStore.getState();
 
-    // Set options for both providers
     store.setModelOptions(
       threadRef,
       providerModelOptions({
@@ -2443,7 +2418,6 @@ describe("composerDraftStore modelSelection", () => {
       }),
     );
 
-    // Now set options for only codex — claudeAgent should be untouched
     store.setModelOptions(threadRef, providerModelOptions({ codex: { reasoningEffort: "xhigh" } }));
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
@@ -3151,10 +3125,6 @@ describe("composerDraftStore runtime and interaction settings", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// createDeferredStorage
-// ---------------------------------------------------------------------------
-
 function createMockStorage() {
   const store = new Map<string, string>();
   return {
@@ -3305,7 +3275,6 @@ describe("createDeferredStorage", () => {
     storage.flush();
     expect(base.setItem).toHaveBeenCalledWith("key", "s:v1");
 
-    // Timer should be cancelled; no duplicate write.
     vi.advanceTimersByTime(300);
     expect(serialize).toHaveBeenCalledTimes(1);
     expect(base.setItem).toHaveBeenCalledTimes(1);
@@ -3382,7 +3351,6 @@ describe("composerDraftStore inline context references", () => {
     store.setPrompt(threadRef, "look");
     store.addReviewComment(threadRef, reviewComment);
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(`look ${reviewLink} `);
-    // Re-adding the same comment replaces the record without a second link.
     store.addReviewComment(threadRef, { ...reviewComment, text: "edited" });
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(`look ${reviewLink} `);
     store.removeReviewComment(threadRef, "rc-1");

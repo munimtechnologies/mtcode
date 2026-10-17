@@ -201,7 +201,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
   options: {
     readonly environment?: NodeJS.ProcessEnv;
     readonly modelCatalog?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
-    /** Test hook. */
     readonly createHost?: typeof createMuseSdkHost;
   } = {},
 ) {
@@ -219,7 +218,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     }
     const selectedModel = input.modelSelection.model.trim();
     const models = yield* modelCatalog;
-    // "default" is the catalog's default model, as in chat. Without one, Muse picks.
     const catalogModel =
       selectedModel && selectedModel !== MUSE_DEFAULT_MODEL
         ? models.find((model) => model.slug === selectedModel)

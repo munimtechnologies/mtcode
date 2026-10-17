@@ -96,9 +96,7 @@ function kindLabel(kind: ServerProviderUsageWindow["kind"]): string {
         : "Other";
 }
 
-// ---------------------------------------------------------------------------
 // auth.json
-// ---------------------------------------------------------------------------
 
 export type OpenCodeAuthCredential =
   | {
@@ -164,9 +162,7 @@ export function resolveOpenCodeAuthPath(input: {
   return path.join(dataDir, "opencode", "auth.json");
 }
 
-// ---------------------------------------------------------------------------
 // ChatGPT (`wham/usage`)
-// ---------------------------------------------------------------------------
 
 /**
  * The `wham/usage` response Codex reads for `account/rateLimits/read`:
@@ -202,9 +198,7 @@ export function chatGptUsageToWindows(payload: unknown): ReadonlyArray<ServerPro
   return windows;
 }
 
-// ---------------------------------------------------------------------------
 // Claude (`api/oauth/usage`)
-// ---------------------------------------------------------------------------
 
 /**
  * The `api/oauth/usage` response Claude Code's `get_usage` reads: `five_hour`
@@ -238,9 +232,7 @@ export function claudeOAuthUsageToWindows(
   return windows;
 }
 
-// ---------------------------------------------------------------------------
 // Probe
-// ---------------------------------------------------------------------------
 
 interface SubscriptionSource {
   readonly request: HttpClientRequest.HttpClientRequest;

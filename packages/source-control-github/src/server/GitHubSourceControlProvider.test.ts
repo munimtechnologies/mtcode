@@ -171,7 +171,6 @@ function harness(input: {
   >;
   readonly localBranches?: ReadonlyArray<string>;
   readonly resolved?: string;
-  /** Fails the local branch listing, the first git read a checkout makes. */
   readonly gitFailure?: unknown;
 }) {
   const git: Array<readonly [string, unknown]> = [];
@@ -314,7 +313,6 @@ describe("GitHubSourceControlProvider repository resolution", () => {
     return Effect.gen(function* () {
       const gh = yield* GitHubSourceControlProvider.make;
       yield* gh.getDefaultBranch({ cwd: "/repo" });
-      // A provider's host hint for the same alias (`github` here) resolves the same way.
       yield* gh.getDefaultBranch({ cwd: "/repo", context: githubContext("github") });
       assert.deepStrictEqual(hosts, ["github.com repos/acme/web", "github.com repos/acme/web"]);
     }).pipe(Effect.provide(layer));
@@ -381,7 +379,6 @@ describe("GitHubSourceControlProvider change request lookups by head", () => {
             context: githubContext("github.com"),
           })
           .pipe(Effect.forkChild);
-      // Each branch's own git reads come first, so a sweep's lookups arrive spread out.
       const firstLookup = yield* lookup("feature/a");
       yield* TestClock.adjust("200 millis");
       const secondLookup = yield* lookup("feature/b");
@@ -614,7 +611,6 @@ describe("GitHubSourceControlProvider writes", () => {
       });
       assert.strictEqual(requests[0]!.method, "POST");
       assert.strictEqual(requests[0]!.path, "repos/acme/web/pulls");
-      // A user's own write, so the background's reserve is not held against it.
       assert.strictEqual(requests[0]!.allowReserve, true);
       assert.deepStrictEqual(requests[0]!.body, {
         base: "main",
@@ -629,7 +625,7 @@ describe("GitHubSourceControlProvider writes", () => {
   // MT Code: the "create pull requests as draft" setting rides on the REST body.
   for (const draft of [undefined, false, true]) {
     it.effect(`creates GitHub pull requests with draft=${draft}`, () => {
-      const requests: Array<GitHubApi.GitHubRestInput> = [];
+      const requests: Array<GitHubRest.GitHubRestInput> = [];
       const { layer } = harness({
         remotes: remotesOutput(["origin", "git@github.com:acme/web.git"]),
         api: {
@@ -731,7 +727,6 @@ describe("GitHubSourceControlProvider writes", () => {
         "code.example.test GET user",
         "code.example.test GET repos/me/notes",
       ]);
-      // Malformed names are still refused before any request.
       for (const repository of ["me/", "/notes", "a/b/c/d", "", "two words"]) {
         const error = yield* Effect.flip(gh.getRepositoryCloneUrls({ cwd: "/repo", repository }));
         assert.include(error.message, "Repositories are named owner/name.");
@@ -792,7 +787,6 @@ describe("GitHubSourceControlProvider.checkoutChangeRequest", () => {
     return Effect.gen(function* () {
       const gh = yield* GitHubSourceControlProvider.make;
       yield* Effect.flip(gh.checkoutChangeRequest({ cwd: "/repo", reference: "6", force: true }));
-      // Nothing touched the local branches: `main` must not be reset to the fork's commit.
       assert.deepStrictEqual(git, []);
     }).pipe(Effect.provide(layer));
   });

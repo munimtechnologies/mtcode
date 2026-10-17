@@ -219,8 +219,6 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
-  // Chromium pastes as plain text for the accelerator on its own. Dispatching
-  // the action as well injects a second paste, which doubles the pasted text.
   it.effect("leaves the accelerator to Chromium instead of injecting a paste", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
@@ -250,9 +248,6 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
-  // Zoom must route through DesktopWindow.zoomMain instead of the Electron
-  // zoom roles: the roles zoom whichever webContents has focus, which breaks
-  // app zoom while an embedded preview WebContentsView holds focus.
   it.effect("routes View menu zoom to the main window instead of zoom roles", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();

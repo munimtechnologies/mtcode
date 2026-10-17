@@ -409,7 +409,6 @@ const makeTestPreviewWebContents = (
   } as unknown as TestPreviewWebContents;
 };
 
-/** Two ready tabs (41, 42) sharing one window, so they contend for the single display-media slot. */
 const setupRecordingRaceTabs = (manager: PreviewManager.PreviewManager["Service"]) =>
   Effect.gen(function* () {
     const capturePage = vi.fn(async () => ({
@@ -826,7 +825,6 @@ describe("PreviewManager", () => {
           };
           beforeInput({ preventDefault } as never, input as never);
           expect(contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false);
-          // Releasing Command must not disable native fallback for the pending paste.
           beforeInput(
             { preventDefault } as never,
             { ...input, type: "keyUp", key: "Meta", meta: false } as never,
@@ -836,7 +834,6 @@ describe("PreviewManager", () => {
           beforeInput({ preventDefault } as never, { ...input, key: "w" } as never);
           expect(contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true);
 
-          // An injected paste in an unfocused guest cannot edit the active renderer.
           getFocusedWebContents.mockReturnValue(null);
           beforeInput({ preventDefault } as never, input as never);
           expect(contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true);
@@ -1583,8 +1580,6 @@ describe("PreviewManager", () => {
         expect(states.at(-1)?.zoomFactor).toBe(1);
         expect(setZoomFactor).toHaveBeenCalledWith(1);
 
-        // An app zoom leaves the guest reporting the inherited level. Navigating
-        // must not adopt it as the preview's zoom.
         effectiveZoom = 0.8;
         url = "https://example.com/after-app-zoom";
         listeners.get("did-navigate")?.();
@@ -1597,7 +1592,6 @@ describe("PreviewManager", () => {
         });
         expect(states.at(-1)?.zoomFactor).toBe(1);
 
-        // Only the preview's own zoom controls move it.
         yield* manager.zoomIn("tab_zoom");
         expect(setZoomFactor).toHaveBeenCalledWith(1.1);
         expect(states.at(-1)?.zoomFactor).toBe(1.1);
@@ -1690,9 +1684,6 @@ describe("PreviewManager", () => {
     ),
   );
 
-  // did-attach and dom-ready both re-register the guest that is already
-  // attached, and a guest that just inherited the app window's zoom needs its
-  // own back — without that round trip republishing tab state.
   effectIt.effect("re-asserts the tab's zoom when the active guest registers again", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -1955,8 +1946,6 @@ describe("PreviewManager", () => {
   effectIt.effect("sets the opaque base as soon as a guest attaches", () =>
     withManager((manager) =>
       Effect.gen(function* () {
-        // The tab's first document can paint before the renderer registers the
-        // guest, so the opaque base has to be the first command on attach.
         const claimed = makeAttachingGuest(44);
         fromId.mockReturnValue(claimed.wc);
         yield* manager.prepareWebview(claimed.wc);
@@ -1974,7 +1963,6 @@ describe("PreviewManager", () => {
           features: [{ name: "prefers-color-scheme", value: "dark" }],
         });
 
-        // A guest destroyed before any tab claims it releases its session.
         const unclaimed = makeAttachingGuest(45);
         yield* manager.prepareWebview(unclaimed.wc);
         expect(unclaimed.attach).toHaveBeenCalledTimes(1);
@@ -2133,7 +2121,6 @@ describe("PreviewManager", () => {
         });
         const exit = yield* manager.setAudioMuted("tab_audio_fail", true).pipe(Effect.exit);
 
-        // Reporting success would draw the tab as muted while it keeps playing.
         expect(Exit.isFailure(exit)).toBe(true);
         expect(states.at(-1)?.audioMuted).toBe(false);
       }),
@@ -2151,15 +2138,12 @@ describe("PreviewManager", () => {
         yield* manager.setAudioMuted("tab_audio_attach_fail", true);
 
         const replacement = makeAudioWebContents(43);
-        // Fails the post-attach settle, not the pre-publish apply.
         replacement.setAudioMuted.mockImplementationOnce(() => undefined);
         replacement.setAudioMuted.mockImplementationOnce(() => {
           throw new Error("guest went away");
         });
         fromId.mockReturnValue(replacement.wc);
 
-        // Reconciliation is best-effort: a guest dying mid-attach must not fail
-        // the registration it was attaching for.
         const exit = yield* manager.registerWebview("tab_audio_attach_fail", 43).pipe(Effect.exit);
         expect(Exit.isSuccess(exit)).toBe(true);
       }),
@@ -2282,13 +2266,9 @@ describe("PreviewManager", () => {
         yield* manager.navigate("tab_audio_nav", "https://example.com/next");
         yield* Effect.yieldNow;
 
-        // navigate runs before loadURL swaps the document, so the old page can
-        // still be playing. Dropping audibility here would lose the speaker
-        // with no transition left to bring it back.
         expect(states.at(-1)?.audioMuted).toBe(true);
         expect(states.at(-1)?.audible).toBe(true);
 
-        // Chromium reports the real stop once the new document takes over.
         guest.emitAudioState(false);
         yield* Effect.yieldNow;
         expect(states.at(-1)?.audible).toBe(false);
@@ -2469,7 +2449,6 @@ describe("PreviewManager", () => {
     withManager((manager) =>
       Effect.gen(function* () {
         const preview = makeFaviconWebContents();
-        // The frame tree is still loading the iframe; the main frame is done.
         Object.assign(preview.webContents, { isLoading: () => true });
         fromId.mockReturnValue(preview.webContents);
         const states: PreviewManager.PreviewTabState[] = [];
@@ -2561,7 +2540,6 @@ describe("PreviewManager", () => {
         expect(Exit.isSuccess(retriedExit)).toBe(true);
         expect(capturePage).toHaveBeenCalledTimes(3);
 
-        // A persistent failure still surfaces once the retries are spent.
         capturePage.mockClear();
         const captureCause = new Error("capture failed");
         capturePage.mockRejectedValue(captureCause);
@@ -2649,7 +2627,6 @@ describe("PreviewManager", () => {
         } as never);
 
         yield* manager.startRecording("tab_capture_throttling_1");
-        // The first renderer takes its grant, freeing the arm slot for the second tab.
         host.displayMediaHandler()?.({ frame: host.mainFrame }, () => {});
         yield* manager.startRecording("tab_capture_throttling_2");
         expect(setBackgroundThrottling.mock.calls).toEqual([[false]]);
@@ -2965,7 +2942,6 @@ describe("PreviewManager", () => {
       const manager = yield* PreviewManager.PreviewManager;
       yield* manager.createTab("tab_1", { serverTab });
       yield* manager.registerWebview("tab_1", 42);
-      // The debugger attaches in the background; the server hears it here.
       expect(yield* nextType).toBe("attached");
       yield* manager.closeTab("tab_1");
       expect(yield* nextType).toBe("detached");
@@ -2988,7 +2964,6 @@ describe("PreviewManager", () => {
         const fiber = yield* Effect.exit(manager.captureScreenshot("tab_1")).pipe(
           Effect.forkChild({ startImmediately: true }),
         );
-        // Let the rejection schedule its retry before replacing the guest.
         yield* TestClock.adjust(60);
         expect(capturePage).toHaveBeenCalledTimes(1);
         fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 43));
@@ -3049,7 +3024,6 @@ describe("PreviewManager", () => {
         }));
         const firstSendCommand = vi.fn(async () => undefined);
         const secondSendCommand = vi.fn(async () => undefined);
-        // Both webviews live in the same window, so they share one display-media handler.
         const host = makeTestHostWebContents();
         const makeWebContents = (
           id: number,
@@ -3153,8 +3127,6 @@ describe("PreviewManager", () => {
     ),
   );
 
-  // Runs on the real clock: an earlier queueing design only settled under TestClock and stalled the
-  // losing start forever in the desktop app.
   effectIt.live("settles both starts when two tabs race for the capture stream", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -3169,7 +3141,6 @@ describe("PreviewManager", () => {
         );
 
         const [exitA, exitB] = exits;
-        // Exactly one start owns the stream; the other fails fast instead of hanging.
         expect(exits.filter(Exit.isSuccess)).toHaveLength(1);
         const loserExit = Exit.isSuccess(exitA) ? exitB : exitA;
         if (Exit.isSuccess(loserExit)) return;
@@ -3177,7 +3148,6 @@ describe("PreviewManager", () => {
           _tag: "PreviewRecordingArmConflictError",
         });
 
-        // The single grant goes to the tab that actually won the slot, never the other one.
         takeGrant();
         expect(grants).toEqual([{ video: { routingId: Exit.isSuccess(exitA) ? 41 : 42 } }]);
         expect(host.session.setDisplayMediaRequestHandler).toHaveBeenCalledOnce();
@@ -3199,7 +3169,6 @@ describe("PreviewManager", () => {
           armedTabId: "tab_race_a",
         });
 
-        // Nothing ever captured the armed tab, so the slot goes stale and stops blocking starts.
         yield* TestClock.adjust(10_000);
         yield* manager.startRecording("tab_race_b");
         takeGrant();
@@ -3218,7 +3187,6 @@ describe("PreviewManager", () => {
 
         yield* manager.startRecording("tab_race_a");
         yield* TestClock.adjust(10_000);
-        // The handler cannot read a clock, so the expiry fiber must have dropped the frame.
         takeGrant();
         expect(grants).toEqual([{}]);
 
@@ -3331,7 +3299,6 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_cursor_reload", options);
         for (const recording of [true, false]) {
           if (!recording) yield* manager.stopRecording("tab_cursor_reload");
-          // A new document has lost the previous preload's cursor overlay.
           cursorActive = false;
           const restored = new Promise<void>((resolve) => {
             cursorUpdated = resolve;
@@ -3435,7 +3402,6 @@ describe("PreviewManager", () => {
         yield* manager.startRecording("tab_recording_warmup_failure");
         expect(capturePage).toHaveBeenCalledTimes(2);
 
-        // The armed tab answers exactly one display-media request, then further requests are denied.
         const handler = host.displayMediaHandler();
         const streams: Array<{ video?: unknown }> = [];
         handler?.({ frame: host.mainFrame }, (value) => streams.push(value));
@@ -3938,10 +3904,7 @@ describe("PreviewManager", () => {
         }));
         fromId.mockReturnValue(makeTestPreviewWebContents(capturePage));
         const { pictureInPictureWindow: initializingWindow } = makeTestPictureInPictureWindow(
-          () =>
-            new Promise<void>(() => {
-              // Simulate a renderer load that never settles.
-            }),
+          () => new Promise<void>(() => {}),
         );
         const { pictureInPictureWindow: reopenedWindow } = makeTestPictureInPictureWindow();
         browserWindowConstructor
@@ -4238,7 +4201,6 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           once: vi.fn(),
           off: vi.fn(),
-          // A wedged compositor leaves `capturePage` pending forever.
           capturePage: vi.fn(() => new Promise(() => {})),
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
@@ -4287,8 +4249,6 @@ describe("PreviewManager", () => {
         expect(pick.pollUnsafe()).toBeUndefined();
 
         yield* TestClock.adjust("6 seconds");
-        // The pick has to give up on the crop rather than strand the renderer,
-        // which would leave the composer stuck on "Capturing…".
         const result = yield* Fiber.join(pick);
         expect(result?.annotation.screenshot).toBeNull();
         expect(result?.screenshotFailed).toBe(true);
@@ -4417,18 +4377,14 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_1", 42);
         const firstPick = yield* manager.pickElement("tab_1").pipe(Effect.forkChild);
         yield* Effect.yieldNow;
-        // The first pick submits and its crop hangs.
         onPicked?.({}, annotation, null, "send");
         yield* Effect.yieldNow;
 
-        // A second pick on the same tab replaces the first, which resumes null.
         const secondPick = yield* manager.pickElement("tab_1").pipe(Effect.forkChild);
         yield* Effect.yieldNow;
         expect(yield* Fiber.join(firstPick)).toBeNull();
         webviewSend.mockClear();
 
-        // The first pick's crop times out while the second pick is live. It
-        // must not signal the overlay, which would tear down the second pick.
         yield* TestClock.adjust("6 seconds");
         yield* Effect.yieldNow;
         expect(webviewSend).not.toHaveBeenCalledWith("preview:annotation-captured");
@@ -4499,7 +4455,6 @@ describe("PreviewManager", () => {
         yield* Effect.yieldNow;
         expect(goForward).toHaveBeenCalledOnce();
 
-        // Ignores unknown payloads and never navigates when history is exhausted.
         mouseNavigate?.({}, { direction: "sideways" });
         canGoBack = false;
         mouseNavigate?.({}, { direction: "back" });

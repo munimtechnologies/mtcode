@@ -17,7 +17,8 @@
       "vitest": { "entry": [".github/**/*.test.cjs"] },
     },
     "scripts": {
-      // Knip loads its preprocessor through a CLI option; native verification runs directly.
+      // Knip loads its preprocessor through a CLI option; native verification and
+      // worktree setup (from t3.json) run directly.
       // .mcp.json runs run-desktop-mcp.ts; `fetch:desktop-mcp` runs the fetcher.
       "entry": [
         "knip-schemas.ts",
@@ -26,6 +27,8 @@
         "run-desktop-mcp.ts",
         "fetch-munim-computer-use.ts",
       ],
+      // The `t3` npm package's files: copied into the package, never imported.
+      "ignore": ["npm-launcher/**"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.

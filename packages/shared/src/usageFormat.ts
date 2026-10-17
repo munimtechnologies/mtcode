@@ -40,10 +40,6 @@ export function formatCount(value: number): string {
   return INTEGER.format(Math.round(value));
 }
 
-/**
- * Compacts a token count to three significant figures with a unit suffix, so
- * columns of numbers line up at a glance (`19.9B`, `76.7M`, `804K`).
- */
 export function formatTokens(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 1e12) return `${trim(value / 1e12)}T`;
@@ -75,7 +71,6 @@ export function formatUsageContractMismatch(
     : `This client is older than the server on ${environmentLabel}; its usage is excluded from totals.`;
 }
 
-/** `2026-08-07` to `Aug 7`. */
 export function formatDayShort(day: string): string {
   const [year, month, dayOfMonth] = day.split("-").map((part) => Number(part));
   if (year === undefined || month === undefined || dayOfMonth === undefined) return day;
@@ -96,7 +91,6 @@ export function formatDayShort(day: string): string {
   return `${MONTHS[month - 1] ?? ""} ${dayOfMonth}`;
 }
 
-/** Inclusive day list between two `YYYY-MM-DD` bounds. */
 export function enumerateDays(sinceDay: string, untilDay: string): readonly string[] {
   const days: string[] = [];
   const start = Date.parse(`${sinceDay}T00:00:00Z`);
@@ -128,7 +122,6 @@ function dateTimeFormatter(
   return formatter;
 }
 
-/** Every fixed-duration bucket start in an hourly rolling window. */
 export function enumerateHourStarts(sinceTime: string, untilTime: string): readonly string[] {
   const starts: string[] = [];
   const start = Date.parse(sinceTime);
@@ -142,10 +135,8 @@ export function enumerateHourStarts(sinceTime: string, untilTime: string): reado
 }
 
 /**
- * A rolling bucket start rendered in the viewer's requested time zone.
- *
- * Repeated wall-clock hours during a fall-back transition include their short
- * zone name so the two distinct buckets remain distinguishable.
+ * Repeated wall-clock hours during a fall-back transition include their short zone name so the
+ * two distinct buckets remain distinguishable.
  */
 export function formatHourShort(hourStart: string, timeZone?: string): string {
   const instant = new Date(hourStart);
@@ -176,7 +167,6 @@ export function formatHourShort(hourStart: string, timeZone?: string): string {
   }).format(instant);
 }
 
-/** `2026-08-11T14:37:00Z` to `Aug 11, 2 PM` in the requested zone. */
 export function formatDateTimeShort(instant: string, timeZone?: string): string {
   const date = new Date(instant);
   if (Number.isNaN(date.getTime())) return instant;
@@ -188,7 +178,6 @@ export function formatDateTimeShort(instant: string, timeZone?: string): string 
   }).format(date);
 }
 
-/** An hourly tooltip label relative to the rolling window's end date. */
 export function formatRelativeHourShort(
   hourStart: string,
   relativeTo: string,
@@ -249,7 +238,6 @@ export function makeWindow(
       day: "2-digit",
     });
   } catch {
-    // An unknown zone should degrade to UTC rather than crash the page.
     timeZone = "UTC";
     format = new Intl.DateTimeFormat("en-CA", {
       timeZone: "UTC",
@@ -260,9 +248,6 @@ export function makeWindow(
   }
   const untilDay = format.format(now);
   if (resolution === "hour") {
-    // Minute-aligned bounds keep labels readable while still representing an
-    // exact rolling 24-hour duration. Fixed-duration buckets remain correct
-    // across offset changes and daylight-saving transitions.
     const untilTimeMs = Math.floor(now.getTime() / 60_000) * 60_000;
     const sinceTimeMs = untilTimeMs - 24 * HOUR_MS;
     const sinceTime = new Date(sinceTimeMs);

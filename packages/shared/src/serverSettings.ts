@@ -35,7 +35,6 @@ import {
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 const decodeServerSettingsJson = Schema.decodeUnknownOption(ServerSettingsJson);
 
-/** @deprecated Read `resolveProjectSettings(...).settings.enableAgentBrowserAccess`. */
 export function resolveProjectAgentBrowserAccess(
   settings: Pick<
     ServerSettings,
@@ -50,7 +49,6 @@ export function resolveProjectAgentBrowserAccess(
   );
 }
 
-/** @deprecated Read `resolveProjectSettings(...).settings.defaultAutoPull`. */
 export function resolveProjectAutoPull(
   settings: Pick<
     ServerSettings,
@@ -59,7 +57,6 @@ export function resolveProjectAutoPull(
   projectId: ProjectId,
   legacyAutoPull: boolean | undefined,
 ): boolean {
-  // Existing opt-ins stay enabled until explicitly overridden or reset.
   return (
     settings.projectSettingsOverrides[projectId]?.defaultAutoPull ??
     settings.projectAutoPullOverrides[projectId] ??
@@ -113,16 +110,6 @@ const TEXT_GENERATION_FALLBACK_DRIVERS = [
 ].map((driver) => ProviderDriverKind.make(driver));
 
 /**
- * The text generation model on the first instance `isEnabled` accepts: the
- * built-in default instances in preference order, then, when
- * `includeConfiguredInstances` is set, configured instances of those
- * drivers. `null` when none is.
- *
- * The model is the driver's cheap default, unless `defaultModelSelection`
- * (the thread default) is one of that instance's custom models. A custom
- * model usually means a backend that may refuse the built-in default, and
- * the thread default, with its options, is known to work there.
- *
  * `includeConfiguredInstances` is for the project-scoped caller only: a
  * project that disabled every built-in instance should still be able to
  * fall back to one it configured itself. The machine-level caller leaves it
@@ -169,12 +156,6 @@ export function fallbackTextGenerationModelSelection(
   };
 }
 
-/**
- * `projectId` has no default: a caller that forgets it would otherwise fall
- * back to the machine's own writer choice, silently ignoring a project that
- * turned the writer's instance off. Pass `null` explicitly outside a
- * project's scope.
- */
 export function resolveSourceControlWriterModelSelection(
   settings: ServerSettings,
   providers: ReadonlyArray<ServerProvider> | undefined,
@@ -199,10 +180,6 @@ export function resolveSourceControlWriterModelSelection(
     : settings.textGenerationModelSelection;
 }
 
-/**
- * The model that writes review guides: its own setting when that provider can still run it,
- * otherwise whatever writes source control text.
- */
 export function resolveReviewGuideModelSelection(
   settings: ServerSettings,
   providers: ReadonlyArray<ServerProvider> | undefined,
@@ -287,7 +264,6 @@ function mergeModelSelectionOptionsById(input: {
   return [...merged.entries()].map(([id, value]) => ({ id, value }));
 }
 
-/** Upsert each patched entry; `null` removes it. Entries the patch omits are untouched. */
 function mergeSettingsEntries<Value>(
   current: Readonly<Record<string, Value>>,
   patch: Readonly<Record<string, Value | null>>,
@@ -324,10 +300,8 @@ export function resolveNewThreadRuntimeMode(
  * `projectSettingsOverrides` entries otherwise replace whole (see the field's
  * doc comment in contracts), but `providerInstances` was added after clients
  * already round-trip a project's entry on every edit. A client built before
- * that addition sends an entry that never mentions the key, and a whole
- * replace would silently wipe it. When an incoming entry omits the key, keep
- * what is stored; a client that means to clear every provider override for
- * the project says so explicitly with `providerInstances: {}`.
+ * that addition sends an entry that never mentions the key, and a whole replace
+ * would silently wipe it.
  */
 function mergeProjectSettingsOverridesPatch(
   current: Readonly<Record<string, ProjectSettingsOverrides>>,
@@ -350,11 +324,6 @@ function mergeProjectSettingsOverridesPatch(
   return Object.fromEntries(next);
 }
 
-/**
- * Derived views of `projectSettingsOverrides` for clients that still read
- * the legacy per-key maps. Recomputed on every patch and load so they
- * cannot drift from the generic record.
- */
 export function deriveLegacyProjectOverrides(
   settings: Pick<ServerSettings, "projectSettingsOverrides">,
 ): Pick<
@@ -378,12 +347,6 @@ export function deriveLegacyProjectOverrides(
   return { projectAgentBrowserAccessOverrides, projectAutoPullOverrides, projectScriptOverrides };
 }
 
-/**
- * Rewrite a patch that still uses the legacy per-key project maps into
- * entries of `projectSettingsOverrides`, so older clients keep editing the
- * values the server actually reads. `null` in a legacy map clears that one
- * override.
- */
 function translateLegacyProjectOverridePatch(
   current: Pick<ServerSettings, "projectSettingsOverrides">,
   patch: ServerSettingsPatch,
@@ -461,8 +424,6 @@ export function applyServerSettingsPatch(
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
-    // Already translated into `projectSettingsOverrides` above; the legacy
-    // maps are derived views and must never be merged directly.
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
     projectAutoPullOverrides: _legacyAutoPull,
     projectScriptOverrides: _legacyScripts,
@@ -712,7 +673,6 @@ export function applyServerSettingsPatch(
   };
 }
 
-/** Resolve legacy local preferences only until the environment has a saved value. */
 export function resolveModelPreferences(
   settings: Pick<ServerSettings, "favorites" | "providerModelPreferences">,
   legacy: Partial<ModelPreferences> = {},

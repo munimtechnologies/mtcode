@@ -68,7 +68,6 @@ type CodexRateLimitsProbe =
         | null
         | undefined;
       readonly resetCredits: CodexResetCreditsSummary | null | undefined;
-      /** The ChatGPT workspace the usage belongs to, when the backend names it. */
       readonly accountId?: string | null | undefined;
     }
   | { readonly failure: string };
@@ -77,6 +76,11 @@ const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 const CODEX_CATALOG_REFRESH_TIMEOUT = "3 seconds" as const;
 const CODEX_CATALOG_REFRESH_POLL = "100 millis" as const;
 const CODEX_CLIENT_NAME = "T3 Code";
+// Codex's probe does a full handshake plus account, models, and skills requests, which can
+// legitimately run past the shared 10s AUTH_PROBE_TIMEOUT_MS on a loaded or slow machine
+// (most often reported on Windows). Give Codex its own longer budget instead of raising the
+// timeout for every provider.
+const CODEX_AUTH_PROBE_TIMEOUT_MS = 20_000;
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -105,7 +109,6 @@ const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
 
 const DEFAULT_SERVICE_TIER_ID = "default";
 
-/** Shorter copy for tiers whose catalog description wraps in the traits menu. */
 const SERVICE_TIER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   ultrafast: "Even faster, more expensive",
 };
@@ -122,7 +125,6 @@ function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["accoun
   return codexPlanLabel(account.planType);
 }
 
-/** Shared with usage-limit sources, which report the same `planType` slugs. */
 export function codexPlanLabel(planType: string | null | undefined): string | undefined {
   switch (planType) {
     case "free":
@@ -301,10 +303,6 @@ function parseCodexModelListResponse(
   }));
 }
 
-/**
- * Prefer our own default-model ranking when one of the preferred slugs is in
- * the live catalog; otherwise keep whatever Codex itself flagged as default.
- */
 export function applyPreferredCodexDefaultModel(
   models: ReadonlyArray<ServerProviderModel>,
 ): ReadonlyArray<ServerProviderModel> {
@@ -397,7 +395,6 @@ const decodeCodexModelsCacheStamp = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ fetched_at: Schema.String })),
 );
 
-/** When Codex last wrote `models_cache.json`, in epoch millis; NaN when unreadable. */
 const readCodexModelsCacheFetchedAt = Effect.fn("readCodexModelsCacheFetchedAt")(function* (
   codexHome: string,
 ) {
@@ -413,16 +410,10 @@ const readCodexModelsCacheFetchedAt = Effect.fn("readCodexModelsCacheFetchedAt")
 });
 
 /**
- * Lists the ChatGPT model catalog as fetched for T3 Code.
- *
- * `model/list` serves `CODEX_HOME/models_cache.json` while it is under five
- * minutes old. Every Codex client on the machine shares that file, and the
- * backend tailors the catalog to each client's originator: the plain CLI does
- * not get Sol Ultrafast. So the first answer can be another client's catalog.
- * App-server refreshes the catalog online at startup, so wait until a write
- * newer than this process's spawn lands, then list again. If no refresh
- * lands in time, keep the first answer. Another client writing in the same
- * few hundred milliseconds can still win; the next probe corrects it.
+ * Every Codex client on the machine shares that file, and the backend tailors
+ * the catalog to each client's originator: the plain CLI does not get Sol
+ * Ultrafast. App-server refreshes the catalog online at startup, so wait until
+ * a write newer than this process's spawn lands, then list again.
  */
 const requestCodexChatGptModels = Effect.fn("requestCodexChatGptModels")(function* (input: {
   readonly client: CodexClient.CodexAppServerClient["Service"];
@@ -447,14 +438,10 @@ const requestCodexChatGptModels = Effect.fn("requestCodexChatGptModels")(functio
 });
 
 /**
- * Environment for every `codex app-server` T3 Code spawns.
- *
- * Codex sends its client name as the `originator` header, and the backend
- * tailors the model catalog to it. App-server starts its catalog refresh
- * before `initialize` names the client, so that first fetch goes out as the
- * plain CLI, misses tiers like Sol Ultrafast, and overwrites the shared
- * `models_cache.json`. Naming the originator at spawn closes that race.
- * A value the user already set wins.
+ * App-server starts its catalog refresh before `initialize` names the client,
+ * so that first fetch goes out as the plain CLI, misses tiers like Sol
+ * Ultrafast, and overwrites the shared `models_cache.json`. Naming the
+ * originator at spawn closes that race.
  */
 export const codexAppServerEnvironment = (
   environment: NodeJS.ProcessEnv | undefined,
@@ -479,12 +466,6 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
-/**
- * Spawns a short-lived `codex app-server`, runs the initialize handshake, and
- * hands the caller a connected client. Scoped: the process is killed when
- * the caller's scope closes. Shared by the status probe, the skills probe,
- * and account-level requests such as reset-credit redemption.
- */
 export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string | undefined;
@@ -495,7 +476,6 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
   // so `CODEX_HOME=~/.codex_work` would reach codex verbatim and trip
   // "CODEX_HOME points to '~/.codex_work', but that path does not exist".
-  // Expand here for parity with `CodexTextGeneration`.
   const resolvedHomePath = input.homePath
     ? expandHomePath(input.homePath, yield* HostProcess.HomeDirectory)
     : undefined;
@@ -549,7 +529,6 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   const spawnedAtMs = DateTime.toEpochMillis(yield* DateTime.now);
   const { client, initialize } = yield* withCodexAppServerClient(input);
 
-  // Extract the version string after the first '/' in userAgent, up to the next space or the end
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);
   const version = versionMatch ? versionMatch[1] : undefined;
 
@@ -571,8 +550,6 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       accountResponse.account?.type === "chatgpt"
         ? requestCodexChatGptModels({ client, codexHome: initialize.codexHome, spawnedAtMs })
         : requestAllCodexModels(client),
-      // Usage is an enrichment: a failure or a slow answer degrades to "no
-      // usage this probe" rather than costing the account and models.
       input.skipNativeUsage
         ? Effect.succeed(undefined)
         : client.request("account/rateLimits/read", null).pipe(
@@ -671,8 +648,6 @@ function accountProbeStatus({ account, rateLimits }: CodexAppServerProviderSnaps
 } {
   const authLabel = codexAccountAuthLabel(account.account);
   const authEmail = codexAccountEmail(account.account);
-  // One email can hold several workspaces, each with its own quota; the usage
-  // read names the one this login draws on.
   const workspaceId =
     rateLimits && "accountId" in rateLimits ? rateLimits.accountId?.trim() : undefined;
   const auth = {
@@ -741,7 +716,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     });
   }
 
-  const authProbeTimeoutMs = yield* providerAuthProbeTimeoutMs;
+  const authProbeTimeoutMs = Math.max(
+    yield* providerAuthProbeTimeoutMs,
+    CODEX_AUTH_PROBE_TIMEOUT_MS,
+  );
   const probeCwd = yield* resolveProviderProbeCwd(undefined, resolvedEnvironment);
   const probeResult = yield* probe({
     binaryPath: codexSettings.binaryPath,
@@ -837,11 +815,4 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   });
 });
 
-// NOTE: the singleton `CodexProviderLive` Layer has been removed as part of
-// the per-instance-driver refactor. `CodexDriver.create()` builds a managed
-// snapshot per instance (each with its own `CodexSettings`) and hands the
-// resulting `ManagedServerProvider` back as `ProviderInstance.snapshot`.
-//
-// The `makePendingCodexProvider` and `checkCodexProviderStatus` helpers are
-// re-exported for use by `CodexDriver`.
 export { makePendingCodexProvider };

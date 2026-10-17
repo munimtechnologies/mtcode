@@ -1,11 +1,3 @@
-/**
- * Merges per-environment usage summaries into the single view the page renders.
- *
- * Pure, so the de-duplication and derivation rules can be tested without a
- * connected environment.
- *
- * @module usageMerge
- */
 import {
   USAGE_MERGE_COMPATIBLE_SINCE,
   type EnvironmentId,
@@ -41,15 +33,7 @@ export interface ModelTotals {
   readonly totalTokens: number;
   readonly tokens: UsageTokenTotals;
   readonly records: number;
-  /**
-   * Records whose tokens are counted here but which contributed nothing to
-   * `costUsd`. When it equals `records` the cost is unknown, not zero.
-   */
   readonly unpricedRecords: number;
-  /**
-   * Tokens with no known rates, which a custom price would cover. A cell that
-   * mixes these with reported costs counts its tokens by record share.
-   */
   readonly unpricedTokens: number;
   readonly costShare: number;
   readonly tokenShare: number;
@@ -85,10 +69,6 @@ export interface CostQuality {
   readonly cacheSavingsUsd: number;
 }
 
-/**
- * `costUsd` by token category. `unsplit` is cost no rates could split,
- * including all cost from servers that predate the split.
- */
 export interface CategoryCost {
   readonly input: number;
   readonly cacheRead: number;
@@ -97,12 +77,10 @@ export interface CategoryCost {
   readonly unsplit: number;
 }
 
-/** `costUsd` by request speed. Servers that predate speeds count as standard. */
 export interface SpeedCost {
   readonly standard: number;
   readonly fast: number;
   readonly ultrafast: number;
-  /** What fast and ultrafast requests cost above the standard rate. */
   readonly premium: number;
 }
 
@@ -134,19 +112,14 @@ export interface MergedUsage {
   readonly pricingStatus: UsagePricingStatus;
   readonly categoryCost: CategoryCost;
   readonly speedCost: SpeedCost;
-  /** Environments whose data was dropped as a duplicate of another's. */
   readonly duplicateSources: readonly string[];
   readonly contributingEnvironments: readonly EnvironmentId[];
   readonly contractMismatches: readonly UsageContractMismatch[];
 }
 
 /**
- * Two sources are the same physical transcript directory only when host,
- * provider, path and filesystem identity all agree.
- *
- * `volumeId` is what stops two machines that happen to share a hostname and a
- * home path, which is every Mac in a fleet, from collapsing into one source and
- * having one of them silently dropped.
+ * `volumeId` is what stops two machines that happen to share a hostname and a home path, which is
+ * every Mac in a fleet, from collapsing into one source and having one of them silently dropped.
  */
 function fingerprintKey(fingerprint: UsageSourceFingerprint): string {
   return [
@@ -223,8 +196,6 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
       a.environmentId.localeCompare(b.environmentId),
   );
 
-  // A complete scan takes precedence over a newer partial scan of the same
-  // directory. Partial history still contributes when no complete copy exists.
   for (const status of ["ok", "partial", "failed"] as const) {
     for (const environment of ordered) {
       for (const source of environment.summary.sources) {

@@ -112,7 +112,6 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
 
-  // The SDK bridge acquires Electron's profile-scoped single-instance lock.
   // Must not yield: the bridge registers a scheme Electron rejects once ready.
   const userDataPath = yield* DesktopUserData.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
@@ -259,8 +258,6 @@ export const make = Effect.gen(function* () {
         );
         return true;
       };
-      // Prompt links and thread links (`t3code://new?…`, `t3code://threads/…`) reach the
-      // renderer through the same queue as web links; it routes them in the app.
       const openAppLink = (value: string | undefined) => {
         if (!value || promptLinkAppPath(value) === null) return false;
         void runPromise(webLinks.receive(value));
@@ -268,7 +265,6 @@ export const make = Effect.gen(function* () {
       };
       const args = yield* HostProcess.Arguments;
       args.some((value) => startProviderAuthHandoff(value) || openAppLink(value));
-      // As the default browser, macOS hands T3 Code every web link through the same event.
       const openWebLink = (url: string) => {
         if (!DesktopWebLinks.isWebLink(url)) return false;
         void runPromise(webLinks.receive(url));
@@ -294,7 +290,6 @@ export const make = Effect.gen(function* () {
         (event as { preventDefault?: () => void } | undefined)?.preventDefault?.();
         void runPromise(revealAndDispatch(url));
       });
-      // A browser opens HTML files too, which macOS hands over by path.
       yield* electronApp.on("open-file", (event: { preventDefault: () => void }, path: string) => {
         if (!DesktopWebLinks.isWebPageFile(path)) return;
         event.preventDefault();

@@ -41,11 +41,6 @@ import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
 
-/**
- * Placeholder text for the "add a custom model" input, keyed by driver
- * kind. Mirrors the prior hardcoded switch in `SettingsPanels.tsx` so the
- * UX is unchanged — only the owning component has moved.
- */
 const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, string>> = {
   [ProviderDriverKind.make("codex")]: "gpt-6.7-codex-ultra-preview",
   [ProviderDriverKind.make("claudeAgent")]: "claude-sonnet-5",
@@ -54,15 +49,8 @@ const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, strin
   [ProviderDriverKind.make("pi")]: "anthropic/claude-sonnet-5",
 };
 
-/** Above this many models the list gets a filter input. */
 const FILTER_THRESHOLD = 8;
 
-/**
- * Short capability words shown after a model's slug. Claude and Cursor report
- * fast mode as a boolean `fastMode` option; Codex reports it as a
- * `serviceTier` select whose fast tier is labelled "Fast" (catalog id
- * `priority`, or `fast` from the speed-tier fallback), matching the composer.
- */
 function describeModelCapabilities(model: ServerProviderModel): string[] {
   const descriptors = model.capabilities?.optionDescriptors ?? [];
   const labels: string[] = [];
@@ -214,37 +202,15 @@ export function resolveModelListDrop(input: ModelListDrop): {
 }
 
 interface ProviderModelsSectionProps {
-  /** Identifier used to namespace input ids within the DOM. */
   readonly instanceId: ProviderInstanceId;
-  /**
-   * Driver kind for slug normalization + input placeholder. `null` when
-   * the section is rendered without enough provider metadata.
-   */
   readonly driverKind: ProviderDriverKind | null;
-  /**
-   * The live model list to display. Includes both built-in (probe-reported)
-   * and custom entries, distinguished by `isCustom`.
-   */
   readonly models: ReadonlyArray<ServerProviderModel>;
-  /**
-   * The persisted custom-model list for this instance, resolved. Drives
-   * dedup, and is the list we hand back (with an entry appended / replaced /
-   * removed) via `onChange`.
-   */
   readonly customModels: ReadonlyArray<CustomModelDefinition>;
   readonly canManageCustomModels: boolean;
   readonly canWritePreferences?: boolean;
-  /** Server-returned model slugs hidden from the model picker. */
   readonly hiddenModels: ReadonlyArray<string>;
-  /** Model slugs favorited for this provider instance. */
   readonly favoriteModels: ReadonlyArray<string>;
-  /** Explicit user-authored model ordering for this provider instance. */
   readonly modelOrder: ReadonlyArray<string>;
-  /**
-   * Commit the new custom-model list. Caller is responsible for routing the
-   * write to the correct storage (legacy `settings.providers[kind]` vs.
-   * `providerInstances[id].config`).
-   */
   readonly onChange: (next: ReadonlyArray<CustomModelDefinition>) => void;
   /**
    * Hidden models and order are stored together and a drop can change both,
@@ -354,10 +320,8 @@ export function ProviderModelsSection({
   const [isAdding, setIsAdding] = useState(false);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // Slug of the custom model whose inline editor is open, if any.
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  // Slug of a just-added custom model, scrolled into view once its row exists.
   const scrollToSlugRef = useRef<string | null>(null);
   const hiddenModelSet = useMemo(() => new Set(hiddenModels), [hiddenModels]);
   const favoriteModelSet = useMemo(() => new Set(favoriteModels), [favoriteModels]);
@@ -468,8 +432,6 @@ export function ProviderModelsSection({
     onFavoriteModelsChange(result.favoriteModels);
   };
 
-  // The parent commits the new custom model and hands back an updated
-  // `models` list, so the row can only be scrolled to after that render.
   useEffect(() => {
     const slug = scrollToSlugRef.current;
     if (slug === null) return;
@@ -501,8 +463,6 @@ export function ProviderModelsSection({
       return;
     }
 
-    // Clear the filter so the new row renders even when it does not match,
-    // which is also what lets the pending scroll target resolve and clear.
     scrollToSlugRef.current = normalized;
     setFilter("");
     onChange([...customModels, { slug: normalized, name: normalized, capabilities: null }]);

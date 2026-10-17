@@ -451,8 +451,6 @@ describe("AgentActivityPublisher", () => {
           ok: true,
         },
       ]);
-      // Terminal states are persisted (and later pruned by the cron) so the
-      // finished thread can keep a Done row in later aggregates.
       expect(upserts).toEqual([
         {
           environmentPublicKey: "environment-public-key",
@@ -823,9 +821,6 @@ describe("makeAggregateState", () => {
       nowMs: hourMs,
     });
 
-    // An armed card never renders an empty state: recently finished threads
-    // keep Done content on it, and once they age out the aggregate becomes
-    // null and the delivery layer ends the card.
     expect(aggregate).toMatchObject({
       activeCount: 0,
       subtitle: "Agent work completed",

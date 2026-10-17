@@ -1,10 +1,3 @@
-/**
- * Usage history for Grok Build: the format of its per-session
- * `updates.jsonl` logs and where each instance's `GROK_HOME` keeps them.
- *
- * @module provider-grok/server/usage
- */
-
 import type { UsageTokenTotals } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
@@ -24,7 +17,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 
 /**
  * Grok reports cost in integer ticks where `1 USD = 10^10` ticks. See Grok
- * headless `total_cost_usd_ticks`. Convert to dollars for pricing.
+ * headless `total_cost_usd_ticks`.
  */
 export const GROK_COST_USD_TICKS_PER_DOLLAR = 10_000_000_000;
 
@@ -129,7 +122,6 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
   const sessionId = typeof paramsRecord["sessionId"] === "string" ? paramsRecord["sessionId"] : "";
   const promptId = typeof updateRecord["prompt_id"] === "string" ? updateRecord["prompt_id"] : null;
 
-  // Prefer the high-resolution agent clock; fall back to the outer unix seconds.
   const meta = paramsRecord["_meta"];
   let eventId: string | null = null;
   let timestampMs: number | null = null;

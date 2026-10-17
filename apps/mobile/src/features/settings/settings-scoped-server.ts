@@ -101,7 +101,6 @@ export function planMobileScopedSettingsPatch(
   }));
 }
 
-/** A mixed selection has no single value to display. */
 export function uniformMobileSetting<K extends keyof ServerSettings>(
   targets: readonly Pick<ScopedMobileSettingsTarget, "settings">[],
   key: K,

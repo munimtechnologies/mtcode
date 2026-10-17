@@ -130,8 +130,8 @@ const readClaudeCancelledSubagentResumeTranscript = Effect.fn(
             message: {
               ...frame.message.message,
               content: [
-                "Note: the T3 server restarted, and this background work was cancelled before it finished. It will not report back:",
-                "- subagent: Audit src/math.ts",
+                "Note: the T3 server restarted, and this background work was cancelled before it finished. It will not report back on its own, so resume or restart what you still need and wait for its result:",
+                "- subagent: Audit src/math.ts (id a44c0ed810da9e4f3)",
                 "",
                 "User message:",
                 frame.message.message.content,
@@ -377,8 +377,6 @@ describe("orchestrator replay recovery", () => {
   it.effect("keeps a Claude subagent resumed after a server restart in its own thread", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        // The math.ts subagent from thread 42e302f0 (2026-09-25): launched,
-        // finished, then resumed by SendMessage after the server restarted.
         const transcript = yield* readClaudeSubagentResumeTranscript();
         const [launchPrompt, resumePrompt] = yield* decodePromptPair(transcript.metadata?.prompts);
         const workspace = yield* checkpointWorkspace(transcript.scenario);
@@ -449,8 +447,6 @@ describe("orchestrator replay recovery", () => {
         assert.lengthOf(childThreads, 1);
         const child = childThreads[0];
         assert.equal(child?.thread.id, subagent?.childThreadId);
-        // The recovered subagent's replies name the model its thread already
-        // holds, so the effort recorded at launch survives the restart.
         assert.deepEqual(child?.thread.modelSelection, {
           instanceId: CLAUDE_MODEL_SELECTION.instanceId,
           model: "claude-sonnet-5",
@@ -473,7 +469,6 @@ describe("orchestrator replay recovery", () => {
         assert.include(conversation[1], "is 1 line long");
         assert.include(conversation[2], "Look again at");
         assert.include(conversation[3], "Bug/edge case found and fixed");
-        // The resumed run's own tool calls land in the child thread too.
         const childCommands = (child?.turnItems ?? []).filter(
           (item) => item.type === "command_execution",
         );

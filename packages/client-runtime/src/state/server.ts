@@ -58,7 +58,6 @@ import {
   withoutEnvironmentThemes,
 } from "./serverConfigProjection.ts";
 
-// Exported server state includes this type in its inferred public return type.
 export type { ServerConfigProjection } from "./serverConfigProjection.ts";
 
 export type ServerUpdateStage = "downloading" | "installing" | "resuming";
@@ -108,7 +107,6 @@ const IDLE_SERVER_UPDATE_STATE: ServerUpdateState = { status: "idle" };
 const EMPTY_SERVER_UPDATE_STATE_ATOM = Atom.make<ServerUpdateState>(IDLE_SERVER_UPDATE_STATE).pipe(
   Atom.withLabel("environment-data:server:update-state:empty"),
 );
-/** Shared with the outdated-host update, which reports through the same state. */
 export const serverUpdateStateAtom = Atom.family((environmentId: EnvironmentId) =>
   Atom.make<ServerUpdateState>(IDLE_SERVER_UPDATE_STATE).pipe(
     Atom.withLabel(`environment-data:server:update-state:${environmentId}`),
@@ -200,19 +198,8 @@ export function validateServerUpdateReadyEvent(
 }
 
 /**
- * Keeps reconnect attempts ~1s apart for the whole update restart.
- *
- * A restart takes the server down for ~15 seconds, but the supervisor's normal
- * backoff assumes an unexpected failure and doubles its delay after each failed
- * attempt, so a 15-second restart can be observed as a ~30-second "Resuming".
- * Nudging on every backoff entry (not just the first)
- * holds the retry cadence flat until the server answers again. The sleep before
- * each nudge is the pacer: a connection that fails instantly re-enters backoff
- * immediately and would otherwise spin a tight retry loop.
- *
- * A newly restarted server can also reject the first environment credential.
- * Authentication blocks need the same paced retry during this known restart;
- * permission and configuration failures remain blocked.
+ * The sleep before each nudge is the pacer: a connection that fails instantly
+ * re-enters backoff immediately and would otherwise spin a tight retry loop.
  *
  * Callers fork this as a child of the update command so it is interrupted as
  * soon as the update settles, whether it succeeds, fails, or times out.
@@ -307,11 +294,6 @@ export const waitForDesktopUpdateTarget = Effect.fn("waitForDesktopUpdateTarget"
   });
 });
 
-/**
- * "resuming" means the server has its update and restarts without this
- * client. A desktop app update is not there yet when its prepare step
- * completes: the client still has to commit it, so it stays "installing".
- */
 export function serverUpdateStateForProgressEvent(
   fromVersion: string,
   targetVersion: string,
@@ -416,8 +398,6 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       ),
     );
     const state = yield* SubscriptionRef.make<Option.Option<ServerConfigProjection>>(
-      // Stripped on load as well as on save: a cache written by an earlier
-      // build can still carry published themes.
       Option.map(cachedConfig, (cached) => ({
         config: withoutEnvironmentThemes(cached),
         latestEvent: cachedConfigSnapshotEvent(withoutEnvironmentThemes(cached)),
@@ -652,19 +632,12 @@ export function createServerEnvironmentAtoms<R, E>(
     readonly initialConfigValueAtom: (
       environmentId: EnvironmentId,
     ) => Atom.Atom<ServerConfig | null>;
-    /**
-     * Whether this surface renders themes the environment publishes. Mobile
-     * keeps its own appearance settings, so it neither asks for the stream nor
-     * receives the payload.
-     */
     readonly environmentThemes?: boolean;
-    /** Whether this surface renders quota from configured usage-limit sources. */
     readonly usageLimitSources?: boolean;
     readonly usageLimitsCommand?: boolean;
   },
 ) {
   const configScheduler = createAtomCommandScheduler();
-  // Updates stay serial end-to-end, but only their handoff phase occupies the config lane.
   const updateScheduler = createAtomCommandScheduler();
   const configConcurrency = {
     mode: "serial" as const,
@@ -872,9 +845,6 @@ export function createServerEnvironmentAtoms<R, E>(
           }),
         );
 
-        // The update restart is intentional and the server stays unreachable
-        // for the whole restart, so hold the retry cadence flat instead of
-        // letting the supervisor climb its backoff ladder.
         yield* nudgeReconnectDuringUpdateRestart({
           stateChanges: environmentRegistry.stateChanges(target.environmentId),
           retryNow: environmentRegistry.retryNow(target.environmentId),
@@ -1144,7 +1114,6 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:webhook-delivery",
       tag: WS_METHODS.scheduledTasksGetWebhookDelivery,
     }),
-    /** Live scheduled-task list: snapshot on subscribe, fresh list after every server-side change. */
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
@@ -1167,8 +1136,6 @@ export function createServerEnvironmentAtoms<R, E>(
                   Effect.andThen(
                     request(WS_METHODS.serverGetUsageSummary, { ...input, awaitRefresh: true }),
                   ),
-                  // The cached summary is still the best data, and a failure
-                  // would read as the environment not reporting usage at all.
                   Effect.catch((error) =>
                     Effect.logWarning("Could not refresh slow usage sources.").pipe(
                       Effect.annotateLogs({ ...safeErrorLogAttributes(error) }),
@@ -1193,8 +1160,6 @@ export function createServerEnvironmentAtoms<R, E>(
     searchAcpRegistry: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:acp-registry:search",
       tag: WS_METHODS.serverSearchAcpRegistry,
-      // Each submitted search refreshes the server-side registry. Dropping an
-      // abandoned query immediately also interrupts stale in-flight requests.
       staleTimeMs: 0,
       idleTtlMs: 0,
     }),
@@ -1321,9 +1286,6 @@ export function createServerEnvironmentAtoms<R, E>(
       concurrency: configConcurrency,
     }),
     updateSettings,
-    // Provider-instance mutations share the settings command and its
-    // environment-serial scheduler. The named boundary keeps clients on the
-    // atomic map-entry payload instead of rebuilding a stale whole map.
     mutateProviderInstance: updateSettings,
     prepareAcpRegistryAgent: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:acp-registry:prepare",

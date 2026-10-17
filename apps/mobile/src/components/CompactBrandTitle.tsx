@@ -11,18 +11,11 @@ import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
 
-/**
- * Horizontal correction applied to content rendered in the brand title slot,
- * shared with the connection-status swap so both align identically.
- */
 export function brandTitleOffset(): number {
   if (Platform.OS !== "ios") return 0;
   return Platform.isPad && !NATIVE_WORKSPACE_COLUMNS_SUPPORTED ? IPAD_HOME_TITLE_OFFSET : 0;
 }
 
-/**
- * Compact brand lockup sized for native navigation bars.
- */
 export function CompactBrandTitle(
   props: {
     readonly allowFontScaling?: boolean;

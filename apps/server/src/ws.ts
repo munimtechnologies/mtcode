@@ -305,7 +305,6 @@ type EditorDiscovery = Pick<
   "resolveAvailableEditors" | "resolveFileManagerRevealKind"
 >;
 
-// The config fields that follow from which editors are installed.
 const resolveEditorConfig = <E, R>(
   availableEditors: ReadonlyArray<EditorId>,
   revealKind: Effect.Effect<FileManagerRevealKind | undefined, E, R>,
@@ -325,14 +324,6 @@ const resolveEditorConfig = <E, R>(
     };
   });
 
-/**
- * Live config updates that follow a snapshot of `config`. A busy host can
- * outlast the snapshot's discovery timeouts, which send no editors, or no
- * reveal kind for the file manager. The scan keeps running, so once it lands
- * this resends the config: clients replace theirs on any snapshot. The resent
- * config is folded from the live updates already sent, so it cannot roll back
- * a change that landed while the scan ran.
- */
 export const withLateEditorConfig = <E, R>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
@@ -652,9 +643,6 @@ export function shouldUseBoundedThreadSnapshot(input: {
   return input.acceptBoundedSnapshot === true;
 }
 
-// Optional client identity announced on the /ws upgrade URL next to wsTicket.
-// Lenient by design: absent or malformed values degrade to {} so a connection
-// never fails over attribution metadata.
 function readClientConnectionOrigin(
   request: HttpServerRequest.HttpServerRequest,
 ): OrchestrationClientOrigin {
@@ -753,11 +741,6 @@ const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
       Effect.forEach(
         projects,
         (project) =>
-          // Non-blocking: emit with cached identity (or null) and schedule
-          // background resolution. subscribeChanges is attached before
-          // loadSnapshot, so later identity completions push refreshed
-          // shells for multi-env grouping without blocking the initial
-          // snapshot or completion marker on slow git probes.
           projectEnrichment.getAvailable(project.workspaceRoot).pipe(
             Effect.map((enrichment) => ({
               project: {
@@ -898,13 +881,9 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       );
     });
 
-    // When the client already holds the projection (cached, or loaded over
-    // HTTP) it passes that snapshot's sequence, and we resume by replaying
-    // persisted events after it instead of re-sending the (potentially
-    // multi-KB) snapshot frame over the socket. The event sink subscribes
-    // to live events before reading the persisted tail, so no event
-    // published during the replay window is lost; overlapping events are
-    // deduped by sequence on the client.
+    // The event sink subscribes to live events before reading the persisted
+    // tail, so no event published during the replay window is lost; overlapping
+    // events are deduped by sequence on the client.
     if (input.afterSequence !== undefined) {
       const highWater = yield* applicationEvents.latestAgentSequence(input.threadId).pipe(
         Effect.mapError(
@@ -1047,10 +1026,6 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       });
     });
 
-    // Coalescing makes each per-thread shell read represent every event
-    // for that thread in the current window; reading only the affected
-    // threads keeps the cost of a busy stream independent of how many
-    // threads exist overall.
     const projectShellItems = Effect.fn("ws.orchestrationV2.projectShellItems")(function* (
       events: ReadonlyArray<ShellApplicationEvent>,
     ) {
@@ -1089,10 +1064,6 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const enrichmentRefreshes = Stream.fromSubscription(enrichmentChanges).pipe(
       Stream.filter((change) => change.repositoryIdentityResolved),
       Stream.groupedWithin(64, Duration.millis(25)),
-      // Build the refresh from the identities the changes carry. Re-enriching
-      // every project here re-requested each expired root, whose resolution
-      // published again, so one expiry kept every subscriber reloading every
-      // project's metadata once a minute.
       Stream.mapEffect((changes) =>
         Effect.gen(function* () {
           const identities = new Map(
@@ -1122,21 +1093,10 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     );
 
     // Always attach the enrichment subscription before the first load so
-    // completions that race HTTP snapshot fetch still push a refresh.
-    // When the client already holds a shell snapshot (cached, or loaded
-    // over HTTP) it passes that snapshot's sequence. We still emit one
-    // compact metadata refresh up front: getAvailable may have been cold on the
-    // HTTP path (null identity), and enrichment PubSub events published
-    // before this subscribe attached are dropped. Rehydrating here fills
-    // repositoryIdentity for cross-environment project grouping even on
-    // afterSequence resumes. Application events after the sequence still
-    // stream as deltas; overlapping events are deduped by sequence on the
-    // client.
-    //
-    // After the unmarked authoritative frame, emit a same-sequence
-    // metadata-only frame for roots that already resolved successfully
-    // (including cached null). Cold/failed roots stay unmarked and use
-    // the PubSub enrichment path when they complete later.
+    // completions that race HTTP snapshot fetch still push a refresh. We still
+    // emit one compact metadata refresh up front: getAvailable may have been
+    // cold on the HTTP path (null identity), and enrichment PubSub events
+    // published before this subscribe attached are dropped.
     const completionMarker =
       input.requestCompletionMarker === true
         ? Stream.make({ kind: "synchronized" as const })
@@ -1876,8 +1836,8 @@ const layerWsRpc = (
     });
 
     const handlers = ServerWsRpcGroup.of({
-      // MERGE-TODO(orchestration-v2): external pi threads routed through the deleted V1
-      // engine (ClientThreadRouter); until they are ported both RPCs report unavailable.
+      // External Pi threads were routed through the deleted V1 engine (ClientThreadRouter);
+      // until they are ported to orchestration-v2 both RPCs report unavailable.
       [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
         Effect.annotateCurrentSpan({
           "orchestration_v2.command_id": command.commandId,
@@ -3631,9 +3591,8 @@ const layerWsRpc = (
   );
 };
 
-// A defect in a handler's effect fails only its own request. RpcServer's default
-// sends a socket-level Defect frame instead, and the client ends every pending
-// request on the socket with it. DefectReporter logs these defects.
+// RpcServer's default sends a socket-level Defect frame instead, and the client
+// ends every pending request on the socket with it.
 export const WS_RPC_SERVER_OPTIONS = {
   disableTracing: true,
   disableFatalDefects: true,
@@ -3717,7 +3676,6 @@ export const layer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
-              // Shared like the pull request service, so concurrent generations single-flight.
               Layer.provide(
                 Layer.succeed(
                   PullRequestReviewGuideService.PullRequestReviewGuideService,

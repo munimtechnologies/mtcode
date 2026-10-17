@@ -28,7 +28,6 @@ interface NewThreadHandler {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
     },
-    // The opened draft's identity, which most callers have no use for.
   ): Promise<unknown>;
 }
 

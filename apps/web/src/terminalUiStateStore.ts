@@ -1,10 +1,3 @@
-/**
- * Single Zustand store for terminal UI state keyed by scoped thread identity.
- *
- * Terminal UI transition helpers are intentionally private to keep the public
- * API constrained to store actions/selectors.
- */
-
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";

@@ -47,7 +47,6 @@ export type ServiceReconcileResult =
       readonly plan: BootService.BootServicePlan;
     };
 
-/** Install, update, or repair the service using the CLI version running this command. */
 export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
   readonly allowDowngrade?: boolean;
   readonly start?: boolean;
@@ -174,8 +173,6 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
   ),
 );
 
-// Kept one release for muscle memory and old docs. It did what `t3 service
-// install` does; the way to move to a newer release is `t3 update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription("Deprecated. Run `t3 update` to move to a newer release."),
   Command.unlisted,
@@ -274,7 +271,6 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     yield* Console.log(
       `A newer t3@${status.installedVersion} background service is installed. Leaving it unchanged.`,
     );
-    // This CLI cannot verify the newer service. Keep the manual fallback available.
     return false;
   }
   // A LaunchAgent (macOS) and a Startup shortcut (Windows) both start at

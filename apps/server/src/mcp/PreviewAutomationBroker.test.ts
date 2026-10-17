@@ -537,7 +537,6 @@ it.effect.each([
         .invoke<void>({ scope, operation: "open", input: {} })
         .pipe(Effect.flip);
       expect(error._tag).toBe("PreviewAutomationExecutionError");
-      // A desktop or other remote host's text stays out of the agent's context.
       expect(error.message.includes("ERR_CONNECTION_REFUSED")).toBe(shown);
     }),
   ),
@@ -1444,7 +1443,6 @@ it.effect("rejects a routed action when its generation is evicted before deliver
         .pipe(Effect.flip, Effect.forkScoped);
       yield* Deferred.await(received);
 
-      // Suspend only this invocation in the gap between route selection and delivery.
       const tasks: Array<() => void> = [];
       let paused = false;
       const dispatcher: Scheduler.SchedulerDispatcher = {
@@ -1499,7 +1497,6 @@ it.effect("keeps a host whose operation timeout arrives just after the budget", 
         Effect.gen(function* () {
           if (request.operation === "waitFor") {
             yield* Deferred.succeed(received, undefined);
-            // The browser starts its own timer after delivery, so its timeout lands late.
             yield* Effect.sleep(request.timeoutMs + 50);
           }
           yield* broker.respond({
@@ -1534,7 +1531,6 @@ it.effect("keeps the host connected when a background status read times out", ()
     Effect.gen(function* () {
       const broker = yield* makeBroker;
       const requests = requestsFrom(yield* broker.connect(makeHost()));
-      // A busy host answers its actions but not the metadata read behind them.
       yield* Stream.runForEach(requests, (request) =>
         request.operation === "status"
           ? Effect.void

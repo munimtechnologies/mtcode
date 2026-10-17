@@ -18,9 +18,7 @@ export const clerkAppearance = {
     unsafe_disableDevelopmentModeWarnings: true,
   },
   variables: {
-    // Clerk reuses its primary color for filled buttons and bare links. The
-    // app's update foreground is the palette's action hue cast for readable
-    // text, while the card surface provides the inverse filled-control pair.
+    // Clerk reuses its primary color for filled buttons and bare links.
     colorPrimary: "var(--update-foreground)",
     colorPrimaryForeground: "var(--card)",
     colorDanger: "var(--error)",

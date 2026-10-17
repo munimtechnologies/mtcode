@@ -91,9 +91,7 @@ const clerkGateModule =
 export const startup = Promise.all([clerkGateModule, router.load()])
   .then(() => {
     // A route chunk failure still resolves router.load(): the error is parked in
-    // the lazy component and surfaces through the route error boundary. Skip the
-    // paint when a reload is on its way, and only re-arm the guard after a boot
-    // that fetched every chunk it asked for.
+    // the lazy component and surfaces through the route error boundary.
     if (reloadScheduled) return;
     if (!chunkLoadFailed) clearChunkReloadGuard();
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -105,7 +103,6 @@ export const startup = Promise.all([clerkGateModule, router.load()])
     );
   })
   .catch((error: unknown) => {
-    // Let the bootstrap entry show the error unless a reload is already scheduled.
     if (reloadScheduled) return;
     console.error("MT Code failed to load its startup chunks.", error);
     const bootShell = document.getElementById("boot-shell");
