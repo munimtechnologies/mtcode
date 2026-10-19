@@ -34,7 +34,7 @@ then copy. Cmd+A on macOS and Ctrl+Shift+A elsewhere select the same output.
 Ctrl+A still moves to the beginning of shell input on Windows and Linux.
 Jump to latest in the context menu returns to the current output.
 
-# Find in the terminal
+## Find in the terminal
 
 With a terminal focused, press `mod+f` to search its output and scrollback.
 `mod` is Command on macOS and Ctrl on Windows and Linux; `Ctrl+Shift+F` also
@@ -42,3 +42,15 @@ works, or click the search icon next to the terminal buttons. Enter moves to
 the next match and Shift+Enter to the previous one. Use the toggle for
 case-sensitive search, and Escape to close. Rebind **Terminal: Find** in
 Settings → Keybindings.
+
+## fish
+
+T3 Code starts fish with `no-query-term`, avoiding startup waits for terminal
+replies. This disables optional fish features that depend on those replies.
+T3 Code's exported `fish_features` also hides any universal flags you set with
+`set -U fish_features`.
+
+To preserve those flags or enable queries with `query-term`, include them in
+`fish_features` in the environment that launches T3 Code. A shell export applies
+when you launch T3 Code from that shell; it does not configure a desktop app
+launched from the Dock or Finder. Enabling queries can restore the startup wait.

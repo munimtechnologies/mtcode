@@ -99,6 +99,7 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     // `https:` subsumes the fork's explicit https://challenges.cloudflare.com Turnstile frame
     // and `blob:` keeps the fork's document-preview blobs working.
     "frame-src 'self' blob: http: https:",
+    "object-src 'self' blob: http: https:",
     "form-action 'self'",
   ].join("; ");
 }
