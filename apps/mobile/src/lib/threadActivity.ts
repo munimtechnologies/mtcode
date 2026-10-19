@@ -62,6 +62,7 @@ import {
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+import { truncate } from "@t3tools/shared/String";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
 import {
@@ -118,6 +119,11 @@ export interface ThreadFeedActivity {
   readonly workEntry: WorkLogPresentationEntry;
   readonly groupedToolDetail?: boolean;
   readonly live?: boolean;
+  /**
+   * Set on a lone call shown in place of its group header. Carries the header's
+   * label and the group that takes over once a second call joins it.
+   */
+  readonly groupStandIn?: { readonly groupId: string; readonly label: string };
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
 }
 
@@ -234,6 +240,7 @@ export interface ThreadFeedLatestRun {
   readonly status: OrchestrationV2RunStatus;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
+  readonly turnEnded?: boolean;
 }
 
 export interface AgentSpawnSummary {
@@ -249,8 +256,15 @@ export interface AgentSpawnSummary {
   }>;
 }
 
+/**
+ * Work-log headers render one line, but Android still lays out and hit-tests
+ * the whole string, so a multi-kilobyte heredoc stalls touch dispatch until
+ * the app ANRs. Expanded bodies and copy keep the full text.
+ */
+const WORK_LOG_LABEL_MAX_LENGTH = 200;
+
 function compactWorkEntryText(value: string): string {
-  return value.replace(/\s+/gu, " ").trim();
+  return truncate(value.replace(/\s+/gu, " "), WORK_LOG_LABEL_MAX_LENGTH);
 }
 
 export function workEntryRowLabel(entry: WorkLogPresentationEntry, expanded = false): string {
@@ -289,7 +303,7 @@ export function workEntryRowLabel(entry: WorkLogPresentationEntry, expanded = fa
         ? entry.changedFiles[0]!
         : `${entry.changedFiles[0]!} +${entry.changedFiles.length - 1} more`
       : null);
-  if (expanded) return preview?.trim() || entry.label;
+  if (expanded) return preview?.trim() ? truncate(preview, WORK_LOG_LABEL_MAX_LENGTH) : entry.label;
   return preview ? compactWorkEntryText(preview) || entry.label : entry.label;
 }
 
@@ -862,7 +876,7 @@ function singleToolCallLabel(activity: ThreadFeedActivity, expanded: boolean): s
   const presentation = resolveWorkEntryToolPresentation(activity.workEntry, "completed");
   if (presentation) return presentation.displayName;
   const command = activity.workEntry.command?.trim();
-  return command || activity.summary;
+  return command ? truncate(command, WORK_LOG_LABEL_MAX_LENGTH) : activity.summary;
 }
 
 function isEmptyMessage(entry: RawThreadFeedEntry): boolean {
@@ -1330,9 +1344,10 @@ export function deriveThreadFeedPresentation(
   if (
     isWorking &&
     activeWorkStartedAt !== null &&
+    latestRun?.turnEnded !== true &&
     !result.some(
       (row) =>
-        (row.type === "work-toggle" && row.shimmer) ||
+        row.id === LIVE_ACTIVITY_ROW_ID ||
         (row.type === "activity-group" &&
           isContextCompactionActivityGroup(row) &&
           row.runId === activeRunId &&
@@ -1527,6 +1542,23 @@ function appendToolGroupRows(
       : singleActivity !== null && !singleActivity.toolLike
         ? singleActivity.workEntry.label
         : groupSummary.summary;
+  const id = shimmer ? LIVE_ACTIVITY_ROW_ID : `${live ? "work-live" : "work-toggle"}:${groupId}`;
+  // A lone call needs no header. Its own row takes the header's place, label
+  // and identity, and discloses its details directly. A lone thought keeps the
+  // header, whose expansion already shows the text itself.
+  if (singleActivity !== null && singleActivity.workEntry.itemType !== "reasoning") {
+    result.push({
+      type: "activity-group",
+      id,
+      createdAt: singleActivity.createdAt,
+      runId: singleActivity.runId,
+      activities: [{ ...singleActivity, live: shimmer, groupStandIn: { groupId, label: summary } }],
+      // Like the header, the row has no trailing margin, so the Thinking
+      // fallback and a growing group swap in without shifting the feed.
+      continuesWorkLog: true,
+    });
+    return;
+  }
   const primarySourceActivity = activities.find(
     (activity) => activity.workEntry.toolSource !== undefined,
   );
@@ -1550,14 +1582,10 @@ function appendToolGroupRows(
       .toolIcon;
   const summaryToolIcon = live
     ? resolveWorkEntryToolPresentation(latestActivity.workEntry)?.icon
-    : singleActivity !== null &&
-        singleActivity.toolLike &&
-        toolGroupAction(singleActivity.workEntry) !== "edit"
-      ? resolveWorkEntryToolPresentation(singleActivity.workEntry, "completed")?.icon
-      : undefined;
+    : undefined;
   result.push({
     type: "work-toggle",
-    id: shimmer ? LIVE_ACTIVITY_ROW_ID : `${live ? "work-live" : "work-toggle"}:${groupId}`,
+    id,
     createdAt: sourceGroup.createdAt,
     runId: sourceGroup.runId,
     groupId,

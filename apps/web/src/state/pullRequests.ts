@@ -22,7 +22,7 @@ import {
 } from "@t3tools/shared/threadPullRequests";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useCallback, useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -138,12 +138,11 @@ export function newestPullRequestObservation(
 }
 
 function observePullRequestSummary(
-  environmentId: EnvironmentId,
-  reference: PullRequestRef,
+  key: string,
   summary: PullRequestSummary,
   observedAt: number,
 ): void {
-  const atom = observedPullRequestSummaryAtom(pullRequestSummaryKey(environmentId, reference));
+  const atom = observedPullRequestSummaryAtom(key);
   appAtomRegistry.modify(atom, (previous) => {
     const next = newestPullRequestObservation(previous, { summary, observedAt });
     return next === previous ? [false, previous] : [true, next];
@@ -217,11 +216,11 @@ export function useSharedPullRequestSummary(
         : savedPullRequestKey(environmentId, reference),
     ),
   );
+  // Keyed structurally so a fresh reference object for the same pull request is a no-op.
   useLayoutEffect(() => {
-    if (environmentId === null || reference === null || current === null || observedAt === null)
-      return;
-    observePullRequestSummary(environmentId, reference, current, observedAt);
-  }, [current, environmentId, reference, observedAt]);
+    if (key === "none" || current === null || observedAt === null) return;
+    observePullRequestSummary(key, current, observedAt);
+  }, [current, key, observedAt]);
   const summary =
     newestPullRequestObservation(
       observed,
@@ -291,16 +290,13 @@ function createMergedEnvironmentQuery<Input, A>(
   return function useMergedQuery(targets: ReadonlyArray<EnvironmentQueryTarget<Input>>) {
     const key = JSON.stringify(targets);
     const view = useAtomValue(targets.length === 0 ? empty : family(key));
-    const refresh = useCallback(
-      (override?: ReadonlyArray<EnvironmentQueryTarget<Input>>) => {
-        const refreshTargets =
-          override ?? (JSON.parse(key) as ReadonlyArray<EnvironmentQueryTarget<Input>>);
-        for (const atom of new Set(refreshTargets.map(atomFor))) {
-          appAtomRegistry.refresh(atom);
-        }
-      },
-      [key],
-    );
+    const refresh = (override?: ReadonlyArray<EnvironmentQueryTarget<Input>>) => {
+      const refreshTargets =
+        override ?? (JSON.parse(key) as ReadonlyArray<EnvironmentQueryTarget<Input>>);
+      for (const atom of new Set(refreshTargets.map(atomFor))) {
+        appAtomRegistry.refresh(atom);
+      }
+    };
     return { ...view, refresh };
   };
 }
@@ -349,23 +345,20 @@ export function usePullRequestList(
     for (const [environmentId, answer, observedAt] of query.observations) {
       for (const entry of answer.entries) {
         observePullRequestSummary(
-          environmentId,
-          {
+          pullRequestSummaryKey(environmentId, {
             projectId: entry.projectId,
             host: entry.host,
             repository: entry.repository,
             number: entry.number,
-          },
+          }),
           pullRequestListEntryToSummary(entry),
           observedAt,
         );
       }
     }
   }, [query.observations]);
-  const data = useMemo(
-    () =>
-      mergePullRequestLists(query.values.map(([target, value]) => [target.environmentId, value])),
-    [query.values],
+  const data = mergePullRequestLists(
+    query.values.map(([target, value]) => [target.environmentId, value] as const),
   );
   return { data, error: query.error, isPending: query.isPending, refresh: query.refresh };
 }
@@ -391,20 +384,18 @@ export function usePullRequestUsefulness(
   readonly error: string | null;
 } {
   const query = usePullRequestRankQuery(targets);
-  return useMemo(() => {
-    const usefulness = new Map<string, number>();
-    const reasons = new Map<string, string>();
-    for (const [target, result] of query.values) {
-      for (const ranking of result.rankings) {
-        // Keyed exactly as `pullRequestEntryKey` keys its rows, so a score survives the list
-        // being re-read, re-merged and re-sorted.
-        const key = `${target.environmentId}:${result.host}:${result.repository}#${ranking.number}`;
-        usefulness.set(key, ranking.score);
-        if (ranking.reason !== undefined) reasons.set(key, ranking.reason);
-      }
+  const usefulness = new Map<string, number>();
+  const reasons = new Map<string, string>();
+  for (const [target, result] of query.values) {
+    for (const ranking of result.rankings) {
+      // Keyed exactly as `pullRequestEntryKey` keys its rows, so a score survives the list
+      // being re-read, re-merged and re-sorted.
+      const key = `${target.environmentId}:${result.host}:${result.repository}#${ranking.number}`;
+      usefulness.set(key, ranking.score);
+      if (ranking.reason !== undefined) reasons.set(key, ranking.reason);
     }
-    return { usefulness, reasons, isPending: query.isPending, error: query.error };
-  }, [query.values, query.isPending, query.error]);
+  }
+  return { usefulness, reasons, isPending: query.isPending, error: query.error };
 }
 
 /** The line counts for the rows on screen, asked of each environment for its own rows. */
@@ -418,14 +409,11 @@ export function usePullRequestListStats(
   ) => void;
 } {
   const query = usePullRequestStatsQuery(targets);
-  const stats = useMemo(
-    () =>
-      query.values.length === 0
-        ? null
-        : query.values.flatMap(([target, result]) =>
-            result.stats.map((stat) => ({ ...stat, environmentId: target.environmentId })),
-          ),
-    [query.values],
-  );
+  const stats =
+    query.values.length === 0
+      ? null
+      : query.values.flatMap(([target, result]) =>
+          result.stats.map((stat) => ({ ...stat, environmentId: target.environmentId })),
+        );
   return { stats, isPending: query.isPending, refresh: query.refresh };
 }

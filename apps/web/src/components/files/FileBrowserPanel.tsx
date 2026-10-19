@@ -10,7 +10,7 @@ import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Cause from "effect/Cause";
 import { ChevronsDownUp, ChevronsUpDown } from "lucide";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -31,6 +31,7 @@ import { joinHostPath } from "./filePath";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
+import { loadFileAncestors } from "./loadFileAncestors";
 import { useDirectoryEntries } from "./useDirectoryEntries";
 import { useProjectPathSearch } from "~/state/queries";
 
@@ -105,15 +106,14 @@ function FileSearchField(props: {
   );
 }
 
-// The tree diffs `treePaths` by identity, so these derivations must stay cached
-// across the hooks that read them.
-function useTreeEntries(
+// The tree diffs `treePaths` by identity, so the panel must keep this result cached
+// across the hooks that read it.
+function buildTreeEntries(
   directoryEntries: readonly ProjectEntry[],
   searchEntries: readonly ProjectEntry[],
   searchPending: boolean,
   query: string,
 ) {
-  "use memo";
   const result = new Map(directoryEntries.map((entry) => [entry.path, entry]));
   if (query.trim() && !searchPending) {
     for (const entry of searchEntries) {
@@ -132,18 +132,6 @@ function useTreeEntries(
   const treePaths = entries.map(treePath);
   const directoryPaths = entries.filter((entry) => entry.kind === "directory").map(treePath);
   return { entries, entryKinds, treePaths, directoryPaths };
-}
-
-function useDragMentionController(
-  cwd: string,
-  hostFolder: boolean,
-  treeModelRef: RefObject<ReturnType<typeof useFileTree>["model"] | null>,
-) {
-  "use memo";
-  return createFileTreeDragMentionController({
-    deselect: (path) => treeModelRef.current?.getItem(path)?.deselect(),
-    ...(hostFolder ? { mentionPath: (path: string) => joinHostPath(cwd, path) } : {}),
-  });
 }
 
 export default function FileBrowserPanel({
@@ -177,7 +165,7 @@ export default function FileBrowserPanel({
     { environmentId, cwd: hostFolder ? null : cwd, query: query.slice(0, 256) },
     200,
   );
-  const { entries, entryKinds, treePaths, directoryPaths } = useTreeEntries(
+  const { entries, entryKinds, treePaths, directoryPaths } = buildTreeEntries(
     directoryEntries,
     pathSearch.entries,
     pathSearch.isPending,
@@ -281,8 +269,9 @@ export default function FileBrowserPanel({
   );
 
   const loadingDirectoriesRef = useRef(loadingDirectories);
-  const treeModelRef = useRef<ReturnType<typeof useFileTree>["model"] | null>(null);
-  const dragMention = useDragMentionController(cwd, hostFolder, treeModelRef);
+  const dragMention = createFileTreeDragMentionController(
+    hostFolder ? { mentionPath: (path: string) => joinHostPath(cwd, path) } : {},
+  );
   const { model } = useFileTree({
     composition: {
       contextMenu: {
@@ -329,6 +318,8 @@ export default function FileBrowserPanel({
     model.setComposition(model.getComposition());
   }, [loadingDirectories, model]);
   const search = useFileTreeSearch(model);
+  // Pierre restores the unfiltered tree when a search has no matches.
+  const hasNoSearchMatches = search.value.trim().length > 0 && search.matchingPaths.length === 0;
   const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
     areAllDirectoriesExpanded(currentModel, directoryPaths),
   );
@@ -378,12 +369,7 @@ export default function FileBrowserPanel({
   useEffect(() => {
     if (!selectedPath) return;
     const controller = new AbortController();
-    void (async () => {
-      const segments = selectedPath.split("/");
-      for (let index = 0; index < segments.length && !controller.signal.aborted; index++) {
-        await load(segments.slice(0, index).join("/"));
-      }
-    })();
+    void loadFileAncestors(selectedPath, load, { signal: controller.signal });
     return () => {
       controller.abort();
     };
@@ -499,22 +485,20 @@ export default function FileBrowserPanel({
   // the dragged row, so the drag flag is up before that selection emits.
   const panelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    treeModelRef.current = model;
-  }, [model]);
-  useEffect(() => {
     const panel = panelRef.current;
     if (panel === null) {
       return;
     }
     const handleDragStart = (event: DragEvent) => dragMention.handleDragStart(event);
-    const handleDragEnd = () => dragMention.handleDragEnd();
+    const handleDragEnd = () =>
+      dragMention.handleDragEnd((path) => model.getItem(path)?.deselect());
     panel.addEventListener("dragstart", handleDragStart, true);
     panel.addEventListener("dragend", handleDragEnd);
     return () => {
       panel.removeEventListener("dragstart", handleDragStart, true);
       panel.removeEventListener("dragend", handleDragEnd);
     };
-  }, [dragMention]);
+  }, [dragMention, model]);
 
   return (
     <div
@@ -581,12 +565,20 @@ export default function FileBrowserPanel({
           Loading files…
         </div>
       )}
-      <FileTree
-        model={model}
-        aria-label={`${projectName} files`}
-        className="min-h-0 flex-1 overflow-hidden"
-        style={pierreTreeStyle(resolvedTheme)}
-      />
+      {hasNoSearchMatches ? (
+        ready && !isPending && !pathSearch.isPending && !error && !pathSearch.error ? (
+          <div role="status" className="px-3 py-4 text-xs text-muted-foreground">
+            No matching files.
+          </div>
+        ) : null
+      ) : (
+        <FileTree
+          model={model}
+          aria-label={`${projectName} files`}
+          className="min-h-0 flex-1 overflow-hidden"
+          style={pierreTreeStyle(resolvedTheme)}
+        />
+      )}
     </div>
   );
 }

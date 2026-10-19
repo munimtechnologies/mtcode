@@ -1065,6 +1065,11 @@ const encodeTimelineSources = Schema.encodeEffect(
 );
 const encodeIdList = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
 
+// An empty list filter selects no rows, but SQLite still walks every row of
+// the thread to apply it. Callers pass `turnItemTypes: []` to skip items.
+const matchesNothing = (...filters: ReadonlyArray<ReadonlyArray<unknown> | undefined>) =>
+  filters.some((values) => values?.length === 0);
+
 const encodeThreadPayload = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2AppThreadJsonSchema),
 );
@@ -2752,7 +2757,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         }
 
         const boundedTurnItemRows =
-          fields !== undefined && !fields.includes("turnItems")
+          (fields !== undefined && !fields.includes("turnItems")) ||
+          (window === undefined &&
+            matchesNothing(filter?.turnItemTypes, filter?.turnItemStatuses, filter?.turnItemRunIds))
             ? []
             : window === undefined
               ? yield* sql<PayloadRow>`
@@ -3025,7 +3032,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           contextTransferRows,
         ] = yield* Effect.all([
           decodeThreadPayload(threadRow.payload_json),
-          fields !== undefined && !fields.includes("runs")
+          (fields !== undefined && !fields.includes("runs")) ||
+          (window === undefined && matchesNothing(filter?.runIds))
             ? Effect.succeed([])
             : window === undefined
               ? sql<PayloadRow>`
@@ -3196,7 +3204,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 OR provider_turn_id IN (SELECT value FROM json_each(${cohortProviderTurnIds})))
             ORDER BY created_at ASC, runtime_request_id ASC
           `,
-          fields !== undefined && !fields.includes("messages")
+          (fields !== undefined && !fields.includes("messages")) ||
+          (window === undefined &&
+            matchesNothing(filter?.messageIds, filter?.messageRoles, filter?.messageRunIds))
             ? Effect.succeed([])
             : window === undefined
               ? sql<PayloadRow>`
@@ -3582,6 +3592,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             LIMIT 1
           )
           WHERE t.deleted_at IS NULL
+            -- The sweep runs every scheduler tick. Without this list the latest-run
+            -- lookup above sorts every run of every thread, tens of milliseconds
+            -- for one long thread; only threads with a usage-limit failure qualify.
+            AND t.thread_id IN (
+              SELECT failure.thread_id FROM orchestration_v2_projection_turn_items failure
+              WHERE failure.type = 'error' AND failure.status = 'failed'
+                AND json_extract(failure.payload_json, '$.failure.class') = 'usage_limit'
+            )
             AND json_extract(t.payload_json, '$.archivedAt') IS NULL
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
@@ -3967,6 +3985,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `.pipe(Effect.flatMap(decodeRows(decodeRunAttemptPayload, threadId)));
             const nodes = yield* sql<PayloadRow>`
               SELECT payload_json FROM orchestration_v2_projection_nodes
+              -- Look up the root node by key, not every node in the thread.
+              INDEXED BY sqlite_autoindex_orchestration_v2_projection_nodes_1
               WHERE thread_id = ${threadId} AND node_id IN (SELECT json_extract(payload_json, '$.rootNodeId') FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} AND run_id = ${runId}) ORDER BY node_id ASC
             `.pipe(Effect.flatMap(decodeRows(decodeNodePayload, threadId)));
             const subagents = yield* sql<PayloadRow>`

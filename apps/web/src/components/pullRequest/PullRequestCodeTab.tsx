@@ -1,9 +1,4 @@
-import type {
-  CodeViewItem,
-  DiffLineAnnotation,
-  FileDiffMetadata,
-  SelectedLineRange,
-} from "@pierre/diffs";
+import type { CodeViewItem, DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import type { CodeViewDiffItem, CodeViewHandle } from "@pierre/diffs/react";
 import type {
   EnvironmentId,
@@ -42,7 +37,7 @@ import {
 } from "react";
 
 import { useLocalStorage } from "~/hooks/useLocalStorage";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
 import { pullRequestFindingKey, type PullRequestFinding } from "./pullRequestDetail.logic";
@@ -107,6 +102,7 @@ import {
   type DiffFoldOverride,
 } from "./pullRequestDiff.logic";
 import { PullRequestDiffStat, PullRequestMetaLine } from "./pullRequestPresentation";
+import { PullRequestDiffUnavailableState } from "./PullRequestDiffUnavailableState";
 import { usePullRequestFilesViewed } from "./usePullRequestFilesViewed";
 import {
   nextPendingReviewCommentId,
@@ -243,201 +239,6 @@ export interface PullRequestAgentSelectionInput {
   readonly request: string;
 }
 
-// These hooks call no hooks, so the compiler needs the directive to memoize them. The viewer
-// and the viewed-file tracker key on the identity of what they return.
-function usePullRequestDiffFileContentsLoader<E>(
-  getDiffFileContents: Parameters<typeof createPullRequestDiffFileContentsLoader<E>>[0],
-  source: Parameters<typeof createPullRequestDiffFileContentsLoader<E>>[1],
-) {
-  "use memo";
-  return createPullRequestDiffFileContentsLoader(getDiffFileContents, source);
-}
-
-function useParsedDiffSlices(
-  loadedSlices: ReadonlyArray<DiffSlice>,
-  scopeKey: string,
-  resolvedTheme: string,
-  ignoreWhitespace: boolean,
-) {
-  "use memo";
-  // The cache key carries the theme, which is what the tokenizer caches against, so a theme
-  // change is still a fresh parse. The patch's own hash is part of it too: a refreshed page
-  // reuses its cursor, and a key of position alone would hand back the parse it replaced.
-  const parsedSlices = loadedSlices.map((slice) =>
-    parseSlice(
-      slice,
-      `pull-request:${scopeKey}:${resolvedTheme}:${ignoreWhitespace}:${slice.cursor ?? "first"}:${fnv1a32(slice.patch)}`,
-      ignoreWhitespace,
-    ),
-  );
-  const files = parsedSlices.flatMap((parsed) =>
-    parsed?.kind === "files" ? orderDiffFiles(parsed.files) : [],
-  );
-  const filePaths = files.map((file) => resolveFileDiffPath(file));
-  const omittedFileStats = new Map(
-    loadedSlices.flatMap((slice) =>
-      slice.omittedFileStats.map((file) => [file.path, file] as const),
-    ),
-  );
-  const sourceFileStats = new Map(
-    parsedSlices.flatMap((parsed) =>
-      parsed?.kind === "files"
-        ? parsed.files.map(
-            (file, index) =>
-              [
-                buildFileDiffRenderKey(file),
-                getDiffLineStat([parsed.sourceFiles[index] ?? file]),
-              ] as const,
-          )
-        : [],
-    ),
-  );
-  const fileTreeEntries = diffFileTreeEntries(files);
-  return { parsedSlices, files, filePaths, sourceFileStats, omittedFileStats, fileTreeEntries };
-}
-
-function useAnnotatedDiffFiles(
-  files: ReadonlyArray<FileDiffMetadata>,
-  reviewThreads: ReadonlyArray<PullRequestReviewThread>,
-  pendingComments: ReadonlyArray<PendingReviewComment>,
-  draft: DraftAnchor | null,
-  scopedToCommit: boolean,
-) {
-  "use memo";
-  // Placing a conversation takes more than its file being in the diff: its line has to fall
-  // inside a hunk that was rendered. One that does not is drawn nowhere, so it belongs in the
-  // off-diff list rather than disappearing between the two.
-  const placedThreadIds = (() => {
-    const placed = new Set<string>();
-    // A commit's diff counts lines within that commit; a review comment is anchored to the
-    // pull request's head diff. Pinning one onto the other would put the remark against
-    // whichever code happens to hold that line number in this commit, so while a commit is on
-    // screen every conversation is listed rather than placed.
-    if (scopedToCommit) return placed;
-    for (const file of files) {
-      const path = resolveFileDiffPath(file);
-      for (const thread of reviewThreads) {
-        if (
-          thread.path === path &&
-          thread.line !== null &&
-          isLineInFileDiff(file, thread.side, thread.line)
-        ) {
-          placed.add(thread.id);
-        }
-      }
-    }
-    return placed;
-  })();
-
-  const annotatedFiles = files.map((fileDiff) => {
-    const fileKey = buildFileDiffRenderKey(fileDiff);
-    const path = resolveFileDiffPath(fileDiff);
-    const groups = new Map<string, MutableAnnotationGroup>();
-    const groupAt = (side: PullRequestDiffSide, line: number) => {
-      const key = `${side}:${line}`;
-      const existing = groups.get(key);
-      if (existing) return existing;
-      const created: MutableAnnotationGroup = {
-        side,
-        line,
-        threads: [],
-        pending: [],
-        draft: false,
-      };
-      groups.set(key, created);
-      return created;
-    };
-
-    for (const thread of reviewThreads) {
-      if (thread.path !== path || thread.line === null) continue;
-      if (!placedThreadIds.has(thread.id)) continue;
-      groupAt(thread.side, thread.line).threads.push(thread);
-    }
-    if (!scopedToCommit) {
-      for (const comment of pendingComments) {
-        if (comment.path !== path) continue;
-        const anchor = getReviewPositionAnchor(comment.position);
-        groupAt(anchor.side, anchor.line).pending.push(comment);
-      }
-    }
-    if (draft?.fileKey === fileKey) {
-      const anchor = getReviewPositionAnchor(draft.position);
-      groupAt(anchor.side, anchor.line).draft = true;
-    }
-
-    const annotations: ReviewAnnotation[] = [...groups.values()].map((group) => ({
-      side: toViewerSide(group.side),
-      lineNumber: group.line,
-      metadata: { threads: group.threads, pending: group.pending, draft: group.draft },
-    }));
-    return {
-      fileKey,
-      path,
-      fileDiff,
-      annotations,
-      // The viewer re-renders an item only when its version changes, so everything the
-      // annotations show has to be part of it.
-      annotationsVersion: fnv1a32(
-        annotations
-          .map(
-            ({ side, lineNumber, metadata }) =>
-              `${side}:${lineNumber}:${metadata.draft ? "d" : ""}:${metadata.pending
-                .map((comment) => `${comment.id}:${comment.body}`)
-                .join(",")}:${metadata.threads
-                .map(
-                  (thread) =>
-                    `${thread.id}:${thread.isResolved ? "r" : ""}:${
-                      thread.isOutdated ? "o" : ""
-                    }:${thread.comments
-                      .map(
-                        (comment) =>
-                          `${comment.id}:${comment.author?.login ?? ""}:${comment.createdAt}:${comment.body}:${(
-                            comment.reactions ?? []
-                          )
-                            .map((r) => `${r.content}:${r.count}:${r.viewerHasReacted ? "v" : ""}`)
-                            .join(",")}`,
-                      )
-                      .join(";")}`,
-                )
-                .join(",")}`,
-          )
-          .join("|"),
-      ),
-    };
-  });
-  return { annotatedFiles, placedThreadIds };
-}
-
-function useDiffItems(
-  annotatedFiles: ReturnType<typeof useAnnotatedDiffFiles>["annotatedFiles"],
-  foldOverride: Exclude<DiffFoldOverride, null>,
-  toggledFiles: ReadonlySet<string>,
-  viewedFiles: {
-    readonly enabled: boolean;
-    readonly isViewed: (path: string) => boolean;
-    readonly isStale: (path: string) => boolean;
-  },
-) {
-  "use memo";
-  const items: CodeViewDiffItem<ReviewAnnotationGroup>[] = annotatedFiles.map(
-    ({ fileKey, path, fileDiff, annotations, annotationsVersion }) => {
-      const collapsed = isFileDiffCollapsed(fileKey, foldOverride, toggledFiles);
-      const viewedMark = viewedFiles.enabled
-        ? `e${viewedFiles.isViewed(path) ? "v" : ""}${viewedFiles.isStale(path) ? "s" : ""}`
-        : "";
-      return {
-        id: fileKey,
-        type: "diff" as const,
-        fileDiff,
-        annotations,
-        collapsed,
-        version: fnv1a32(`${collapsed ? "1" : "0"}:${viewedMark}:${annotationsVersion}`),
-      };
-    },
-  );
-  return items;
-}
-
 function PullRequestCodeTab({
   scrollerRef,
   environmentId,
@@ -471,14 +272,18 @@ function PullRequestCodeTab({
   revealRequest?: { readonly path: string; readonly nonce: number } | null;
 }) {
   const { resolvedTheme } = useTheme();
-  const settings = useClientSettings();
+  const settings = useClientSettings((settings) => ({
+    diffFilesCollapsed: settings.diffFilesCollapsed,
+    diffIgnoreWhitespace: settings.diffIgnoreWhitespace,
+    diffLayout: settings.diffLayout,
+    wordWrap: settings.wordWrap,
+  }));
   const [toggledFiles, setToggledFiles] = useState<ReadonlySet<string>>(() => new Set());
   const [visibleCommitCount, setVisibleCommitCount] = useState(COMMIT_PAGE_SIZE);
   const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
   const effectiveFoldOverride =
     foldOverride ?? (settings.diffFilesCollapsed ? "folded" : "expanded");
   const diffLayout = settings.diffLayout;
-  const updateClientSettings = useUpdateClientSettings();
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [fileTreeOpen, setFileTreeOpen] = useLocalStorage(
@@ -608,28 +413,12 @@ function PullRequestCodeTab({
     reportFailure: false,
   });
   const getDiffFileContents = useAtomCommand(pullRequestEnvironment.diffFileContents);
-  const loadDiffFiles = usePullRequestDiffFileContentsLoader(getDiffFileContents, {
-    environmentId,
-    reference,
-    commit,
-    cacheKey: `pull-request:${referenceKey}:${detail.updatedAt}:${commit ?? "all"}`,
-  });
 
-  const hostReview = detail.capabilities.review;
-  const review = {
-    inlineComment: hostReview.inlineComment && detail.viewerPermissions.comment,
-    reply: hostReview.reply && detail.viewerPermissions.comment,
-    resolve: hostReview.resolve && detail.viewerPermissions.resolve,
-  };
-  const canCommentOnLines = review.inlineComment && commit === null;
-  const { parsedSlices, files, filePaths, sourceFileStats, omittedFileStats, fileTreeEntries } =
-    useParsedDiffSlices(loadedSlices, scopeKey, resolvedTheme, ignoreWhitespace);
   const viewedFilesStore = detail.capabilities.viewedFiles;
   const filesViewed = usePullRequestFilesViewed({
     environmentId,
     reference,
     enabled: viewedFilesStore !== undefined,
-    paths: filePaths,
   });
   const {
     setViewed,
@@ -646,20 +435,210 @@ function PullRequestCodeTab({
     refreshFirstDiffPage();
     refreshFilesViewed();
   }, [refreshToken, scopeKey, refreshFirstDiffPage, refreshFilesViewed]);
+
+  // The sentinel is held as state rather than a ref because the viewer mounts its own footer:
+  // an effect reading a ref could run before that node exists and would never arm the observer.
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
+  const requestTreeReveal = useCodeViewFileReveal(viewer, scopeKey);
+  const answeredReveal = useRef<number | null>(null);
+
+  const loadDiffFiles = createPullRequestDiffFileContentsLoader(getDiffFileContents, {
+    environmentId,
+    reference,
+    commit,
+    cacheKey: `pull-request:${referenceKey}:${detail.updatedAt}:${commit ?? "all"}`,
+  });
+  const hostReview = detail.capabilities.review;
+  const review = {
+    inlineComment: hostReview.inlineComment && detail.viewerPermissions.comment,
+    reply: hostReview.reply && detail.viewerPermissions.comment,
+    resolve: hostReview.resolve && detail.viewerPermissions.resolve,
+  };
+  const canCommentOnLines = review.inlineComment && commit === null;
+  // The cache key carries the theme, which is what the tokenizer caches against, so a theme
+  // change is still a fresh parse. The patch's own hash is part of it too: a refreshed page
+  // reuses its cursor, and a key of position alone would hand back the parse it replaced.
+  const parsedSlices = loadedSlices.map((slice) =>
+    parseSlice(
+      slice,
+      `pull-request:${scopeKey}:${resolvedTheme}:${ignoreWhitespace}:${slice.cursor ?? "first"}:${fnv1a32(slice.patch)}`,
+      ignoreWhitespace,
+    ),
+  );
+  const files = parsedSlices.flatMap((parsed) =>
+    parsed?.kind === "files" ? orderDiffFiles(parsed.files) : [],
+  );
+  const filePaths = files.map((file) => resolveFileDiffPath(file));
+  const omittedFileStats = new Map(
+    loadedSlices.flatMap((slice) =>
+      slice.omittedFileStats.map((file) => [file.path, file] as const),
+    ),
+  );
+  const sourceFileStats = new Map(
+    parsedSlices.flatMap((parsed) =>
+      parsed?.kind === "files"
+        ? parsed.files.map(
+            (file, index) =>
+              [
+                buildFileDiffRenderKey(file),
+                getDiffLineStat([parsed.sourceFiles[index] ?? file]),
+              ] as const,
+          )
+        : [],
+    ),
+  );
+  const fileTreeEntries = diffFileTreeEntries(files);
+  // Placing a conversation takes more than its file being in the diff: its line has to fall
+  // inside a hunk that was rendered. One that does not is drawn nowhere, so it belongs in the
+  // off-diff list rather than disappearing between the two.
+  const placedThreadIds = (() => {
+    const placed = new Set<string>();
+    // A commit's diff counts lines within that commit; a review comment is anchored to the
+    // pull request's head diff. Pinning one onto the other would put the remark against
+    // whichever code happens to hold that line number in this commit, so while a commit is on
+    // screen every conversation is listed rather than placed.
+    if (commit !== null) return placed;
+    for (const file of files) {
+      const path = resolveFileDiffPath(file);
+      for (const thread of detail.reviewThreads) {
+        if (
+          thread.path === path &&
+          thread.line !== null &&
+          isLineInFileDiff(file, thread.side, thread.line)
+        ) {
+          placed.add(thread.id);
+        }
+      }
+    }
+    return placed;
+  })();
+
+  const annotatedFiles = files.map((fileDiff) => {
+    const fileKey = buildFileDiffRenderKey(fileDiff);
+    const path = resolveFileDiffPath(fileDiff);
+    const groups = new Map<string, MutableAnnotationGroup>();
+    const groupAt = (side: PullRequestDiffSide, line: number) => {
+      const key = `${side}:${line}`;
+      const existing = groups.get(key);
+      if (existing) return existing;
+      const created: MutableAnnotationGroup = {
+        side,
+        line,
+        threads: [],
+        pending: [],
+        draft: false,
+      };
+      groups.set(key, created);
+      return created;
+    };
+
+    for (const thread of detail.reviewThreads) {
+      if (thread.path !== path || thread.line === null) continue;
+      if (!placedThreadIds.has(thread.id)) continue;
+      groupAt(thread.side, thread.line).threads.push(thread);
+    }
+    if (commit === null) {
+      for (const comment of pendingComments) {
+        if (comment.path !== path) continue;
+        const anchor = getReviewPositionAnchor(comment.position);
+        groupAt(anchor.side, anchor.line).pending.push(comment);
+      }
+    }
+    if (draft?.fileKey === fileKey) {
+      const anchor = getReviewPositionAnchor(draft.position);
+      groupAt(anchor.side, anchor.line).draft = true;
+    }
+
+    const annotations: ReviewAnnotation[] = [...groups.values()].map((group) => ({
+      side: toViewerSide(group.side),
+      lineNumber: group.line,
+      metadata: { threads: group.threads, pending: group.pending, draft: group.draft },
+    }));
+    return {
+      fileKey,
+      path,
+      fileDiff,
+      annotations,
+      // The viewer re-renders an item only when its version changes, so everything the
+      // annotations show has to be part of it.
+      annotationsVersion: fnv1a32(
+        annotations
+          .map(
+            ({ side, lineNumber, metadata }) =>
+              `${side}:${lineNumber}:${metadata.draft ? "d" : ""}:${metadata.pending
+                .map((comment) => `${comment.id}:${comment.body}`)
+                .join(",")}:${metadata.threads
+                .map(
+                  (thread) =>
+                    `${thread.id}:${thread.isResolved ? "r" : ""}:${
+                      thread.isOutdated ? "o" : ""
+                    }:${thread.comments
+                      .map(
+                        (comment) =>
+                          `${comment.id}:${comment.author?.login ?? ""}:${comment.createdAt}:${comment.body}:${(
+                            comment.reactions ?? []
+                          )
+                            .map((r) => `${r.content}:${r.count}:${r.viewerHasReacted ? "v" : ""}`)
+                            .join(",")}`,
+                      )
+                      .join(";")}`,
+                )
+                .join(",")}`,
+          )
+          .join("|"),
+      ),
+    };
+  });
+
   const nextCursor = loadedSlices.at(-1)?.nextCursor ?? null;
   const withheldContent =
     loadedSlices.some((slice) => slice.truncated) ||
     parsedSlices.some((parsed) => parsed?.kind === "raw");
+  // Only once the diff is whole: returning here while a cursor is outstanding would take the
+  // sentinel off screen and end the walk, leaving the rest of the change unasked for.
+  const rawSlices =
+    nextCursor === null
+      ? parsedSlices.flatMap((parsed) => (parsed?.kind === "raw" ? [parsed] : []))
+      : [];
+  const rawSlicesView =
+    files.length === 0 && rawSlices.length > 0 ? (
+      <div className="space-y-4 px-4 py-5">
+        {rawSlices.map((slice) => (
+          <div key={`${slice.reason}:${slice.text.slice(0, 64)}`} className="space-y-2">
+            <p className="text-xs text-muted-foreground">{slice.reason}</p>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs">{slice.text}</pre>
+          </div>
+        ))}
+      </div>
+    ) : null;
+  const unstructured =
+    rawSlices.length === 0 ? null : (
+      <div className="space-y-4 border-t border-border/60 px-4 py-5">
+        {rawSlices.map((slice) => (
+          <div key={`${slice.reason}:${slice.text.slice(0, 64)}`} className="space-y-2">
+            <p className="text-xs text-muted-foreground">{slice.reason}</p>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs">{slice.text}</pre>
+          </div>
+        ))}
+      </div>
+    );
 
-  const { annotatedFiles, placedThreadIds } = useAnnotatedDiffFiles(
-    files,
-    detail.reviewThreads,
-    pendingComments,
-    draft,
-    commit !== null,
+  const items: CodeViewDiffItem<ReviewAnnotationGroup>[] = annotatedFiles.map(
+    ({ fileKey, path, fileDiff, annotations, annotationsVersion }) => {
+      const collapsed = isFileDiffCollapsed(fileKey, effectiveFoldOverride, toggledFiles);
+      const viewedMark = filesViewedEnabled
+        ? `e${isFileViewed(path) ? "v" : ""}${isFileViewedStale(path) ? "s" : ""}`
+        : "";
+      return {
+        id: fileKey,
+        type: "diff" as const,
+        fileDiff,
+        annotations,
+        collapsed,
+        version: fnv1a32(`${collapsed ? "1" : "0"}:${viewedMark}:${annotationsVersion}`),
+      };
+    },
   );
-
-  const items = useDiffItems(annotatedFiles, effectiveFoldOverride, toggledFiles, filesViewed);
   const fileKeys = items.map((item) => item.id);
   const collapsedFileKeys = new Set(
     items.filter((item) => item.collapsed === true).map((item) => item.id),
@@ -677,21 +656,6 @@ function PullRequestCodeTab({
     if (nextCursor === null) return;
     setSliceState((previous) => ({ ...previous, cursor: nextCursor }));
   };
-
-  // The sentinel is held as state rather than a ref because the viewer mounts its own footer:
-  // an effect reading a ref could run before that node exists and would never arm the observer.
-  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (sentinel === null || !canLoadNextSlice) return;
-    const observer = new IntersectionObserver(
-      (observed) => {
-        if (observed.some((entry) => entry.isIntersecting)) loadNextSlice();
-      },
-      { rootMargin: "240px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [canLoadNextSlice, loadNextSlice, sentinel]);
 
   const toggleFile = (fileKey: string) =>
     setToggledFiles((current) => {
@@ -714,28 +678,12 @@ function PullRequestCodeTab({
     setFileViewed,
   };
 
-  const requestTreeReveal = useCodeViewFileReveal(viewer, scopeKey);
   const revealFile = (path: string) => {
     const item = items.find((candidate) => resolveFileDiffPath(candidate.fileDiff) === path);
     if (item === undefined) return;
     if (item.collapsed === true) toggleFile(item.id);
     requestTreeReveal(item.id);
   };
-  const answeredReveal = useRef<number | null>(null);
-  const answerReveal = useEffectEvent(() => {
-    if (revealRequest === null || answeredReveal.current === revealRequest.nonce) return;
-    if (!items.some((item) => resolveFileDiffPath(item.fileDiff) === revealRequest.path)) {
-      if (canLoadNextSlice) loadNextSlice();
-      return;
-    }
-    answeredReveal.current = revealRequest.nonce;
-    revealFile(revealRequest.path);
-  });
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- A reveal for a file not loaded yet pages forward, which sets the slice cursor.
-    answerReveal();
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-checked as pages load until the requested file arrives.
-  }, [canLoadNextSlice, items, revealRequest]);
 
   const toggleAllFiles = () => {
     setFoldOverride(areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys) ? "expanded" : "folded");
@@ -1018,11 +966,6 @@ function PullRequestCodeTab({
   // to the whole diff and it is not drawn without commits to list, so a scope that outlived them
   // would leave the tab reading one obsolete commit with nothing to press.
   const selectedCommit = orderedCommits.find((entry) => entry.oid === commit);
-  useEffect(() => {
-    if (commit !== null && selectedCommit === undefined) {
-      onSelectedCommitChange(null);
-    }
-  }, [commit, onSelectedCommitChange, selectedCommit]);
   const scopeLabel = selectedCommit ? selectedCommit.messageHeadline : "All commits";
   const changeIgnoreWhitespace = (next: boolean) => {
     setIgnoreWhitespace(next);
@@ -1087,7 +1030,7 @@ function PullRequestCodeTab({
           {filesViewed.enabled && files.length > 0 ? (
             <span className="flex min-w-0 items-center gap-1 tabular-nums">
               <span className="shrink-0">
-                {filesViewed.viewedCount} / {files.length}
+                {filePaths.filter(isFileViewed).length} / {files.length}
               </span>
               <span className="truncate">
                 {viewedFilesStore === "environment" ? `viewed in ${APP_BASE_NAME}` : "viewed"}
@@ -1320,6 +1263,38 @@ function PullRequestCodeTab({
       </div>
     </div>
   );
+  // The effects sit after every derivation: a hook between the diff's derivations and their
+  // later readers (the viewer options, the reveal handler) would leave them uncached.
+  useEffect(() => {
+    if (sentinel === null || !canLoadNextSlice) return;
+    const observer = new IntersectionObserver(
+      (observed) => {
+        if (observed.some((entry) => entry.isIntersecting)) loadNextSlice();
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [canLoadNextSlice, loadNextSlice, sentinel]);
+  const answerReveal = useEffectEvent(() => {
+    if (revealRequest === null || answeredReveal.current === revealRequest.nonce) return;
+    if (!items.some((item) => resolveFileDiffPath(item.fileDiff) === revealRequest.path)) {
+      if (canLoadNextSlice) loadNextSlice();
+      return;
+    }
+    answeredReveal.current = revealRequest.nonce;
+    revealFile(revealRequest.path);
+  });
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- A reveal for a file not loaded yet pages forward, which sets the slice cursor.
+    answerReveal();
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-checked as pages load until the requested file arrives.
+  }, [canLoadNextSlice, items, revealRequest]);
+  useEffect(() => {
+    if (commit !== null && selectedCommit === undefined) {
+      onSelectedCommitChange(null);
+    }
+  }, [commit, onSelectedCommitChange, selectedCommit]);
   const withToolbar = (body: ReactNode) => (
     <div className="flex h-full min-h-0 flex-col">
       {toolbar}
@@ -1335,27 +1310,17 @@ function PullRequestCodeTab({
 
   if (diffQuery.error && loadedSlices.length === 0) {
     return withToolbar(
-      <p className="px-4 py-5 text-sm text-muted-foreground">{diffQuery.error}</p>,
+      <PullRequestDiffUnavailableState
+        error={diffQuery.error}
+        provider={detail.provider}
+        url={detail.url}
+        onRetry={() => diffQuery.refresh()}
+      />,
     );
   }
 
-  // Only once the diff is whole: returning here while a cursor is outstanding would take the
-  // sentinel off screen and end the walk, leaving the rest of the change unasked for.
-  const rawSlices =
-    nextCursor === null
-      ? parsedSlices.flatMap((parsed) => (parsed?.kind === "raw" ? [parsed] : []))
-      : [];
-  if (files.length === 0 && rawSlices.length > 0) {
-    return withToolbar(
-      <div className="space-y-4 px-4 py-5">
-        {rawSlices.map((slice) => (
-          <div key={`${slice.reason}:${slice.text.slice(0, 64)}`} className="space-y-2">
-            <p className="text-xs text-muted-foreground">{slice.reason}</p>
-            <pre className="whitespace-pre-wrap break-words font-mono text-xs">{slice.text}</pre>
-          </div>
-        ))}
-      </div>,
-    );
+  if (rawSlicesView !== null) {
+    return withToolbar(rawSlicesView);
   }
 
   if (items.length === 0 && nextCursor === null) {
@@ -1375,18 +1340,6 @@ function PullRequestCodeTab({
     if (existing) existing.push(thread);
     else orphanFiles.set(thread.path, [thread]);
   }
-
-  const unstructured =
-    rawSlices.length === 0 ? null : (
-      <div className="space-y-4 border-t border-border/60 px-4 py-5">
-        {rawSlices.map((slice) => (
-          <div key={`${slice.reason}:${slice.text.slice(0, 64)}`} className="space-y-2">
-            <p className="text-xs text-muted-foreground">{slice.reason}</p>
-            <pre className="whitespace-pre-wrap break-words font-mono text-xs">{slice.text}</pre>
-          </div>
-        ))}
-      </div>
-    );
 
   return (
     <div className="flex h-full min-h-0 flex-col">

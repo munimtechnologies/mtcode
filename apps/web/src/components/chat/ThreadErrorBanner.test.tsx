@@ -83,7 +83,7 @@ describe("ThreadErrorBanner", () => {
     expect(shouldShowThreadErrorBanner("env:thread-e", null, false)).toBe(false);
   });
 
-  it("offers copy and aligns the controls with the first line of a multi-line error", () => {
+  it("offers copy next to dismiss on a multi-line error", () => {
     const markup = renderToStaticMarkup(
       <ThreadErrorBanner
         error={"The first error line\ncontinues on a second line"}
@@ -95,11 +95,6 @@ describe("ThreadErrorBanner", () => {
     expect(markup).toContain('aria-label="Copy error"');
     expect(markup).toContain("lucide-copy text-error");
     expect(markup).toContain('aria-label="Dismiss error"');
-    expect(markup).not.toContain("controlAlignment");
-    expect(markup).toContain("flex gap-2 items-start");
-    expect(markup).toContain("min-h-7 pt-1 sm:min-h-6 sm:pt-0.5");
-    expect(markup).toContain("h-lh w-4");
-    expect(markup).toContain("h-lh self-start");
   });
 
   it("shows anchored feedback when copying fails", () => {

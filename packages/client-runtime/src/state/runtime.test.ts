@@ -33,6 +33,7 @@ import {
   createAtomCommandScheduler,
   createEnvironmentQueryAtomFamily,
   createEnvironmentRpcQueryAtomFamily,
+  selectEnvironmentQueryData,
   createEnvironmentSubscriptionAtomFamily,
   createRuntimeCommand,
   scheduleAtomCommandEffect,
@@ -452,6 +453,62 @@ describe("finite environment subscription lifecycle", () => {
 });
 
 describe("environment query lifecycle", () => {
+  it.effect("keeps the previous value when a refetch returns equal content", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let checks = [{ name: "ci", status: "passed" }];
+        const execute = Effect.sync(() => ({ checks: checks.map((check) => ({ ...check })) }));
+        const harness = yield* makeEnvironmentQueryHarness(execute);
+        const registry = yield* mountEnvironmentQuery(harness.atom);
+
+        const first = yield* readEnvironmentQuery(registry, harness.atom);
+        registry.refresh(harness.atom);
+        const equal = yield* readEnvironmentQuery(registry, harness.atom);
+        expect(equal).toBe(first);
+
+        checks = [{ name: "ci", status: "failed" }];
+        registry.refresh(harness.atom);
+        const changed = yield* readEnvironmentQuery(registry, harness.atom);
+        expect(changed).not.toBe(first);
+        expect(changed.checks[0]?.status).toBe("failed");
+      }),
+    ),
+  );
+
+  it.effect("does not notify a data-only reader when a refetch returns equal content", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let status = "passed";
+        const execute = Effect.sync(() => ({ checks: [{ name: "ci", status }] }));
+        const harness = yield* makeEnvironmentQueryHarness(execute);
+        const registry = yield* mountEnvironmentQuery(harness.atom);
+        yield* readEnvironmentQuery(registry, harness.atom);
+
+        const data = Atom.map(harness.atom, selectEnvironmentQueryData);
+        const seen: Array<unknown> = [];
+        let resultNotifications = 0;
+        const unsubscribeData = registry.subscribe(data, (value) => seen.push(value), {
+          immediate: true,
+        });
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribeData));
+        const unsubscribeResult = registry.subscribe(harness.atom, () => resultNotifications++);
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribeResult));
+
+        registry.refresh(harness.atom);
+        yield* readEnvironmentQuery(registry, harness.atom);
+        // The result itself still moves (timestamp, `waiting`), which SWR relies on.
+        expect(resultNotifications).toBeGreaterThan(0);
+        expect(seen).toHaveLength(1);
+
+        status = "failed";
+        registry.refresh(harness.atom);
+        yield* readEnvironmentQuery(registry, harness.atom);
+        expect(seen).toHaveLength(2);
+        expect(seen[1]).toEqual({ checks: [{ name: "ci", status: "failed" }] });
+      }),
+    ),
+  );
+
   it.effect(
     "retries an interrupted query without exposing a failure during session replacement",
     () =>
@@ -537,6 +594,96 @@ describe("environment query lifecycle", () => {
           ).toBe("recovered");
         }),
       ),
+  );
+
+  it.effect("keeps a query pending when it loses its session before the atom sees the change", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstStarted = Latch.makeUnsafe();
+        const failFirst = Latch.makeUnsafe();
+        const firstSettled = Latch.makeUnsafe();
+        let executions = 0;
+        const execute = Effect.suspend(() => {
+          executions += 1;
+          if (executions > 1) {
+            return Effect.succeed("recovered");
+          }
+          firstStarted.openUnsafe();
+          return failFirst.await.pipe(
+            Effect.andThen(
+              Effect.fail(
+                new EnvironmentRpcUnavailableError({
+                  environmentId: QUERY_ENVIRONMENT.environmentId,
+                  message: "Query environment is not connected.",
+                }),
+              ),
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                firstSettled.openUnsafe();
+              }),
+            ),
+          );
+        });
+        const harness = yield* makeEnvironmentQueryHarness(execute);
+        const registry = AtomRegistry.make();
+        const observed: Array<AsyncResult.AsyncResult<string, unknown>> = [];
+        const unsubscribe = registry.subscribe(
+          harness.atom,
+          (result) => {
+            observed.push(result);
+          },
+          { immediate: true },
+        );
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            unsubscribe();
+            registry.dispose();
+          }),
+        );
+
+        yield* firstStarted.await;
+        // No yield before the failure: the request finds its session gone
+        // before the atom has processed the session change.
+        yield* SubscriptionRef.set(harness.supervisorSession, Option.none());
+        failFirst.openUnsafe();
+        yield* firstSettled.await;
+        yield* Effect.yieldNow;
+
+        expect(observed.some(AsyncResult.isFailure)).toBe(false);
+
+        yield* SubscriptionRef.set(harness.supervisorSession, Option.some(QUERY_RPC_SESSION));
+        yield* SubscriptionRef.set(
+          harness.supervisorState,
+          queryConnectionState({ generation: 2 }),
+        );
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, {
+            suspendOnWaiting: true,
+          }),
+        ).toBe("recovered");
+        expect(observed.some(AsyncResult.isFailure)).toBe(false);
+      }),
+    ),
+  );
+
+  it.effect("fails a query that reports unavailable while its session is still live", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const unavailable = new EnvironmentRpcUnavailableError({
+          environmentId: QUERY_ENVIRONMENT.environmentId,
+          message: "The environment did not respond to the request.",
+        });
+        const harness = yield* makeEnvironmentQueryHarness(Effect.fail(unavailable));
+        const registry = yield* mountEnvironmentQuery(harness.atom);
+
+        const exit = yield* AtomRegistry.getResult(registry, harness.atom, {
+          suspendOnWaiting: true,
+        }).pipe(Effect.exit);
+
+        expect(exit).toStrictEqual(Exit.fail(unavailable));
+      }),
+    ),
   );
 
   it.effect.each([

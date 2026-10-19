@@ -7,6 +7,7 @@ import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { environmentThreadDetails } from "../../state/threads";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import * as DateTime from "effect/DateTime";
 import { WorkLogRow } from "./WorkLog";
@@ -47,6 +48,7 @@ import { getTriggerDisplayModelName } from "./providerIconUtils";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
+import { subagentResumedSince } from "./V2LifecycleRow.logic";
 import { Button, InlineButton } from "../ui/button";
 import { T3Wordmark } from "../T3Wordmark";
 
@@ -72,7 +74,6 @@ export function V2LifecycleRow(props: {
   readonly resourceSummary?: boolean | undefined;
   readonly createdAt: string;
   readonly timestampFormat: TimestampFormat;
-  readonly providerStatuses: ReadonlyArray<ServerProvider>;
   readonly runs: ReadonlyArray<HandoffTimelineRun>;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
@@ -125,9 +126,9 @@ export function V2LifecycleRow(props: {
   }
   if (item.type === "handoff") {
     return (
-      <HandoffRow
+      <EnvironmentHandoffRow
+        environmentId={props.environmentId}
         endpoints={resolveHandoffEndpoints(item, props.runs)}
-        providers={props.providerStatuses}
         failed={item.status === "failed"}
       />
     );
@@ -192,10 +193,6 @@ export function V2LifecycleRow(props: {
         origin={item.origin}
         status={item.status}
         driver={item.driver}
-        provider={props.providerStatuses.find(
-          (provider) => provider.instanceId === item.providerInstanceId,
-        )}
-        providers={props.providerStatuses}
         title={formatSubagentDisplayTitle(item.title ?? "Subagent")}
         result={item.result}
         progress={item.progress}
@@ -253,14 +250,16 @@ export function SubagentElapsed({ agent }: { agent: Parameters<typeof AgentElaps
   return <AgentElapsed agent={agent} />;
 }
 
-export function SubagentAvatar({
+function SubagentAvatar({
   driver,
-  provider,
+  displayName,
+  iconUrl,
   status,
   className,
 }: {
   driver?: ProviderDriverKind | undefined;
-  provider?: ServerProvider | undefined;
+  displayName?: string | undefined;
+  iconUrl?: string | undefined;
   status?: OrchestrationV2TurnItem["status"] | undefined;
   className?: string;
 }) {
@@ -275,8 +274,8 @@ export function SubagentAvatar({
       {driver ? (
         <ProviderInstanceIcon
           driverKind={driver}
-          displayName={provider?.displayName ?? driver}
-          acpRegistryIconUrl={provider?.iconUrl}
+          displayName={displayName ?? driver}
+          acpRegistryIconUrl={iconUrl}
           className="z-auto"
           iconClassName="size-3.5"
         />
@@ -293,6 +292,35 @@ export function SubagentAvatar({
       ) : null}
     </span>
   );
+}
+
+/**
+ * Reads only the two provider fields the avatar draws. Provider status pushes
+ * replace the provider objects (fresh `checkedAt`), so selecting strings keeps
+ * the avatar from re-rendering when nothing it shows changed.
+ */
+export function EnvironmentSubagentAvatar({
+  environmentId,
+  providerInstanceId,
+  ...props
+}: {
+  environmentId: EnvironmentId;
+  providerInstanceId: ProviderInstanceId;
+  driver?: ProviderDriverKind | undefined;
+  status?: OrchestrationV2TurnItem["status"] | undefined;
+}) {
+  const providersAtom = serverEnvironment.providersValueAtom(environmentId);
+  const displayName = useAtomValue(
+    providersAtom,
+    (providers) =>
+      providers?.find((provider) => provider.instanceId === providerInstanceId)?.displayName,
+  );
+  const iconUrl = useAtomValue(
+    providersAtom,
+    (providers) =>
+      providers?.find((provider) => provider.instanceId === providerInstanceId)?.iconUrl,
+  );
+  return <SubagentAvatar {...props} displayName={displayName} iconUrl={iconUrl} />;
 }
 
 const NOTIFICATION_OUTCOME_STATUS: Record<
@@ -320,7 +348,6 @@ export function SubagentNotificationLink(props: {
   readonly outcome: OrchestrationV2Notification["outcome"];
   readonly createdAt: string;
   readonly timestampFormat: TimestampFormat;
-  readonly providerStatuses: ReadonlyArray<ServerProvider>;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly fallback: ReactNode;
 }) {
@@ -331,6 +358,10 @@ export function SubagentNotificationLink(props: {
       null,
   );
   if (agent === null) return props.fallback;
+  // A subagent resumed since this notification shows its live status, not the outcome reported then.
+  const resumed =
+    NOTIFICATION_OUTCOME_STATUS[props.outcome] !== null &&
+    subagentResumedSince(agent, props.createdAt);
   return (
     <SubagentTimelineLink
       parentRef={props.parentRef}
@@ -339,10 +370,6 @@ export function SubagentNotificationLink(props: {
       origin={agent.origin}
       status={agent.status}
       driver={agent.driver}
-      provider={props.providerStatuses.find(
-        (provider) => provider.instanceId === agent.providerInstanceId,
-      )}
-      providers={props.providerStatuses}
       title={formatSubagentDisplayTitle(agent.title ?? "Subagent")}
       result={agent.result}
       progress={agent.progress}
@@ -350,11 +377,15 @@ export function SubagentNotificationLink(props: {
       completedAt={agent.completedAt}
       threadId={props.childThreadId}
       onOpenThread={props.onOpenThread}
-      event={{
-        status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
-        label: NOTIFICATION_OUTCOME_LABEL[props.outcome],
-        timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
-      }}
+      {...(resumed
+        ? {}
+        : {
+            event: {
+              status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
+              label: NOTIFICATION_OUTCOME_LABEL[props.outcome],
+              timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
+            },
+          })}
     />
   );
 }
@@ -365,8 +396,6 @@ function SubagentTimelineLink(props: {
   readonly providerInstanceId: ProviderInstanceId;
   readonly origin: OrchestrationV2Subagent["origin"];
   readonly driver: ProviderDriverKind;
-  readonly provider: ServerProvider | undefined;
-  readonly providers: ReadonlyArray<ServerProvider>;
   readonly title: string;
   readonly result: string | null;
   readonly progress: string | undefined;
@@ -403,9 +432,10 @@ function SubagentTimelineLink(props: {
   };
   const content = (
     <>
-      <SubagentAvatar
+      <EnvironmentSubagentAvatar
+        environmentId={props.parentRef.environmentId}
+        providerInstanceId={props.providerInstanceId}
         driver={props.driver}
-        provider={props.provider}
         status={status ?? undefined}
       />
       <span className="min-w-0 flex-1">
@@ -501,6 +531,10 @@ function SubagentTimelineTooltip(
   },
 ) {
   const environmentId = props.parentRef.environmentId;
+  // The popup only mounts while open, so the full provider list is read here
+  // instead of in every timeline row.
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
   const parent = useThreadShell(props.parentRef)?.source;
   const child = useThreadShell(
     props.threadId ? scopeThreadRef(environmentId, props.threadId) : null,
@@ -516,8 +550,8 @@ function SubagentTimelineTooltip(
       providerInstanceId={props.providerInstanceId}
       origin={props.origin}
       modelSelection={props.modelSelection}
-      provider={props.provider}
-      providers={props.providers}
+      provider={providers.find((provider) => provider.instanceId === props.providerInstanceId)}
+      providers={providers}
       driver={props.driver}
       elapsed={props.elapsed}
       status={props.status}
@@ -529,6 +563,19 @@ function SubagentTimelineTooltip(
       childProject={childProject ?? undefined}
     />
   );
+}
+
+function EnvironmentHandoffRow({
+  environmentId,
+  ...props
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly endpoints: HandoffEndpoints;
+  readonly failed: boolean;
+}) {
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  return <HandoffRow {...props} providers={providers} />;
 }
 
 export function HandoffRow(props: {

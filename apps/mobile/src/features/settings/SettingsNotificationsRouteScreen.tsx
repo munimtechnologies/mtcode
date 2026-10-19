@@ -8,7 +8,7 @@ import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
 import * as Effect from "effect/Effect";
 import { AsyncResult } from "effect/reactivity";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AppState, Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -99,10 +99,10 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     AsyncResult.isSuccess(preferencesResult) &&
     preferencesResult.value.liveActivitiesEnabled !== false;
 
-  const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
+  const connections = Object.values(savedConnectionsById);
   const environmentCount = connections.length;
 
-  const refreshNotifications = useCallback(async () => {
+  const refreshNotifications = async () => {
     if (Platform.OS !== "ios" && Platform.OS !== "android") {
       setNotificationStatus("unsupported");
       return;
@@ -114,7 +114,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       return;
     }
     setNotificationStatus(result.value.granted ? "enabled" : "disabled");
-  }, []);
+  };
 
   useEffect(() => {
     void refreshNotifications();
@@ -147,7 +147,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     );
   }, [isLoaded, isSignedIn, preferencesResult]);
 
-  const requestNotifications = useCallback(async () => {
+  const requestNotifications = async () => {
     const result = await settleAsyncResult(() =>
       runtime.runPromiseExit(
         requestAgentNotificationPermission.pipe(
@@ -200,9 +200,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
         { text: "Open Settings", onPress: () => void Linking.openSettings() },
       ],
     );
-  }, []);
+  };
 
-  const promptSignIn = useCallback(() => {
+  const promptSignIn = () => {
     Dialog.alert(
       `Sign in to ${getConnectName()}`,
       `Live Activity updates require ${getConnectName()} so relay can deliver updates to this device.`,
@@ -214,9 +214,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
         },
       ],
     );
-  }, [navigation]);
+  };
 
-  const linkEnvironments = useCallback(async () => {
+  const linkEnvironments = async () => {
     if (!isSignedIn) {
       promptSignIn();
       return;
@@ -311,111 +311,86 @@ function ConfiguredSettingsNotificationsRouteScreen() {
         `This device could not be registered with ${getConnectName()}, so activity updates won't appear yet. They'll start once registration succeeds.`,
       );
     }
-  }, [
-    connections,
-    environmentCount,
-    getToken,
-    isSignedIn,
-    liveActivitiesPreferenceEnabled,
-    promptSignIn,
-    savePreferences,
-  ]);
+  };
 
-  const handleDeviceNotificationsChange = useCallback(
-    (enabled: boolean) => {
-      if (enabled) {
-        if (!isSignedIn) {
-          promptSignIn();
-          return;
-        }
-        void requestNotifications();
-        return;
-      }
-
-      Dialog.alert(
-        "Disable notifications",
-        `Open system Settings to disable notifications for ${getProductName()}.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => void Linking.openSettings() },
-        ],
-      );
-    },
-    [isSignedIn, promptSignIn, requestNotifications],
-  );
-
-  const handleLiveActivitiesChange = useCallback(
-    (enabled: boolean) => {
-      if (liveActivityWriteInFlight.current) return;
-      if (!enabled) {
-        liveActivityWriteInFlight.current = true;
-        setLiveActivityStatus("linking");
-        void (async () => {
-          try {
-            let token: string | null = null;
-            if (isSignedIn) {
-              const tokenResult = await settlePromise(() =>
-                getToken(resolveRelayClerkTokenOptions()),
-              );
-              if (tokenResult._tag === "Failure") {
-                setLiveActivityStatus("enabled");
-                reportAtomCommandResult(tokenResult, {
-                  label: "live activity disable token lookup",
-                });
-                return;
-              }
-              token = tokenResult.value;
-            }
-
-            const updateResult = await settleAsyncResult(() =>
-              runtime.runPromiseExit(
-                setLiveActivityUpdatesEnabled({
-                  canConfigureEnvironment: (environmentId) =>
-                    readEnvironmentScope(environmentId, AuthRelayWriteScope),
-                  enabled: false,
-                  previousEnabled: liveActivitiesPreferenceEnabled,
-                  clerkToken: token,
-                  connections,
-                }),
-              ),
-            );
-            if (updateResult._tag === "Failure") {
-              setLiveActivityStatus(isSignedIn ? "enabled" : "signed-out");
-              reportAtomCommandResult(updateResult, {
-                label: "live activity disable",
-              });
-              return;
-            }
-            savePreferences({ liveActivitiesEnabled: false });
-            refreshManagedRelayEnvironments();
-            setLiveActivityStatus("disabled");
-          } finally {
-            liveActivityWriteInFlight.current = false;
-          }
-        })();
-        return;
-      }
-
+  const handleDeviceNotificationsChange = (enabled: boolean) => {
+    if (enabled) {
       if (!isSignedIn) {
         promptSignIn();
         return;
       }
+      void requestNotifications();
+      return;
+    }
 
-      liveActivityWriteInFlight.current = true;
-      void linkEnvironments().finally(() => {
-        liveActivityWriteInFlight.current = false;
+    Dialog.alert(
+      "Disable notifications",
+      `Open system Settings to disable notifications for ${getProductName()}.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Open Settings", onPress: () => void Linking.openSettings() },
+      ],
+    );
+  };
+
+  async function disableLiveActivities() {
+    let token: string | null = null;
+    if (isSignedIn) {
+      const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+      if (tokenResult._tag === "Failure") {
+        setLiveActivityStatus("enabled");
+        reportAtomCommandResult(tokenResult, {
+          label: "live activity disable token lookup",
+        });
+        return;
+      }
+      token = tokenResult.value;
+    }
+
+    const updateResult = await settleAsyncResult(() =>
+      runtime.runPromiseExit(
+        setLiveActivityUpdatesEnabled({
+          canConfigureEnvironment: (environmentId) =>
+            readEnvironmentScope(environmentId, AuthRelayWriteScope),
+          enabled: false,
+          previousEnabled: liveActivitiesPreferenceEnabled,
+          clerkToken: token,
+          connections,
+        }),
+      ),
+    );
+    if (updateResult._tag === "Failure") {
+      setLiveActivityStatus(isSignedIn ? "enabled" : "signed-out");
+      reportAtomCommandResult(updateResult, {
+        label: "live activity disable",
       });
-    },
-    [
-      connections,
-      getToken,
-      isSignedIn,
-      linkEnvironments,
-      liveActivitiesPreferenceEnabled,
-      promptSignIn,
-      savePreferences,
-    ],
-  );
+      return;
+    }
+    savePreferences({ liveActivitiesEnabled: false });
+    refreshManagedRelayEnvironments();
+    setLiveActivityStatus("disabled");
+  }
+
+  // Both writers settle their own failures, so awaiting them never throws.
+  const handleLiveActivitiesChange = async (enabled: boolean) => {
+    if (liveActivityWriteInFlight.current) return;
+    if (!enabled) {
+      liveActivityWriteInFlight.current = true;
+      setLiveActivityStatus("linking");
+      await disableLiveActivities();
+      liveActivityWriteInFlight.current = false;
+      return;
+    }
+
+    if (!isSignedIn) {
+      promptSignIn();
+      return;
+    }
+
+    liveActivityWriteInFlight.current = true;
+    await linkEnvironments();
+    liveActivityWriteInFlight.current = false;
+  };
 
   return (
     <SettingsScreen title="Notifications">
@@ -466,13 +441,13 @@ function ConfiguredSettingsNotificationsRouteScreen() {
               (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
               deviceRegistered
             }
-            onValueChange={handleLiveActivitiesChange}
+            onValueChange={(enabled) => void handleLiveActivitiesChange(enabled)}
           />
           {liveActivityStatus === "signed-out" && canClearLiveActivitiesPreference ? (
             <SettingsRow
               icon="bolt.circle"
               label="Turn off Live Activity preference"
-              onPress={() => handleLiveActivitiesChange(false)}
+              onPress={() => void handleLiveActivitiesChange(false)}
             />
           ) : null}
           {supportsAndroidLiveUpdateSettings() ? (

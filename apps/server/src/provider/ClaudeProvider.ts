@@ -7,6 +7,7 @@ import {
   type ServerProviderSlashCommand,
   type ServerProviderResetCredits,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -308,7 +309,7 @@ function nonEmptyProbeString(value: string): string | undefined {
   return candidate ? candidate : undefined;
 }
 
-type ClaudeCapabilitiesProbe = {
+export type ClaudeCapabilitiesProbe = {
   readonly email: string | undefined;
   readonly workspaceId?: string | undefined;
   readonly subscriptionType: string | undefined;
@@ -566,10 +567,13 @@ const probeClaudeCapabilities = (
         if (!abort.signal.aborted) abort.abort();
       }),
     ),
-    Effect.result,
-    Effect.map((result) => (Result.isSuccess(result) ? result.success : undefined)),
+    Effect.tapError((error) =>
+      Effect.logWarning("Claude capability probe failed.", { errorTag: error._tag }),
+    ),
   );
 };
+
+type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
 
 const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   claudeSettings: ClaudeSettings,
@@ -597,7 +601,10 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
 ): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
-  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
+  const probeResult = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false).pipe(
+    Effect.result,
+  );
+  const capabilities = Result.isSuccess(probeResult) ? probeResult.success : undefined;
   return {
     ...machineSnapshot,
     skills,
@@ -613,7 +620,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   claudeSettings: ClaudeSettings,
   resolveCapabilities?: (
     claudeSettings: ClaudeSettings,
-  ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
+  ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined, ClaudeCapabilitiesProbeError>,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -719,9 +726,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const updateRequiredModels = resolveClaudeUpdateRequiredModels(modelCatalog, parsedVersion);
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
+  const probeResult = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.result)
     : undefined;
+  const capabilities =
+    probeResult && Result.isSuccess(probeResult) ? probeResult.success : undefined;
+  const probeFailure =
+    probeResult && Result.isFailure(probeResult) ? probeResult.failure : undefined;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
@@ -740,7 +751,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: parsedVersion,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Could not verify Claude authentication status from initialization result.",
+        message: probeFailure
+          ? Cause.isTimeoutError(probeFailure)
+            ? `Timed out after ${CAPABILITIES_PROBE_TIMEOUT_MS / 1_000}s while checking Claude account status.`
+            : "Claude Agent CLI failed while checking account status."
+          : "Could not verify Claude authentication status from initialization result.",
       },
     });
   }

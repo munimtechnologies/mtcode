@@ -137,6 +137,7 @@ const isHostSetupError = Schema.is(
   Schema.Union([
     PreviewBrowserHost.PreviewBrowserSandboxError,
     PreviewBrowserHost.PreviewBrowserLibrariesError,
+    PreviewBrowserHost.PreviewBrowserRootError,
   ]),
 );
 
@@ -283,6 +284,9 @@ interface ServerTab {
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
   readonly control: SessionControl;
+  agentOperating: boolean;
+  fileChooserIntercepted: boolean;
+  readonly onFileChooser: (chooser: FileChooser) => void;
 
   readonly isolatedContext: boolean;
 
@@ -500,7 +504,18 @@ const make = Effect.gen(function* () {
         }
       : null;
 
+  const updateFileChooserInterception = (tab: ServerTab) => {
+    // Native desktop views use the OS picker. Only agents and streamed controllers
+    // have an uploader that can answer an intercepted request.
+    const intercept = !tab.desktop || tab.agentOperating || tab.control.controller !== null;
+    if (intercept === tab.fileChooserIntercepted) return;
+    tab.fileChooserIntercepted = intercept;
+    if (intercept) tab.page.on("filechooser", tab.onFileChooser);
+    else tab.page.off("filechooser", tab.onFileChooser);
+  };
+
   const broadcastControl = (tab: ServerTab) => {
+    updateFileChooserInterception(tab);
     for (const viewer of tab.viewers)
       viewer.push({
         _tag: "control",
@@ -743,6 +758,9 @@ const make = Effect.gen(function* () {
       networkEntries: [],
       actionTimeline: [],
       control,
+      agentOperating: false,
+      fileChooserIntercepted: false,
+      onFileChooser: (chooser) => void offerFileChooser(tab, chooser),
       isolatedContext,
       desktop: desktop === null ? null : { close: desktop.close },
       profileId: snapshot.profileId,
@@ -851,7 +869,7 @@ const make = Effect.gen(function* () {
       broadcastControl(tab);
     });
     page.on("download", (download) => void saveDownload(tab, download));
-    page.on("filechooser", (chooser) => void offerFileChooser(tab, chooser));
+    updateFileChooserInterception(tab);
     // Popups become tabs and keep `window.opener`, so sign-in popups can report back.
     page.on("popup", (popup) => void adoptPopup(tab, popup));
     // Playwright cannot reload a crashed page, so it must leave the tab list.
@@ -1712,6 +1730,20 @@ const make = Effect.gen(function* () {
                 ),
               )
             : undefined;
+        if (reuse && request.tabIdExplicit && !found) {
+          const { sessions } = await Effect.runPromise(
+            manager.list({ threadId: ThreadId.make(request.threadId) }),
+          );
+          const desktop = sessions.some(
+            (session) => session.tabId === request.tabId && session.runtime !== "server",
+          );
+          throw new ServerBrowserPage.ServerBrowserOperationError(
+            desktop ? "PreviewAutomationExecutionError" : "PreviewAutomationTabNotFoundError",
+            desktop
+              ? "This tab belongs to the desktop runtime. This environment's server browser cannot control desktop tabs. Omit tabId to open a server tab instead."
+              : "The requested server preview tab does not exist.",
+          );
+        }
         // Only an explicit tabId reuses a tab this session did not open; a tab
         // it last read (such as the user's) is not taken over implicitly.
         const existing =
@@ -1851,9 +1883,13 @@ const make = Effect.gen(function* () {
           "dialogPending",
         );
       const generation = tab.control.generation;
+      tab.agentOperating = !READ_OPERATIONS.has(request.operation);
+      updateFileChooserInterception(tab);
       try {
         return await executeTabOperation(tab, request);
       } finally {
+        tab.agentOperating = false;
+        updateFileChooserInterception(tab);
         if (generation !== tab.control.generation) ServerBrowserPage.invalidateRefs(tab.page);
       }
     });

@@ -201,8 +201,8 @@ export const make = Effect.gen(function* () {
             ...(pullRequest.diffRevision === undefined
               ? {}
               : { diffRevision: pullRequest.diffRevision }),
-            mergedAt: null,
-            closedAt: null,
+            mergedAt: pullRequest.state === "merged" ? pullRequest.closedAt : null,
+            closedAt: pullRequest.state === "closed" ? pullRequest.closedAt : null,
             reviewers: pullRequest.reviewers,
             checks,
             // Bitbucket publishes no per-repository list of allowed strategies, so the ones it

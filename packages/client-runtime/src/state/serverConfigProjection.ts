@@ -24,6 +24,8 @@ export function withoutEnvironmentThemes(config: ServerConfig): ServerConfig {
  * previous object. A provider status push re-sends every provider even when
  * only one field (often just `checkedAt`) changed, so this keeps unchanged
  * providers, models and skills identical and lets memoized UI skip them.
+ * A reconnect snapshot re-sends the whole config the same way.
+ * A settings write re-sends the whole settings document for one changed field.
  */
 export function reuseUnchanged<T>(previous: unknown, next: T): T {
   if (Object.is(previous, next)) return next;
@@ -78,12 +80,14 @@ export function applyServerConfigProjection(
         capabilities.usageLimitSources === true && Option.isSome(current)
           ? current.value.config.usageLimitSources
           : undefined;
+      const config: ServerConfig = {
+        ...event.config,
+        ...(carriedThemes === undefined ? {} : { environmentThemes: carriedThemes }),
+        ...(carriedSources === undefined ? {} : { usageLimitSources: carriedSources }),
+      };
       return Option.some({
-        config: {
-          ...event.config,
-          ...(carriedThemes === undefined ? {} : { environmentThemes: carriedThemes }),
-          ...(carriedSources === undefined ? {} : { usageLimitSources: carriedSources }),
-        },
+        // Every reconnect re-sends the whole config, usually unchanged apart from timestamps.
+        config: Option.isSome(current) ? reuseUnchanged(current.value.config, config) : config,
         latestEvent: event,
         source: "live" as const,
       });
@@ -111,7 +115,7 @@ export function applyServerConfigProjection(
       return Option.map(current, (projection) => ({
         config: {
           ...projection.config,
-          settings: event.payload.settings,
+          settings: reuseUnchanged(projection.config.settings, event.payload.settings),
         },
         latestEvent: event,
         source: "live",

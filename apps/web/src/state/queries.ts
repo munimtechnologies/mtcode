@@ -100,60 +100,51 @@ export function useThreadSearch(
   };
 }
 
-// A hook so its result is frozen: `refresh` hands a page atom to the registry,
-// which the compiler would treat as a mutation and leave pagesAtom uncached,
-// resubscribing every render.
-function useBranchPageAtoms(
-  environmentId: EnvironmentId | null,
-  cwd: string | null,
-  query: string,
-  cursors: ReadonlyArray<number | undefined>,
-  targetKey: string | null,
-) {
-  // Calls no hooks, so the compiler needs the directive to memoize it.
-  "use memo";
-  const pageAtoms =
-    environmentId !== null && cwd !== null
-      ? cursors.map((cursor) =>
-          vcsEnvironment.listRefs({
-            environmentId,
-            input: {
-              cwd,
-              ...(query.length > 0 ? { query } : {}),
-              ...(cursor === undefined ? {} : { cursor }),
-              limit: VCS_REF_LIST_LIMIT,
-            },
-          }),
-        )
-      : [];
-  const pagesAtom = Atom.make((get) => pageAtoms.map((atom) => get(atom))).pipe(
-    Atom.withLabel(`web:vcs-ref-pages:${targetKey ?? "empty"}`),
-  );
-  return { pageAtoms, pagesAtom };
+function vcsRefPageAtom(targetKey: string, cursor: number | undefined) {
+  const [environmentId, cwd, query] = JSON.parse(targetKey) as [EnvironmentId, string, string];
+  return vcsEnvironment.listRefs({
+    environmentId,
+    input: {
+      cwd,
+      ...(query.length > 0 ? { query } : {}),
+      ...(cursor === undefined ? {} : { cursor }),
+      limit: VCS_REF_LIST_LIMIT,
+    },
+  });
 }
 
+const EMPTY_VCS_REF_PAGES_ATOM = Atom.make<
+  ReadonlyArray<Atom.Type<ReturnType<typeof vcsRefPageAtom>>>
+>([]).pipe(Atom.withLabel("web:vcs-ref-pages:empty"));
+
+// Keyed by target and cursors so every render of the same pages reads the same atom.
+const vcsRefPagesAtom = Atom.family((pagesKey: string) => {
+  const [targetKey, cursors] = JSON.parse(pagesKey) as [string, Array<number | null>];
+  const pageAtoms = cursors.map((cursor) => vcsRefPageAtom(targetKey, cursor ?? undefined));
+  return Atom.make((get) => pageAtoms.map((atom) => get(atom))).pipe(
+    Atom.withLabel(`web:vcs-ref-pages:${pagesKey}`),
+  );
+});
+
 export function usePaginatedBranches(target: VcsRefTarget) {
-  const query = target.query?.trim() ?? "";
-  const targetKey =
-    target.environmentId !== null && target.cwd !== null
-      ? JSON.stringify([target.environmentId, target.cwd, query])
-      : null;
+  // Starts unkeyed: a key mismatch already resolves to the initial cursors, and seeding
+  // the key here would make every derivation below straddle this hook call.
   const [pagination, setPagination] = useState<{
     readonly targetKey: string | null;
     readonly cursors: ReadonlyArray<number | undefined>;
   }>({
-    targetKey,
+    targetKey: null,
     cursors: INITIAL_BRANCH_CURSORS,
   });
+  const { environmentId, cwd } = target;
+  const query = target.query?.trim() ?? "";
+  const targetKey =
+    environmentId !== null && cwd !== null ? JSON.stringify([environmentId, cwd, query]) : null;
   const cursors = pagination.targetKey === targetKey ? pagination.cursors : INITIAL_BRANCH_CURSORS;
-  const { pageAtoms, pagesAtom } = useBranchPageAtoms(
-    target.environmentId,
-    target.cwd,
-    query,
-    cursors,
-    targetKey,
+  const pagesKey = targetKey === null ? null : JSON.stringify([targetKey, cursors]);
+  const results = useAtomValue(
+    pagesKey === null ? EMPTY_VCS_REF_PAGES_ATOM : vcsRefPagesAtom(pagesKey),
   );
-  const results = useAtomValue(pagesAtom);
   const values = results.flatMap((result) => {
     const value = Option.getOrNull(AsyncResult.value(result));
     return value === null ? [] : [value];
@@ -188,10 +179,9 @@ export function usePaginatedBranches(target: VcsRefTarget) {
         })()
       : null;
   const refresh = () => {
-    const firstPage = pageAtoms[0];
     setPagination({ targetKey, cursors: INITIAL_BRANCH_CURSORS });
-    if (firstPage !== undefined) {
-      appAtomRegistry.refresh(firstPage);
+    if (targetKey !== null) {
+      appAtomRegistry.refresh(vcsRefPageAtom(targetKey, undefined));
     }
   };
   const nextCursor = data?.nextCursor;

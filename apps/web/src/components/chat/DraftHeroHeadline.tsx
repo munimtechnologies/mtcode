@@ -5,7 +5,7 @@ import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/envir
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { FolderPlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -29,7 +29,11 @@ import {
   projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import {
+  useEnvironmentProviders,
+  useEnvironments,
+  usePrimaryEnvironmentId,
+} from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
@@ -45,6 +49,7 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
+import { DraftProjectName } from "./DraftProjectName";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 const ADD_PROJECT_VALUE = "add-project";
@@ -68,6 +73,7 @@ export function DraftHeroHeadline({
   const projects = useProjects();
   const threads = useThreadShells();
   const serverConfigs = useServerConfigs();
+  const providersByEnvironment = useEnvironmentProviders();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -79,68 +85,43 @@ export function DraftHeroHeadline({
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
+  const openAddProject = () => openCommandPalette({ open: "add-project" });
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const openProjectDraft = useNewThreadHandler();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const pickerFilter = useComboboxFilter();
 
-  const environmentLabelById = useMemo(
-    () =>
-      new Map(
-        environments.map((environment) => [environment.environmentId, environment.label] as const),
-      ),
-    [environments],
+  const environmentLabelById = new Map(
+    environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
-  const projectGroups = useMemo(
-    () =>
-      sortLogicalProjectsForSidebar(
-        buildSidebarProjectSnapshots({
-          projects,
-          settings: projectGroupingSettings,
-          primaryEnvironmentId,
-          resolveEnvironmentLabel: (environmentId) =>
-            environmentLabelById.get(environmentId) ?? null,
-        }),
-        threads,
-        projectSortOrder,
-      ),
-    [
-      environmentLabelById,
-      primaryEnvironmentId,
-      projectGroupingSettings,
-      projectSortOrder,
+  const projectGroups = sortLogicalProjectsForSidebar(
+    buildSidebarProjectSnapshots({
       projects,
-      threads,
-    ],
+      settings: projectGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
+    }),
+    threads,
+    projectSortOrder,
   );
-  const showProjectEnvironments = useMemo(
-    () => projectGroupsSpanEnvironments(projectGroups),
-    [projectGroups],
+  const showProjectEnvironments = projectGroupsSpanEnvironments(projectGroups);
+  const environmentMachineById = new Map(
+    environments.map(
+      (environment) =>
+        [
+          environment.environmentId,
+          resolveEnvironmentMachineKind(environment.serverConfig),
+        ] as const,
+    ),
   );
-  const environmentMachineById = useMemo(
-    () =>
-      new Map(
-        environments.map(
-          (environment) =>
-            [
-              environment.environmentId,
-              resolveEnvironmentMachineKind(environment.serverConfig),
-            ] as const,
-        ),
-      ),
-    [environments],
-  );
-  const projectPickerEntries = useMemo(
-    () =>
-      buildSidebarProjectPickerEntries({
-        groups: projectGroups,
-        preferredProjectRef: activeProjectRef,
-      }),
-    [activeProjectRef, projectGroups],
-  );
-  const projectEntryByKey = useMemo(
-    () => new Map(projectPickerEntries.map((entry) => [entry.group.projectKey, entry] as const)),
-    [projectPickerEntries],
+  const projectPickerEntries = buildSidebarProjectPickerEntries({
+    groups: projectGroups,
+    preferredProjectRef: activeProjectRef,
+  });
+  const projectEntryByKey = new Map(
+    projectPickerEntries.map((entry) => [entry.group.projectKey, entry] as const),
   );
   const activeProjectGroup =
     activeProjectRef === null
@@ -173,13 +154,9 @@ export function DraftHeroHeadline({
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
-  const menuEntries = useMemo(
-    () =>
-      projectPickerEntries.filter(
-        ({ targetProject }) =>
-          !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId)),
-      ),
-    [projectPickerEntries, scratchWorkspaceRootFor],
+  const menuEntries = projectPickerEntries.filter(
+    ({ targetProject }) =>
+      !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId)),
   );
   const scratchTargetEnvironmentId = scratchEnvironmentId(
     activeProjectRef?.environmentId ?? primaryEnvironmentId,
@@ -188,41 +165,32 @@ export function DraftHeroHeadline({
   const isScratchDraft =
     activeProject !== null && isScratchProject(activeProject, scratchWorkspaceRoot);
 
-  // {value, label} items let Base UI drive the combobox selection while the
-  // popup search filters the same collection. "Add project" is an action, not
-  // a project, so it only trails the unfiltered list.
   // A computer-home project (the environment's home directory) is labelled
   // with the environment's name rather than the home folder's.
-  const pickerItems = useMemo<readonly PickerItem[]>(
-    () => [
-      ...menuEntries.map(({ group, targetProject }) => {
-        const environment = environments.find(
-          (candidate) => candidate.environmentId === targetProject.environmentId,
+  const pickerItems: readonly PickerItem[] = [
+    ...menuEntries.map(({ group, targetProject }) => {
+      const environment = environments.find(
+        (candidate) => candidate.environmentId === targetProject.environmentId,
+      );
+      const label = isComputerHomeWorkspace(
+        targetProject.workspaceRoot,
+        environment?.serverConfig?.environment.homeDirectory,
+      )
+        ? (environment?.label ?? group.displayName)
+        : group.displayName;
+      return { value: group.projectKey, label };
+    }),
+    { value: ADD_PROJECT_VALUE, label: "Add project" },
+  ];
+  const pickerSearch = pickerQuery.trim();
+  const filteredPickerItems =
+    pickerSearch.length === 0
+      ? pickerItems
+      : pickerItems.filter(
+          (item) =>
+            item.value !== ADD_PROJECT_VALUE &&
+            pickerFilter.contains(item, pickerSearch, (candidate) => candidate.label),
         );
-        const label = isComputerHomeWorkspace(
-          targetProject.workspaceRoot,
-          environment?.serverConfig?.environment.homeDirectory,
-        )
-          ? (environment?.label ?? group.displayName)
-          : group.displayName;
-        return { value: group.projectKey, label };
-      }),
-      { value: ADD_PROJECT_VALUE, label: "Add project" },
-    ],
-    [environments, menuEntries],
-  );
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerQuery, setPickerQuery] = useState("");
-  const pickerFilter = useComboboxFilter();
-  const filteredPickerItems = useMemo(() => {
-    const query = pickerQuery.trim();
-    if (query.length === 0) return pickerItems;
-    return pickerItems.filter(
-      (item) =>
-        item.value !== ADD_PROJECT_VALUE &&
-        pickerFilter.contains(item, query, (candidate) => candidate.label),
-    );
-  }, [pickerFilter, pickerItems, pickerQuery]);
   const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
 
   // The picker can change the draft's target while the no-project home is
@@ -275,8 +243,10 @@ export function DraftHeroHeadline({
           projectSettings,
           getComposerDraft(draftId)?.activeProvider ??
             defaultModelSelection?.instanceId ??
-            resolveDefaultProviderModelSelection(targetServerConfig?.providers ?? [], null)
-              ?.instanceId,
+            resolveDefaultProviderModelSelection(
+              providersByEnvironment.get(project.environmentId) ?? [],
+              null,
+            )?.instanceId,
         ),
       });
     }
@@ -333,13 +303,14 @@ export function DraftHeroHeadline({
             <ComboboxTrigger
               render={<InlineButton tone="picker" />}
               data-draft-project-trigger=""
-              className="pointer-events-auto max-w-64 align-baseline"
+              // Leaves room for the trailing "?" so a truncated name keeps it on its line.
+              className="pointer-events-auto max-w-[calc(100%-1em)] align-baseline"
             />
           }
         >
-          <span className="min-w-0 truncate">
-            {isScratchDraft ? "No project" : (activeProjectDisplayName ?? "Choose a project")}
-          </span>
+          <DraftProjectName
+            value={isScratchDraft ? "No project" : (activeProjectDisplayName ?? "Choose a project")}
+          />
         </TooltipTrigger>
         {activeProjectDisplayName && !isScratchDraft ? (
           <TooltipPopup side="top">{activeProjectDisplayName}</TooltipPopup>
@@ -364,8 +335,8 @@ export function DraftHeroHeadline({
                   <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
                 ) : null}
                 <Tooltip>
-                  <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-sm" />}>
-                    {item.label}
+                  <TooltipTrigger render={<span className="min-w-0 flex-1 text-sm" />}>
+                    <DraftProjectName value={item.label} />
                   </TooltipTrigger>
                   <TooltipPopup side="top">{item.label}</TooltipPopup>
                 </Tooltip>
@@ -438,9 +409,18 @@ export function DraftHeroHeadline({
         {isScratchDraft ? (
           <>What should we work on?</>
         ) : isComputerHome ? (
-          <>What should we work on{canChooseProject ? <> in {projectSelector}</> : null}?</>
+          canChooseProject ? (
+            <>
+              What should we work on in{" "}
+              <span className="whitespace-nowrap">{projectSelector}?</span>
+            </>
+          ) : (
+            <>What should we work on?</>
+          )
         ) : hasResolvedProject ? (
-          <>What should we build in {projectSelector}?</>
+          <>
+            What should we build in <span className="whitespace-nowrap">{projectSelector}?</span>
+          </>
         ) : canChooseProject ? (
           <>{projectSelector} to start</>
         ) : (

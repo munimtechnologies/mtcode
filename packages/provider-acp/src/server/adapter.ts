@@ -224,6 +224,10 @@ export interface AcpAdapterV2Flavor {
     ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
   >;
   readonly resolveModelId?: (selection: ModelSelection) => string | undefined;
+  readonly getModelContextWindow?: (
+    selection: ModelSelection,
+    session: AcpSessionRuntime.AcpSessionRuntimeStartResult,
+  ) => number | undefined;
   readonly applyModelSelection?: (input: {
     readonly runtime: AcpSessionRuntime.AcpSessionRuntime["Service"];
     readonly startResult: AcpSessionRuntime.AcpSessionRuntimeStartResult;
@@ -6380,6 +6384,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             attachments: turnInput.message.attachments,
             resolveAttachmentPath: host.resolveAttachmentPath,
           });
+          const isNativeSlashCommand = turnInput.message.text.trimStart().startsWith("/");
           const text = t3AcpPromptWithInstructions({
             prompt: messageText,
             state: instructionState,
@@ -6429,13 +6434,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               detail: "ACP turn requires non-empty text or attachments",
             });
           }
-          prompt.push({
-            type: "text",
-            text: buildRuntimeInstructions({
-              harness: flavor.runtimeHarness ?? driver,
-              model: turnInput.modelSelection.model,
-            }),
-          });
+          if (!isNativeSlashCommand) {
+            prompt.push({
+              type: "text",
+              text: buildRuntimeInstructions({
+                harness: flavor.runtimeHarness ?? driver,
+                model: turnInput.modelSelection.model,
+              }),
+            });
+          }
           return { prompt, instructionState: text === messageText ? undefined : instructionState };
         });
 
@@ -6872,6 +6879,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           providerSession,
           events: Stream.fromEffectRepeat(Queue.take(events)),
+          ...(flavor.getModelContextWindow === undefined
+            ? {}
+            : {
+                getModelContextWindow: (selection) => {
+                  const session = Ref.getUnsafe(activeSessionSetup);
+                  return session === null
+                    ? undefined
+                    : flavor.getModelContextWindow?.(selection, session);
+                },
+              }),
           ...(postSettleContinuationEnabled
             ? {
                 hasPendingBackgroundWork: Effect.gen(function* () {

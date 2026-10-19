@@ -318,6 +318,7 @@ export class GitVcsDriver extends Context.Service<
     readonly prepareCommitContext: (
       cwd: string,
       filePaths?: readonly string[],
+      options?: { readonly includePatch?: boolean },
     ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
     readonly commit: (
       cwd: string,
@@ -805,11 +806,17 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
+      // core.splitIndex governs every index Git writes, so an unguarded write to the
+      // scratch index can expire the sharedindex.* the real .git/index still uses.
       const indexConfig = [
         "-c",
         "core.fsmonitor=false",
         "-c",
         "sparse.expectFilesOutsideOfPatterns=false",
+        "-c",
+        "core.splitIndex=false",
+        "-c",
+        "splitIndex.sharedIndexExpire=never",
       ];
       const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
       // Built fresh by `read-tree` below rather than copied from the real
@@ -960,7 +967,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
                     "--reset",
                     "HEAD",
                   ]
-                : [...TEMP_INDEX_CONFIG_ARGS, "read-tree", "HEAD"],
+                : [...TEMP_INDEX_CONFIG_ARGS, ...indexConfig, "read-tree", "HEAD"],
               env: commitEnv,
             });
           }

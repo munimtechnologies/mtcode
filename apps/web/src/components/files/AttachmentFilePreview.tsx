@@ -16,7 +16,7 @@ import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { toastManager } from "~/components/ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 
 import { AudioPreview } from "./AudioPreview";
@@ -48,26 +48,6 @@ function renderedToggleLabel(mode: "markdown" | "html" | "table", rendered: bool
   return rendered ? "Show HTML source" : "Show rendered page";
 }
 
-// useAssetUrlRefresh keys its callback on these objects, so they must stay cached.
-function useAttachmentResources(
-  attachmentId: string | undefined,
-  fileName: string,
-  mimeType: string,
-) {
-  "use memo";
-  const resource = attachmentId
-    ? {
-        _tag: "attachment" as const,
-        attachmentId,
-        fileName,
-        mimeType,
-        disposition: "inline" as const,
-      }
-    : null;
-  const downloadResource = resource ? { ...resource, disposition: "attachment" as const } : null;
-  return { resource, downloadResource };
-}
-
 export function AttachmentFilePreview(props: {
   name: string;
   mimeType: string;
@@ -86,11 +66,17 @@ export function AttachmentFilePreview(props: {
     kind === "markdown" ? "markdown" : kind === "html" ? "html" : delimiter ? "table" : null;
   const attachmentId = props.asset?.attachmentId;
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: props.name });
-  const { resource, downloadResource } = useAttachmentResources(
-    attachmentId,
-    props.name,
-    props.mimeType,
-  );
+  // useAssetUrlRefresh keys its callback on these objects, so they must stay cached.
+  const resource = attachmentId
+    ? {
+        _tag: "attachment" as const,
+        attachmentId,
+        fileName: props.name,
+        mimeType: props.mimeType,
+        disposition: "inline" as const,
+      }
+    : null;
+  const downloadResource = resource ? { ...resource, disposition: "attachment" as const } : null;
   const refresh = useAssetUrlRefresh(
     props.file ? null : (props.asset?.environmentId ?? null),
     props.file ? null : resource,
@@ -173,7 +159,6 @@ export function AttachmentFilePreview(props: {
   }, [url, needsText, revision, props.sizeBytes, props.file, refresh]);
   const failure = error ?? (needsText ? contentError : null);
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
-  const updateClientSettings = useUpdateClientSettings();
   const showsRawText =
     failure === null &&
     needsText &&

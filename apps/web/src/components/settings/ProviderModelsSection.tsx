@@ -24,7 +24,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS as DndCSS } from "@dnd-kit/utilities";
 import { GripVerticalIcon, PencilIcon, PlusIcon, StarIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ProviderDriverKind,
   type ProviderInstanceId,
@@ -32,6 +32,7 @@ import {
 } from "@t3tools/contracts";
 import { type CustomModelDefinition, normalizeCustomModelSlug } from "@t3tools/shared/model";
 
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";
 import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
@@ -323,43 +324,31 @@ export function ProviderModelsSection({
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const scrollToSlugRef = useRef<string | null>(null);
-  const hiddenModelSet = useMemo(() => new Set(hiddenModels), [hiddenModels]);
-  const favoriteModelSet = useMemo(() => new Set(favoriteModels), [favoriteModels]);
-  const customSlugSet = useMemo(
-    () => new Set(customModels.map((entry) => entry.slug)),
-    [customModels],
-  );
+  const hiddenModelSet = new Set(hiddenModels);
+  const favoriteModelSet = new Set(favoriteModels);
+  const customSlugSet = new Set(customModels.map((entry) => entry.slug));
   const isHiddenModel = (model: ServerProviderModel) =>
     !model.isCustom && hiddenModelSet.has(model.slug);
-  // Memoized as one unit: dnd-kit keys its layout animations on the identity
-  // of the sortable ids array.
-  const { displayModels, favorites, enabled, hidden, sortableIds } = useMemo(() => {
-    const displayModels = groupModelsForDisplay(models, {
-      favoriteModels: favoriteModelSet,
-      hiddenModels: hiddenModelSet,
-      modelOrder,
-    });
-    const isHidden = (model: ServerProviderModel) =>
-      !model.isCustom && hiddenModelSet.has(model.slug);
-    const favorites = displayModels.filter((model) => favoriteModelSet.has(model.slug));
-    const rest = displayModels.filter((model) => !favoriteModelSet.has(model.slug));
-    const enabled = rest.filter((model) => !isHidden(model));
-    const hidden = rest.filter(isHidden);
-    const sortableIds = [
-      ...favorites.map((model) => model.slug),
-      ...(favorites.length > 0 ? [ALL_LABEL_ID] : []),
-      ...enabled.map((model) => model.slug),
-      ...(favorites.length === 0 && enabled.length === 0 ? [ENABLED_SLOT_ID] : []),
-      HIDDEN_LABEL_ID,
-      ...hidden.map((model) => model.slug),
-      ...(hidden.length === 0 ? [HIDDEN_SLOT_ID] : []),
-    ];
-    return { displayModels, favorites, enabled, hidden, sortableIds };
-  }, [favoriteModelSet, hiddenModelSet, modelOrder, models]);
+  const displayModels = groupModelsForDisplay(models, {
+    favoriteModels: favoriteModelSet,
+    hiddenModels: hiddenModelSet,
+    modelOrder,
+  });
+  const favorites = displayModels.filter((model) => favoriteModelSet.has(model.slug));
+  const rest = displayModels.filter((model) => !favoriteModelSet.has(model.slug));
+  const enabled = rest.filter((model) => !isHiddenModel(model));
+  const hidden = rest.filter(isHiddenModel);
+  // dnd-kit keys its layout animations on the identity of the sortable ids array.
+  const sortableIds = [
+    ...favorites.map((model) => model.slug),
+    ...(favorites.length > 0 ? [ALL_LABEL_ID] : []),
+    ...enabled.map((model) => model.slug),
+    ...(favorites.length === 0 && enabled.length === 0 ? [ENABLED_SLOT_ID] : []),
+    HIDDEN_LABEL_ID,
+    ...hidden.map((model) => model.slug),
+    ...(hidden.length === 0 ? [HIDDEN_SLOT_ID] : []),
+  ];
   const hiddenCount = displayModels.filter(isHiddenModel).length;
-  const builtInModels = useMemo(() => models.filter((model) => !model.isCustom), [models]);
-  const allBuiltInModelsHidden =
-    builtInModels.length > 0 && builtInModels.every((model) => hiddenModelSet.has(model.slug));
   const showFilter = models.length > FILTER_THRESHOLD;
   const normalizedFilter = filter.trim().toLowerCase();
   const isFiltering = showFilter && normalizedFilter.length > 0;
@@ -432,6 +421,7 @@ export function ProviderModelsSection({
     onFavoriteModelsChange(result.favoriteModels);
   };
 
+  // A model added or moved lands in a later commit, so each commit looks for the pending row.
   useEffect(() => {
     const slug = scrollToSlugRef.current;
     if (slug === null) return;
@@ -441,7 +431,13 @@ export function ProviderModelsSection({
     if (!row) return;
     scrollToSlugRef.current = null;
     row.scrollIntoView({ block: "nearest" });
-  }, [displayModels]);
+  });
+
+  // CustomModelEditor keys its option list on this array. Derived after the effect and
+  // checked against `hiddenModels` rather than the set built above it, so it stays cached.
+  const builtInModels = models.filter((model) => !model.isCustom);
+  const allBuiltInModelsHidden =
+    builtInModels.length > 0 && builtInModels.every((model) => hiddenModels.includes(model.slug));
 
   const handleAdd = () => {
     if (!canManageCustomModels || driverKind === "antigravity") return;
@@ -510,165 +506,35 @@ export function ProviderModelsSection({
     onToggleFavorite(slug);
   };
 
-  // `dragHandle` is the sortable activator, `"overlay"` for the lifted copy
-  // (an inert grip), and `null` for filtered rows, which cannot be dragged.
-  // `preview` shows the state the row will have when dropped in `target`.
+  const handleToggleEdit = useStableCallback((slug: string) => {
+    if (!canManageCustomModels) return;
+    setEditingSlug((current) => (current === slug ? null : slug));
+  });
+  const rowHandlers = {
+    onToggleFavorite: useStableCallback(handleToggleFavorite),
+    onSetHidden: useStableCallback(setHidden),
+    onToggleEdit: handleToggleEdit,
+    onRemove: useStableCallback(handleRemove),
+  };
+
+  // `preview` shows the state the row will have when dropped in `target`. Hidden is read
+  // from the preference itself: a favorited model can still be hidden, and its switch must
+  // say so even though it sits among favorites.
   const renderRow = (
     model: ServerProviderModel,
     dragHandle: ModelDragHandle | "overlay" | null,
     preview?: ModelListSegment | null,
-  ) => {
-    const capLabels = describeModelCapabilities(model);
-    // Hidden is read from the preference itself: a favorited model can still be
-    // hidden, and its switch must say so even though it sits among favorites.
-    const isHidden = preview === "hidden" || (preview !== "enabled" && isHiddenModel(model));
-    const isFavorite = preview ? preview === "favorites" : favoriteModelSet.has(model.slug);
-    return (
-      <div
-        data-model-slug={model.slug}
-        className={cn(
-          "grid h-7 grid-cols-[auto_1.5rem_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
-          isHidden && "opacity-50",
-        )}
-      >
-        {dragHandle === "overlay" ? (
-          <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/50">
-            <GripVerticalIcon className="size-3" />
-          </span>
-        ) : dragHandle ? (
-          <Button
-            ref={dragHandle.setActivatorNodeRef}
-            size="icon-micro"
-            variant="ghost-muted"
-            {...dragHandle.attributes}
-            {...dragHandle.listeners}
-            disabled={!canWritePreferences}
-            aria-label={`Drag to reorder ${model.name}`}
-            className="cursor-grab touch-none active:cursor-grabbing"
-          >
-            <GripVerticalIcon className="size-3" />
-          </Button>
-        ) : (
-          // Filtered rows are not draggable; keep the columns aligned.
-          <span className="size-5 shrink-0" aria-hidden />
-        )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-micro"
-                variant="ghost"
-                className={cn(
-                  "[--control-icon-color:currentColor]",
-                  isFavorite
-                    ? "text-yellow-500 hover:text-yellow-600"
-                    : "text-muted-foreground/40 hover:text-muted-foreground",
-                )}
-                disabled={!canWritePreferences}
-                onClick={() => handleToggleFavorite(model.slug)}
-                aria-label={`${isFavorite ? "Remove" : "Add"} ${model.name} ${
-                  isFavorite ? "from" : "to"
-                } favorites`}
-              />
-            }
-          >
-            <StarIcon className={cn("size-3", isFavorite && "fill-current")} />
-          </TooltipTrigger>
-          <TooltipPopup side="top">
-            {isFavorite ? "Remove from favorites" : "Add to favorites"}
-          </TooltipPopup>
-        </Tooltip>
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span
-            className={cn(
-              "truncate text-xs",
-              isHidden ? "text-muted-foreground" : "text-foreground/90",
-            )}
-          >
-            {model.name}
-          </span>
-          {model.name !== model.slug ? (
-            <code className="truncate font-mono text-2xs text-muted-foreground/70">
-              {model.slug}
-            </code>
-          ) : null}
-          {model.isCustom ? (
-            <span className="text-2xs text-muted-foreground/70">custom</span>
-          ) : null}
-        </span>
-        {/* Always a grid item so the columns line up across rows; the text
-            itself drops out on phone widths where it would starve the name. */}
-        <span className="text-2xs text-muted-foreground/70">
-          {capLabels.length > 0 ? (
-            <span className="hidden sm:inline">{capLabels.join(" · ")}</span>
-          ) : null}
-        </span>
-        {/* Wide enough for the custom-row buttons plus the switch so the
-            capability labels line up across built-in and custom rows. */}
-        <span className="flex min-w-[4.5rem] shrink-0 items-center justify-end gap-0.5">
-          {model.isCustom ? (
-            <>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-micro"
-                      variant="ghost-muted"
-                      disabled={!canManageCustomModels}
-                      aria-label={`Edit ${model.slug}`}
-                      onClick={() => {
-                        if (!canManageCustomModels) return;
-                        setEditingSlug((current) => (current === model.slug ? null : model.slug));
-                      }}
-                    />
-                  }
-                >
-                  <PencilIcon className="size-3" />
-                </TooltipTrigger>
-                <TooltipPopup side="top">Edit name and options</TooltipPopup>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-micro"
-                      variant="ghost-muted"
-                      disabled={!canManageCustomModels}
-                      aria-label={`Remove ${model.slug}`}
-                      onClick={() => handleRemove(model.slug)}
-                    />
-                  }
-                >
-                  <XIcon className="size-3" />
-                </TooltipTrigger>
-                <TooltipPopup side="top">Remove custom model</TooltipPopup>
-              </Tooltip>
-            </>
-          ) : null}
-          {/* The trigger is a wrapper span: a disabled switch gets no pointer
-              events, so it could not open the tooltip itself. */}
-          <Tooltip>
-            <TooltipTrigger render={<span className="flex shrink-0 items-center" />}>
-              <Switch
-                size="sm"
-                checked={!isHidden}
-                disabled={!canWritePreferences || model.isCustom}
-                onCheckedChange={(checked) => setHidden(model.slug, !checked)}
-                aria-label={`Show ${model.name} in the model picker`}
-              />
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              {model.isCustom
-                ? "Custom models are always shown in the picker"
-                : isHidden
-                  ? "Hidden from picker"
-                  : "Shown in picker"}
-            </TooltipPopup>
-          </Tooltip>
-        </span>
-      </div>
-    );
-  };
+  ) => (
+    <ProviderModelRow
+      model={model}
+      isHidden={preview === "hidden" || (preview !== "enabled" && isHiddenModel(model))}
+      isFavorite={preview ? preview === "favorites" : favoriteModelSet.has(model.slug)}
+      dragHandle={dragHandle}
+      canWritePreferences={canWritePreferences}
+      canManageCustomModels={canManageCustomModels}
+      {...rowHandlers}
+    />
+  );
 
   const renderEditor = (model: ServerProviderModel) => {
     const entry =
@@ -880,6 +746,174 @@ export function ProviderModelsSection({
       {driverKind !== "antigravity" && error ? (
         <p className="mt-2 text-xs text-destructive">{error}</p>
       ) : null}
+    </div>
+  );
+}
+
+// A row gets its flags as primitives and handlers that never change, so toggling or
+// starring one model re-renders that row and leaves the others cached. `dragHandle` is
+// the sortable activator, `"overlay"` for the lifted copy (an inert grip), and `null` for
+// filtered rows, which cannot be dragged.
+function ProviderModelRow({
+  model,
+  isHidden,
+  isFavorite,
+  dragHandle,
+  canWritePreferences,
+  canManageCustomModels,
+  onToggleFavorite,
+  onSetHidden,
+  onToggleEdit,
+  onRemove,
+}: {
+  readonly model: ServerProviderModel;
+  readonly isHidden: boolean;
+  readonly isFavorite: boolean;
+  readonly dragHandle: ModelDragHandle | "overlay" | null;
+  readonly canWritePreferences: boolean;
+  readonly canManageCustomModels: boolean;
+  readonly onToggleFavorite: (slug: string) => void;
+  readonly onSetHidden: (slug: string, hidden: boolean) => void;
+  readonly onToggleEdit: (slug: string) => void;
+  readonly onRemove: (slug: string) => void;
+}) {
+  const capLabels = describeModelCapabilities(model);
+  return (
+    <div
+      data-model-slug={model.slug}
+      className={cn(
+        "grid h-7 grid-cols-[auto_1.5rem_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
+        isHidden && "opacity-50",
+      )}
+    >
+      {dragHandle === "overlay" ? (
+        <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/50">
+          <GripVerticalIcon className="size-3" />
+        </span>
+      ) : dragHandle ? (
+        <Button
+          ref={dragHandle.setActivatorNodeRef}
+          size="icon-micro"
+          variant="ghost-muted"
+          {...dragHandle.attributes}
+          {...dragHandle.listeners}
+          disabled={!canWritePreferences}
+          aria-label={`Drag to reorder ${model.name}`}
+          className="cursor-grab touch-none active:cursor-grabbing"
+        >
+          <GripVerticalIcon className="size-3" />
+        </Button>
+      ) : (
+        // Filtered rows are not draggable; keep the columns aligned.
+        <span className="size-5 shrink-0" aria-hidden />
+      )}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-micro"
+              variant="ghost"
+              className={cn(
+                "[--control-icon-color:currentColor]",
+                isFavorite
+                  ? "text-yellow-500 hover:text-yellow-600"
+                  : "text-muted-foreground/40 hover:text-muted-foreground",
+              )}
+              disabled={!canWritePreferences}
+              onClick={() => onToggleFavorite(model.slug)}
+              aria-label={`${isFavorite ? "Remove" : "Add"} ${model.name} ${
+                isFavorite ? "from" : "to"
+              } favorites`}
+            />
+          }
+        >
+          <StarIcon className={cn("size-3", isFavorite && "fill-current")} />
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          {isFavorite ? "Remove from favorites" : "Add to favorites"}
+        </TooltipPopup>
+      </Tooltip>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span
+          className={cn(
+            "truncate text-xs",
+            isHidden ? "text-muted-foreground" : "text-foreground/90",
+          )}
+        >
+          {model.name}
+        </span>
+        {model.name !== model.slug ? (
+          <code className="truncate font-mono text-2xs text-muted-foreground/70">{model.slug}</code>
+        ) : null}
+        {model.isCustom ? <span className="text-2xs text-muted-foreground/70">custom</span> : null}
+      </span>
+      {/* Always a grid item so the columns line up across rows; the text
+          itself drops out on phone widths where it would starve the name. */}
+      <span className="text-2xs text-muted-foreground/70">
+        {capLabels.length > 0 ? (
+          <span className="hidden sm:inline">{capLabels.join(" · ")}</span>
+        ) : null}
+      </span>
+      {/* Wide enough for the custom-row buttons plus the switch so the
+          capability labels line up across built-in and custom rows. */}
+      <span className="flex min-w-[4.5rem] shrink-0 items-center justify-end gap-0.5">
+        {model.isCustom ? (
+          <>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    disabled={!canManageCustomModels}
+                    aria-label={`Edit ${model.slug}`}
+                    onClick={() => onToggleEdit(model.slug)}
+                  />
+                }
+              >
+                <PencilIcon className="size-3" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">Edit name and options</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    disabled={!canManageCustomModels}
+                    aria-label={`Remove ${model.slug}`}
+                    onClick={() => onRemove(model.slug)}
+                  />
+                }
+              >
+                <XIcon className="size-3" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">Remove custom model</TooltipPopup>
+            </Tooltip>
+          </>
+        ) : null}
+        {/* The trigger is a wrapper span: a disabled switch gets no pointer
+            events, so it could not open the tooltip itself. */}
+        <Tooltip>
+          <TooltipTrigger render={<span className="flex shrink-0 items-center" />}>
+            <Switch
+              size="sm"
+              checked={!isHidden}
+              disabled={!canWritePreferences || model.isCustom}
+              onCheckedChange={(checked) => onSetHidden(model.slug, !checked)}
+              aria-label={`Show ${model.name} in the model picker`}
+            />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            {model.isCustom
+              ? "Custom models are always shown in the picker"
+              : isHidden
+                ? "Hidden from picker"
+                : "Shown in picker"}
+          </TooltipPopup>
+        </Tooltip>
+      </span>
     </div>
   );
 }

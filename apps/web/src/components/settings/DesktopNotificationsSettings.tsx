@@ -1,5 +1,5 @@
 import type { DesktopNotificationEvent, DesktopNotificationSettings } from "@t3tools/contracts";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import {
   getBrowserNotificationPermission,
@@ -8,7 +8,7 @@ import {
   type BrowserNotificationPermission,
 } from "../../browserNotifications.ts";
 import { isElectron } from "../../env.ts";
-import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings.ts";
+import { updateClientSettings, useClientSettings } from "../../hooks/useSettings.ts";
 import { cn } from "../../lib/utils.ts";
 import { Button } from "../ui/button.tsx";
 import { Switch } from "../ui/switch.tsx";
@@ -48,9 +48,9 @@ function useBrowserNotificationPermission() {
   const [permission, setPermission] = useState<BrowserNotificationPermission>(() =>
     isElectron ? "granted" : getBrowserNotificationPermission(),
   );
-  const refresh = useCallback(() => {
+  const refresh = () => {
     setPermission(isElectron ? "granted" : getBrowserNotificationPermission());
-  }, []);
+  };
 
   useEffect(() => {
     if (isElectron) return;
@@ -83,7 +83,6 @@ function useBrowserNotificationPermission() {
 
 function useDesktopNotificationSettingsModel() {
   const settings = useClientSettings((current) => current.desktopNotifications);
-  const updateClientSettings = useUpdateClientSettings();
   const browserPermission = useBrowserNotificationPermission();
   const update = (patch: Partial<DesktopNotificationSettings>) => {
     updateClientSettings((current) => ({

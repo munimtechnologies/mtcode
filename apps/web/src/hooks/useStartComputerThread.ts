@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
@@ -16,9 +15,12 @@ import {
 import { newProjectId } from "../lib/utils";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
 import { useProjects } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useEnvironmentProviders,
+  useEnvironments,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import { projectEnvironment } from "../state/projects";
-import { primaryServerProvidersAtom } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useHandleNewThread } from "./useHandleNewThread";
 
@@ -31,7 +33,7 @@ export function useStartComputerThread() {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
-  const providers = useAtomValue(primaryServerProvidersAtom);
+  const providersByEnvironment = useEnvironmentProviders();
 
   /**
    * Start a thread scoped to a whole computer. Without an argument that is the
@@ -91,9 +93,7 @@ export function useStartComputerThread() {
 
       const projectId = newProjectId();
       const title = environment?.label.trim() || "Computer";
-      const targetEnvironmentProviders =
-        environment?.serverConfig?.providers ??
-        (environmentId === primaryEnvironmentId ? providers : []);
+      const targetEnvironmentProviders = providersByEnvironment.get(environmentId) ?? [];
       const createResult = await createProject({
         environmentId,
         input: {
@@ -133,7 +133,7 @@ export function useStartComputerThread() {
       handleNewThread,
       primaryEnvironmentId,
       projects,
-      providers,
+      providersByEnvironment,
     ],
   );
 }

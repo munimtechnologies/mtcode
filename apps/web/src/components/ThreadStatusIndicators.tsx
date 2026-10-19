@@ -4,6 +4,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
+import { useStableCallback } from "~/hooks/useStableCallback";
 
 import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull-requests";
 import {
@@ -16,15 +17,15 @@ import {
 } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { FolderGit2Icon, TerminalIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject } from "../state/entities";
 import {
+  pullRequestListLines,
   resolveThreadCurrentPullRequestLink,
   resolveThreadPullRequestChains,
-  visibleThreadPullRequests,
   type ThreadPullRequestBadge,
+  visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
 import { useRender } from "@base-ui/react/use-render";
 import {
@@ -56,7 +57,6 @@ import {
 import type { SidebarThreadSummary } from "../types";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { pullRequestListLines } from "./pullRequest/pullRequestListLines";
 import {
   PULL_REQUEST_STATE_PRESENTATION,
   PullRequestGlyph,
@@ -95,19 +95,14 @@ export function useLinkedThreadPullRequest(
   branchPullRequest?: ThreadLinkedPullRequest | null,
 ): LinkedThreadPullRequestStatus | null {
   const supportsLinks = useSupportsMultiplePullRequests(environmentId);
-  const current = useMemo(
-    () => (supportsLinks ? resolveThreadCurrentPullRequestLink(pullRequests ?? []) : null),
-    [pullRequests, supportsLinks],
-  );
+  const current = supportsLinks ? resolveThreadCurrentPullRequestLink(pullRequests ?? []) : null;
+  // Callers key on the returned status, so it stays cached across the query hooks.
+  const currentStatus = current === null ? null : linkedPullRequestSnapshotStatus(current);
   const fallback =
     current === null ? ((!supportsLinks ? linkedPullRequest : null) ?? branchPullRequest) : null;
-  // Stable per link: the shared summary effect keys on this object, and a sidebar row must not
-  // touch the cache on every render.
-  const reference = useMemo(() => {
-    if (fallback == null) return null;
-    const host = parseChangeRequestUrl(fallback.url)?.host;
-    return { ...fallback, ...(host === undefined ? {} : { host }) };
-  }, [fallback]);
+  // The query atom and shared summary effect key on this object, and a sidebar row
+  // must not touch the summary cache on every render.
+  const reference = fallback == null ? null : linkedPullRequestReference(fallback);
   const queried = useEnvironmentQuery(
     !enabled || environmentId === null || reference === null
       ? null
@@ -120,15 +115,18 @@ export function useLinkedThreadPullRequest(
     queried.dataUpdatedAt,
   );
 
-  return useMemo(() => {
-    if (current !== null) return linkedPullRequestSnapshotStatus(current);
-    return detail === null
-      ? null
-      : {
-          pr: pullRequestDetailToVcsStatus(detail),
-          sourceControlProvider: { kind: detail.provider, name: detail.provider, baseUrl: "" },
-        };
-  }, [current, detail]);
+  if (current !== null) return currentStatus;
+  return detail === null
+    ? null
+    : {
+        pr: pullRequestDetailToVcsStatus(detail),
+        sourceControlProvider: { kind: detail.provider, name: detail.provider, baseUrl: "" },
+      };
+}
+
+function linkedPullRequestReference(fallback: ThreadLinkedPullRequest) {
+  const host = parseChangeRequestUrl(fallback.url)?.host;
+  return { ...fallback, ...(host === undefined ? {} : { host }) };
 }
 
 export function linkedPullRequestSnapshotStatus(
@@ -330,10 +328,8 @@ export function ThreadPullRequestsMiniList({
   pullRequests: ReadonlyArray<ThreadPullRequestLink>;
   onOpenPullRequest?: (event: MouseEvent<HTMLAnchorElement>, url: string) => void;
 }) {
-  const lines = useMemo(
-    () =>
-      pullRequestListLines(resolveThreadPullRequestChains(visibleThreadPullRequests(pullRequests))),
-    [pullRequests],
+  const lines = pullRequestListLines(
+    resolveThreadPullRequestChains(visibleThreadPullRequests(pullRequests)),
   );
   if (lines.length === 0) return null;
   return (
@@ -873,21 +869,16 @@ export function ThreadRowLeadingStatus({
   snapshot?: ThreadChangeRequestSnapshot | undefined;
 }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
-  const statusRef = useCallback(
-    (node: HTMLSpanElement | null) => rowRef(node?.parentElement ?? null),
-    [rowRef],
+  // A new ref callback would detach and reattach the row, and each reattach sets lease state.
+  const statusRef = useStableCallback((node: HTMLSpanElement | null) =>
+    rowRef(node?.parentElement ?? null),
   );
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const localLastVisitedAt = useUiStateStore(
     (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
   );
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
-  const threadProject = useProject(
-    useMemo(
-      () => scopeProjectRef(thread.environmentId, thread.projectId),
-      [thread.environmentId, thread.projectId],
-    ),
-  );
+  const threadProject = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
   const threadProjectCwd = threadProject?.workspaceRoot ?? null;
   const gitCwd = thread.worktreePath ?? threadProjectCwd;
   const linkedPullRequest = useLinkedThreadPullRequest(

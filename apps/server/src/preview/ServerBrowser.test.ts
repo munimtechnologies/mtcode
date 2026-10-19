@@ -80,7 +80,15 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
       if (method === "Page.getLayoutMetrics") return { cssVisualViewport: { pageX: 0, pageY: 0 } };
       if (method === "Page.captureScreenshot") return { data: "ZnJhbWU=" };
       if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "main" } } };
-      if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
+      // Snapshots read password fields from their own isolated world in each frame.
+      if (method === "Page.createIsolatedWorld") {
+        return {
+          executionContextId: (input as { worldName?: string }).worldName === "t3-preview" ? 1 : 7,
+        };
+      }
+      if (method === "Runtime.evaluate" && (input as { contextId?: number }).contextId === 1) {
+        return { result: { value: [] } };
+      }
       if (method === "Page.addScriptToEvaluateOnNewDocument") frame?.recording.resolve();
       if (method === "Input.dispatchKeyEvent" && (input as { commands?: unknown }).commands) {
         if (focusedFrame) focusedFrame.copy = keyCopy || focusedFrame.copy;
@@ -99,6 +107,8 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
 
 function makeContext(onClose?: (context: BrowserContext) => void) {
   const events = new NodeEvents.EventEmitter();
+  const nativeFileChooser = vi.fn();
+  const setChooserFiles = vi.fn(async (_files: unknown) => {});
   const sessions: ReturnType<typeof makeSession>[] = [];
   let url = "about:blank";
   let viewport = { width: 1280, height: 800 };
@@ -109,6 +119,19 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     once: (name: string, callback: (...args: unknown[]) => void) => events.once(name, callback),
     off: (name: string, callback: (...args: unknown[]) => void) => events.off(name, callback),
     emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
+    nativeFileChooser,
+    setChooserFiles,
+    openFileChooser: () => {
+      if (
+        !events.emit("filechooser", {
+          isMultiple: () => false,
+          element: () => ({ getAttribute: async () => ".csv" }),
+          setFiles: setChooserFiles,
+        })
+      ) {
+        nativeFileChooser();
+      }
+    },
     emitAsync: (name: string, ...args: unknown[]) =>
       Promise.all(events.listeners(name).map((listener) => listener(...args))),
     setDefaultTimeout: vi.fn(),
@@ -298,6 +321,114 @@ beforeEach(() => {
   releasedDesktopTabs.length = 0;
   desktopConnections.length = 0;
 });
+
+it.live.each(["desktop" as const, undefined])(
+  "explicit desktop targets ($0 runtime) fail without creating a server tab",
+  (runtime) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { broker, tabId } = yield* ready;
+        const manager = yield* Manager.PreviewManager;
+        const desktop = yield* manager.open({
+          threadId: scope.thread.threadId,
+          url: "https://example.com/original",
+          ...(runtime === undefined ? {} : { runtime }),
+        });
+        const before = yield* manager.list({ threadId: scope.thread.threadId });
+        const error = yield* broker
+          .invoke<PreviewAutomationStatus>({
+            scope,
+            tabId: PreviewTabId.make(desktop.tabId),
+            operation: "open",
+            input: { url: "https://example.com/replacement", open: true },
+          })
+          .pipe(Effect.flip);
+        expect(error).toMatchObject({ _tag: "PreviewAutomationExecutionError" });
+        expect(error.message).toContain("desktop runtime");
+        expect(error.message).toContain("cannot control");
+        expect(yield* manager.list({ threadId: scope.thread.threadId })).toEqual(before);
+        expect(contexts).toHaveLength(1);
+        // A rejected explicit target must not replace this session's working tab.
+        const reused = yield* broker.invoke<PreviewAutomationStatus>({
+          scope,
+          operation: "open",
+          input: { open: false },
+        });
+        expect(reused.tabId).toBe(tabId);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live("an unknown explicit target fails without creating a server tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker } = yield* ready;
+      const manager = yield* Manager.PreviewManager;
+      const before = yield* manager.list({ threadId: scope.thread.threadId });
+      const error = yield* broker
+        .invoke<PreviewAutomationStatus>({
+          scope,
+          tabId: PreviewTabId.make("missing-tab"),
+          operation: "open",
+          input: { url: "https://example.com/replacement", open: true },
+        })
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "PreviewAutomationTabNotFoundError",
+        tabId: "missing-tab",
+      });
+      expect(yield* manager.list({ threadId: scope.thread.threadId })).toEqual(before);
+      expect(contexts).toHaveLength(1);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("an explicit server target reuses its ID and navigates without creating a tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const manager = yield* Manager.PreviewManager;
+      const before = yield* manager.list({ threadId: scope.thread.threadId });
+      const opened = yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "open",
+        input: { url: "https://example.com/reused", open: false },
+      });
+      expect(opened).toMatchObject({ tabId, url: "https://example.com/reused" });
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(sessions.map((session) => session.tabId)).toEqual(
+        before.sessions.map((session) => session.tabId),
+      );
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0]!.page.goto).toHaveBeenCalledWith(
+        "https://example.com/reused",
+        expect.anything(),
+      );
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("an unresolved implicit target still falls back to a new server tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const manager = yield* Manager.PreviewManager;
+      yield* manager.close({ threadId: scope.thread.threadId, tabId });
+      const opened = yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { url: "https://example.com/fallback", open: false },
+      });
+      expect(opened.tabId).not.toBe(tabId);
+      expect(opened).toMatchObject({ available: true, url: "https://example.com/fallback" });
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(sessions).toEqual([
+        expect.objectContaining({ tabId: opened.tabId, runtime: "server" }),
+      ]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
 
 it.live("readiness none responds immediately but takeover input waits for navigation commit", () =>
   Effect.scoped(
@@ -1384,6 +1515,75 @@ it.live("drives the desktop's own page for a tab the desktop renders", () =>
       while (releasedDesktopTabs.length === 0) yield* Effect.yieldNow;
       expect(releasedDesktopTabs).toEqual([opened.tabId]);
       expect(page.close).not.toHaveBeenCalled();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("desktop file pickers stay native outside agent actions and remote control", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      desktopRendersNext = true;
+      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
+      const tabId = PreviewTabId.make(opened.tabId);
+      const observer = yield* browser.attachViewer(viewerInput(tabId, false));
+      const page = desktopConnections[0]!.context.page;
+      page.openFileChooser();
+      expect(page.nativeFileChooser).toHaveBeenCalledTimes(1);
+
+      const status = () =>
+        broker.invoke<PreviewAutomationStatus>({ scope, tabId, operation: "status", input: {} });
+      expect((yield* status()).fileChooser).toBeNull();
+      const remote = yield* browser.attachViewer(viewerInput(tabId, true));
+      page.openFileChooser();
+      let offered = yield* Queue.take(remote.output);
+      while (offered._tag !== "fileChooser") offered = yield* Queue.take(remote.output);
+      const file = { name: "a.csv", mimeType: "text/csv", buffer: Buffer.from("a,b") };
+      expect(
+        yield* browser.answerFileChooser({
+          threadId: scope.thread.threadId,
+          tabId,
+          chooserId: offered.id,
+          files: [file],
+        }),
+      ).toBe(true);
+      expect(page.setChooserFiles).toHaveBeenLastCalledWith([file]);
+      expect(page.nativeFileChooser).toHaveBeenCalledTimes(1);
+
+      yield* remote.input({ type: "releaseControl" });
+      page.openFileChooser();
+      expect(page.nativeFileChooser).toHaveBeenCalledTimes(2);
+
+      page.locator.mockReturnValue({
+        scrollIntoViewIfNeeded: async () => {},
+        boundingBox: async () => null,
+        click: async () => page.openFileChooser(),
+      } as never);
+      yield* broker.invoke({ scope, tabId, operation: "click", input: { locator: "input" } });
+      expect((yield* status()).fileChooser).toEqual({ multiple: false, accept: ".csv" });
+      yield* broker.invoke({ scope, tabId, operation: "upload", input: { paths: ["/tmp/a.csv"] } });
+      expect(page.setChooserFiles).toHaveBeenLastCalledWith(["/tmp/a.csv"], expect.anything());
+      expect((yield* status()).fileChooser).toBeNull();
+      page.openFileChooser();
+      expect(page.nativeFileChooser).toHaveBeenCalledTimes(3);
+      page.locator.mockReturnValue({
+        scrollIntoViewIfNeeded: async () => {
+          throw new Error("input disappeared");
+        },
+      } as never);
+      expect(
+        yield* Effect.flip(
+          broker.invoke<void>({ scope, tabId, operation: "click", input: { locator: "input" } }),
+        ),
+      ).toMatchObject({ _tag: "PreviewAutomationExecutionError" });
+      page.openFileChooser();
+      expect(page.nativeFileChooser).toHaveBeenCalledTimes(4);
+      expect(
+        (yield* Queue.clear(observer.output)).some((item) => item._tag === "fileChooser"),
+      ).toBe(false);
     }),
   ).pipe(Effect.provide(layer)),
 );

@@ -2966,6 +2966,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
+  // A missing `publish` makes electron-builder infer a GitHub feed from
+  // GH_TOKEN/GITHUB_TOKEN. The staged app has no repository to resolve it
+  // against, so writing update manifests then crashes on a null config.
+  buildConfig.publish = null;
   if (!isDesktopPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel, distro);
     if (publishConfig) {

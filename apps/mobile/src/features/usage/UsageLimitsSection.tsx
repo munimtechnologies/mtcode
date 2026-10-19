@@ -8,7 +8,6 @@ import {
   type ServerProvider,
   type ServerProviderResetCredits,
   type ServerProviderUsageWindow,
-  type UsageProviderKind,
 } from "@t3tools/contracts";
 import {
   elapsedShare,
@@ -28,30 +27,16 @@ import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useProviderColors } from "./usageProviders";
+import { usageProviderKind, useProviderColors } from "./usageProviders";
 
 const PACE_LABEL = { ahead: "ahead of pace", on: "on pace", under: "under pace" } as const;
 
 type Driver = ServerProvider["driver"];
 
-/** Drivers whose usage series colour the limit bars reuse; the rest draw in the default ink. */
-const DRIVER_USAGE_KIND: Partial<Record<string, UsageProviderKind>> = {
-  codex: "codex",
-  claudeAgent: "claude",
-  cursor: "cursor",
-  grok: "grok",
-  opencode: "opencode",
-  antigravity: "antigravity",
-};
-
-export function usageKindForDriver(driver: Driver): UsageProviderKind | undefined {
-  return DRIVER_USAGE_KIND[driver];
-}
-
 /** The series colour the usage chart uses for this driver, so the two views read as one. */
 function useBarColor(driver: Driver): string | null {
   const colors = useProviderColors();
-  const kind = usageKindForDriver(driver);
+  const kind = usageProviderKind(driver);
   return kind ? colors[kind] : null;
 }
 
@@ -311,27 +296,23 @@ export function useRefreshLimits(
         presentation.connection.phase === "connected" &&
         (selectedEnvironmentIds === null || selectedEnvironmentIds.has(environmentId)),
     );
-    try {
-      await Promise.all(
-        connected.map(async ([environmentId, presentation]) => {
-          const result = await refreshUsageLimits(
-            environmentId,
-            () => refreshProviders({ environmentId, input: {} }),
-            automatic,
-            afterPending,
-          );
-          if (result === undefined) return;
-          setFailedEnvironments((previous) => [
-            ...previous.filter((failed) => failed.environmentId !== environmentId),
-            ...(result._tag === "Failure"
-              ? [{ environmentId, label: presentation.entry.target.label }]
-              : []),
-          ]);
-        }),
-      );
-    } finally {
-      setNow(Date.now());
-    }
+    await Promise.all(
+      connected.map(async ([environmentId, presentation]) => {
+        const result = await refreshUsageLimits(
+          environmentId,
+          () => refreshProviders({ environmentId, input: {} }),
+          automatic,
+          afterPending,
+        );
+        if (result === undefined) return;
+        setFailedEnvironments((previous) => [
+          ...previous.filter((failed) => failed.environmentId !== environmentId),
+          ...(result._tag === "Failure"
+            ? [{ environmentId, label: presentation.entry.target.label }]
+            : []),
+        ]);
+      }),
+    ).finally(() => setNow(Date.now()));
   };
   // Always toggles `refreshing`, even with nothing to probe: Android's
   // RefreshControl keeps its spinner up until it sees true then false.
@@ -339,12 +320,10 @@ export function useRefreshLimits(
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
-    try {
-      await refresh();
-    } finally {
+    await refresh().finally(() => {
       refreshingRef.current = false;
       setRefreshing(false);
-    }
+    });
   };
   const connectedLimitsEnvironments = [...presentations]
     .filter(

@@ -2,7 +2,7 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
@@ -54,23 +54,18 @@ function IndexDraftLanding() {
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
   const startComputerThread = useStartComputerThread();
-  const startingRef = useRef(false);
+  // One start per attempt; a retry request opens the next attempt.
+  const startedAttemptRef = useRef<number | null>(null);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
-  const mostRecentProject = useMemo(
-    () =>
-      bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
-        : null,
-    [bootstrapped, projects, threads],
-  );
+  const mostRecentProject = bootstrapped
+    ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
+    : null;
+  const attempt = startState.retryRequest;
 
   useEffect(() => {
-    if (!bootstrapped || startingRef.current) {
-      return;
-    }
     // Starting a draft after the user has left would replace the page they picked.
-    if (!isStillOnIndex()) {
+    if (!bootstrapped || startedAttemptRef.current === attempt || !isStillOnIndex()) {
       return;
     }
     if (mostRecentProject !== null) {
@@ -80,39 +75,30 @@ function IndexDraftLanding() {
       if (readProject(projectRef) === null) {
         return;
       }
-      startingRef.current = true;
+      startedAttemptRef.current = attempt;
       void handleNewThread(projectRef, { replace: true })
         .then((opened) => {
           // The project was removed while its draft started; land on the next one.
           if (opened === null) {
-            startingRef.current = false;
             setStartState((state) => ({ ...state, retryRequest: state.retryRequest + 1 }));
           }
         })
         .catch(() => {
-          startingRef.current = false;
           setStartState((state) => ({ ...state, failed: true }));
         });
       return;
     }
-    startingRef.current = true;
+    startedAttemptRef.current = attempt;
     void startComputerThread()
       .then((started) => {
         if (!started) {
-          startingRef.current = false;
+          startedAttemptRef.current = null;
         }
       })
       .catch(() => {
-        startingRef.current = false;
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [
-    bootstrapped,
-    handleNewThread,
-    mostRecentProject,
-    startComputerThread,
-    startState.retryRequest,
-  ]);
+  }, [attempt, bootstrapped, handleNewThread, mostRecentProject, startComputerThread]);
 
   if (!bootstrapped) {
     return null;

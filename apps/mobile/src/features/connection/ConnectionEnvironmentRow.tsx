@@ -92,15 +92,17 @@ export function ConnectionEnvironmentRow(props: {
 
   return (
     <Animated.View layout={LinearTransition.duration(250)} className="bg-grouped-card">
-      <Pressable
-        className="flex-row items-center gap-3 px-4 py-3.5 active:opacity-70"
-        accessibilityRole="button"
-        accessibilityLabel={
-          props.opensDetails ? `Manage ${props.environment.environmentLabel}` : undefined
-        }
-        onPress={props.onToggle}
-      >
-        <View className="flex-1 gap-0.5">
+      <View className="flex-row items-center gap-3 px-4 py-3.5">
+        <Pressable
+          className="min-w-0 flex-1 gap-0.5 active:opacity-70"
+          accessibilityRole="button"
+          accessibilityLabel={
+            props.opensDetails
+              ? `Manage ${props.environment.environmentLabel}`
+              : `${props.expanded ? "Collapse" : "Expand"} details for ${props.environment.environmentLabel}`
+          }
+          onPress={props.onToggle}
+        >
           <View className="flex-row items-center gap-1.5">
             <ConnectionStatusDot
               state={enabled || unsupported ? props.environment.connectionState : "available"}
@@ -143,44 +145,57 @@ export function ConnectionEnvironmentRow(props: {
               ) : null}
             </Text>
           ) : null}
-        </View>
+        </Pressable>
 
-        <View className="flex-row items-center gap-2">
-          {canRename ? (
-            <Pressable
-              accessibilityLabel={`Rename ${props.environment.environmentLabel}`}
-              accessibilityRole="button"
-              className="h-8 w-8 items-center justify-center rounded-full active:bg-subtle"
-              onPress={(event) => {
-                event.stopPropagation();
-                props.onRename(props.environment.environmentId);
-              }}
-            >
-              <SymbolView
-                name="pencil"
-                size={13}
-                tintColorClassName={"accent-icon-subtle"}
-                type="monochrome"
-              />
-            </Pressable>
-          ) : null}
-          <ThemedSwitch
-            style={{ alignSelf: "center" }}
-            disabled={unsupported}
-            onValueChange={(next) => props.onSetEnabled(props.environment.environmentId, next)}
-            value={enabled}
-          />
+        {canRename ? (
+          <Pressable
+            accessibilityLabel={`Rename ${props.environment.environmentLabel}`}
+            accessibilityRole="button"
+            className="h-8 w-8 items-center justify-center rounded-full active:bg-subtle"
+            onPress={(event) => {
+              event.stopPropagation();
+              props.onRename(props.environment.environmentId);
+            }}
+          >
+            <SymbolView
+              name="pencil"
+              size={13}
+              tintColorClassName="accent-icon-subtle"
+              type="monochrome"
+            />
+          </Pressable>
+        ) : null}
+        <ThemedSwitch
+          accessibilityLabel={`Enable ${props.environment.environmentLabel}`}
+          style={{ alignSelf: "center" }}
+          disabled={unsupported}
+          onValueChange={(next) => props.onSetEnabled(props.environment.environmentId, next)}
+          value={enabled}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            props.opensDetails
+              ? `Manage ${props.environment.environmentLabel}`
+              : `${props.expanded ? "Collapse" : "Expand"} details for ${props.environment.environmentLabel}`
+          }
+          onPress={props.onToggle}
+          style={{
+            minWidth: 44,
+            minHeight: 44,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <SymbolView
             name={props.opensDetails ? "chevron.right" : "chevron.down"}
             size={12}
-            tintColorClassName={"accent-icon-subtle"}
+            tintColorClassName="accent-icon-subtle"
             type="monochrome"
-            style={{
-              transform: [{ rotate: props.expanded ? "180deg" : "0deg" }],
-            }}
+            style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
           />
-        </View>
-      </Pressable>
+        </Pressable>
+      </View>
 
       {props.expanded ? (
         <Animated.View

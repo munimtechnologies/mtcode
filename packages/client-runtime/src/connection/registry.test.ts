@@ -216,6 +216,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
           case "RelayConnectionRegistration":
             return;
           case "BearerConnectionRegistration":
+          case "SshConnectionRegistration":
             yield* Ref.update(storedProfiles, (current) => {
               const next = new Map(current);
               next.set(registration.profile.connectionId, registration.profile);
@@ -227,12 +228,6 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
               return next;
             });
             return;
-          case "SshConnectionRegistration":
-            yield* Ref.update(storedProfiles, (current) => {
-              const next = new Map(current);
-              next.set(registration.profile.connectionId, registration.profile);
-              return next;
-            });
         }
       }),
     setRoutes: (environmentId, routes) =>
@@ -631,6 +626,28 @@ describe("EnvironmentRegistry", () => {
         yield* Fiber.join(start);
 
         expect(yield* Ref.get(loadCount)).toBe(2);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
+  it.effect("does not expose a persisted environment as disconnected while it starts", () =>
+    Effect.gen(function* () {
+      const connectionStarted = yield* Deferred.make<void>();
+      const finishConnection = yield* Deferred.make<void>();
+      const harness = yield* makeHarness([TARGET], [], [], {
+        beforeSessionConnect: () =>
+          Deferred.succeed(connectionStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(finishConnection)),
+          ),
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        expect((yield* registry.state(TARGET.environmentId)).phase).toBe("connecting");
+
+        yield* Deferred.await(connectionStarted);
+        expect((yield* registry.state(TARGET.environmentId)).phase).toBe("connecting");
+        yield* Deferred.succeed(finishConnection, undefined);
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
@@ -1941,6 +1958,7 @@ describe("EnvironmentRegistry routes", () => {
               connectionId: other.connectionId,
               target: { ...SSH_TARGET, alias: "other", hostname: "other.example.test" },
             }),
+            credential: BEARER_CREDENTIAL,
           }),
         );
 
@@ -1969,6 +1987,7 @@ describe("EnvironmentRegistry routes", () => {
                 ...SSH_PROFILE,
                 connectionId: again.connectionId,
               }),
+              credential: BEARER_CREDENTIAL,
             }),
           );
 

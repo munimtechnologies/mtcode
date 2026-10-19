@@ -92,6 +92,9 @@ import Migration0069 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0070 from "./Migrations/061_PullRequestReviewGuides.ts";
 // Upstream 062; registered as the next free fork id.
 import Migration0071 from "./Migrations/062_ThreadFailureLookupIndex.ts";
+// Upstream 063/064; registered as the next free fork ids.
+import Migration0072 from "./Migrations/063_DropUnusedV1Projections.ts";
+import Migration0073 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -157,6 +160,7 @@ export const migrationEntries = [
   [61, "ProjectionThreadTurnQueueScheduledFor", Migration0061],
   [62, "ProjectionThreadTurnQueueRecurrence", Migration0062],
   [63, "PullRequestFilesViewed", Migration0063],
+  // Preserve this migration's schema. Future V2 schema changes need new migrations.
   [64, "OrchestrationV2", Migration0064],
   [65, "RemoveRedundantProjectionIndexes", Migration0065],
   // Upstream 057/058 (webhook tasks, #15085/#15086); registered as the next free fork ids.
@@ -169,6 +173,10 @@ export const migrationEntries = [
   [70, "PullRequestReviewGuides", Migration0070],
   // Upstream 062 (thread failure lookup index); registered as the next free fork id.
   [71, "ThreadFailureLookupIndex", Migration0071],
+  // Upstream 063/064 (drop unused V1 projections, canonicalize thread PR links);
+  // registered as the next free fork ids.
+  [72, "DropUnusedV1Projections", Migration0072],
+  [73, "CanonicalizeThreadPullRequestLinks", Migration0073],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

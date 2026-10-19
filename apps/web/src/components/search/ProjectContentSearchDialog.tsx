@@ -1,7 +1,7 @@
 import { Spinner } from "~/components/ui/spinner";
 import { AuthFilesystemReadScope, type ProjectContentMatch } from "@t3tools/contracts";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";
 import { useTheme } from "~/hooks/useTheme";
@@ -95,25 +95,27 @@ function OpenContentSearchDialog(props: {
   });
   const canOpenMatches = search.canReadFiles && !search.isPending && search.error === null;
   const matches = search.matches;
-  const visibleMatches = useMemo(() => matches.slice(0, visibleCount), [matches, visibleCount]);
-  const groups = useMemo(() => groupMatches(visibleMatches), [visibleMatches]);
-
-  useEffect(() => {
+  // New results restart the selection and the rendered window.
+  const [resultsFor, setResultsFor] = useState(matches);
+  if (resultsFor !== matches) {
+    setResultsFor(matches);
     setSelectedIndex(0);
     setVisibleCount(VISIBLE_MATCH_WINDOW);
-  }, [matches]);
+  }
+  // Keyboard selection past the window grows it before the row has to scroll into view.
+  if (selectedIndex >= visibleCount) {
+    setVisibleCount(selectedIndex + VISIBLE_MATCH_WINDOW);
+  }
+  const visibleMatches = matches.slice(0, visibleCount);
+  const groups = groupMatches(visibleMatches);
 
   useEffect(() => {
-    if (selectedIndex >= visibleCount) {
-      setVisibleCount(selectedIndex + VISIBLE_MATCH_WINDOW);
-      return;
-    }
     document
       .querySelector<HTMLElement>(`[data-content-search-result="${selectedIndex}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex, visibleCount]);
+  }, [selectedIndex]);
 
-  const observeLoadMoreSentinel = useCallback((sentinel: HTMLElement | null) => {
+  const observeLoadMoreSentinel = (sentinel: HTMLElement | null) => {
     if (!sentinel) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
@@ -122,7 +124,7 @@ function OpenContentSearchDialog(props: {
     });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, []);
+  };
 
   const openMatch = (match: ProjectContentMatch) => {
     if (!canOpenMatches || !readEnvironmentScope(target.environmentId, AuthFilesystemReadScope)) {
@@ -131,7 +133,7 @@ function OpenContentSearchDialog(props: {
     props.onOpenChange(false);
     useRightPanelStore.getState().openFile(target.threadRef, match.path, match.lineNumber);
   };
-  const fileCount = useMemo(() => new Set(matches.map((match) => match.path)).size, [matches]);
+  const fileCount = new Set(matches.map((match) => match.path)).size;
   const showSearchStatus =
     search.canReadFiles &&
     (search.hasQuery || search.isPending || search.error !== null || search.invalidRegex);

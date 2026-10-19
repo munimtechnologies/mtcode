@@ -2,7 +2,7 @@ import {
   type GhosttyKeyboardLayoutMap,
   ghosttyControlShortcutCodepoint,
   ghosttyConsumedMods,
-  ghosttyKeyForCode,
+  ghosttyKeyForEvent,
   ghosttyUnshiftedCodepoint,
   loadGhosttyKeyboardLayoutMap,
 } from "./keyCodes";
@@ -517,7 +517,7 @@ export class GhosttyTerminalCore {
       this.keyEvent,
       action === "release" ? 0 : event.repeat ? 2 : 1,
     );
-    this.runtime.call("ghostty_key_event_set_key", this.keyEvent, ghosttyKeyForCode(event.code));
+    this.runtime.call("ghostty_key_event_set_key", this.keyEvent, ghosttyKeyForEvent(event));
     const mods =
       (event.shiftKey ? 1 : 0) |
       (event.ctrlKey ? 1 << 1 : 0) |

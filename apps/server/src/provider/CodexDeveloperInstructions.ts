@@ -5,8 +5,15 @@ import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeI
 import { DESKTOP_MCP_SERVER_NAME } from "@t3tools/contracts";
 import {
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
-  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+  T3_CODE_ORCHESTRATION_SECTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
+
+/**
+ * Codex cuts the middle out of any `additionalContext` value over 1,000 tokens,
+ * which it counts as UTF-8 bytes divided by four. It does this silently, so
+ * every value built here has to fit.
+ */
+export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
 
 const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `## T3 Code devices
 
@@ -74,9 +81,14 @@ interface CodexExtraToolInstructions {
 }
 
 const extraToolInstructions = (options: CodexExtraToolInstructions): string =>
-  `${toolInstructions(options.browserToolsAvailable)}${
-    options.desktopToolsAvailable === true ? T3_CODE_DESKTOP_TOOL_INSTRUCTIONS : ""
-  }${options.computerHomeWorkspace === true ? T3_CODE_COMPUTER_HOME_INSTRUCTIONS : ""}${options.browserToolsAvailable === false ? "" : T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}`;
+  `${toolInstructions(options.browserToolsAvailable)}${options.browserToolsAvailable === false ? "" : T3_CODE_COMPUTER_TOOL_INSTRUCTIONS}`;
+
+// Computer Use and computer-home guidance ride in their own entry: added to the
+// browser/device/computer tool text they would push it past Codex's per-entry cap.
+const desktopToolInstructions = (options: CodexExtraToolInstructions): string =>
+  `${options.desktopToolsAvailable === true ? T3_CODE_DESKTOP_TOOL_INSTRUCTIONS : ""}${
+    options.computerHomeWorkspace === true ? T3_CODE_COMPUTER_HOME_INSTRUCTIONS : ""
+  }`.trim();
 
 const T3_CODE_CHAT_HISTORY_INSTRUCTIONS = `
 
@@ -255,9 +267,19 @@ export function buildCodexAdditionalContext(
   },
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const tools = extraToolInstructions({ browserToolsAvailable: toolsAvailable, ...options });
-  // Separate keys keep each value under Codex's per-entry token cap.
+  const desktopTools = desktopToolInstructions({
+    browserToolsAvailable: toolsAvailable,
+    ...options,
+  });
+  // Separate keys keep each value under Codex's per-entry cap. Codex emits
+  // entries in key order, so the numbering preserves the authored order.
   return {
-    t3_code_orchestration: { kind: "application", value: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
+    ...Object.fromEntries(
+      T3_CODE_ORCHESTRATION_SECTIONS.map((section, index) => [
+        `t3_code_orchestration_${String(index + 1).padStart(2, "0")}`,
+        { kind: "application" as const, value: section },
+      ]),
+    ),
     t3_code_runtime: {
       kind: "application",
       value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
@@ -272,5 +294,8 @@ export function buildCodexAdditionalContext(
         }
       : {}),
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
+    ...(desktopTools
+      ? { mt_code_desktop_tools: { kind: "application" as const, value: desktopTools } }
+      : {}),
   };
 }

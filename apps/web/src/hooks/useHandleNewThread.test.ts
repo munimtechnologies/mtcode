@@ -79,27 +79,33 @@ const testState = vi.hoisted(() => {
   };
 });
 
+const testServerConfigs = () =>
+  new Map([
+    [
+      "environment-primary",
+      {
+        settings: {
+          ...testState.targetSettings,
+          newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin,
+        },
+      },
+    ],
+    ["environment-ssh", { settings: testState.targetSettings }],
+  ]);
+
+vi.mock("../rpc/atomRegistry", () => ({
+  appAtomRegistry: { get: () => testServerConfigs() },
+}));
+
 vi.mock("@effect/atom-react", () => ({
-  // The hook reads three kinds of atoms: the primary settings it asserts on,
-  // the per-environment server configs, and the environment catalog /
-  // presentation map that `useEnvironments` walks (stubbed empty).
+  // The hook subscribes to the primary settings it asserts on and the
+  // environment catalog / presentation map that `useEnvironments` walks
+  // (stubbed empty); server configs are read through the registry mock.
   useAtomValue: (atom: unknown) =>
     atom === "primary-settings"
       ? { newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin }
       : atom === "environment-configs"
-        ? new Map([
-            [
-              "environment-primary",
-              {
-                settings: {
-                  ...testState.targetSettings,
-                  newWorktreesStartFromOrigin:
-                    !testState.targetSettings.newWorktreesStartFromOrigin,
-                },
-              },
-            ],
-            ["environment-ssh", { settings: testState.targetSettings }],
-          ])
+        ? testServerConfigs()
         : { isReady: false, entries: () => [] },
 }));
 vi.mock("@t3tools/client-runtime/environment", () => ({

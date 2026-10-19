@@ -6,6 +6,7 @@ import { CheckIcon, CircleAlertIcon, CopyIcon, XIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { OpenAI } from "../Icons";
 import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
+import { ExpandableText } from "../settings/ExpandableText";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { anchoredToastManager } from "../ui/toast";
 
@@ -130,12 +131,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
               <p>Review your usage settings in ChatGPT to continue.</p>
             </div>
           ) : (
-            <Tooltip>
-              <TooltipTrigger render={<div className="line-clamp-3" />}>{error}</TooltipTrigger>
-              <TooltipPopup side="top" className="whitespace-pre-wrap">
-                {error}
-              </TooltipPopup>
-            </Tooltip>
+            <ExpandableText text={error} />
           )}
         </AlertDescription>
         <AlertAction>

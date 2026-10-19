@@ -4,6 +4,7 @@ import {
   ghosttyControlShortcutCodepoint,
   ghosttyConsumedMods,
   ghosttyKeyForCode,
+  ghosttyKeyForEvent,
   ghosttyUnshiftedCodepoint,
 } from "./keyCodes";
 
@@ -13,6 +14,29 @@ describe("ghosttyKeyForCode", () => {
     expect(ghosttyKeyForCode("PrintScreen")).toBe(ghosttyKeyForCode("FnLock") + 1);
     expect(ghosttyKeyForCode("Pause")).toBe(ghosttyKeyForCode("ScrollLock") + 1);
     expect(ghosttyKeyForCode("Paste")).toBe(ghosttyKeyForCode("Cut") + 1);
+  });
+});
+
+describe("ghosttyKeyForEvent", () => {
+  it.each(["", "Unidentified", "Unknown"])(
+    "falls back to the logical key when code '%s' is not mapped",
+    (code) => {
+      expect(ghosttyKeyForEvent({ code, key: "Backspace" })).toBe(ghosttyKeyForCode("Backspace"));
+    },
+  );
+
+  it("prefers recognized physical codes over logical keys", () => {
+    expect(ghosttyKeyForEvent({ code: "Delete", key: "Backspace" })).toBe(
+      ghosttyKeyForCode("Delete"),
+    );
+    expect(ghosttyKeyForEvent({ code: "NumpadEnter", key: "Enter" })).toBe(
+      ghosttyKeyForCode("NumpadEnter"),
+    );
+  });
+
+  it("leaves printable characters and unknown keys to the text encoding path", () => {
+    expect(ghosttyKeyForEvent({ code: "", key: "a" })).toBe(0);
+    expect(ghosttyKeyForEvent({ code: "", key: "Unidentified" })).toBe(0);
   });
 });
 

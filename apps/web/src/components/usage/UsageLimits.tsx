@@ -46,20 +46,15 @@ const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof Ga
   under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
 };
 
-/** Drivers whose usage series colour the limit bars reuse; the rest fall back to the foreground. */
-const DRIVER_USAGE_KIND: Partial<Record<string, UsageProviderKind>> = {
-  codex: "codex",
-  claudeAgent: "claude",
-  cursor: "cursor",
-  grok: "grok",
-  opencode: "opencode",
-  antigravity: "antigravity",
-};
-
-/** The series colour the cost chart uses for this driver, so the two views read as one. */
+/**
+ * The series colour the cost chart uses for this driver, so the two views read as one. Drivers
+ * without a usage series fall back to the foreground.
+ */
 export function barColor(driver: ServerProvider["driver"]): string {
-  const kind = DRIVER_USAGE_KIND[driver];
-  return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
+  const presentation = Object.values(PROVIDER_PRESENTATION).find(
+    (entry) => entry.driverKind === driver,
+  );
+  return presentation?.color ?? "var(--foreground)";
 }
 
 export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
@@ -341,7 +336,7 @@ export function UsageLimitsSection({
   readonly now: number;
   readonly cursorPrompt?: ReactNode;
 }) {
-  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const hiddenDrivers = new Set<ServerProvider["driver"]>(
     [...hiddenProviders].map((provider) => PROVIDER_PRESENTATION[provider].driverKind),
   );

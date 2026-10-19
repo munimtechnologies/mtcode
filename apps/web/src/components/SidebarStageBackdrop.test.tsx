@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vite-plus/test";
-import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   DEV_BACKDROP,
@@ -7,10 +6,7 @@ import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarArtwork,
   resolveSidebarStageBackdropVariant,
-  StageBackdropArt,
-  StageBackdropButtonArt,
 } from "./SidebarStageBackdrop";
-import { presetConditions } from "../artwork/skyConditions";
 
 describe("SidebarStageBackdrop", () => {
   it("resolves stage artwork only when enabled", () => {
@@ -25,50 +21,6 @@ describe("SidebarStageBackdrop", () => {
     expect(resolveEnvironmentIdentificationPillLabel("nightly")).toBe("Nightly");
     expect(resolveEnvironmentIdentificationPillLabel("Latest")).toBeNull();
     expect(resolveEnvironmentIdentificationPillLabel("Alpha")).toBeNull();
-  });
-
-  it.each([
-    NIGHTLY_BACKDROP,
-    DEV_BACKDROP,
-    { kind: "sky", conditions: presetConditions("dusk", "storm"), name: "Dusk · Storm" },
-  ] as const)(
-    "uses unique SVG definition ids when $kind artwork is rendered more than once",
-    (variant) => {
-      const markup = renderToStaticMarkup(
-        <>
-          <StageBackdropArt variant={variant} />
-          <StageBackdropArt variant={variant} />
-        </>,
-      );
-      const ids = Array.from(markup.matchAll(/\sid="([^"]+)"/g), (match) => match[1]);
-
-      expect(ids.length).toBeGreaterThan(0);
-      expect(new Set(ids).size).toBe(ids.length);
-    },
-  );
-
-  it("paints each artwork variant with theme-owned color tokens", () => {
-    const nightlyMarkup = renderToStaticMarkup(<StageBackdropArt variant={NIGHTLY_BACKDROP} />);
-    const devMarkup = renderToStaticMarkup(<StageBackdropArt variant={DEV_BACKDROP} />);
-
-    expect(nightlyMarkup).toContain("var(--stage-night-bottom)");
-    expect(nightlyMarkup).toContain("var(--stage-night-line)");
-    expect(devMarkup).toContain("var(--stage-art-bottom)");
-    expect(devMarkup).toContain("var(--stage-art-line)");
-    expect(nightlyMarkup).not.toMatch(/#[0-9a-f]{3,8}/i);
-    expect(devMarkup).not.toMatch(/#[0-9a-f]{3,8}/i);
-  });
-
-  it.each([
-    [NIGHTLY_BACKDROP, "96 0 8192 96"],
-    [DEV_BACKDROP, "64 0 8192 96"],
-  ] as const)("uses the compact crop inside the send button", (variant, viewBox) => {
-    const markup = renderToStaticMarkup(<StageBackdropButtonArt variant={variant} />);
-
-    expect(markup).toContain(`viewBox="${viewBox}"`);
-    expect(markup).toContain(
-      `data-stage-art="${variant.kind === "dev" ? "blueprint" : "nightly"}"`,
-    );
   });
 });
 
