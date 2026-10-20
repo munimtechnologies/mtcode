@@ -1208,11 +1208,13 @@ export function toPullRequestCore(result: PullRequestCore.Result): GitHubPullReq
       canDeleteBranch: toCanWrite(pr.headRepository?.viewerPermission) && pr.headRef !== null,
       canTriage: toCanTriage(repository.viewerPermission),
       ...toPullRequestViewerFields(pr),
+      canMergeNow: IMMEDIATELY_MERGEABLE.has(pr.mergeStateStatus),
       mergeCapabilities: {
         merge: repository.mergeCommitAllowed,
         squash: repository.squashMergeAllowed,
         rebase: repository.rebaseMergeAllowed,
       },
+      autoMergeAllowed: repository.autoMergeAllowed,
     },
     comparison:
       pr.state !== "OPEN" || pr.baseRef?.compare == null
@@ -1578,8 +1580,16 @@ export function toReviewThreadCommentsPage(result: ReviewThreadComments.Result):
 
 export interface GitHubRepositoryAccess {
   readonly mergeCapabilities: PullRequestMergeCapabilities;
+  readonly autoMergeAllowed: boolean;
   readonly canWrite: boolean;
 }
+
+/** States in which `gh pr merge --auto` merges at once instead of arming auto-merge. */
+export const IMMEDIATELY_MERGEABLE: ReadonlySet<string> = new Set([
+  "CLEAN",
+  "HAS_HOOKS",
+  "UNSTABLE",
+]);
 
 /**
  * GitHub answers null only to a GitHub App installation, and no API says what an installation
@@ -1736,6 +1746,8 @@ export interface GitHubViewerAccess {
    * something to update" at once. Absent where the comparison was not read.
    */
   readonly canUpdateBranch?: boolean;
+  /** Detail-only readiness; omitted by the lightweight action permission read. */
+  readonly canMergeNow?: boolean;
 }
 
 /** Null for a repository the viewer cannot see. */
@@ -1750,6 +1762,7 @@ export function toViewerPermissions(
       squash: repository.squashMergeAllowed,
       rebase: repository.rebaseMergeAllowed,
     },
+    autoMergeAllowed: repository.autoMergeAllowed,
     canWrite: toCanWrite(repository.viewerPermission),
     canDeleteBranch: toCanWrite(repository.pullRequest?.headRepository?.viewerPermission),
     canTriage: toCanTriage(repository.viewerPermission),

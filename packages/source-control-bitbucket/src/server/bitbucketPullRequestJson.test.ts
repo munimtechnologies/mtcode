@@ -372,8 +372,8 @@ describe("decodeStatusesJson", () => {
     );
 
     expect(decoded.items.map((check) => [check.name, check.status])).toEqual([
-      ["build / Pipeline", "success"],
       ["deploy / Pipeline", "failure"],
+      ["build / Pipeline", "success"],
     ]);
   });
 });

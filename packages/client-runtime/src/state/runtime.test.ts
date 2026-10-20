@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
+  type PreviewEvent,
   type TerminalAttachInput,
   type TerminalAttachStreamEvent,
   type TerminalMetadataStreamEvent,
@@ -35,6 +36,7 @@ import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import { EnvironmentRpcUnavailableError } from "../rpc/client.ts";
 import type * as RpcSession from "../rpc/session.ts";
+import { createPreviewEnvironmentAtoms } from "./preview.ts";
 import type { QueryPersistence } from "./queryPersistence.ts";
 import { createTerminalEnvironmentAtoms } from "./terminal.ts";
 import {
@@ -107,6 +109,7 @@ const makeEnvironmentQueryHarness = Effect.fn("TestEnvironmentQuery.makeHarness"
     idleTtlMs,
     persistence,
     initialState,
+    rpcSession,
     isFinal,
   }: {
     readonly refreshTrigger?: Atom.Atom<unknown>;
@@ -114,10 +117,13 @@ const makeEnvironmentQueryHarness = Effect.fn("TestEnvironmentQuery.makeHarness"
     readonly idleTtlMs?: number;
     readonly persistence?: QueryPersistence<A>;
     readonly initialState?: SupervisorConnectionState;
+    readonly rpcSession?: RpcSession.RpcSession;
   } = {},
 ) {
   const supervisorState = yield* SubscriptionRef.make(initialState ?? queryConnectionState());
-  const supervisorSession = yield* SubscriptionRef.make(Option.some(QUERY_RPC_SESSION));
+  const supervisorSession = yield* SubscriptionRef.make(
+    Option.some(rpcSession ?? QUERY_RPC_SESSION),
+  );
   const streamGeneration = yield* SubscriptionRef.make(0);
   const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
     target: QUERY_ENVIRONMENT,
@@ -396,6 +402,82 @@ describe("bounded environment queries", () => {
         if (AsyncResult.isFailure(result)) {
           expect(Cause.squash(result.cause)).toMatchObject({ _tag: "TimeoutError" });
         }
+      }),
+    ),
+  );
+});
+
+describe("preview event subscriptions", () => {
+  it.effect("delivers every open and close when RPC events arrive in batches", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opened: PreviewEvent[] = ["thread-a", "thread-b"].map((threadId, index) => ({
+          type: "opened",
+          threadId,
+          tabId: `tab-${index}`,
+          serverEpoch: "epoch-1",
+          revision: index + 1,
+          createdAt: "2026-10-02T00:00:00.000Z",
+          snapshot: {
+            threadId,
+            tabId: `tab-${index}`,
+            navStatus: { _tag: "Idle" },
+            canGoBack: false,
+            canGoForward: false,
+            updatedAt: "2026-10-02T00:00:00.000Z",
+          },
+        }));
+        const closed: PreviewEvent[] = opened.map((event, index) => ({
+          type: "closed",
+          threadId: event.threadId,
+          tabId: event.tabId,
+          serverEpoch: event.serverEpoch,
+          revision: opened.length + index + 1,
+          createdAt: event.createdAt,
+        }));
+        const releaseEvents = yield* Deferred.make<void>();
+        // Each iterable is one RPC chunk; separate emissions would hide lost events.
+        const stream = Stream.fromEffect(Deferred.await(releaseEvents)).pipe(
+          Stream.flatMap(() =>
+            Stream.fromIterable(opened).pipe(
+              Stream.concat(Stream.fromIterable(closed)),
+              Stream.concat(Stream.never),
+            ),
+          ),
+        );
+        const harness = yield* makeEnvironmentQueryHarness(Effect.void, {
+          rpcSession: {
+            client: { [WS_METHODS.subscribePreviewEvents]: () => stream },
+          } as unknown as RpcSession.RpcSession,
+        });
+        const atom = createPreviewEnvironmentAtoms(harness.runtime).events({
+          environmentId: QUERY_ENVIRONMENT.environmentId,
+          input: {},
+        });
+        const registry = AtomRegistry.make();
+        const observed: PreviewEvent[] = [];
+        const sawLast = yield* Deferred.make<void>();
+        const unsubscribe = registry.subscribe(
+          atom,
+          (result) => {
+            if (!AsyncResult.isSuccess(result)) return;
+            observed.push(result.value);
+            if (result.value === closed[closed.length - 1]) {
+              Deferred.doneUnsafe(sawLast, Exit.void);
+            }
+          },
+          { immediate: true },
+        );
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            unsubscribe();
+            registry.dispose();
+          }),
+        );
+
+        yield* Deferred.succeed(releaseEvents, undefined);
+        yield* Deferred.await(sawLast);
+        expect(observed).toEqual([...opened, ...closed]);
       }),
     ),
   );

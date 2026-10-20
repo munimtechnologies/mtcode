@@ -983,9 +983,12 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           path.join(repo, ".git", "config"),
           '[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:pingdotgg/t3code.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n',
         );
+        const worktreeGitDir = path.join(repo, ".git", "worktrees", "wt");
+        yield* fileSystem.makeDirectory(worktreeGitDir, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(worktreeGitDir, "commondir"), "../..\n");
         yield* fileSystem.writeFileString(
           path.join(worktree, ".git"),
-          `gitdir: ${path.join(repo, ".git", "worktrees", "wt")}\n`,
+          `gitdir: ${worktreeGitDir}\n`,
         );
         yield* fileSystem.makeDirectory(path.join(noRemote, ".git"));
         yield* fileSystem.writeFileString(path.join(noRemote, ".git", "config"), "[core]\n");
@@ -1025,6 +1028,75 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           },
         ]);
       }),
+    );
+
+    it.effect(
+      "offers bare-repository worktrees separately and imports only their own sessions",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+          yield* TestClock.setTime(nowMs);
+          const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+          const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+          const configBaseDir = yield* makeTempDir("t3code-scanner-base-");
+          const bare = yield* makeTempDir("t3code-workspace-bare-");
+          const bareGitDir = path.join(bare, ".git");
+          yield* fileSystem.makeDirectory(bareGitDir);
+          yield* fileSystem.writeFileString(
+            path.join(bareGitDir, "config"),
+            '[core] bare = "true" ; bare repository\n[remote "origin"]\nurl = git@github.com:pingdotgg/t3code.git\n',
+          );
+          const dev = path.join(bare, "dev");
+          const prod = path.join(bare, "prod");
+          const managed = path.join(configBaseDir, "worktrees", "t3code", "sandbox");
+          for (const [index, cwd] of [bare, dev, prod, managed].entries()) {
+            if (cwd !== bare) {
+              const gitDir = path.join(bareGitDir, "worktrees", path.basename(cwd));
+              yield* fileSystem.makeDirectory(gitDir, { recursive: true });
+              yield* fileSystem.writeFileString(path.join(gitDir, "commondir"), "../..\n");
+              yield* fileSystem.makeDirectory(cwd, { recursive: true });
+              yield* fileSystem.writeFileString(path.join(cwd, ".git"), `gitdir: ${gitDir}\n`);
+            }
+            yield* writeTranscript({
+              filePath: path.join(
+                codexHomePath,
+                "sessions",
+                "2026",
+                "08",
+                "24",
+                `rollout-${index}.jsonl`,
+              ),
+              contents: [
+                encodeTranscriptRecord({
+                  type: "session_meta",
+                  payload: { id: `session-${index}`, cwd },
+                }),
+                encodeTranscriptRecord({
+                  type: "event_msg",
+                  payload: { type: "user_message", message: `Work in ${cwd}` },
+                }),
+              ].join("\n"),
+              mtimeMs: nowMs - index * 1_000,
+            });
+          }
+
+          const input = { claudeHomePath, codexHomePath, configBaseDir };
+          const result = yield* runScan(input);
+          const git = { remoteKey: "github.com/pingdotgg/t3code", repository: "pingdotgg/t3code" };
+          expect(
+            result.candidates.map((candidate) => ({ path: candidate.path, git: candidate.git })),
+          ).toEqual([
+            { path: bare, git },
+            { path: dev, git },
+            { path: prod, git },
+          ]);
+          const threads = yield* runRecentThreads({ ...input, workspaceRoot: dev });
+          expect(threads.map((thread) => thread.providerSessionId)).toEqual(["session-1"]);
+          const managedThreads = yield* runRecentThreads({ ...input, workspaceRoot: managed });
+          expect(managedThreads).toEqual([]);
+        }),
     );
 
     it.effect("excludes sandboxes under the configured worktrees dir without .t3 in the path", () =>
@@ -2296,6 +2368,131 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
               providerSessionId: "large-session",
               messages: [{ role: "user", text: "Import this large session" }],
             },
+          },
+        ]);
+      }),
+    );
+
+    it.effect("imports long Claude tool history with metadata from discarded records", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-long-claude-");
+        const codexHomePath = yield* makeTempDir("t3code-long-codex-");
+        const workspace = yield* makeTempDir("t3code-long-workspace-");
+        const record = (fields: Record<string, unknown>) =>
+          encodeTranscriptRecord({ sessionId: "first-session", ...fields });
+        const toolResult = record({
+          type: "user",
+          cwd: path.join(workspace, "later-cwd"),
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }],
+          },
+        });
+        yield* writeTranscript({
+          filePath: path.join(claudeHomePath, "projects", "-slug", "long-session.jsonl"),
+          contents: [
+            record({ type: "attachment", cwd: workspace, aiTitle: "Old title" }),
+            record({ type: "user", message: { role: "user", content: "First prompt" } }),
+            record({
+              type: "assistant",
+              message: { role: "assistant", model: "claude-opus-5-5", content: "First reply" },
+            }),
+            // Small tool records exceed the real 32 MiB selected-history budget in aggregate.
+            ...Array.from({ length: 20_000 }, () => toolResult),
+            record({ type: "user", message: { role: "user", content: "Latest prompt" } }),
+            record({
+              type: "assistant",
+              message: {
+                role: "assistant",
+                model: "claude-sonnet-5-5",
+                content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: {} }],
+              },
+            }),
+            record({ type: "custom-title", customTitle: "Renamed conversation" }),
+            record({ type: "ai-title", aiTitle: "Newest title" }),
+            record({ type: "attachment", sessionId: "latest-session" }),
+          ].join("\n"),
+          mtimeMs: nowMs,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(threads).toMatchObject([
+          {
+            providerSessionId: "latest-session",
+            title: "Renamed conversation",
+            model: "claude-sonnet-5-5",
+            messages: [
+              { role: "user", text: "First prompt" },
+              { role: "assistant", text: "First reply" },
+              { role: "user", text: "Latest prompt" },
+            ],
+          },
+        ]);
+      }),
+    );
+
+    it.effect("excludes hidden Claude records from the history budget and session metadata", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-hidden-claude-");
+        const codexHomePath = yield* makeTempDir("t3code-hidden-codex-");
+        const workspace = yield* makeTempDir("t3code-hidden-workspace-");
+        const message = (role: "user" | "assistant", text: string) =>
+          encodeTranscriptRecord({
+            sessionId: "visible-session",
+            cwd: workspace,
+            type: role,
+            message: { role, content: text },
+          });
+        const flags = ["isSidechain", "isMeta", "isCompactSummary"] as const;
+        // Each hidden reply selects about 2 MiB; together they exceed the real 32 MiB budget.
+        const hiddenReply = (flag: (typeof flags)[number]) =>
+          encodeTranscriptRecord({
+            sessionId: "hidden-session",
+            aiTitle: "Hidden title",
+            customTitle: "Hidden rename",
+            type: "assistant",
+            [flag]: true,
+            message: { role: "assistant", model: "hidden-model", content: "x".repeat(1024 * 1024) },
+          });
+        yield* writeTranscript({
+          filePath: path.join(claudeHomePath, "projects", "-slug", "hidden-session.jsonl"),
+          contents: [
+            message("user", "First prompt"),
+            message("assistant", "First reply"),
+            ...Array.from({ length: 20 }, (_, index) => hiddenReply(flags[index % flags.length]!)),
+            message("user", "Latest prompt"),
+            hiddenReply("isSidechain"),
+          ].join("\n"),
+          mtimeMs: nowMs,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(threads).toMatchObject([
+          {
+            providerSessionId: "visible-session",
+            title: "First prompt",
+            model: null,
+            messages: [
+              { role: "user", text: "First prompt" },
+              { role: "assistant", text: "First reply" },
+              { role: "user", text: "Latest prompt" },
+            ],
           },
         ]);
       }),

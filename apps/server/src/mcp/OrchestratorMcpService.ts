@@ -54,6 +54,7 @@ import {
   type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
+  ProviderRequestKind,
   type RuntimeMode,
   type ScheduledTask,
   type ScheduledTaskUpsertInput,
@@ -414,6 +415,53 @@ function isTerminalTaskStatus(
     status === "cancelled" ||
     status === "interrupted"
   );
+}
+
+function endsTaskWait(result: OrchestratorMcpDelegateTaskResult): boolean {
+  return (
+    result.hasPendingQuestion ||
+    result.pendingApproval !== null ||
+    isTerminalTaskStatus(result.status)
+  );
+}
+
+const isApprovalRequestKind = Schema.is(ProviderRequestKind);
+
+function pendingTaskApproval(
+  child: Pick<OrchestrationV2ThreadProjection, "runs" | "nodes" | "runtimeRequests">,
+  taskId: NodeId,
+  originalRun: OrchestrationV2Run | undefined,
+) {
+  const taskRunIds = new Set(
+    child.runs
+      .filter(
+        (run) =>
+          !ThreadManagementService.isTerminalRunStatus(run.status) &&
+          (run.delegatedTaskId === taskId ||
+            // Legacy tasks own only their original run, not later turns in the child thread.
+            (run.delegatedTaskId === undefined && run.id === originalRun?.id)),
+      )
+      .map((run) => run.id),
+  );
+  let approval: OrchestratorMcpDelegateTaskResult["pendingApproval"] = null;
+  let oldestCreatedAt = Infinity;
+  for (const request of child.runtimeRequests) {
+    if (
+      request.status !== "pending" ||
+      request.responseCapability.type !== "live" ||
+      !isApprovalRequestKind(request.kind)
+    ) {
+      continue;
+    }
+    const runId = child.nodes.find((node) => node.id === request.nodeId)?.runId;
+    if (runId === undefined || runId === null || !taskRunIds.has(runId)) continue;
+    const createdAt = DateTime.toEpochMillis(request.createdAt);
+    if (createdAt < oldestCreatedAt) {
+      oldestCreatedAt = createdAt;
+      approval = { requestId: request.id, kind: request.kind, runId };
+    }
+  }
+  return approval;
 }
 
 function directAppOwnedChildTasks(
@@ -1329,15 +1377,23 @@ const make = Effect.gen(function* () {
       }
     }
 
+    const inheritsOptions =
+      instanceId === inheritedSelection.instanceId && model === inheritedSelection.model;
+    let options = inheritsOptions ? inheritedSelection.options : undefined;
+    if (requestedOptions !== undefined) {
+      const selections = new Map(
+        (requestedOptions.length === 0 ? [] : (options ?? [])).map((selection) => [
+          selection.id,
+          selection,
+        ]),
+      );
+      for (const selection of requestedOptions) {
+        selections.set(selection.id, selection);
+      }
+      options = [...selections.values()];
+    }
     return {
-      modelSelection:
-        instanceId === inheritedSelection.instanceId &&
-        model === inheritedSelection.model &&
-        requestedOptions === undefined
-          ? inheritedSelection
-          : requestedOptions === undefined
-            ? { instanceId, model }
-            : { instanceId, model, options: requestedOptions },
+      modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
       supportedRuntimeModes: provider.supportedRuntimeModes,
     };
   });
@@ -1371,8 +1427,16 @@ const make = Effect.gen(function* () {
     const childControls = yield* threadManagement
       .getThreadRecords(
         task.childThreadId,
-        ["runs", "messages", "contextTransfers", "subagents", "providerThreads", "runtimeRequests"],
-        { messageRoles: ["user"] },
+        [
+          "runs",
+          "messages",
+          "contextTransfers",
+          "subagents",
+          "providerThreads",
+          "runtimeRequests",
+          "nodes",
+        ],
+        { messageRoles: ["user"], omitSettledLeafNodes: true },
       )
       .pipe(Effect.mapError(threadManagementFailure));
     const childRun = delegatedTaskRun(childControls, task);
@@ -1460,6 +1524,11 @@ const make = Effect.gen(function* () {
       : null;
     const resultContextTransferId = resultTransfer?.id ?? null;
     const latestTerminalResultContextTransferId = resultTransferForRun(terminalRun)?.id ?? null;
+    const modelSelection = childRun?.modelSelection ??
+      childControls.thread.modelSelection ?? {
+        instanceId: task.providerInstanceId,
+        model: task.model,
+      };
     const response = {
       taskId: task.id,
       childThreadId: task.childThreadId,
@@ -1468,8 +1537,9 @@ const make = Effect.gen(function* () {
       status,
       workState,
       hasPendingChildRuns: hasPendingChildRuns(childProjection, childRun),
-      providerInstanceId: task.providerInstanceId,
-      model: task.model,
+      providerInstanceId: modelSelection.instanceId,
+      model: modelSelection.model,
+      options: modelSelection.options ?? [],
       summary: derivedResult,
       resultContextTransferId,
       latestTerminalRunId: terminalRun?.id ?? null,
@@ -1488,6 +1558,10 @@ const make = Effect.gen(function* () {
             request.status === "pending" &&
             request.responseCapability.type === "live",
         ),
+      pendingApproval:
+        isTerminalTaskStatus(status) || task.completionDelivery?.state === "disposed"
+          ? null
+          : pendingTaskApproval(childControls, task.id, childRun),
       waitTimedOut,
     } satisfies OrchestratorMcpDelegateTaskResult;
     if (
@@ -1538,7 +1612,7 @@ const make = Effect.gen(function* () {
         .getThreadEventSequence(scope.thread.threadId)
         .pipe(Effect.mapError(streamError));
       const initial = yield* readTask(scope, taskId, false, true);
-      if (initial.hasPendingQuestion || isTerminalTaskStatus(initial.status)) {
+      if (endsTaskWait(initial)) {
         return Option.some(initial);
       }
       // One stream per event type, so transcript events never fill a buffer.
@@ -1554,7 +1628,7 @@ const make = Effect.gen(function* () {
       ).pipe(
         Stream.mapError(streamError),
         Stream.mapEffect(() => readTask(scope, taskId, false, true)),
-        Stream.filter((result) => result.hasPendingQuestion || isTerminalTaskStatus(result.status)),
+        Stream.filter(endsTaskWait),
         Stream.runHead,
       );
     },
@@ -1924,6 +1998,7 @@ const make = Effect.gen(function* () {
         parentThreadId: parent?.thread.id ?? null,
         inheritedProviderInstanceId: parent?.thread.modelSelection.instanceId ?? null,
         inheritedModel: parent?.thread.modelSelection.model ?? null,
+        inheritedOptions: parent?.thread.modelSelection.options ?? [],
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
         providers: providers.map((provider) => {

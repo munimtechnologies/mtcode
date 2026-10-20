@@ -38,7 +38,11 @@ import {
   saveAgentAwarenessRegistrationRecord,
 } from "../../persistence/imperative";
 import type { AgentActivityProps } from "../../widgets/AgentActivity";
-import { getAgentLiveActivities, startAgentLiveActivity } from "./agentLiveActivity";
+import {
+  dismissEndedAgentLiveActivities,
+  getAgentLiveActivities,
+  startAgentLiveActivity,
+} from "./agentLiveActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
@@ -805,10 +809,20 @@ function ensureAppStateListener(): void {
   });
 }
 
+// Binaries built before the native dismissEnded method throw here.
+function dismissEndedLocalLiveActivities(): void {
+  try {
+    dismissEndedAgentLiveActivities();
+  } catch (error) {
+    logRegistrationError("ended live activity cleanup failed", error);
+  }
+}
+
 function endLocalLiveActivities(context: string): void {
   if (!canRegisterRemoteLiveActivities()) {
     return;
   }
+  dismissEndedLocalLiveActivities();
   try {
     for (const activity of getAgentLiveActivities()) {
       activity.end("immediate").catch((error: unknown) => {
@@ -1031,6 +1045,7 @@ export const refreshActiveLiveActivityRemoteRegistration = Effect.fn(
     return;
   }
 
+  dismissEndedLocalLiveActivities();
   let activities = yield* Effect.try({
     try: () => getAgentLiveActivities(),
     catch: (cause) =>

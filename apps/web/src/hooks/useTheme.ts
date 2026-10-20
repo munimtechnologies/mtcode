@@ -9,11 +9,13 @@ import {
   canonicalThemePreference,
   isKnownThemePreference,
   getThemePreferenceMode,
+  getThemePreviewAppearance,
   MT_CODE_THEME_ID,
   parseThemeHalves,
   resolveDesktopTheme,
   resolveThemeAppearance,
   resolveThemeHalf,
+  subscribeToThemePreview,
   THEME_PREVIEW_ID,
   THEME_APPEARANCE_MODE_STORAGE_KEY,
   THEME_FOLLOW_SYSTEM_STORAGE_KEY,
@@ -510,6 +512,16 @@ function subscribe(listener: () => void): () => void {
       removeWindowListeners = null;
     }
   };
+}
+
+export function useRenderedAppearance() {
+  const { resolvedTheme } = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const previewAppearance = useSyncExternalStore(
+    subscribeToThemePreview,
+    getThemePreviewAppearance,
+    () => null,
+  );
+  return previewAppearance ?? resolvedTheme;
 }
 
 function setTheme(next: Theme): boolean {

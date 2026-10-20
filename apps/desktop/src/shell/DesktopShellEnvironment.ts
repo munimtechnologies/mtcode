@@ -11,6 +11,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
+  buildEnvironmentCaptureCommand,
   buildWindowsEnvironmentCaptureCommand,
   listLoginShellCandidates,
   resolveKnownWindowsCliDirs,
@@ -232,25 +233,52 @@ const logShellEnvironmentCommandError = (
 const FULL_ENVIRONMENT_MARKER = "*";
 const ENTRY_DELIMITER = "\0";
 
+// Names the shared capture builder accepts; harvest allowlists may also name
+// lowercase variables (e.g. http_proxy), which are captured here directly.
+const SHARED_CAPTURE_NAME_PATTERN = /^[A-Z0-9_]+$/u;
+
+const isNushellExecutable = (shell: string): boolean =>
+  executableName(shell).toLowerCase().startsWith("nu");
+
 const capturePosixEnvironmentCommand = (
+  shell: string,
   names: ReadonlyArray<string>,
   mode: ShellEnvironmentMode,
 ) => {
-  const blocks = names.map((name) => {
-    return [
-      `printf '%s\\n' '${startMarker(name)}'`,
-      `printenv ${name} || true`,
-      `printf '%s\\n' '${endMarker(name)}'`,
-    ].join("; ");
-  });
+  const nushell = isNushellExecutable(shell);
+  const sharedNames = names.filter((name) => SHARED_CAPTURE_NAME_PATTERN.test(name));
+  const blocks = sharedNames.length > 0 ? [buildEnvironmentCaptureCommand(shell, sharedNames)] : [];
+
+  for (const name of names) {
+    if (SHARED_CAPTURE_NAME_PATTERN.test(name)) continue;
+    blocks.push(
+      nushell
+        ? [
+            `print '${startMarker(name)}'`,
+            `print ($env.${name}? | default '')`,
+            `print '${endMarker(name)}'`,
+          ].join("; ")
+        : [
+            `printf '%s\\n' '${startMarker(name)}'`,
+            `printenv ${name} || true`,
+            `printf '%s\\n' '${endMarker(name)}'`,
+          ].join("; "),
+    );
+  }
 
   if (mode === "all") {
     blocks.push(
-      [
-        `printf '%s\\n' '${startMarker(FULL_ENVIRONMENT_MARKER)}'`,
-        "env -0 || true",
-        `printf '\\n%s\\n' '${endMarker(FULL_ENVIRONMENT_MARKER)}'`,
-      ].join("; "),
+      nushell
+        ? [
+            `print '${startMarker(FULL_ENVIRONMENT_MARKER)}'`,
+            "print (try { ^env -0 | complete | get stdout } catch { '' })",
+            `print '${endMarker(FULL_ENVIRONMENT_MARKER)}'`,
+          ].join("; ")
+        : [
+            `printf '%s\\n' '${startMarker(FULL_ENVIRONMENT_MARKER)}'`,
+            "env -0 || true",
+            `printf '\\n%s\\n' '${endMarker(FULL_ENVIRONMENT_MARKER)}'`,
+          ].join("; "),
     );
   }
 
@@ -406,7 +434,10 @@ const readLoginShellEnvironment = (
     : runCommandOutput({
         probe: "login-shell",
         command: shell,
-        args: [platform === "darwin" ? "-lc" : "-ilc", capturePosixEnvironmentCommand(names, mode)],
+        args: [
+          platform === "darwin" ? "-lc" : "-ilc",
+          capturePosixEnvironmentCommand(shell, names, mode),
+        ],
         timeout: platform === "darwin" ? MACOS_LOGIN_SHELL_TIMEOUT : LOGIN_SHELL_TIMEOUT,
         ...(platform === "darwin" ? { forceKillAfter: MACOS_LOGIN_SHELL_TERMINATE_GRACE } : {}),
       }).pipe(Effect.map((output) => extractEnvironment(output, names, mode)));

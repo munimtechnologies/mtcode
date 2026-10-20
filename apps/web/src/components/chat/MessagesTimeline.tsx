@@ -1,3 +1,4 @@
+import { useRenderedAppearance } from "../../hooks/useTheme";
 import type { Root, RootContent } from "mdast";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
@@ -555,6 +556,8 @@ interface MessagesTimelineProps {
   findOpen?: boolean;
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null> | undefined;
   hideEmptyPlaceholder?: boolean;
+  /** Composer space to center the empty state against; held steady through collapse. */
+  emptyPlaceholderInset: number;
   topFadeEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
   loadEarlier?: CitationHistoryPage | null;
@@ -648,6 +651,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onManualNavigation,
   cancelPositionRestoreRef,
   hideEmptyPlaceholder = false,
+  emptyPlaceholderInset,
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
@@ -1488,7 +1492,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const renderItem = ({ item }: { item: MessagesTimelineRow }) => (
     <TimelineRowCtx value={sharedState}>
       <div className="messages-timeline-row-frame">
-        <div className="chat-content-lane overflow-x-clip" data-timeline-root="true">
+        <div
+          className="@container/chat-lane chat-content-lane overflow-x-clip"
+          data-timeline-root="true"
+        >
           <TimelineRowContent row={item} />
         </div>
       </div>
@@ -1514,7 +1521,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     return (
       <div
         className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"
-        style={{ paddingBottom: contentInsetEndAdjustment }}
+        style={{ paddingBottom: emptyPlaceholderInset }}
       >
         <p className="text-sm text-muted-foreground/30">
           Send a message to start the conversation.
@@ -2292,7 +2299,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     for (let index = 0; index < selection.rangeCount; index += 1) {
       const container = document.createElement("div");
       container.appendChild(selection.getRangeAt(index).cloneContents());
-      for (const element of container.querySelectorAll("[data-markdown-copy]")) {
+      // Diagram source is copied text, not authority to export context records.
+      for (const element of container.querySelectorAll(
+        "[data-markdown-copy]:not([data-markdown-mermaid])",
+      )) {
         copiedMarkdown.push(element.getAttribute("data-markdown-copy") ?? "");
       }
     }
@@ -4953,6 +4963,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 });
 
 function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentContext }) {
+  const renderedAppearance = useRenderedAppearance();
   const ctx = use(TimelineRowCtx);
   const fenceLanguage = comment.fenceLanguage ?? "diff";
   const renderablePatch = getRenderablePatch(
@@ -4999,7 +5010,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
               options={{
                 collapsed: false,
                 diffStyle: "unified",
-                theme: resolveDiffThemeName(ctx.resolvedTheme),
+                theme: resolveDiffThemeName(renderedAppearance),
                 preferredHighlighter: PREFERRED_HIGHLIGHTER,
               }}
             />

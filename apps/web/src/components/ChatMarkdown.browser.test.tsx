@@ -2,10 +2,14 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
 import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
 import { AsyncResult } from "effect/reactivity";
-import { act, type ReactElement } from "react";
+import { act, useEffect, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
+
+import "../index.css";
+import { useTheme } from "../hooks/useTheme";
+import { applyThemeColorPreview, getStandardThemeColors } from "../themePalette";
 
 import { filesystemEnvironment } from "../state/filesystem";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -128,6 +132,119 @@ function fileOptions(container: HTMLElement) {
     .map((button) => button.getAttribute("aria-label"))
     .filter((label) => label?.startsWith("File options for "));
 }
+
+describe("ChatMarkdown theme drafts", () => {
+  afterEach(() => {
+    act(() => {
+      localStorage.clear();
+      window.dispatchEvent(new StorageEvent("storage", { key: null }));
+    });
+  });
+
+  it.each(["dark", "light"] as const)(
+    "previews opposite syntax colors and restores saved %s colors on cancel",
+    async (savedAppearance) => {
+      let selection: ReturnType<typeof useTheme>;
+      function Preview() {
+        const theme = useTheme();
+        useEffect(() => {
+          selection = theme;
+        }, [theme]);
+        return <ChatMarkdown cwd={undefined} text={"```typescript\nconst answer = 42;\n```"} />;
+      }
+      await getSyntaxHighlighterPromise("typescript");
+      const { container } = await render(<Preview />);
+      await act(async () => {
+        selection.setTheme(savedAppearance);
+        selection.setAppearanceMode(savedAppearance);
+      });
+      const keywordColor = () =>
+        container.querySelector<HTMLElement>(".chat-markdown-shiki .line span")?.style.color;
+      await vi.waitFor(() => expect(keywordColor()).toBeTruthy());
+      const savedColor = keywordColor();
+      const savedStorage = Object.fromEntries(Object.entries(localStorage));
+      const draftAppearance = savedAppearance === "dark" ? "light" : "dark";
+
+      await act(async () =>
+        applyThemeColorPreview(getStandardThemeColors(draftAppearance), draftAppearance),
+      );
+      await vi.waitFor(() => {
+        expect(keywordColor()).toBeTruthy();
+        expect(keywordColor()).not.toBe(savedColor);
+      });
+      expect(document.documentElement.classList.contains("dark")).toBe(draftAppearance === "dark");
+      expect(selection!).toMatchObject({
+        theme: savedAppearance,
+        resolvedTheme: savedAppearance,
+        appearanceMode: savedAppearance,
+      });
+      expect(Object.fromEntries(Object.entries(localStorage))).toEqual(savedStorage);
+
+      await act(async () => selection.refreshTheme());
+      await vi.waitFor(() => expect(keywordColor()).toBe(savedColor));
+      expect(document.documentElement.classList.contains("dark")).toBe(savedAppearance === "dark");
+      expect(Object.fromEntries(Object.entries(localStorage))).toEqual(savedStorage);
+    },
+  );
+});
+
+describe("ChatMarkdown table layout", () => {
+  it.each([
+    { width: 36, timeline: true, fits: true },
+    { width: 48, timeline: true, fits: true },
+    { width: 35, timeline: true, fits: false },
+    { width: 48, timeline: false, fits: false },
+  ])(
+    "wraps expanded cells with fit=$fits in a $width rem container (timeline=$timeline)",
+    async ({ width, timeline, fits }) => {
+      const { container } = await render(
+        <div style={{ width: `${width}rem` }}>
+          <div className={timeline ? "@container/chat-lane chat-content-lane overflow-x-clip" : ""}>
+            <ChatMarkdown
+              cwd={undefined}
+              text={[
+                "| Change summary | Reason details | Verification status | Release impact | Followup actions |",
+                "| --- | --- | --- | --- | --- |",
+                "| Keep the complete explanation readable when the table is expanded in the conversation. | Allow each column to wrap its prose within the available space in the current chat lane. | Collapse and expand the table again to check that the text still fits and remains readable. | Keep the existing layout for narrow chat lanes and file previews. | Check the table again after resizing the conversation lane. |",
+              ].join("\n")}
+            />
+          </div>
+        </div>,
+      );
+      const table = container.querySelector("table")!;
+      const viewport = table.closest<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+      const cell = table.tBodies[0]!.rows[0]!.cells[0]!;
+      const collapse = () => buttonsLabelled(container, "Collapse table cells")[0];
+      if (collapse()) await act(async () => collapse()!.click());
+
+      const collapsedWidth = table.getBoundingClientRect().width;
+      const collapsedHeight = cell.getBoundingClientRect().height;
+      expect(viewport.clientWidth).toBeGreaterThan(0);
+      expect(viewport.scrollWidth).toBeGreaterThan(viewport.clientWidth);
+      expect(cell.scrollWidth).toBeGreaterThan(cell.clientWidth);
+
+      await act(async () => buttonsLabelled(container, "Expand table cells")[0]!.click());
+      const expandedWidth = table.getBoundingClientRect().width;
+      const expandedHeight = cell.getBoundingClientRect().height;
+      if (fits) {
+        expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth + 1);
+        expect(expandedWidth).toBeLessThanOrEqual(viewport.clientWidth + 1);
+      } else {
+        expect(viewport.scrollWidth).toBeGreaterThan(viewport.clientWidth);
+        viewport.scrollLeft = 100;
+        expect(viewport.scrollLeft).toBeGreaterThan(0);
+      }
+      expect(expandedHeight).toBeGreaterThan(collapsedHeight);
+
+      await act(async () => collapse()!.click());
+      expect(table.getBoundingClientRect().width).toBeCloseTo(collapsedWidth, 0);
+      expect(cell.getBoundingClientRect().height).toBeCloseTo(collapsedHeight, 0);
+      await act(async () => buttonsLabelled(container, "Expand table cells")[0]!.click());
+      expect(table.getBoundingClientRect().width).toBeCloseTo(expandedWidth, 0);
+      expect(cell.getBoundingClientRect().height).toBeCloseTo(expandedHeight, 0);
+    },
+  );
+});
 
 describe("ChatMarkdown bare anchor placeholders", () => {
   it.each(["<A>", "<a>", "<a >", "<a/>", "<A/>", "<a />"])(
