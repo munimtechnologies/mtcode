@@ -28,6 +28,7 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   type ProviderInstanceId,
+  type ServerProviderModel,
   type ThreadId,
 } from "@t3tools/contracts";
 import { CursorSettings } from "../settings.ts";
@@ -48,7 +49,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import type { DesktopMcpLaunch } from "@t3tools/provider-core/server/ProviderHost";
 import { CursorTransportFailure } from "./transportFailure.ts";
-import { cursorSdkModelSelection } from "./sdkModel.ts";
+import { cursorContextWindowTokens, cursorSdkModelSelection } from "./sdkModel.ts";
 import {
   discoverCursorSkills,
   hasCursorSkillMention,
@@ -915,6 +916,7 @@ export interface CursorAdapterV2Options {
     readonly cwd?: string;
     readonly environment: NodeJS.ProcessEnv;
   }) => Effect.Effect<boolean>;
+  readonly getModels?: () => ReadonlyArray<ServerProviderModel>;
 }
 
 export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
@@ -2259,6 +2261,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                       new ProviderAdapter.ProviderAdapterProtocolError({
                         driver: CursorAgentSdk.CURSOR_PROVIDER,
                         detail: `Failed to read attachment '${attachment.id}'.`,
+                        reason: "attachment_unreadable",
                         payload: cause,
                       }),
                   ),
@@ -2292,6 +2295,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                 driver: CursorAgentSdk.CURSOR_PROVIDER,
                 detail: `Cursor provider turn ${current.providerTurnId} is still active.`,
+                reason: "previous_turn_active",
               });
             }
             const agentId = nativeThreadId(turnInput.providerThread);
@@ -2489,6 +2493,10 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           driver: CursorAgentSdk.CURSOR_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
+          getModelContextWindow: (selection) =>
+            selection.instanceId === adapterOptions.instanceId
+              ? cursorContextWindowTokens(selection, adapterOptions.getModels?.() ?? [])
+              : undefined,
           events: Stream.fromEffectRepeat(Queue.take(events)),
           ensureThread: Effect.fn("CursorAdapterV2.ensureThread")(
             function* (threadInput: ProviderAdapter.ProviderAdapterV2EnsureThreadInput) {

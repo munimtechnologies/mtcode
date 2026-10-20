@@ -77,44 +77,42 @@ const GROK_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
-export function buildInitialGrokProviderSnapshot(
-  grokSettings: GrokSettings,
-): Effect.Effect<ServerProviderDraft> {
-  return Effect.gen(function* () {
-    const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
-    const models = grokModelsFromSettings(grokSettings.customModels);
+export const buildInitialGrokProviderSnapshot = Effect.fn(
+  "GrokProviderStatus.buildInitialGrokProviderSnapshot",
+)(function* (grokSettings: GrokSettings): Effect.fn.Return<ServerProviderDraft> {
+  const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
+  const models = grokModelsFromSettings(grokSettings.customModels);
 
-    if (!grokSettings.enabled) {
-      return buildServerProvider({
-        presentation: GROK_PRESENTATION,
-        enabled: false,
-        checkedAt,
-        models,
-        probe: {
-          installed: false,
-          version: null,
-          status: "warning",
-          auth: { status: "unknown" },
-          message: providerDisabledMessage("Grok"),
-        },
-      });
-    }
-
+  if (!grokSettings.enabled) {
     return buildServerProvider({
       presentation: GROK_PRESENTATION,
-      enabled: true,
+      enabled: false,
       checkedAt,
       models,
       probe: {
-        installed: true,
+        installed: false,
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Checking Grok CLI availability...",
+        message: providerDisabledMessage("Grok"),
       },
     });
+  }
+
+  return buildServerProvider({
+    presentation: GROK_PRESENTATION,
+    enabled: true,
+    checkedAt,
+    models,
+    probe: {
+      installed: true,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "Checking Grok CLI availability...",
+    },
   });
-}
+});
 
 function grokModelsFromSettings(
   customModels: ReadonlyArray<CustomModelSetting> | undefined,
@@ -293,24 +291,23 @@ function displayNameFromGrokModelSlug(slug: string): string {
     .join(" ");
 }
 
-const runGrokCliCommand = (
+const runGrokCliCommand = Effect.fn("GrokProviderStatus.runGrokCliCommand")(function* (
   grokSettings: GrokSettings,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv,
-) =>
-  Effect.gen(function* () {
-    const command = grokSettings.binaryPath || "grok";
-    const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
-    const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        cwd: probeCwd,
-        env: environment,
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
+) {
+  const command = grokSettings.binaryPath || "grok";
+  const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
+  const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
+  return yield* spawnAndCollect(
+    command,
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      cwd: probeCwd,
+      env: environment,
+      shell: spawnCommand.shell,
+    }),
+  );
+});
 
 const decodeAvailableCommands = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown));
 const decodeAvailableCommand = Schema.decodeUnknownOption(
@@ -351,24 +348,22 @@ export function grokSlashCommandsFromInitialize(
  * This never calls `authenticate` or `session/new`, so it cannot open a browser login or
  * boot the workspace's MCP servers.
  */
-const discoverGrokMetadataViaAcpInitialize = (
-  grokSettings: GrokSettings,
-  environment: NodeJS.ProcessEnv,
-) =>
-  Effect.gen(function* () {
-    const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
-    const acp = yield* makeGrokAcpRuntime({
-      grokSettings,
-      environment,
-      cwd: probeCwd,
-      clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
-    });
-    const initialized = yield* acp.initialize();
-    return {
-      models: buildGrokModelsFromSessionModelState(sessionModelStateFromInitialize(initialized)),
-      slashCommands: grokSlashCommandsFromInitialize(initialized),
-    };
-  }).pipe(Effect.scoped);
+const discoverGrokMetadataViaAcpInitialize = Effect.fn(
+  "GrokProviderStatus.discoverGrokMetadataViaAcpInitialize",
+)(function* (grokSettings: GrokSettings, environment: NodeJS.ProcessEnv) {
+  const probeCwd = yield* resolveProviderProbeCwd(undefined, environment);
+  const acp = yield* makeGrokAcpRuntime({
+    grokSettings,
+    environment,
+    cwd: probeCwd,
+    clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
+  });
+  const initialized = yield* acp.initialize();
+  return {
+    models: buildGrokModelsFromSessionModelState(sessionModelStateFromInitialize(initialized)),
+    slashCommands: grokSlashCommandsFromInitialize(initialized),
+  };
+}, Effect.scoped);
 
 export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(function* (
   grokSettings: GrokSettings,

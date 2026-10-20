@@ -344,10 +344,11 @@ export const readOpenCodeUsage = Effect.fn("readOpenCodeUsage")(function* (
   return { files, missing: !found && !error, error };
 });
 
-const resolveOpenCodeDataDirs = Effect.fn("resolveOpenCodeDataDirs")(function* () {
+const resolveOpenCodeDataDirs = Effect.fn("resolveOpenCodeDataDirs")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const environment = yield* HostProcess.Environment;
   const homeDirectory = yield* HostProcess.HomeDirectory;
   const roots = environment["OPENCODE_DATA_DIR"]
     ?.split(",")
@@ -375,36 +376,41 @@ export type OpenCodeUsageReaderEnv = FileSystem.FileSystem | Path.Path;
 export const openCodeUsageReader: ProviderUsageReader<OpenCodeSettings, OpenCodeUsageReaderEnv> = {
   kind: "scan",
   provider: "opencode",
-  scan: Effect.fn("openCodeUsageReader.scan")(function* ({ windowStartMs }) {
+  scan: Effect.fn("openCodeUsageReader.scan")(function* ({ instances, windowStartMs }) {
     const path = yield* Path.Path;
-    const environment = yield* HostProcess.Environment;
-    const roots = yield* resolveOpenCodeDataDirs();
-    // OpenCode's own switches: `OPENCODE_DB` names one database (relative to
-    // the data directory), and `OPENCODE_DISABLE_CHANNEL_DB` keeps it on
-    // `opencode.db` without per-channel databases.
-    const databaseOverride = environment["OPENCODE_DB"]?.trim();
-    const channelDatabases = !["1", "true"].includes(
-      environment["OPENCODE_DISABLE_CHANNEL_DB"]?.trim().toLowerCase() ?? "",
-    );
-    const sources: ReadonlyArray<{
-      readonly dir: string;
-      readonly selection: OpenCodeDatabaseSelection;
-    }> = databaseOverride
-      ? roots.slice(0, 1).map((root) => {
-          const databasePath =
-            databaseOverride === ":memory:"
-              ? null
-              : path.isAbsolute(databaseOverride)
-                ? databaseOverride
-                : path.join(root, databaseOverride);
-          return {
-            dir: databasePath === null ? root : path.dirname(databasePath),
-            selection: { databasePath },
-          };
-        })
-      : roots.map((root) => ({ dir: root, selection: { channelDatabases } }));
+    type Source = { readonly dir: string; readonly selection: OpenCodeDatabaseSelection };
+    const sources = new Map<string, Source>();
+    for (const instance of instances) {
+      const environment = instance.environment;
+      const roots = yield* resolveOpenCodeDataDirs(environment);
+      // OpenCode's own switches: `OPENCODE_DB` names one database (relative to
+      // the data directory), and `OPENCODE_DISABLE_CHANNEL_DB` keeps it on
+      // `opencode.db` without per-channel databases.
+      const databaseOverride = environment["OPENCODE_DB"]?.trim();
+      const channelDatabases = !["1", "true"].includes(
+        environment["OPENCODE_DISABLE_CHANNEL_DB"]?.trim().toLowerCase() ?? "",
+      );
+      const instanceSources: ReadonlyArray<Source> = databaseOverride
+        ? roots.slice(0, 1).map((root) => {
+            const databasePath =
+              databaseOverride === ":memory:"
+                ? null
+                : path.isAbsolute(databaseOverride)
+                  ? databaseOverride
+                  : path.join(root, databaseOverride);
+            return {
+              dir: databasePath === null ? root : path.dirname(databasePath),
+              selection: { databasePath },
+            };
+          })
+        : roots.map((root) => ({ dir: root, selection: { channelDatabases } }));
+      for (const source of instanceSources) {
+        const { databasePath, channelDatabases: channels } = source.selection;
+        sources.set(`${source.dir}\0${String(databasePath)}\0${String(channels)}`, source);
+      }
+    }
     return yield* Effect.forEach(
-      sources,
+      sources.values(),
       ({ dir, selection }) =>
         readOpenCodeUsage(dir, windowStartMs, selection).pipe(
           Effect.map((result) => ({

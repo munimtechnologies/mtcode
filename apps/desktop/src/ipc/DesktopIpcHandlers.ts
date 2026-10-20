@@ -61,6 +61,7 @@ import {
   getAppBranding,
   getLocalEnvironmentBootstraps,
   getLocalEnvironmentBearerToken,
+  getRelayTelemetryEnabled,
   getSystemLocale,
   getWindowFullscreenState,
   openExternal,
@@ -68,6 +69,7 @@ import {
   checkSystemPermission,
   pasteAsText,
   probeRemoteEditors,
+  revealWindow,
   pickFolder,
   pickProjectFavicon,
   pickThemeFiles,
@@ -114,6 +116,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handleSync(takeLegacyLocalStorage);
   yield* ipc.handle(completeLegacyLocalStorage);
   yield* ipc.handleSync(getAppBranding);
+  yield* ipc.handleSync(getRelayTelemetryEnabled);
   yield* ipc.handleSync(getSystemLocale);
   yield* ipc.handleSync(getWindowFullscreenState);
   yield* ipc.handleSync(getLocalEnvironmentBootstraps);
@@ -176,6 +179,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);
+  yield* ipc.handle(revealWindow);
   yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getComputerUsePermissions);
   yield* ipc.handle(openComputerUsePrivacySettings);

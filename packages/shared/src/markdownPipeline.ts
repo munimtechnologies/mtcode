@@ -1,11 +1,11 @@
 import type { Processor } from "unified";
 import { isWindowsAbsolutePath } from "./path.ts";
 import type { PluggableList } from "unified";
+import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { remarkGithubAlerts } from "./markdownGithubAlerts.ts";
-import { rehypeRawMath, remarkChatMath } from "./markdownMath.ts";
 import { remarkNormalizeListItemIndentation } from "./markdownListIndentation.ts";
 import {
   CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES,
@@ -132,15 +132,11 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   attributes: {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
+    // Fence languages plus the two math classes the web chat's math plugin emits.
     code: [
-      ...(defaultSchema.attributes?.code ?? []).filter(
-        (attribute) => !Array.isArray(attribute) || attribute[0] !== "className",
-      ),
-      // Math classes are only trusted on parser-owned nodes; see rehypeRawMath.
       ["className", /^language-./, "math-inline", "math-display"],
       "dataCodeMeta",
       "dataInlineCode",
-      "dataMathSource",
     ],
     blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
     div: [...(defaultSchema.attributes?.div ?? []), ...CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES],
@@ -167,7 +163,6 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 export const CHAT_MARKDOWN_REMARK_PLUGINS: PluggableList = [
   remarkGfm,
-  remarkChatMath,
   remarkKeepWindowsPaths,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
@@ -178,7 +173,6 @@ export const CHAT_MARKDOWN_REMARK_PLUGINS: PluggableList = [
 
 export const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS: PluggableList = [
   remarkGfm,
-  remarkChatMath,
   remarkKeepWindowsPaths,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
@@ -190,7 +184,7 @@ export const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS: PluggableList = [
 
 export const CHAT_MARKDOWN_REHYPE_PLUGINS: PluggableList = [
   rehypePreserveBareAnchorPlaceholders,
-  rehypeRawMath,
+  rehypeRaw,
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ];
@@ -290,7 +284,7 @@ function keepWindowsPathEscape(this: EscapeCompileContext) {
  * Prose paths end at whitespace: past that, nothing tells a path from a sentence, and
  * `C:\x and \*this\*` must still read `*this*`.
  */
-export function remarkKeepWindowsPaths(this: Processor) {
+function remarkKeepWindowsPaths(this: Processor) {
   const data = this.data();
   (data.fromMarkdownExtensions ??= []).push({
     exit: {

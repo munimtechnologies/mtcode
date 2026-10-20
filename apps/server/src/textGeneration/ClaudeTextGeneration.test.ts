@@ -3,17 +3,17 @@ import { it } from "@effect/vitest";
 import { ClaudeSettings, ProviderInstanceId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { createModelSelection } from "@t3tools/shared/model";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { TestClock } from "effect/testing";
+import * as TestClock from "effect/testing/TestClock";
 import { expect } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
+import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
 import {
   SYNTHETIC_CLAUDE_CAPABLE_MODEL,
   SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
@@ -25,7 +25,6 @@ import * as TextGeneration from "./TextGeneration.ts";
 import { sanitizeThreadTitle } from "@t3tools/provider-core/server/textGenerationUtils";
 import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
-import { killQuietly, readPidFile, waitForProcessExit } from "../testUtils/processProbe.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const layerClaudeTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -35,7 +34,7 @@ const layerClaudeTextGenerationTest = ServerConfig.ServerConfig.layerTest(proces
 // The stub behaviour lives in Node so the same implementation runs on Windows,
 // where a shebang file is not executable and would fall through to the real
 // Claude CLI on PATH; `writeFakeCli` picks the launcher shape per host.
-function makeFakeClaudeBinary(dir: string) {
+function makeFakeClaudeBinary(dir: string, lifecyclePort?: number) {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
@@ -49,7 +48,10 @@ function makeFakeClaudeBinary(dir: string) {
       directory: binDir,
       name: "claude",
       platform,
-      source,
+      source:
+        lifecyclePort === undefined
+          ? source
+          : `process.on("SIGTERM", () => {}); ${processProbeSource(lifecyclePort)}`,
     });
     return binDir;
   });
@@ -58,6 +60,7 @@ function makeFakeClaudeBinary(dir: string) {
 function withFakeClaudeEnv<A, E, R>(
   input: {
     output: string;
+    lifecyclePort?: number;
     exitCode?: number;
     stderr?: string;
     argsMustContain?: string;
@@ -65,7 +68,6 @@ function withFakeClaudeEnv<A, E, R>(
     stdinMustContain?: string;
     configDirMustBe?: string;
     cwdMustNotBe?: string;
-    hangPidFile?: string;
     claudeConfig?: Partial<ClaudeSettings>;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
@@ -73,7 +75,7 @@ function withFakeClaudeEnv<A, E, R>(
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-claude-text-" });
-    const binDir = yield* makeFakeClaudeBinary(tempDir);
+    const binDir = yield* makeFakeClaudeBinary(tempDir, input.lifecyclePort);
     const pathDelimiter = (yield* HostProcess.isWindows) ? ";" : ":";
     const previousPath = process.env.PATH;
     const previousOutput = process.env.T3_FAKE_CLAUDE_OUTPUT;
@@ -84,7 +86,6 @@ function withFakeClaudeEnv<A, E, R>(
     const previousStdinMustContain = process.env.T3_FAKE_CLAUDE_STDIN_MUST_CONTAIN;
     const previousConfigDirMustBe = process.env.T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE;
     const previousCwdMustNotBe = process.env.T3_FAKE_CLAUDE_CWD_MUST_NOT_BE;
-    const previousHangPidFile = process.env.T3_FAKE_CLAUDE_HANG_PID_FILE;
 
     yield* Effect.acquireRelease(
       Effect.sync(() => {
@@ -131,12 +132,6 @@ function withFakeClaudeEnv<A, E, R>(
           process.env.T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE = input.configDirMustBe;
         } else {
           delete process.env.T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE;
-        }
-
-        if (input.hangPidFile !== undefined) {
-          process.env.T3_FAKE_CLAUDE_HANG_PID_FILE = input.hangPidFile;
-        } else {
-          delete process.env.T3_FAKE_CLAUDE_HANG_PID_FILE;
         }
       }),
       () =>
@@ -190,12 +185,6 @@ function withFakeClaudeEnv<A, E, R>(
           } else {
             process.env.T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE = previousConfigDirMustBe;
           }
-
-          if (previousHangPidFile === undefined) {
-            delete process.env.T3_FAKE_CLAUDE_HANG_PID_FILE;
-          } else {
-            process.env.T3_FAKE_CLAUDE_HANG_PID_FILE = previousHangPidFile;
-          }
         }),
     );
 
@@ -210,6 +199,31 @@ function withFakeClaudeEnv<A, E, R>(
 }
 
 it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
+  it.effect("kills a stalled CLI when the request times out", () =>
+    Effect.gen(function* () {
+      const probe = yield* makeProcessProbe;
+      yield* withFakeClaudeEnv({ output: "", lifecyclePort: probe.port }, (textGeneration) =>
+        Effect.gen(function* () {
+          const fiber = yield* textGeneration
+            .generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Name this thread",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            })
+            .pipe(Effect.flip, Effect.forkScoped);
+          yield* probe.started;
+
+          yield* TestClock.adjust("180 seconds");
+          yield* probe.exited;
+          expect((yield* Fiber.join(fiber)).detail).toBe("Claude CLI request timed out.");
+        }),
+      );
+    }),
+  );
+
   it.effect("forwards Claude thinking settings without passing unsupported effort", () =>
     withFakeClaudeEnv(
       {
@@ -406,41 +420,6 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
 
             expect(generated.title).toBe(sanitizeThreadTitle("Use Claude home"));
           }),
-      );
-    }),
-  );
-
-  it.effect("SIGKILLs a Claude CLI that ignores SIGTERM after the request times out", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-claude-hang-" });
-      const pidFile = path.join(tempDir, "claude.pid");
-      return yield* withFakeClaudeEnv({ output: "", hangPidFile: pidFile }, (textGeneration) =>
-        Effect.gen(function* () {
-          const fiber = yield* textGeneration
-            .generateThreadTitle({
-              cwd: process.cwd(),
-              message: "thread title",
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("claudeAgent"),
-                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
-              },
-            })
-            .pipe(Effect.exit, Effect.forkScoped);
-          const pid = yield* readPidFile(pidFile);
-          expect(pid).toBeDefined();
-          yield* Effect.addFinalizer(() => Effect.sync(() => killQuietly(pid!)));
-
-          // The Claude request timeout; the kill grace after it runs on native time.
-          yield* TestClock.adjust(Duration.minutes(3));
-
-          // Without the force kill the release waits on the CLI forever, so the
-          // request would hang here instead of failing; check the process first.
-          expect(yield* waitForProcessExit(pid!)).toBe(true);
-          const exit = yield* Fiber.join(fiber);
-          expect(exit._tag).toBe("Failure");
-        }),
       );
     }),
   );

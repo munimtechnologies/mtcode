@@ -20,7 +20,11 @@ import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as Persistence from "../platform/persistence.ts";
-import { config as environmentConfig, runStreamGuarded, RpcPermissionGuard } from "../rpc/client.ts";
+import {
+  config as environmentConfig,
+  runStreamGuarded,
+  RpcPermissionGuard,
+} from "../rpc/client.ts";
 import {
   createRuntimeCommand,
   runInEnvironment,

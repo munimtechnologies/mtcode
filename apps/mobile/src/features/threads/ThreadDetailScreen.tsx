@@ -2,7 +2,11 @@ import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime
 import { AsyncResult } from "effect/reactivity";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
-import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
+import {
+  useChildThreadInputs,
+  useThreadReportedModelSelection,
+  useThreadShell,
+} from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useNavigation } from "@react-navigation/native";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
@@ -54,7 +58,7 @@ import type { QueuedRunEdit } from "../../state/queued-run-edit";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
 import type { ActiveTurnComposerAction } from "@t3tools/client-runtime/state/composer-dispatch";
 import * as Haptics from "expo-haptics";
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AppState,
   Keyboard,
@@ -62,6 +66,7 @@ import {
   useWindowDimensions,
   View,
   type GestureResponderEvent,
+  type LayoutChangeEvent,
   type ViewInstance,
 } from "react-native";
 import {
@@ -77,6 +82,7 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
+  useReducedMotion,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
@@ -314,10 +320,77 @@ function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedE
   }, [threadId, feed]);
 }
 
+const USAGE_LIMITS_PANEL_GAP = 12;
+const USAGE_LIMITS_PANEL_MIN_HEIGHT = 44;
+
 const USER_INPUT_TOGGLE_TIMING = {
   duration: USER_INPUT_TOGGLE_DURATION_MS,
   easing: Easing.out(Easing.cubic),
 };
+
+// The visit watermark follows the shell's updatedAt, which ticks while a run
+// streams. Keeping it in a leaf lets the screen read the quiet shell.
+function ThreadVisitWatermark(props: {
+  readonly environmentId: EnvironmentId;
+  readonly selectedThread: EnvironmentThreadShell;
+  readonly showContent: boolean;
+}) {
+  const liveThread = useThreadShell({
+    environmentId: props.environmentId,
+    threadId: props.selectedThread.id,
+  });
+  const thread = liveThread ?? props.selectedThread;
+  const showContent = props.showContent;
+  const selectedThreadKey = scopedThreadKey(props.environmentId, thread.id);
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const lastDispatchedVisitRef = useRef<string | null>(null);
+  const lastVisitDispatchRef = useRef({ threadKey: selectedThreadKey, at: 0 });
+  const selectedThreadId = thread.id;
+  const selectedThreadUpdatedAt = thread.updatedAt;
+  const selectedThreadLastVisitedAt = thread.lastVisitedAt;
+  const selectedThreadCompletedAt = thread.latestRun?.completedAt;
+  useEffect(() => {
+    if (!showContent || selectedThreadLastVisitedAt === undefined) return;
+    const threadUpdatedAtMs = Date.parse(selectedThreadUpdatedAt);
+    if (Number.isNaN(threadUpdatedAtMs)) return;
+    const lastVisitedAtMs = selectedThreadLastVisitedAt
+      ? Date.parse(selectedThreadLastVisitedAt)
+      : NaN;
+    if (!Number.isNaN(lastVisitedAtMs) && lastVisitedAtMs >= threadUpdatedAtMs) return;
+    const dispatchKey = `${selectedThreadKey}:${selectedThreadUpdatedAt}`;
+    if (lastDispatchedVisitRef.current === dispatchKey) return;
+    const dispatch = () => {
+      lastDispatchedVisitRef.current = dispatchKey;
+      lastVisitDispatchRef.current = { threadKey: selectedThreadKey, at: Date.now() };
+      void visitThread({
+        environmentId: props.environmentId,
+        input: { threadId: selectedThreadId, visitedAt: selectedThreadUpdatedAt },
+      });
+    };
+    const completedAtMs = selectedThreadCompletedAt ? Date.parse(selectedThreadCompletedAt) : NaN;
+    const hasUnseenCompletion =
+      !Number.isNaN(completedAtMs) &&
+      (Number.isNaN(lastVisitedAtMs) || completedAtMs > lastVisitedAtMs);
+    const previous = lastVisitDispatchRef.current;
+    const elapsed = Date.now() - previous.at;
+    if (previous.threadKey !== selectedThreadKey || hasUnseenCompletion || elapsed >= 10_000) {
+      dispatch();
+      return;
+    }
+    const timer = setTimeout(dispatch, 10_000 - elapsed);
+    return () => clearTimeout(timer);
+  }, [
+    props.environmentId,
+    selectedThreadId,
+    selectedThreadKey,
+    selectedThreadLastVisitedAt,
+    selectedThreadCompletedAt,
+    selectedThreadUpdatedAt,
+    showContent,
+    visitThread,
+  ]);
+  return null;
+}
 
 export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetailScreenProps) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
@@ -599,10 +672,11 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
       setLastKnownKeyboardHeight(liveKeyboardHeight);
     }
   }, [lastKnownKeyboardHeight, liveKeyboardHeight]);
+  const reservedKeyboardHeight =
+    lastKnownKeyboardHeight > 0 ? lastKnownKeyboardHeight : ESTIMATED_KEYBOARD_HEIGHT;
   const pendingUserInputMaxHeight = derivePendingUserInputMaxHeight({
     windowHeight,
-    keyboardHeight:
-      lastKnownKeyboardHeight > 0 ? lastKnownKeyboardHeight : ESTIMATED_KEYBOARD_HEIGHT,
+    keyboardHeight: reservedKeyboardHeight,
     navigationHeaderHeight,
     composerOverlapHeight: composerBottomInset,
   });
@@ -623,9 +697,55 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
     -nativeInsetOvercount,
     Platform.OS === "ios" ? COMPOSER_TRANSITION_DURATION_MS : 0,
   );
+  // Android lays the screen out below its opaque header and reports a zero
+  // header height, so the window height overstates the room by the header.
+  const [screenHeight, setScreenHeight] = useState<number | null>(null);
+  const handleScreenLayout = useCallback((event: LayoutChangeEvent) => {
+    setScreenHeight(event.nativeEvent.layout.height);
+  }, []);
+  const screenAreaHeight = screenHeight ?? windowHeight;
+  // The usage panel stacks with the composer and any approval card, so it gets
+  // whatever room they leave below the header. Measured only while it is open
+  // so typing in the composer does not re-render the screen.
+  const usageLimitsOpen = usageLimitsReport !== null && activeUserInputRequestId === null;
+  const [usageLimitsLayout, setUsageLimitsLayout] = useState({ overlay: 0, panel: 0 });
+  const handleComposerOverlayLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      onComposerLayout(event);
+      if (!usageLimitsOpen) return;
+      const overlay = event.nativeEvent.layout.height;
+      setUsageLimitsLayout((current) =>
+        current.overlay === overlay ? current : { ...current, overlay },
+      );
+    },
+    [onComposerLayout, usageLimitsOpen],
+  );
+  const handleUsageLimitsLayout = useCallback((event: LayoutChangeEvent) => {
+    const panel = event.nativeEvent.layout.height;
+    setUsageLimitsLayout((current) => (current.panel === panel ? current : { ...current, panel }));
+  }, []);
+  const overlayBesideUsageLimits =
+    usageLimitsLayout.overlay > 0
+      ? usageLimitsLayout.overlay - usageLimitsLayout.panel
+      : composerOverlapHeight;
+  // The keyboard is reserved even while closed, like the question card, so the
+  // panel never grows over the header while the keyboard animates. The floor
+  // keeps the close row on screen when the stack below leaves no room at all.
+  const usageLimitsMaxHeight = Math.max(
+    USAGE_LIMITS_PANEL_MIN_HEIGHT,
+    Math.min(
+      Math.round(screenAreaHeight * 0.4),
+      screenAreaHeight -
+        navigationHeaderHeight -
+        reservedKeyboardHeight -
+        overlayBesideUsageLimits -
+        USAGE_LIMITS_PANEL_GAP * 2,
+    ),
+  );
   const userInputCardProgress = useSharedValue(1);
   const userInputInsetProgress = useSharedValue(1);
   const userInputCardCoverage = useSharedValue(0);
+  const composerPopoverHeight = useSharedValue(0);
   const floatingControlCoverage = useSharedValue(
     showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : 0,
   );
@@ -652,12 +772,22 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
     },
     [userInputCoverageApplies],
   );
+  const composerPopoverLift = useDerivedValue(() =>
+    withTiming(
+      !composerSlotHidden && composerPopoverHeight.value > 0 ? composerPopoverHeight.value + 8 : 0,
+      { duration: 180, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System },
+    ),
+  );
   const floatingControlLift = useDerivedValue(
     () =>
-      userInputCoverageApplies ? userInputCardProgress.value * userInputCardCoverage.value : 0,
+      Math.max(
+        userInputCoverageApplies ? userInputCardProgress.value * userInputCardCoverage.value : 0,
+        composerPopoverLift.value,
+      ),
     [userInputCoverageApplies],
   );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
+  const reduceMotion = useReducedMotion();
   // Repin timers fire after the render that scheduled them, so they read follow
   // state from the ref the writers below keep in step with it.
   const endFollowEnabledRef = useRef(true);
@@ -785,54 +915,6 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
     setComposerFocused(false);
   }, [selectedThreadKey, showContent]);
 
-  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const lastDispatchedVisitRef = useRef<string | null>(null);
-  const lastVisitDispatchRef = useRef({ threadKey: selectedThreadKey, at: 0 });
-  const selectedThreadId = props.selectedThread.id;
-  const selectedThreadUpdatedAt = props.selectedThread.updatedAt;
-  const selectedThreadLastVisitedAt = props.selectedThread.lastVisitedAt;
-  const selectedThreadCompletedAt = props.selectedThread.latestRun?.completedAt;
-  useEffect(() => {
-    if (!showContent || selectedThreadLastVisitedAt === undefined) return;
-    const threadUpdatedAtMs = Date.parse(selectedThreadUpdatedAt);
-    if (Number.isNaN(threadUpdatedAtMs)) return;
-    const lastVisitedAtMs = selectedThreadLastVisitedAt
-      ? Date.parse(selectedThreadLastVisitedAt)
-      : NaN;
-    if (!Number.isNaN(lastVisitedAtMs) && lastVisitedAtMs >= threadUpdatedAtMs) return;
-    const dispatchKey = `${selectedThreadKey}:${selectedThreadUpdatedAt}`;
-    if (lastDispatchedVisitRef.current === dispatchKey) return;
-    const dispatch = () => {
-      lastDispatchedVisitRef.current = dispatchKey;
-      lastVisitDispatchRef.current = { threadKey: selectedThreadKey, at: Date.now() };
-      void visitThread({
-        environmentId: props.environmentId,
-        input: { threadId: selectedThreadId, visitedAt: selectedThreadUpdatedAt },
-      });
-    };
-    const completedAtMs = selectedThreadCompletedAt ? Date.parse(selectedThreadCompletedAt) : NaN;
-    const hasUnseenCompletion =
-      !Number.isNaN(completedAtMs) &&
-      (Number.isNaN(lastVisitedAtMs) || completedAtMs > lastVisitedAtMs);
-    const previous = lastVisitDispatchRef.current;
-    const elapsed = Date.now() - previous.at;
-    if (previous.threadKey !== selectedThreadKey || hasUnseenCompletion || elapsed >= 10_000) {
-      dispatch();
-      return;
-    }
-    const timer = setTimeout(dispatch, 10_000 - elapsed);
-    return () => clearTimeout(timer);
-  }, [
-    props.environmentId,
-    selectedThreadId,
-    selectedThreadKey,
-    selectedThreadLastVisitedAt,
-    selectedThreadCompletedAt,
-    selectedThreadUpdatedAt,
-    showContent,
-    visitThread,
-  ]);
-
   useEffect(() => {
     setAnchorMessageId(null);
     setSubmittedMessageId(null);
@@ -875,7 +957,10 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
           ) {
             return;
           }
-          return scrollMessageToEnd({ animated: true, closeKeyboard: false });
+          return scrollMessageToEnd({
+            animated: !reduceMotion,
+            closeKeyboard: false,
+          });
         })
         .catch(() => {
           if (
@@ -896,6 +981,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
     contentPresentationKind,
     props.queuedMessages,
     selectedThreadFeed,
+    reduceMotion,
     scrollMessageToEnd,
     selectedThreadKey,
   ]);
@@ -961,7 +1047,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
 
   const handleScrollToEnd = () => {
     void Haptics.selectionAsync();
-    void scrollMessageToEnd({ animated: true, closeKeyboard: false }).catch(() => {
+    void scrollMessageToEnd({ animated: !reduceMotion, closeKeyboard: false }).catch(() => {
       freeze.set(false);
     });
   };
@@ -1001,8 +1087,13 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
   };
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" onLayout={handleScreenLayout}>
       {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
+      <ThreadVisitWatermark
+        environmentId={props.environmentId}
+        selectedThread={props.selectedThread}
+        showContent={showContent}
+      />
       {showContent ? (
         <View
           style={{ flex: 1 }}
@@ -1096,7 +1187,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
           style={{ position: "absolute", bottom: 0, left: 0, right: 0, top: 0 }}
           offset={{ closed: 0, opened: 0 }}
         >
-          <ComposerPopoverHost hidden={composerSlotHidden}>
+          <ComposerPopoverHost hidden={composerSlotHidden} popoverHeight={composerPopoverHeight}>
             {/* The fixed sticky host gives this bottom-anchored child a stable
               coordinate space. Its top and height can then animate together
               instead of the auto-sized host jumping to Yoga's destination. */}
@@ -1116,7 +1207,11 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
               {/* No paddingTop here: the overlay's measured height becomes the
                 list's bottom inset, so any padding above the pill/composer
                 pushes the resting content floor up by the same amount. */}
-              <View ref={composerOverlayRef} onLayout={onComposerLayout} className="w-full">
+              <View
+                ref={composerOverlayRef}
+                onLayout={handleComposerOverlayLayout}
+                className="w-full"
+              >
                 <FloatingWorkingControl
                   colorScheme={isDarkMode ? "dark" : "light"}
                   status={floatingStatus}
@@ -1192,13 +1287,16 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
                   ) : null}
                   {usageLimitsReport && activeUserInputRequestId === null ? (
                     <Animated.View
-                      className="shrink-0 px-4 pb-3"
+                      className="shrink-0 px-4"
+                      style={{ paddingBottom: USAGE_LIMITS_PANEL_GAP }}
+                      onLayout={handleUsageLimitsLayout}
                       entering={FadeInDown.duration(220)}
                       exiting={FadeOut.duration(140)}
                     >
                       <ComposerUsageLimits
                         report={usageLimitsReport}
                         environmentId={props.environmentId}
+                        maxHeight={usageLimitsMaxHeight}
                         onClose={dismissUsageLimits}
                       />
                     </Animated.View>

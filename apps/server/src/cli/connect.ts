@@ -45,7 +45,6 @@ import * as ExternalLauncher from "../process/externalLauncher.ts";
 import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { resolveCliCommand } from "./invocation.ts";
-import { offerServiceDuringOnboarding, recoverServiceOnboardingOffer } from "./service.ts";
 import * as CliService from "./service.ts";
 import { resolveAppDisplayName } from "../appDisplayName.ts";
 
@@ -686,6 +685,33 @@ const connectLogoutCommand = Command.make("logout", {
   ),
 );
 
+export const reportServiceOnboarding = Effect.fn("cli.connect.report_service_onboarding")(
+  function* (outcome: CliService.ServiceOnboardingOutcome) {
+    if (outcome === "pending") {
+      yield* Console.log(
+        "\nBackground service restarting\n\nThe server establishes the T3 Connect link once it is back. Check the log above if it does not come back.",
+      );
+      return;
+    }
+    if (outcome === "ready") {
+      // macOS/Windows stop at sign-out; only Linux systemd typically survives logout.
+      const platform = yield* HostProcess.Platform;
+      const reach =
+        platform === "darwin"
+          ? `${resolveAppDisplayName()} is set to run while you are logged in to this Mac. The server establishes the T3 Connect link on startup.`
+          : platform === "win32"
+            ? `${resolveAppDisplayName()} will start again every time you sign in to Windows.`
+            : `${resolveAppDisplayName()} is set to keep running after you log out. The server establishes the T3 Connect link on startup.`;
+      yield* Console.log(`\n✓ Background service ready\n\n${reach}`);
+      return;
+    }
+    const serveCommand = yield* resolveCliCommand("serve");
+    yield* Console.log(
+      `\nNext\n  Start the server with \`${serveCommand}\` to make this machine reachable.`,
+    );
+  },
+);
+
 export const connectCommand = Command.make("connect", {
   ...projectLocationFlags,
   headless: headlessFlag,
@@ -702,22 +728,8 @@ export const connectCommand = Command.make("connect", {
         }
         yield* Console.log(`✓ Authorized${connectedAs(linked.identity)}`);
 
-        const background = yield* recoverServiceOnboardingOffer(offerServiceDuringOnboarding);
-        if (background) {
-          // macOS/Windows stop at sign-out; only Linux systemd typically survives logout.
-          const platform = yield* HostProcess.Platform;
-          const reach =
-            platform === "darwin"
-              ? `${resolveAppDisplayName()} is set to run while you are logged in to this Mac. The server establishes the T3 Connect link on startup.`
-              : platform === "win32"
-                ? `${resolveAppDisplayName()} will start again every time you sign in to Windows.`
-                : `${resolveAppDisplayName()} is set to keep running after you log out. The server establishes the T3 Connect link on startup.`;
-          yield* Console.log(`\n✓ Background service ready\n\n${reach}`);
-          return;
-        }
-        const serveCommand = yield* resolveCliCommand("serve");
-        yield* Console.log(
-          `\nNext\n  Start the server with \`${serveCommand}\` to make this machine reachable.`,
+        yield* reportServiceOnboarding(
+          yield* CliService.recoverServiceOnboardingOffer(CliService.offerServiceDuringOnboarding),
         );
       }),
     ),

@@ -40,8 +40,7 @@ export function planAutoSettleSettingsSync(
       target.settings !== null &&
       (target.settings.sidebarAutoSettleAfterDays !== patch.sidebarAutoSettleAfterDays ||
         target.settings.sidebarAutoSettleOnMerge !== patch.sidebarAutoSettleOnMerge ||
-        target.settings.sidebarAutoSettlePinnedThreads !==
-          patch.sidebarAutoSettlePinnedThreads ||
+        target.settings.sidebarAutoSettlePinnedThreads !== patch.sidebarAutoSettlePinnedThreads ||
         (target.supportsScope === true &&
           patch.sidebarAutoSettleScope !== undefined &&
           target.settings.sidebarAutoSettleScope !== patch.sidebarAutoSettleScope)),

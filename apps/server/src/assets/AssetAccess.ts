@@ -223,7 +223,7 @@ const readVisualizationFile = Effect.fn("AssetAccess.readVisualizationFile")(fun
       if (
         info.type !== "File" ||
         info.size > BigInt(VISUALIZATION_FRAGMENT_MAX_BYTES) ||
-        !Option.contains(info.nlink, 1)
+        !Option.contains(info.nlink, 1n)
       )
         return null;
 
@@ -235,7 +235,7 @@ const readVisualizationFile = Effect.fn("AssetAccess.readVisualizationFile")(fun
         Option.isNone(pathInfo.ino) ||
         Option.isNone(info.ino) ||
         pathInfo.ino.value !== info.ino.value ||
-        !Option.contains(pathInfo.nlink, 1)
+        !Option.contains(pathInfo.nlink, 1n)
       ) {
         return null;
       }

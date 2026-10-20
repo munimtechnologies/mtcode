@@ -29,9 +29,6 @@ import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const CODEX_TIMEOUT_MS = 180_000;
-// A `codex exec` call is a short-lived helper: it stays in the backend's process
-// group so quit reaches it, and is SIGKILLed if it ignores SIGTERM on timeout.
-const CODEX_FORCE_KILL_AFTER = "1 second";
 const CODEX_MCP_LIST_TIMEOUT_MS = 10_000;
 // Plugins and apps bring MCP servers of their own; the user's are listed and
 // turned off by name below. These follow the user's launch args, so they win
@@ -181,8 +178,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           env: input.env,
           cwd: input.cwd,
           shell: spawnCommand.shell,
-          detached: false,
-          forceKillAfter: CODEX_FORCE_KILL_AFTER,
+          forceKillAfter: "1 second",
         }),
       );
       const [stdout, , exitCode] = yield* Effect.all(
@@ -324,8 +320,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
         },
-        detached: false,
-        forceKillAfter: CODEX_FORCE_KILL_AFTER,
+        forceKillAfter: "1 second",
       });
 
       const child = yield* commandSpawner

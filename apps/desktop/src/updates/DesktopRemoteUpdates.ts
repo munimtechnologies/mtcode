@@ -188,90 +188,91 @@ export const listen: Effect.Effect<
             Effect.forkScoped,
           );
 
-        const step = (state: DesktopUpdateState): Effect.Effect<boolean, never, Scope.Scope> =>
-          Effect.gen(function* () {
-            const next = nextRemoteDesktopUpdateStep(state, attempts, disabledReason);
-            switch (next.action) {
-              case "wait":
+        const step = Effect.fn("DesktopRemoteUpdates.step")(function* (
+          state: DesktopUpdateState,
+        ): Effect.fn.Return<boolean, never, Scope.Scope> {
+          const next = nextRemoteDesktopUpdateStep(state, attempts, disabledReason);
+          switch (next.action) {
+            case "wait":
+              return false;
+            case "check":
+              attempts = { ...attempts, checks: attempts.checks + 1 };
+              yield* updates.check("remote-update").pipe(
+                Effect.flatMap((result) => {
+                  if (result.checked) return Effect.void;
+                  attempts = { ...attempts, checks: attempts.checks - 1 };
+                  return retryLater(state);
+                }),
+                Effect.forkScoped,
+              );
+              return false;
+            case "download":
+              attempts = { ...attempts, downloads: attempts.downloads + 1 };
+              yield* updates.download.pipe(
+                Effect.flatMap((result) => {
+                  if (result.accepted) return Effect.void;
+                  attempts = { ...attempts, downloads: attempts.downloads - 1 };
+                  return retryLater(state);
+                }),
+                Effect.forkScoped,
+              );
+              return false;
+            case "install": {
+              // The download event fires before its action releases the
+              // updater reservation. Wait until the prepared install can
+              // be committed by the client in a separate RPC.
+              // Personal fork: the updater auto-installs as soon as a download
+              // finishes, and a successful install keeps its reservation until
+              // the app exits. Report that install as prepared instead of
+              // waiting on it: the commit joins the shutdown (or reaches the
+              // relaunched app) and the client proves the handoff on reconnect,
+              // the same way it does for a local install.
+              if ((yield* updates.isActionActive) && !(yield* updates.isInstallActive)) {
+                yield* retryLater(state);
                 return false;
-              case "check":
-                attempts = { ...attempts, checks: attempts.checks + 1 };
-                yield* updates.check("remote-update").pipe(
-                  Effect.flatMap((result) => {
-                    if (result.checked) return Effect.void;
-                    attempts = { ...attempts, checks: attempts.checks - 1 };
-                    return retryLater(state);
-                  }),
-                  Effect.forkScoped,
-                );
-                return false;
-              case "download":
-                attempts = { ...attempts, downloads: attempts.downloads + 1 };
-                yield* updates.download.pipe(
-                  Effect.flatMap((result) => {
-                    if (result.accepted) return Effect.void;
-                    attempts = { ...attempts, downloads: attempts.downloads - 1 };
-                    return retryLater(state);
-                  }),
-                  Effect.forkScoped,
-                );
-                return false;
-              case "install": {
-                // The download event fires before its action releases the
-                // updater reservation. Wait until the prepared install can
-                // be committed by the client in a separate RPC.
-                // Personal fork: the updater auto-installs as soon as a download
-                // finishes, and a successful install keeps its reservation until
-                // the app exits. Report that install as prepared instead of
-                // waiting on it: the commit joins the shutdown (or reaches the
-                // relaunched app) and the client proves the handoff on reconnect,
-                // the same way it does for a local install.
-                if ((yield* updates.isActionActive) && !(yield* updates.isInstallActive)) {
-                  yield* retryLater(state);
-                  return false;
-                }
-                if (state.downloadedVersion === null) {
-                  yield* publishReport(
-                    state,
-                    {
-                      outcome: "failed",
-                      reason: "The desktop app lost the downloaded update.",
-                    },
-                    request.requestId,
-                  );
-                  return true;
-                }
-                yield* Ref.set(
-                  preparedUpdateRef,
-                  Option.some({
-                    requestId: request.requestId,
-                    downloadedVersion: state.downloadedVersion,
-                    status: "prepared",
-                    expiresAt:
-                      (yield* Clock.currentTimeMillis) + Duration.toMillis(PREPARED_UPDATE_TTL),
-                  }),
-                );
-                yield* publishReport(state, { outcome: "ready-to-install" }, request.requestId);
-                yield* logInfo("remote update prepared", { requestId: request.requestId });
-                return true;
               }
-              case "done":
+              if (state.downloadedVersion === null) {
                 yield* publishReport(
                   state,
                   {
-                    outcome: next.outcome,
-                    ...(next.reason === undefined ? {} : { reason: next.reason }),
+                    outcome: "failed",
+                    reason: "The desktop app lost the downloaded update.",
                   },
                   request.requestId,
                 );
-                yield* logInfo("remote update finished", {
-                  requestId: request.requestId,
-                  outcome: next.outcome,
-                  reason: next.reason ?? null,
-                });
                 return true;
+              }
+              yield* Ref.set(
+                preparedUpdateRef,
+                Option.some({
+                  requestId: request.requestId,
+                  downloadedVersion: state.downloadedVersion,
+                  status: "prepared",
+                  expiresAt:
+                    (yield* Clock.currentTimeMillis) + Duration.toMillis(PREPARED_UPDATE_TTL),
+                }),
+              );
+              yield* publishReport(state, { outcome: "ready-to-install" }, request.requestId);
+              yield* logInfo("remote update prepared", { requestId: request.requestId });
+              return true;
             }
-          });
+            case "done":
+              yield* publishReport(
+                state,
+                {
+                  outcome: next.outcome,
+                  ...(next.reason === undefined ? {} : { reason: next.reason }),
+                },
+                request.requestId,
+              );
+              yield* logInfo("remote update finished", {
+                requestId: request.requestId,
+                outcome: next.outcome,
+                reason: next.reason ?? null,
+              });
+              return true;
+          }
+        });
 
         yield* Effect.raceFirst(
           Effect.gen(function* () {

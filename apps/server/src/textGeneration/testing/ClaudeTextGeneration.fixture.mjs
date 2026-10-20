@@ -43,15 +43,6 @@ if (!process.stdin.isTTY) {
   stdinContent = Buffer.concat(chunks).toString("utf8");
 }
 
-// A stalled CLI: it has the prompt, ignores SIGTERM, and never answers.
-const hangPidFile = process.env.T3_FAKE_CLAUDE_HANG_PID_FILE;
-if (hangPidFile) {
-  process.on("SIGTERM", () => {});
-  setInterval(() => {}, 1_000);
-  NodeFS.writeFileSync(hangPidFile, String(process.pid));
-  await new Promise(() => {});
-}
-
 const argsMustContain = process.env.T3_FAKE_CLAUDE_ARGS_MUST_CONTAIN;
 if (argsMustContain && !args.includes(argsMustContain)) {
   fail("args missing expected content", 2);

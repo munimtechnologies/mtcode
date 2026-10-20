@@ -160,16 +160,6 @@ it("indexes the citation chip label instead of its link text", () => {
   ]);
 });
 
-it("skips typeset math without joining the text around it, matching the renderer", () => {
-  expect(
-    searchableMessageSegments({
-      role: "assistant",
-      streaming: false,
-      text: "Area is $\\pi r^2$ for circles.\n\n\\[\nE = mc^2\n\\]\n\nDone.",
-    }),
-  ).toEqual(["Area is ", " for circles.", "Done."]);
-});
-
 it("does not index inline visualization references", () => {
   const reference = 'visualize{"path":"/tmp/chart.html","title":"Chart"}';
   expect(

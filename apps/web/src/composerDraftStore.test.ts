@@ -76,7 +76,7 @@ import {
   finalizePromotedDraftThreadByRef,
   flushComposerDraftStorage,
   markPromotedDraftThreadByRef,
-  restoreFailedBackgroundDraftThread,
+  restoreFailedDraftThread,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   composerFileNeedsReattach,
@@ -87,6 +87,10 @@ import {
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import { insertInlineContextReference } from "./lib/composerContextReferences";
 import { terminalContextReference, threadContextRecord } from "./lib/composerContextRecords";
+import {
+  copiedComposerAttachmentFile,
+  rememberCopiedComposerAttachments,
+} from "./lib/copiedComposerAttachments";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   formatTerminalContextReference,
@@ -449,6 +453,62 @@ describe("composerDraftStore addImages", () => {
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft?.images.map((image) => image.id)).toEqual(["img-shared"]);
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:shared");
+  });
+});
+
+describe("composerDraftStore copied attachments", () => {
+  beforeEach(resetComposerDraftStore);
+  afterEach(() => {
+    rememberCopiedComposerAttachments(TEST_ENVIRONMENT_ID, new Map());
+    resetComposerDraftStore();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps unsent image and file bytes usable in another draft after source removal", async () => {
+    const source = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("copy-source"));
+    const target = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("copy-target"));
+    const image = makeImage({ id: "uploading-image", previewUrl: "blob:source" });
+    const file = makeFile("uploading-file");
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const store = useComposerDraftStore.getState();
+    store.addImages(source, [image]);
+    store.addFiles(source, [file]);
+    rememberCopiedComposerAttachments(
+      TEST_ENVIRONMENT_ID,
+      new Map([
+        [image.id, image.file],
+        [file.id, file.file!],
+      ]),
+    );
+
+    store.removeImage(source, image.id);
+    store.clearComposerContent(source);
+    expect(store.getComposerDraft(source)).toBeNull();
+    expect(revoke).toHaveBeenCalledWith(image.previewUrl);
+
+    const copiedImage = copiedComposerAttachmentFile(TEST_ENVIRONMENT_ID, image.id);
+    const copiedFile = copiedComposerAttachmentFile(TEST_ENVIRONMENT_ID, file.id);
+    expect(copiedImage).toBe(image.file);
+    expect(copiedFile).toBe(file.file);
+    store.addImages(target, [{ ...image, file: copiedImage!, previewUrl: "blob:target" }]);
+    store.addFiles(target, [{ ...file, file: copiedFile! }]);
+    const draft = store.getComposerDraft(target)!;
+    expect([...new Uint8Array(await draft.images[0]!.file.arrayBuffer())]).toEqual([1, 1, 1, 1]);
+    expect(await draft.files[0]!.file!.text()).toBe("report");
+  });
+
+  it("does not reuse bytes from another environment or a superseded clipboard copy", () => {
+    const first = makeImage({ id: "first", previewUrl: "blob:first" });
+    const second = makeFile("second");
+    rememberCopiedComposerAttachments(TEST_ENVIRONMENT_ID, new Map([[first.id, first.file]]));
+    expect(copiedComposerAttachmentFile(OTHER_TEST_ENVIRONMENT_ID, first.id)).toBeUndefined();
+
+    rememberCopiedComposerAttachments(TEST_ENVIRONMENT_ID, new Map([[second.id, second.file!]]));
+    expect(copiedComposerAttachmentFile(TEST_ENVIRONMENT_ID, first.id)).toBeUndefined();
+    expect(copiedComposerAttachmentFile(TEST_ENVIRONMENT_ID, second.id)).toBe(second.file);
+
+    rememberCopiedComposerAttachments(TEST_ENVIRONMENT_ID, new Map());
+    expect(copiedComposerAttachmentFile(TEST_ENVIRONMENT_ID, second.id)).toBeUndefined();
   });
 });
 
@@ -1866,7 +1926,7 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(useComposerDraftStore.getState().getDraftSession(draftId)).toBeNull();
   });
 
-  it("restores a failed background draft without changing the fresh draft", () => {
+  it("restores a failed draft without changing the fresh draft", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
     const sentDraft = useComposerDraftStore.getState().getDraftSession(draftId)!;
@@ -1874,12 +1934,14 @@ describe("composerDraftStore project draft thread mapping", () => {
     const freshId = DraftId.make("fresh-background-draft");
     store.setProjectDraftThreadId(projectRef, freshId, { threadId: ThreadId.make("fresh-thread") });
     store.setPrompt(freshId, "new work");
-    restoreFailedBackgroundDraftThread(draftId, sentDraft, ThreadId.make("retry-thread"));
+    store.setDraftThreadContext(draftId, { branch: "retry-base" });
+    restoreFailedDraftThread(draftId, sentDraft, ThreadId.make("retry-thread"));
     store.setPrompt(draftId, "retry work");
     expect(useComposerDraftStore.getState().getDraftSession(draftId)?.promotedTo).toBeNull();
     expect(useComposerDraftStore.getState().getDraftSession(draftId)?.threadId).toBe(
       "retry-thread",
     );
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.branch).toBe("retry-base");
     expect(draftByKey(freshId)?.prompt).toBe("new work");
     expect(draftByKey(draftId)?.prompt).toBe("retry work");
   });

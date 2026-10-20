@@ -28,6 +28,8 @@ export interface GhosttySearchHighlight {
 const DEFAULT_SELECTION_BACKGROUND = "rgba(72, 122, 191, 0.35)";
 const DEFAULT_SEARCH_MATCH_BACKGROUND = "rgba(234, 179, 8, 0.32)";
 const DEFAULT_SEARCH_ACTIVE_MATCH_BACKGROUND = "rgba(249, 115, 22, 0.62)";
+const POWERLINE_SOLID_RIGHT = "\ue0b0";
+const POWERLINE_SOLID_LEFT = "\ue0b2";
 
 function cssColor(color: GhosttyColor): string {
   return `rgb(${color.r}, ${color.g}, ${color.b})`;
@@ -55,6 +57,30 @@ function sameTextStyle(left: GhosttyCell, right: GhosttyCell): boolean {
   );
 }
 
+function isSolidPowerlineSeparator(text: string): boolean {
+  return text === POWERLINE_SOLID_RIGHT || text === POWERLINE_SOLID_LEFT;
+}
+
+// Fallback fonts inset or scale these private-use glyphs, leaving a gap where
+// the separator should meet the next cell. Fill the triangle from the cell's
+// own edges instead, as native terminals do.
+function fillSolidPowerlineSeparator(
+  context: CanvasRenderingContext2D,
+  text: string,
+  left: number,
+  top: number,
+  metrics: GhosttyCellMetrics,
+): void {
+  const right = left + metrics.width;
+  const [base, point] = text === POWERLINE_SOLID_RIGHT ? [left, right] : [right, left];
+  context.beginPath();
+  context.moveTo(base, top);
+  context.lineTo(point, top + metrics.height / 2);
+  context.lineTo(base, top + metrics.height);
+  context.closePath();
+  context.fill();
+}
+
 export function ghosttyTextRunEnd(
   cells: readonly GhosttyCell[],
   start: number,
@@ -68,7 +94,7 @@ export function ghosttyTextRunEnd(
       end += 1;
       continue;
     }
-    if (next.text.length === 0 || !sameStyle(next)) break;
+    if (next.text.length === 0 || isSolidPowerlineSeparator(next.text) || !sameStyle(next)) break;
     end += 1;
   }
   return end;
@@ -229,6 +255,20 @@ export function renderGhosttySnapshot(options: {
         runStart += 1;
         continue;
       }
+      if (isSolidPowerlineSeparator(first.text)) {
+        if (!first.invisible) {
+          context.fillStyle = cssColor(first.foreground);
+          fillSolidPowerlineSeparator(
+            context,
+            first.text,
+            padding + runStart * metrics.width,
+            top,
+            metrics,
+          );
+        }
+        runStart += 1;
+        continue;
+      }
       const runEnd = ghosttyTextRunEnd(row.cells, runStart, (cell) => sameTextStyle(cell, first));
       const text = row.cells
         .slice(runStart, runEnd)
@@ -298,9 +338,13 @@ export function renderGhosttySnapshot(options: {
       context.fillRect(left, top, metrics.width, metrics.height);
       const cell = snapshot.rowData[snapshot.cursorY]?.cells[snapshot.cursorX];
       if (cell?.text) {
-        context.font = fontForCell(cell, fontSize, fontFamily);
         context.fillStyle = cssColor(snapshot.background);
-        context.fillText(cell.text, left, top + metrics.baseline, metrics.width);
+        if (isSolidPowerlineSeparator(cell.text)) {
+          fillSolidPowerlineSeparator(context, cell.text, left, top, metrics);
+        } else {
+          context.font = fontForCell(cell, fontSize, fontFamily);
+          context.fillText(cell.text, left, top + metrics.baseline, metrics.width);
+        }
       }
     }
   }

@@ -1,9 +1,7 @@
+import type { Root, RootContent } from "mdast";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shallow } from "zustand/vanilla/shallow";
-import {
-  remarkKeepWindowsPaths,
-  shouldPreserveAssistantLineBreaks,
-} from "@t3tools/shared/markdownPipeline";
+import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, findRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock, WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "./WorkLog";
@@ -120,9 +118,6 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { Root, RootContent } from "mdast";
 import { T3Wordmark } from "../T3Wordmark";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
@@ -309,7 +304,7 @@ import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { WorkflowOpeningBlock } from "./WorkflowOpeningBlock";
 
-import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
+import { SkillChipIcon } from "./SkillInlineText";
 import * as DateTime from "effect/DateTime";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
@@ -546,6 +541,7 @@ interface MessagesTimelineProps {
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
   contentInsetEndAdjustment: number;
+  composerOverlayHeight?: number;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /**
    * Off while the user is reading history; LegendList's own maintainScrollAtEnd
@@ -644,6 +640,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onAnchorReady,
   onAnchorSizeChanged,
   contentInsetEndAdjustment,
+  composerOverlayHeight = 0,
   onIsAtEndChange,
   onContentOverflowChange,
   liveFollowEnabled,
@@ -904,6 +901,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
   const minimapItems = deriveTimelineMinimapItems(rows);
+  // Preserve initialScrollAtEnd's measured target until the list is reused
+  // for another thread; scrollToEnd would replace it with an estimated offset.
+  const listOpenedOnRef = useRef<{
+    readonly list: LegendListRef;
+    identity: string | null;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const opened = listOpenedOnRef.current;
+    if (!list) return;
+    if (opened?.list !== list) {
+      listOpenedOnRef.current = { list, identity: listIdentityKey };
+    } else if (opened.identity !== listIdentityKey) {
+      opened.identity = null;
+    }
+  });
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false
       ? rows.findIndex((row) => row.id === rememberedPosition.rowId)
@@ -961,7 +974,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
               viewOffset: -position.offsetWithinRow,
             })
           : list.scrollToOffset({ offset: position.scrollOffset, animated: false })
-        : list.scrollToEnd({ animated: false });
+        : listOpenedOnRef.current?.identity === listIdentityKey
+          ? undefined
+          : list.scrollToEnd({ animated: false });
     void Promise.resolve(scrolling).then(() => {
       if (cancelled) return;
       if (position?.atEnd !== false || index < 0) {
@@ -1134,6 +1149,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
       {footer}
     </TimelineListFooter>
   );
+  const timelineMaskStyle =
+    composerOverlayHeight === 0
+      ? undefined
+      : ({
+          "--timeline-composer-overlay-height": `${composerOverlayHeight}px`,
+        } as CSSProperties);
 
   const measureContentOverflow = () =>
     timelineContentOverflowsViewport(listRef.current?.getState?.(), {
@@ -1517,57 +1538,65 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onCite={onCiteAssistantText}
             />
           ) : null}
-          <LegendList<MessagesTimelineRow>
-            ref={setTimelineList}
-            data={rows}
-            extraData={listExtraData}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd={
-              !findActive &&
-              citationRequest === null &&
-              searchRequest === null &&
-              rememberedPosition?.atEnd !== false
-            }
-            // Legend needs a data refresh to mount new pins without a scroll event.
-            dataVersion={dataVersion ?? listIdentityKey}
-            {...(alwaysRender ? { alwaysRender } : {})}
-            onLoad={handleListLoad}
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-            maintainScrollAtEnd={
-              citationPositioning ||
-              searchPositioning ||
-              (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-              anchoredEndSpace ||
-              !liveFollowEnabled ||
-              fullscreenAppRowId !== null ||
-              disclosureToggleSettling
-                ? false
-                : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                  ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                  : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={
-              findActive ||
-              citationPositioning ||
-              searchPositioning ||
-              (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                ? false
-                : maintainVisibleContentPosition
-            }
-            maintainScrollAtEndThreshold={1}
-            onScroll={handleScroll}
-            onItemSizeChanged={handleItemSizeChanged}
+          <div
             className={cn(
-              "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-              topFadeEnabled && "topbar-scroll-fade",
+              "h-full min-h-0",
+              composerOverlayHeight > 0 && "virtualized-scroll-fade timeline-scroll-bottom-fade",
             )}
-            ListHeaderComponent={listHeader}
-            ListFooterComponent={timelineListFooter}
-          />
+            style={timelineMaskStyle}
+          >
+            <LegendList<MessagesTimelineRow>
+              ref={setTimelineList}
+              data={rows}
+              extraData={listExtraData}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd={
+                !findActive &&
+                citationRequest === null &&
+                searchRequest === null &&
+                rememberedPosition?.atEnd !== false
+              }
+              // Legend needs a data refresh to mount new pins without a scroll event.
+              dataVersion={dataVersion ?? listIdentityKey}
+              {...(alwaysRender ? { alwaysRender } : {})}
+              onLoad={handleListLoad}
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+              maintainScrollAtEnd={
+                citationPositioning ||
+                searchPositioning ||
+                (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                anchoredEndSpace ||
+                !liveFollowEnabled ||
+                fullscreenAppRowId !== null ||
+                disclosureToggleSettling
+                  ? false
+                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={
+                findActive ||
+                citationPositioning ||
+                searchPositioning ||
+                (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                  ? false
+                  : maintainVisibleContentPosition
+              }
+              maintainScrollAtEndThreshold={1}
+              onScroll={handleScroll}
+              onItemSizeChanged={handleItemSizeChanged}
+              className={cn(
+                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={listHeader}
+              ListFooterComponent={timelineListFooter}
+            />
+          </div>
           <TimelineMinimap
             items={minimapItems}
             hasPersistentGutter={minimapHasPersistentGutter}
@@ -1579,7 +1608,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onManualNavigation();
               void listRef.current?.scrollToIndex({
                 index: item.rowIndex,
-                animated: true,
+                animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
                 viewOffset: 24,
               });
             }}
@@ -1603,9 +1632,13 @@ function TimelineHistoryControl(props: MessagesTimelineHistoryControls) {
             disabled={props.loading}
             aria-label="Load earlier turns"
             onClick={() => props.onLoadEarlier()}
-            className="w-full py-1.5 text-xs text-muted-foreground/60 hover:text-foreground disabled:cursor-default"
+            className="flex w-full cursor-pointer items-center gap-3 py-1.5 text-muted-foreground text-xs hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
           >
-            {props.loading ? "Loading earlier turns…" : "Load earlier turns"}
+            <span aria-hidden="true" className="h-px flex-1 bg-border/70" />
+            <span className="shrink-0">
+              {props.loading ? "Loading earlier turns…" : "Load earlier turns"}
+            </span>
+            <span aria-hidden="true" className="h-px flex-1 bg-border/70" />
           </button>
         ) : null}
         {props.error !== null ? (
@@ -3448,7 +3481,7 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
               />
             ))}
             {agents.length > 3 ? (
-              <span className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-3xs font-medium text-muted-foreground ring-2 ring-background">
+              <span className="relative inline-flex size-6 items-center justify-center rounded-full bg-muted text-3xs font-medium text-muted-foreground ring-2 ring-background">
                 +{agents.length - 3}
               </span>
             ) : null}
@@ -4094,7 +4127,17 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
               />
             </span>
           }
-          label={<span className="line-clamp-4">{thoughtLine}</span>}
+          label={
+            <span className="line-clamp-4">
+              <ChatMarkdown
+                inline
+                text={thoughtLine}
+                cwd={ctx.markdownCwd}
+                parseRawHtml={false}
+                extraRemarkPlugins={[[remarkThoughtPreview, "Thought"]]}
+              />
+            </span>
+          }
           wrapLabel
         />
       ) : null}
@@ -4114,15 +4157,13 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
               </span>
             </span>
           ) : row.entry.itemType === "reasoning" ? (
-            <ReactMarkdown
-              remarkPlugins={[
-                remarkGfm,
-                remarkKeepWindowsPaths,
-                [remarkThoughtPreview, row.active ? "Thinking" : "Thought"],
-              ]}
-            >
-              {row.entry.detail ?? label}
-            </ReactMarkdown>
+            <ChatMarkdown
+              inline
+              text={row.entry.detail ?? label}
+              cwd={ctx.markdownCwd}
+              parseRawHtml={false}
+              extraRemarkPlugins={[[remarkThoughtPreview, row.active ? "Thinking" : "Thought"]]}
+            />
           ) : threadLabel ? (
             <ThreadReadLabel
               label={threadLabel}
@@ -4929,8 +4970,14 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         </div>
       </div>
       {comment.text.length > 0 && (
-        <div className="whitespace-pre-wrap wrap-break-word text-sm">
-          <SkillInlineText text={comment.text} skills={ctx.skills} />
+        <div className="wrap-break-word text-sm">
+          <ChatMarkdown
+            text={comment.text}
+            cwd={ctx.markdownCwd}
+            skills={ctx.skills}
+            parseRawHtml={false}
+            lineBreaks
+          />
         </div>
       )}
       {fenceLanguage !== "diff" && comment.diff.trim().length > 0 && (
@@ -5436,25 +5483,50 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-function remarkThoughtPreview(fallback: string) {
+/** Compact reasoning keeps formulas while flattening other Markdown into label text. */
+export function remarkThoughtPreview(fallback: string) {
   return (tree: Root) => {
-    const plainText = (node: Root | RootContent): string => {
-      if (node.type === "html" || node.type === "definition") return "";
-      if ("alt" in node) return node.alt ?? "";
-      if ("value" in node) return node.value;
-      if ("children" in node) {
-        const separator = ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(
-          node.type,
-        )
-          ? " "
-          : "";
-        return node.children.map(plainText).join(separator);
-      }
-      return node.type === "break" ? " " : "";
+    const children: RootContent[] = [];
+    const append = (value: string) => {
+      const last = children.at(-1);
+      const text = value.replace(/\s+/g, " ");
+      if (last?.type === "text") last.value = (last.value + text).replace(/\s+/g, " ");
+      else children.push({ type: "text", value: text });
     };
-    tree.children = [
-      { type: "text", value: plainText(tree).replace(/\s+/g, " ").trim() || fallback },
-    ];
+    const visit = (node: Root | RootContent) => {
+      if (node.type === "html" || node.type === "definition") return;
+      if (node.type === "math" || node.type === "inlineMath") {
+        children.push({
+          type: "inlineMath",
+          value: node.value,
+          position: node.position,
+          data: {
+            hName: "code",
+            hProperties: { className: ["language-math", "math-inline"] },
+            hChildren: [{ type: "text", value: node.value }],
+          },
+        });
+      } else if ("alt" in node) append(node.alt ?? "");
+      else if ("value" in node) append(node.value);
+      else if ("children" in node) {
+        node.children.forEach((child, index) => {
+          if (
+            index &&
+            ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(node.type)
+          )
+            append(" ");
+          visit(child);
+        });
+      } else if (node.type === "break") append(" ");
+    };
+    visit(tree);
+    const first = children[0];
+    const last = children.at(-1);
+    if (first?.type === "text") first.value = first.value.trimStart();
+    if (last?.type === "text") last.value = last.value.trimEnd();
+    tree.children = children.some((child) => child.type !== "text" || child.value)
+      ? children
+      : [{ type: "text", value: fallback }];
   };
 }
 
@@ -5720,7 +5792,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         "aria-expanded": expanded,
         onClick: toggleExpanded,
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === "Enter" || e.key === " ") {
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             toggleExpanded();
           }
@@ -5754,18 +5826,18 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               className={cn(answerPreview ? "min-w-0" : "min-w-0 flex-1", "truncate", headingClass)}
             >
               {isReasoning && !expanded ? (
-                <ReactMarkdown
-                  remarkPlugins={[
-                    remarkGfm,
-                    remarkKeepWindowsPaths,
+                <ChatMarkdown
+                  inline
+                  text={workEntry.detail ?? previewText}
+                  cwd={ctx.markdownCwd}
+                  parseRawHtml={false}
+                  extraRemarkPlugins={[
                     [
                       remarkThoughtPreview,
                       workEntry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought",
                     ],
                   ]}
-                >
-                  {workEntry.detail ?? previewText}
-                </ReactMarkdown>
+                />
               ) : threadLabel ? (
                 <ThreadReadLabel
                   label={threadLabel}

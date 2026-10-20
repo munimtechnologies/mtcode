@@ -22,6 +22,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as ModelManifest from "./ModelManifest.ts";
 import { applyProviderCompatibility } from "./providerCompatibility.ts";
 import * as ServerConfig from "../config.ts";
@@ -62,6 +63,12 @@ export class ProviderRegistry extends Context.Service<
      */
     readonly refreshInstance: (
       instanceId: ProviderInstanceId,
+    ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+    /** Only refreshed instances can verify an update; the published list still includes every row. */
+    readonly refreshAfterUpdate: (
+      provider: ProviderDriverKind,
+      selectedInstanceId: ProviderInstanceId,
     ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
     readonly refreshWorkspaceSnapshot: (input: {
@@ -141,15 +148,17 @@ export function upsertProviderWorkspaceSnapshot(
   cwd: string,
   scopedSnapshot: ProviderWorkspaceSnapshot,
 ): ServerProvider {
+  const previousSnapshot = provider.workspaceSnapshots?.find((snapshot) => snapshot.cwd === cwd);
+  const optionDescriptors = scopedSnapshot.optionDescriptors ?? previousSnapshot?.optionDescriptors;
   const workspaceSnapshot = {
     cwd,
     checkedAt: scopedSnapshot.checkedAt,
     slashCommands: scopedSnapshot.slashCommandsPending
-      ? (provider.workspaceSnapshots?.find((snapshot) => snapshot.cwd === cwd)?.slashCommands ??
-        scopedSnapshot.slashCommands)
+      ? (previousSnapshot?.slashCommands ?? scopedSnapshot.slashCommands)
       : scopedSnapshot.slashCommands,
     ...(scopedSnapshot.slashCommandsPending ? { slashCommandsPending: true } : {}),
     skills: scopedSnapshot.skills,
+    ...(optionDescriptors === undefined ? {} : { optionDescriptors }),
   } satisfies NonNullable<ServerProvider["workspaceSnapshots"]>[number];
   return {
     ...provider,
@@ -374,6 +383,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const instanceRegistry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const manifestService = yield* ModelManifest.ModelManifest;
+    const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const serviceScope = yield* Effect.scope;
     const config = yield* ServerConfig.ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -469,21 +479,22 @@ export const layer = Layer.effect(
       liveSubsRef,
     ).pipe(Effect.map((map) => Array.from(map.values(), buildSnapshotSource)));
 
-    const persistProvider = (provider: ServerProvider) =>
-      Effect.gen(function* () {
-        const key = snapshotInstanceKey(provider);
-        const filePath = yield* resolveProviderStatusCachePath({
-          cacheDir: config.providerStatusCacheDir,
-          instanceId: key,
-        }).pipe(Effect.provideService(Path.Path, path));
-        const { workspaceSnapshots: _workspaceSnapshots, ...machineProvider } = provider;
-        yield* writeProviderStatusCache({ filePath, provider: machineProvider }).pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-          Effect.tapError(Effect.logError),
-          Effect.ignore,
-        );
-      });
+    const persistProvider = Effect.fn("ProviderRegistry.persistProvider")(function* (
+      provider: ServerProvider,
+    ) {
+      const key = snapshotInstanceKey(provider);
+      const filePath = yield* resolveProviderStatusCachePath({
+        cacheDir: config.providerStatusCacheDir,
+        instanceId: key,
+      }).pipe(Effect.provideService(Path.Path, path));
+      const { workspaceSnapshots: _workspaceSnapshots, ...machineProvider } = provider;
+      yield* writeProviderStatusCache({ filePath, provider: machineProvider }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.tapError(Effect.logError),
+        Effect.ignore,
+      );
+    });
 
     const applyProviderUpdateState = Effect.fn("applyProviderUpdateState")(function* (
       provider: ServerProvider,
@@ -700,6 +711,70 @@ export const layer = Layer.effect(
         return yield* Ref.get(providersRef);
       }
       return yield* refreshOneSource(providerSource);
+    });
+
+    const refreshAfterUpdate = Effect.fn("refreshAfterUpdate")(function* (
+      provider: ProviderDriverKind,
+      selectedInstanceId: ProviderInstanceId,
+    ) {
+      yield* manifestService.forceRefresh;
+      const instances = (yield* instanceRegistry.listInstances).filter(
+        (instance) =>
+          instance.driverKind === provider &&
+          (instance.enabled || instance.instanceId === selectedInstanceId),
+      );
+      const failedInstances = new Set<ProviderInstanceId>();
+      const recoverInstanceFailure = Effect.fn("recoverPostUpdateRefreshFailure")(function* (
+        instanceId: ProviderInstanceId,
+        cause: Cause.Cause<unknown>,
+      ) {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return yield* Effect.interrupt;
+        }
+        yield* Effect.logError("provider post-update refresh failed", {
+          instanceId,
+          cause: Cause.pretty(cause),
+        });
+        failedInstances.add(instanceId);
+        // A cached ready snapshot cannot verify a successful update.
+        return yield* updateProviders((providers) =>
+          providers.map((candidate) =>
+            candidate.instanceId === instanceId
+              ? { ...candidate, status: "error", message: "Provider refresh failed after update." }
+              : candidate,
+          ),
+        );
+      });
+      // Accounts can share an installation, but discovery must use each
+      // instance's own executable, environment, and credentials.
+      yield* Effect.forEach(
+        instances,
+        (instance) =>
+          Effect.gen(function* () {
+            yield* instance.invalidateCaches ?? Effect.void;
+            const maintenance = yield* instance.snapshot.resolveMaintenance({ fresh: true });
+            if (maintenance.packageName) {
+              yield* latestVersions.invalidate(maintenance.packageName);
+            }
+          }).pipe(Effect.catchCause((cause) => recoverInstanceFailure(instance.instanceId, cause))),
+        { concurrency: "unbounded", discard: true },
+      );
+      yield* Effect.forEach(
+        instances.filter((instance) => !failedInstances.has(instance.instanceId)),
+        (instance) =>
+          refreshOneSource(buildSnapshotSource(instance)).pipe(
+            Effect.catchCause((cause) => recoverInstanceFailure(instance.instanceId, cause)),
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
+      const refreshedInstanceIds = new Set(
+        instances
+          .filter((instance) => !failedInstances.has(instance.instanceId))
+          .map((instance) => instance.instanceId),
+      );
+      return (yield* Ref.get(providersRef)).filter((candidate) =>
+        refreshedInstanceIds.has(candidate.instanceId),
+      );
     });
 
     const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
@@ -1016,6 +1091,7 @@ export const layer = Layer.effect(
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshWorkspaceSnapshot: (input) =>
         refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
+      refreshAfterUpdate,
       getProviderMaintenanceCapabilitiesForInstance,
       listWorkspaceCapabilities,
       setProviderMaintenanceActionState,

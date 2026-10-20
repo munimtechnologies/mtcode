@@ -8,7 +8,10 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -155,6 +158,7 @@ import {
   pullRequestFindingKey,
   pullRequestHandoffLabels,
   PULL_REQUEST_MERGE_METHOD_LABELS,
+  checkoutFailureDescription,
   readableFailure,
   readPullRequestDetailSnapshot,
   resolvePullRequestReferenceHost,
@@ -827,7 +831,6 @@ export function PullRequestDetailPanel({
     nativeStackQuery.refresh();
   };
   const [refreshToken, setRefreshToken] = useState(0);
-  const codeRefreshToken = refreshToken + (turnRefresh ?? 0);
   const [activityRevision, setActivityRevision] = useState<{
     readonly key: string;
     readonly updatedAt: string;
@@ -1214,12 +1217,12 @@ export function PullRequestDetailPanel({
     });
     if (prepared._tag === "Failure") {
       setHandoff(null);
-      const detailMessage =
-        prepareThread.error instanceof Error ? prepareThread.error.message : null;
       toastManager.update(toastId, {
         type: "error",
         title: "Could not prepare the pull request checkout",
-        ...(detailMessage ? { description: detailMessage } : {}),
+        description: checkoutFailureDescription(
+          isAtomCommandInterrupted(prepared) ? undefined : squashAtomCommandFailure(prepared),
+        ),
       });
       return;
     }
@@ -2874,7 +2877,8 @@ export function PullRequestDetailPanel({
                     fixFindingLabel={handoffLabels.fixFinding}
                     {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
                     onRefresh={refreshDetail}
-                    refreshToken={codeRefreshToken}
+                    refreshToken={refreshToken}
+                    backgroundRefreshToken={turnRefresh ?? 0}
                     revealRequest={codeRevealRequest}
                   />
                 </Suspense>

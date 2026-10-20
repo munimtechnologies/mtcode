@@ -147,39 +147,54 @@ describe("serializeRenderedMarkdownFragment", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([String.raw`$\frac{1}{2}$`, "\\[\n\\frac{1}{2}\n\\]"])(
-    "copies the LaTeX when the selection is entirely inside an equation: %s",
-    (source) => {
-      const math = Object.assign(new FakeElement("SPAN", [], { "data-markdown-copy": source }), {
-        cloneNode: () => math,
-      }).append(new FakeText("1212"));
-      const fragment = new FakeElement("DIV");
-      const container = Object.assign(fragment, {
-        innerHTML: "",
-        appendChild(child: FakeText) {
-          fragment.append(child);
-        },
-        replaceChildren(child: FakeElement) {
-          fragment.childNodes.splice(0, fragment.childNodes.length, child);
-        },
-        querySelectorAll: () => [],
-      });
-      vi.stubGlobal("document", { createElement: () => container });
-      const selection = {
-        rangeCount: 1,
-        getRangeAt: () => ({
-          collapsed: false,
-          cloneContents: () => new FakeText("1"),
-          commonAncestorContainer: {
-            nodeType: ELEMENT_NODE,
-            closest: (selector: string) => (selector === "pre" ? null : math),
-          },
-        }),
-      } as unknown as Selection;
-
-      expect(chatMarkdownClipboardPayload(selection)?.text).toBe(source);
+  it.each([
+    {
+      kind: "inline",
+      copy: String.raw`\(\frac{1}{2}\)`,
+      html: String.raw`<code>\(\frac{1}{2}\)</code>`,
     },
-  );
+    {
+      kind: "display",
+      copy: "\\[\n\\frac{1}{2}\n\\]\n\n",
+      html: "<pre><code>\\[\n\\frac{1}{2}\n\\]</code></pre>",
+    },
+  ])("copies the TeX when the selection is entirely inside $kind math", ({ kind, copy, html }) => {
+    const math = new FakeElement("SPAN", [], {
+      "data-markdown-math": kind,
+      "data-markdown-copy": copy,
+    }).append(new FakeText("1212"));
+    const createElement = (tagName: string) => {
+      const children: Array<{ outerHTML: string }> = [];
+      return {
+        textContent: "",
+        appendChild() {},
+        append(...nodes: Array<{ outerHTML: string }>) {
+          children.push(...nodes);
+        },
+        get outerHTML(): string {
+          const inner = children.map((child) => child.outerHTML).join("") || this.textContent;
+          return `<${tagName}>${inner}</${tagName}>`;
+        },
+      };
+    };
+    vi.stubGlobal("document", { createElement });
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => ({
+        collapsed: false,
+        cloneContents: () => new FakeText("1"),
+        commonAncestorContainer: {
+          nodeType: ELEMENT_NODE,
+          closest: (selector: string) => (selector === "[data-markdown-math]" ? math : null),
+        },
+      }),
+    } as unknown as Selection;
+
+    expect(chatMarkdownClipboardPayload(selection)).toEqual({
+      text: copy.trim(),
+      html: `<meta charset="utf-8">${html}`,
+    });
+  });
 
   it("wraps inline code in backticks", () => {
     const paragraph = new FakeElement("P").append(

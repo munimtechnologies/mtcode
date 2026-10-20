@@ -69,7 +69,13 @@ describe("readFullEnvironmentFromLoginShell", () => {
   type FullEnvExecFile = (
     file: string,
     args: ReadonlyArray<string>,
-    options: { encoding: "utf8"; timeout: number; maxBuffer?: number },
+    options: {
+      encoding: "utf8";
+      timeout: number;
+      maxBuffer?: number;
+      detached?: true;
+      stdio?: ["ignore", "pipe", "ignore"];
+    },
   ) => string;
 
   function fullEnvOutput(entries: ReadonlyArray<string>): string {
@@ -101,6 +107,8 @@ describe("readFullEnvironmentFromLoginShell", () => {
     expect(args?.[1]).toContain("__T3CODE_ENV_ALL_END__");
     expect(options.encoding).toBe("utf8");
     expect(options.timeout).toBe(5000);
+    expect(options.detached).toBe(true);
+    expect(options.stdio).toEqual(["ignore", "pipe", "ignore"]);
   });
 
   it("keeps values that contain newlines and equals signs", () => {
@@ -146,6 +154,46 @@ describe("readFullEnvironmentFromLoginShell", () => {
     );
 
     expect(readFullEnvironmentFromLoginShell("/bin/zsh", execFile)).toEqual({ EDITOR: "nvim" });
+  });
+});
+
+describe("readEnvironmentFromLoginShell probe", () => {
+  it("uses a shell-agnostic printenv PATH probe", () => {
+    const execFile = vi.fn<
+      (
+        file: string,
+        args: ReadonlyArray<string>,
+        options: { encoding: "utf8"; timeout: number },
+      ) => string
+    >(() => "__T3CODE_ENV_PATH_START__\n/a:/b\n__T3CODE_ENV_PATH_END__\n");
+
+    expect(readEnvironmentFromLoginShell("/opt/homebrew/bin/fish", ["PATH"], execFile).PATH).toBe(
+      "/a:/b",
+    );
+    expect(execFile).toHaveBeenCalledTimes(1);
+
+    const firstCall = execFile.mock.calls[0] as
+      | [string, ReadonlyArray<string>, { encoding: "utf8"; timeout: number }]
+      | undefined;
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected execFile to be called");
+    }
+
+    const [shell, args, options] = firstCall;
+    expect(shell).toBe("/opt/homebrew/bin/fish");
+    expect(args).toHaveLength(2);
+    expect(args?.[0]).toBe("-ilc");
+    expect(args?.[1]).toContain("printenv PATH || true");
+    expect(args?.[1]).toContain("__T3CODE_ENV_PATH_START__");
+    expect(args?.[1]).toContain("__T3CODE_ENV_PATH_END__");
+    expect(options).toEqual({
+      encoding: "utf8",
+      timeout: 5000,
+      killSignal: "SIGKILL",
+      detached: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
   });
 });
 

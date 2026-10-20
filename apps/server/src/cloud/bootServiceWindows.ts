@@ -759,12 +759,17 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
   const restart: BootService.BootService["Service"]["restart"] = Effect.gen(function* () {
     yield* requireWindows;
     // Nothing installed here is nothing of ours to restart. The generated
-    // startup script is the artifact that proves this base directory owns it.
+    // startup script is the artifact that proves this base directory owns it,
+    // so anything else is another home's service and is `skipped`. Windows has
+    // no service manager to queue a restart with, so a restart is never
+    // `queued`: the launcher is stopped and started again directly.
     const script = yield* fs.readFileString(startupScriptPath).pipe(Effect.option);
-    if (Option.isNone(script) || script.value !== renderStartupScript(plan)) return false;
+    if (Option.isNone(script) || script.value !== renderStartupScript(plan)) {
+      return "skipped" as const;
+    }
     yield* requestStop;
     yield* runPowerShellScript("restarting the service", startupScriptPath);
-    return true;
+    return "restarted" as const;
   }).pipe(Effect.withSpan("cloud.boot_service_windows.restart"));
 
   return BootService.BootService.of({ install, restart, uninstall, status });

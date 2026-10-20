@@ -3,6 +3,7 @@ import * as HttpServerRespondable from "effect/http/HttpServerRespondable";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
 import {
+  ForwardCompatibleArray,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -244,7 +245,7 @@ export const PullRequestReviewCapabilities = Schema.Struct({
   inlineComment: Schema.Boolean,
   reply: Schema.Boolean,
   resolve: Schema.Boolean,
-  verdicts: Schema.Array(PullRequestReviewVerdict),
+  verdicts: ForwardCompatibleArray(PullRequestReviewVerdict),
 });
 export type PullRequestReviewCapabilities = typeof PullRequestReviewCapabilities.Type;
 
@@ -266,14 +267,14 @@ export type PullRequestViewedFilesStore = typeof PullRequestViewedFilesStore.Typ
 export const PullRequestCapabilities = Schema.Struct({
   diff: Schema.Boolean,
   comment: Schema.Boolean,
-  actions: Schema.Array(PullRequestAction),
-  mergeMethods: Schema.Array(PullRequestMergeMethod),
+  actions: ForwardCompatibleArray(PullRequestAction),
+  mergeMethods: ForwardCompatibleArray(PullRequestMergeMethod),
   deleteBranch: Schema.optional(Schema.Boolean),
   /**
    * Absent where it cannot at all, which is every host that has not said otherwise — so a
    * provider that says nothing offers nothing.
    */
-  updateMethods: Schema.optional(Schema.Array(PullRequestUpdateMethod)),
+  updateMethods: Schema.optional(ForwardCompatibleArray(PullRequestUpdateMethod)),
   search: Schema.Boolean,
   reactions: Schema.optional(Schema.Boolean),
   viewedFiles: Schema.optional(PullRequestViewedFilesStore),
@@ -291,12 +292,12 @@ export type PullRequestCapabilities = typeof PullRequestCapabilities.Type;
  */
 export const PullRequestViewerPermissions = Schema.Struct({
   stackRebase: Schema.optional(Schema.Boolean),
-  actions: Schema.Array(PullRequestAction),
+  actions: ForwardCompatibleArray(PullRequestAction),
   comment: Schema.Boolean,
   resolve: Schema.Boolean,
-  verdicts: Schema.Array(PullRequestReviewVerdict),
+  verdicts: ForwardCompatibleArray(PullRequestReviewVerdict),
   requestReviewers: Schema.Boolean,
-  updateMethods: Schema.optional(Schema.Array(PullRequestUpdateMethod)),
+  updateMethods: Schema.optional(ForwardCompatibleArray(PullRequestUpdateMethod)),
   labels: Schema.optional(Schema.Boolean),
   editChangeRequest: Schema.optional(Schema.Boolean),
 });
@@ -551,7 +552,7 @@ export const PullRequestProviderSummary = Schema.Struct({
   host: TrimmedNonEmptyString,
   kind: SourceControlProviderKind,
   searchesOnHost: Schema.Boolean,
-  actions: Schema.optional(Schema.Array(PullRequestAction)),
+  actions: Schema.optional(ForwardCompatibleArray(PullRequestAction)),
   projectCount: PositiveInt,
   configured: Schema.Boolean,
   detail: Schema.NullOr(TrimmedNonEmptyString),

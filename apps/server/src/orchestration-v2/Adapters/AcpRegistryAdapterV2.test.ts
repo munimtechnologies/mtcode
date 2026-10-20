@@ -1,7 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { ProviderInstanceId, ProviderSessionId, ThreadId } from "@t3tools/contracts";
+import {
+  type ModelSelection,
+  ProviderInstanceId,
+  ProviderSessionId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
+import * as DateTime from "effect/DateTime";
+import * as Stream from "effect/Stream";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -31,6 +38,7 @@ import {
   decodeAcpReplayTranscript,
   makeAcpReplayCompletenessAssertion,
   makeAcpReplayRuntime,
+  makeTurnInput,
 } from "./AcpAdapterV2.testkit.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { BUILT_IN_PROVIDER_ADAPTER_DRIVER_KINDS_V2 } from "../builtInProviderAdapterDrivers.ts";
@@ -39,6 +47,7 @@ import {
   ACP_REGISTRY_PROVIDER,
   makeAcpRegistryAdapterV2,
   acpRegistryPromptFailure,
+  acpRegistryProbeResult,
 } from "@t3tools/provider-acp-registry/testing";
 
 const registryUrl = "https://registry.test/registry.json";
@@ -140,7 +149,7 @@ describe("AcpRegistryAdapterV2", () => {
     });
   });
 
-  describe("the agent's own mode picker", () => {
+  describe("the agent's own pickers", () => {
     type Frame = Record<string, unknown>;
     const outbound = (method: string, params: unknown = "<any>"): Frame => ({
       type: "expect_outbound",
@@ -159,16 +168,19 @@ describe("AcpRegistryAdapterV2", () => {
       options: ["ask", "auto"].map((value) => ({ value, name: value })),
     });
 
-    const openWithStoredModePick = Effect.fn("openWithStoredModePick")(function* (input: {
+    const openWithStoredPicks = Effect.fn("openWithStoredPicks")(function* (input: {
       readonly setup: unknown;
-      readonly modeFrames: ReadonlyArray<Frame>;
-      readonly storedModePick: string;
+      readonly pickFrames: ReadonlyArray<Frame>;
+      readonly customModels?: ReadonlyArray<string>;
+      readonly storedModel?: string;
+      readonly storedModePick?: string;
+      readonly turnModels?: ReadonlyArray<string>;
     }) {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const replayDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-acp-registry-mode-pick-",
+        prefix: "t3-acp-registry-stored-picks-",
       });
       const statusPath = path.join(replayDir, "status.json");
       const transcript = yield* decodeAcpReplayTranscript(
@@ -176,7 +188,7 @@ describe("AcpRegistryAdapterV2", () => {
           provider: ACP_REGISTRY_PROVIDER,
           protocol: "acp.ndjson-jsonrpc",
           version: "1",
-          scenario: "stored-mode-pick",
+          scenario: "stored-picks",
           entries: [
             outbound("initialize"),
             answer("initialize", {
@@ -186,21 +198,24 @@ describe("AcpRegistryAdapterV2", () => {
             }),
             outbound("session/new"),
             answer("session/new", { sessionId: "agent-session", ...(input.setup as object) }),
-            ...input.modeFrames,
+            ...input.pickFrames,
           ] as never,
         },
         ACP_REGISTRY_PROVIDER,
       );
-      const instanceId = ProviderInstanceId.make("acp-registry-mode-pick");
+      const instanceId = ProviderInstanceId.make("acp-registry-stored-picks");
+      let published: AcpRegistryLiveConfiguration | undefined;
       const adapter = yield* makeAcpRegistryAdapterV2({
         selfInvocation: yield* resolveSelfInvocation(),
         instanceId,
         settings: yield* decodeAcpRegistryAdapterSettings({
           agentId: "fixture-agent",
           authMethodId: "test",
+          customModels: input.customModels ?? [],
         }),
         environment: {},
         makeRuntime: makeAcpReplayRuntime({
+          customModels: input.customModels,
           transcript,
           statusPath,
           scriptPath: yield* path.fromFileUrl(
@@ -209,35 +224,96 @@ describe("AcpRegistryAdapterV2", () => {
           childProcessSpawner,
           fileSystem,
         }),
-      }).pipe(Effect.provide(layerInjectedRuntimeCatalog));
-      yield* adapter
-        .openSession({
-          threadId: ThreadId.make("thread-acp-registry-mode-pick"),
-          providerSessionId: ProviderSessionId.make("provider-session-mode-pick"),
-          modelSelection: {
-            instanceId,
-            model: "default",
-            options: [{ id: ACP_SESSION_MODE_OPTION_ID, value: input.storedModePick }],
-          },
-          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-            runtimeMode: "approval-required",
-            interactionMode: "default",
-            cwd: replayDir,
-          }),
-        })
-        .pipe(Effect.scoped);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            layerInjectedRuntimeCatalog,
+            Layer.mock(AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator)({
+              withForegroundStartup: (_startupKey, effect) => effect,
+              publishLiveConfiguration: (_instanceId, configuration) =>
+                Effect.sync(() => {
+                  published = configuration;
+                }),
+            }),
+          ),
+        ),
+      );
+      const threadId = ThreadId.make("thread-acp-registry-stored-picks");
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        cwd: replayDir,
+      });
+      const stored: ModelSelection = {
+        instanceId,
+        model: input.storedModel ?? "default",
+        ...(input.storedModePick === undefined
+          ? {}
+          : { options: [{ id: ACP_SESSION_MODE_OPTION_ID, value: input.storedModePick }] }),
+      };
+      const configurations: Array<AcpRegistryLiveConfiguration | undefined> = [];
+      yield* Effect.gen(function* () {
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-stored-picks"),
+          modelSelection: stored,
+          runtimePolicy,
+        });
+        configurations.push(published);
+        if (input.turnModels === undefined) return;
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: stored,
+          runtimePolicy,
+        });
+        const now = yield* DateTime.now;
+        let current = stored;
+        for (const [index, model] of input.turnModels.entries()) {
+          const target: ModelSelection = { instanceId, model };
+          const plan = yield* adapter.planSelectionTransition({
+            current,
+            target,
+            sessionCapabilities: runtime.providerSession.capabilities,
+          });
+          assert.equal(plan.type, "apply_on_next_turn");
+          yield* runtime.startTurn(
+            makeTurnInput({
+              threadId,
+              providerThread,
+              instanceId,
+              runtimePolicy,
+              now,
+              ordinal: index + 1,
+              modelSelection: target,
+            }),
+          );
+          yield* runtime.events.pipe(
+            Stream.takeUntil((event) => event.type === "turn.terminal"),
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                if (event.type === "turn.terminal") {
+                  assert.equal(event.status, "completed", event.failure?.message);
+                }
+              }),
+            ),
+          );
+          configurations.push(published);
+          current = target;
+        }
+      }).pipe(Effect.scoped);
       yield* makeAcpReplayCompletenessAssertion(fileSystem, statusPath, transcript);
+      return { configurations };
     });
 
     it.effect("switches an agent that only advertises modes with session/set_mode", () =>
-      openWithStoredModePick({
+      openWithStoredPicks({
         setup: {
           modes: {
             currentModeId: "default",
             availableModes: ["default", "autoEdit"].map((id) => ({ id, name: id })),
           },
         },
-        modeFrames: [
+        pickFrames: [
           outbound("session/set_mode", { sessionId: "agent-session", modeId: "autoEdit" }),
           answer("session/set_mode", {}),
         ],
@@ -246,9 +322,9 @@ describe("AcpRegistryAdapterV2", () => {
     );
 
     it.effect("switches a mode config option under its own id", () =>
-      openWithStoredModePick({
+      openWithStoredPicks({
         setup: { configOptions: [permissionModeOption("ask")] },
-        modeFrames: [
+        pickFrames: [
           outbound("session/set_config_option", {
             sessionId: "agent-session",
             configId: "permission-mode",
@@ -257,6 +333,287 @@ describe("AcpRegistryAdapterV2", () => {
           answer("session/set_config_option", { configOptions: [permissionModeOption("auto")] }),
         ],
         storedModePick: "auto",
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    const modelOption = (id: string, currentValue: string, grouped = false) => ({
+      id,
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue,
+      options: grouped
+        ? [{ group: "models", name: "Models", options: [{ value: "default", name: "Default" }] }]
+        : [{ value: "auto", name: "Auto" }],
+    });
+    const configOptionUpdate = (configOptions: ReadonlyArray<unknown>): Frame => ({
+      type: "emit_inbound",
+      frame: {
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "agent-session",
+          update: { sessionUpdate: "config_option_update", configOptions },
+        },
+      },
+    });
+    const prompt = (...updates: ReadonlyArray<Frame>): ReadonlyArray<Frame> => [
+      outbound("session/prompt"),
+      ...updates,
+      answer("session/prompt", { stopReason: "end_turn" }),
+    ];
+    const setModel = (modelId: string): ReadonlyArray<Frame> => [
+      outbound("session/set_model", { sessionId: "agent-session", modelId }),
+      answer("session/set_model", {}),
+    ];
+
+    it.effect(
+      "discovers session models and switches through live model configuration changes",
+      () =>
+        Effect.gen(function* () {
+          const flatOption = (current: string) => modelOption("live-model", current);
+          const groupedOption = (current: string) =>
+            modelOption("replacement-model", current, true);
+          const { configurations } = yield* openWithStoredPicks({
+            setup: {
+              models: {
+                currentModelId: "hermes",
+                availableModels: ["hermes", "auto", "default"].map((modelId) => ({
+                  modelId,
+                  name: modelId,
+                })),
+              },
+            },
+            customModels: ["custom-model"],
+            storedModel: "default",
+            turnModels: [
+              "hermes",
+              "custom-model",
+              "auto",
+              "default",
+              "hermes",
+              "custom-model",
+              "auto",
+              "custom-model",
+              "default",
+              "hermes",
+            ],
+            pickFrames: [
+              ...setModel("default"),
+              ...setModel("hermes"),
+              ...prompt(),
+              ...setModel("custom-model"),
+              ...prompt(),
+              ...setModel("auto"),
+              ...prompt(),
+              ...setModel("default"),
+              ...prompt(),
+              ...setModel("hermes"),
+              ...prompt(configOptionUpdate([flatOption("hermes")])),
+              outbound("session/set_config_option", {
+                sessionId: "agent-session",
+                configId: "live-model",
+                value: "custom-model",
+              }),
+              answer("session/set_config_option", { configOptions: [flatOption("custom-model")] }),
+              ...prompt(),
+              outbound("session/set_config_option", {
+                sessionId: "agent-session",
+                configId: "live-model",
+                value: "auto",
+              }),
+              answer("session/set_config_option", { configOptions: [flatOption("auto")] }),
+              ...prompt(configOptionUpdate([groupedOption("auto")])),
+              outbound("session/set_config_option", {
+                sessionId: "agent-session",
+                configId: "replacement-model",
+                value: "custom-model",
+              }),
+              answer("session/set_config_option", {
+                configOptions: [groupedOption("custom-model")],
+              }),
+              ...prompt(),
+              outbound("session/set_config_option", {
+                sessionId: "agent-session",
+                configId: "replacement-model",
+                value: "default",
+              }),
+              answer("session/set_config_option", { configOptions: [groupedOption("default")] }),
+              ...prompt(configOptionUpdate([])),
+              ...setModel("hermes"),
+              ...prompt(),
+            ],
+          });
+          assert.deepEqual(
+            configurations.map((configuration) => ({
+              models: configuration?.models.map((model) => model.id),
+              current: configuration?.currentModelId,
+            })),
+            [
+              { models: ["hermes", "auto", "default"], current: "default" },
+              { models: ["hermes", "auto", "default"], current: "hermes" },
+              { models: ["hermes", "auto", "default"], current: null },
+              { models: ["hermes", "auto", "default"], current: "auto" },
+              { models: ["hermes", "auto", "default"], current: "default" },
+              { models: ["auto"], current: null },
+              { models: ["auto"], current: null },
+              { models: ["default"], current: null },
+              { models: ["default"], current: null },
+              { models: ["hermes", "auto", "default"], current: "default" },
+              { models: ["hermes", "auto", "default"], current: "hermes" },
+            ],
+          );
+        }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("leaves unadvertised model IDs alone in both model selection protocols", () =>
+      Effect.gen(function* () {
+        const { configurations } = yield* openWithStoredPicks({
+          setup: {
+            models: {
+              currentModelId: "hermes",
+              availableModels: ["hermes", "other"].map((modelId) => ({ modelId, name: modelId })),
+            },
+          },
+          storedModel: "default",
+          turnModels: [
+            "auto",
+            "removed-model",
+            "other",
+            "default",
+            "auto",
+            "hermes",
+            "removed-model",
+          ],
+          pickFrames: [
+            ...prompt(),
+            ...prompt(),
+            ...setModel("other"),
+            ...prompt(
+              configOptionUpdate([
+                {
+                  ...modelOption("live-model", "other"),
+                  options: [{ value: "other", name: "Other" }],
+                },
+              ]),
+            ),
+            ...prompt(),
+            ...prompt(),
+            ...prompt(
+              configOptionUpdate([
+                {
+                  ...modelOption("replacement-model", "other", true),
+                  options: [
+                    {
+                      group: "models",
+                      name: "Models",
+                      options: [{ value: "other", name: "Other" }],
+                    },
+                  ],
+                },
+              ]),
+            ),
+            ...prompt(),
+          ],
+        });
+        assert.deepEqual(
+          configurations.map((configuration) => configuration?.currentModelId),
+          ["hermes", "hermes", "hermes", "other", "other", "other", "other", "other"],
+        );
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+    const modelOptions = [
+      { id: "fast", name: "Fast", category: "model", type: "boolean", currentValue: false },
+      {
+        id: " ",
+        name: "Unnamed",
+        category: "model",
+        type: "select",
+        currentValue: "unaddressable",
+        options: [{ value: "unaddressable", name: "Unaddressable" }],
+      },
+      {
+        id: "provider",
+        name: "Provider",
+        category: "model",
+        type: "select",
+        currentValue: "gateway",
+        options: [
+          {
+            group: "hosted",
+            name: "Hosted",
+            options: [
+              { value: "gateway", name: "Gateway" },
+              { value: "codex", name: "Codex" },
+            ],
+          },
+        ],
+      },
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "later-model",
+        options: [{ value: "later-model", name: "Later model" }],
+      },
+    ] as const;
+
+    it.effect("opens a model from the catalog by writing the first usable model select", () =>
+      Effect.gen(function* () {
+        const setup = { sessionId: "agent-session", configOptions: modelOptions };
+        const catalog = acpRegistryProbeResult(ProviderInstanceId.make("acp-registry-mode-pick"), {
+          sessionId: setup.sessionId,
+          initializeResult: { protocolVersion: 1 },
+          sessionSetupResult: {
+            ...setup,
+            // The catalog uses the normalized groupId; ACP v1 sends group on the wire.
+            configOptions: modelOptions.map((option) =>
+              option.id === "provider"
+                ? {
+                    ...option,
+                    options: [{ ...option.options[0], groupId: option.options[0].group }],
+                  }
+                : option,
+            ),
+          },
+          modelConfigId: "provider",
+        });
+        assert.deepEqual(catalog.models, [
+          { id: "gateway", name: "Gateway", description: null },
+          { id: "codex", name: "Codex", description: null },
+        ]);
+        assert.equal(catalog.currentModelId, "gateway");
+        const model = catalog.models[1]?.id;
+        assert.isDefined(model);
+        const opened = yield* openWithStoredPicks({
+          setup,
+          pickFrames: [
+            outbound("session/set_config_option", {
+              sessionId: "agent-session",
+              configId: "provider",
+              value: "codex",
+            }),
+            answer("session/set_config_option", {
+              configOptions: modelOptions.map((option) =>
+                option.id === "provider" ? { ...option, currentValue: "codex" } : option,
+              ),
+            }),
+          ],
+          storedModel: model,
+        });
+        assert.equal(opened.configurations.at(-1)?.currentModelId, "codex");
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("ignores a later-option model without writing configuration", () =>
+      Effect.gen(function* () {
+        const { configurations } = yield* openWithStoredPicks({
+          setup: { configOptions: modelOptions },
+          pickFrames: [],
+          storedModel: "later-model",
+        });
+        assert.equal(configurations[0]?.currentModelId, "gateway");
       }).pipe(Effect.provide(layerTest), Effect.scoped),
     );
   });

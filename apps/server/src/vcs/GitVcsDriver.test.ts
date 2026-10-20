@@ -9,12 +9,14 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/process";
 import { assert, it } from "@effect/vitest";
 
 import { CheckpointRef, GitCommandError, VcsProcessExitError } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ServerConfig from "../config.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -134,6 +136,38 @@ it.effect("captures a checkpoint without expiring a split index the repository s
     assert.isTrue(yield* fileSystem.exists(path.join(cwd, ".git", "index")));
   }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
+
+it.effect("lists the fetch and push URLs of a partial clone remote", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const cwd = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-partial-clone-remotes-",
+    });
+    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    yield* runGit(cwd, ["init"]);
+    yield* runGit(cwd, ["remote", "add", "origin", "https://github.com/pingdotgg/t3code.git"]);
+    yield* runGit(cwd, [
+      "remote",
+      "set-url",
+      "--push",
+      "origin",
+      "git@github.com:octocat/t3code.git",
+    ]);
+    yield* runGit(cwd, ["config", "remote.origin.promisor", "true"]);
+    yield* runGit(cwd, ["config", "remote.origin.partialclonefilter", "blob:none"]);
+
+    const result = yield* driver.listRemotes(cwd);
+    assert.deepEqual(result.remotes, [
+      {
+        name: "origin",
+        url: "https://github.com/pingdotgg/t3code.git",
+        pushUrl: Option.some("git@github.com:octocat/t3code.git"),
+        isPrimary: true,
+      },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
+);
+
 const makeCheckpointFixture = Effect.fn("makeCheckpointFixture")(function* (
   driver: Effect.Success<ReturnType<typeof GitVcsDriver.makeVcsDriverShape>>,
   cwd: string,
@@ -269,6 +303,9 @@ it.effect("checkpoint capture still fails when a clean filter rejects a file", (
     );
 
     assert.strictEqual(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.strictEqual(result.failure._tag, "VcsProcessExitError");
+    }
     assert.deepEqual(yield* fileSystem.readFile(path.join(cwd, ".git", "index")), originalIndex);
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
   }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
@@ -302,6 +339,98 @@ it.effect("checkpoint capture refuses a truncated nested repository listing", ()
     assert.strictEqual(result._tag, "Failure");
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
   }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
+);
+
+it.effect("checkpoint capture skips an ignored project while keeping its allowed sibling", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    const parent = yield* fs.makeTempDirectoryScoped({ prefix: "t3-checkpoint-ignored-" });
+    const { git } = yield* makeCheckpointFixture(driver, parent);
+    yield* fs.writeFileString(
+      path.join(parent, ".gitignore"),
+      "*\n!.gitignore\n!file.txt\n!keep/\n!keep/**\n",
+    );
+    const ignoredCwd = path.join(parent, "ignored");
+    const keepCwd = path.join(parent, "keep");
+    yield* fs.makeDirectory(ignoredCwd);
+    yield* fs.makeDirectory(keepCwd);
+    yield* fs.writeFileString(path.join(ignoredCwd, "secret.txt"), "private\n");
+    yield* fs.writeFileString(path.join(keepCwd, "new.txt"), "new\n");
+    const originalIndex = yield* fs.readFile(path.join(parent, ".git", "index"));
+    const ignoredRef = CheckpointRef.make("refs/t3/checkpoints/ignored");
+    const keepRef = CheckpointRef.make("refs/t3/checkpoints/keep");
+
+    const ignored = yield* Effect.result(
+      driver.checkpoints.captureCheckpoint({ cwd: ignoredCwd, checkpointRef: ignoredRef }),
+    );
+    yield* driver.checkpoints.captureCheckpoint({ cwd: keepCwd, checkpointRef: keepRef });
+
+    assert.strictEqual((yield* git(["show", `${keepRef}:keep/new.txt`])).stdout, "new\n");
+    assert.strictEqual((yield* git(["ls-tree", "-r", keepRef, "--", "ignored"])).stdout, "");
+    assert.isFalse(
+      yield* driver.checkpoints.hasCheckpointRef({ cwd: parent, checkpointRef: ignoredRef }),
+    );
+    assert.deepEqual(yield* fs.readFile(path.join(parent, ".git", "index")), originalIndex);
+    assert.strictEqual(ignored._tag, "Failure");
+    if (ignored._tag === "Failure") {
+      assert.strictEqual(ignored.failure._tag, "VcsUnsupportedOperationError");
+    }
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
+);
+
+it.effect.each([
+  { tracking: "committed-only", committed: ["committed.txt"], staged: [] },
+  { tracking: "staged-only", committed: [], staged: ["staged.txt"] },
+  { tracking: "mixed", committed: ["committed.txt"], staged: ["staged.txt"] },
+])(
+  "checkpoint capture keeps $tracking tracked edits but excludes new files in a project ignored later",
+  ({ committed, staged }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const driver = yield* GitVcsDriver.makeVcsDriverShape();
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "t3-checkpoint-ignored-later-" });
+      const { git, checkpointRef } = yield* makeCheckpointFixture(driver, parent);
+      const cwd = path.join(parent, "sub");
+      yield* fs.makeDirectory(cwd);
+      for (const file of committed) {
+        yield* fs.writeFileString(path.join(cwd, file), "committed\n");
+        yield* git(["add", `sub/${file}`]);
+      }
+      if (committed.length > 0) {
+        yield* git(["commit", "-m", "track project"]);
+      }
+      for (const file of staged) {
+        yield* fs.writeFileString(path.join(cwd, file), "staged\n");
+        yield* git(["add", `sub/${file}`]);
+      }
+      const tracked = [...committed, ...staged];
+      yield* fs.writeFileString(path.join(parent, ".gitignore"), "sub/\n");
+      for (const file of tracked) {
+        yield* fs.writeFileString(path.join(cwd, file), `${file} working\n`);
+      }
+      yield* fs.writeFileString(path.join(cwd, "secret.txt"), "private\n");
+      const originalIndex = yield* fs.readFile(path.join(parent, ".git", "index"));
+
+      const captured = yield* Effect.result(
+        driver.checkpoints.captureCheckpoint({ cwd, checkpointRef }),
+      );
+
+      assert.deepEqual(yield* fs.readFile(path.join(parent, ".git", "index")), originalIndex);
+      if (captured._tag === "Failure") return yield* captured.failure;
+      assert.strictEqual(
+        (yield* git(["ls-tree", "-r", "--name-only", checkpointRef, "--", "sub"])).stdout,
+        tracked.map((file) => `sub/${file}\n`).join(""),
+      );
+      for (const file of tracked) {
+        assert.strictEqual(
+          (yield* git(["show", `${checkpointRef}:sub/${file}`])).stdout,
+          `${file} working\n`,
+        );
+      }
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
 it.effect("checkpoint recovery refuses excessive candidates before probing", () =>
@@ -1250,3 +1379,50 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
     ),
   );
 });
+
+it.effect.each(["win32", "linux"] as const)(
+  "checkpoint working-tree commands enable Git long paths only on Windows (%s)",
+  (platform) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const liveProcess = yield* VcsProcess.VcsProcess;
+      const driver = yield* GitVcsDriver.makeVcsDriverShape();
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-checkpoint-long-paths-" });
+      const { git, checkpointRef } = yield* makeCheckpointFixture(driver, cwd);
+      // An unborn nested repository fails the first `add`, so recovery's listing runs too.
+      yield* git(["init", "empty"]);
+      const observedArgs: ReadonlyArray<string>[] = [];
+      const platformDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
+        Effect.provideService(HostProcess.Platform, platform),
+        Effect.provideService(VcsProcess.VcsProcess, {
+          run: (input) => {
+            observedArgs.push(input.args);
+            return liveProcess.run(input);
+          },
+        }),
+      );
+
+      yield* platformDriver.checkpoints.captureCheckpoint({ cwd, checkpointRef });
+      yield* fs.writeFileString(path.join(cwd, "file.txt"), "changed\n");
+      assert.isTrue(yield* platformDriver.checkpoints.restoreCheckpoint({ cwd, checkpointRef }));
+
+      assert.strictEqual(yield* fs.readFileString(path.join(cwd, "file.txt")), "unstaged\n");
+      assert.strictEqual((yield* git(["ls-tree", checkpointRef, "--", "empty"])).stdout, "");
+      for (const command of ["add", "ls-files", "restore", "clean", "reset"]) {
+        const calls = observedArgs.filter(
+          (args) => args.includes(command) && (command !== "ls-files" || args.includes("--others")),
+        );
+        assert.isNotEmpty(calls, `Expected checkpoint command: ${command}`);
+        for (const args of calls) {
+          const setting = args.indexOf("core.longpaths=true");
+          if (platform === "win32") {
+            assert.strictEqual(args[setting - 1], "-c", args.join(" "));
+            assert.isBelow(setting, args.indexOf(command), args.join(" "));
+          } else {
+            assert.strictEqual(setting, -1, args.join(" "));
+          }
+        }
+      }
+    }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
+);

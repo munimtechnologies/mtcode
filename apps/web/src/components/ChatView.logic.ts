@@ -186,12 +186,7 @@ export function shouldOpenProactiveTurnDiff(input: {
 export function resolveProactiveTurnDiffAction(input: {
   checkpoint: Pick<TurnDiffSummary, "status" | "files"> | undefined;
   isGitRepo: boolean | undefined;
-  activeSurfaceKind: RightPanelSurface["kind"] | null;
 }): "defer" | "ignore" | "open" {
-  // An open diff already shows the work; reopening it would reset the chosen scope.
-  if (input.activeSurfaceKind === "pull-request" || input.activeSurfaceKind === "diff") {
-    return "ignore";
-  }
   if (input.checkpoint === undefined || input.checkpoint.status === "missing") return "defer";
   if (input.isGitRepo === undefined) return "defer";
   if (
@@ -433,17 +428,6 @@ export function resolveThreadSwitchTimeline<T extends readonly unknown[]>(input:
     return { entries: rememberedForActive, displayThreadKey: input.activeThreadKey };
   }
 
-  const lastReady = input.lastReady ?? peekHeldThreadTimeline<T>();
-  if (
-    input.loading &&
-    lastReady !== null &&
-    lastReady.threadKey !== null &&
-    lastReady.threadKey !== input.activeThreadKey &&
-    lastReady.entries.length > 0 &&
-    threadKeysShareEnvironment(lastReady.threadKey, input.activeThreadKey)
-  ) {
-    return { entries: lastReady.entries, displayThreadKey: lastReady.threadKey };
-  }
   return { entries: input.nextEntries, displayThreadKey: input.activeThreadKey };
 }
 
@@ -495,7 +479,6 @@ export function resolveThreadMetadataUpdateForNextTurn(input: {
 }): {
   modelSelection?: ModelSelection;
   branch?: string;
-  worktreePath?: null;
 } | null {
   const nextModelSelection = input.nextModelSelection;
   const modelSelectionChanged =
@@ -510,7 +493,7 @@ export function resolveThreadMetadataUpdateForNextTurn(input: {
   }
   return {
     ...(modelSelectionChanged ? { modelSelection: nextModelSelection } : {}),
-    ...(branchChanged ? { branch: input.nextBranch, worktreePath: null } : {}),
+    ...(branchChanged ? { branch: input.nextBranch } : {}),
   };
 }
 
@@ -701,6 +684,17 @@ export function reconcileMountedTerminalThreadIds(input: {
   }
 
   return nextThreadIds;
+}
+
+// Null identifies the project checkout when a launch or session is known.
+export function resolveTerminalWorktreePath(input: {
+  launchContext: { readonly worktreePath: string | null } | null;
+  summary: { readonly worktreePath: string | null } | null;
+  threadWorktreePath: string | null;
+}): string | null {
+  if (input.launchContext !== null) return input.launchContext.worktreePath;
+  if (input.summary !== null) return input.summary.worktreePath;
+  return input.threadWorktreePath;
 }
 
 export function revokeBlobPreviewUrl(previewUrl: string | undefined): void {

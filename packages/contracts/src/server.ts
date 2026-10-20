@@ -23,8 +23,8 @@ import {
   ResolvedKeybindingsConfig,
 } from "./keybindings.ts";
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
-import { ModelCapabilities } from "./model.ts";
 import { ProviderAccountLoginMode } from "./providerAccountLogin.ts";
+import { ModelCapabilities, ProviderOptionDescriptor } from "./model.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderUsageLimits, UsageLimitSourceSnapshots } from "./providerUsageLimits.ts";
@@ -210,6 +210,7 @@ export const ServerProviderWorkspaceSnapshot = Schema.Struct({
   slashCommands: Schema.Array(ServerProviderSlashCommand),
   slashCommandsPending: Schema.optional(Schema.Boolean),
   skills: Schema.Array(ServerProviderSkill),
+  optionDescriptors: Schema.optional(Schema.Array(ProviderOptionDescriptor)),
 });
 export type ServerProviderWorkspaceSnapshot = typeof ServerProviderWorkspaceSnapshot.Type;
 
@@ -332,6 +333,9 @@ export const ServerProvider = Schema.Struct({
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),
+  // Version reported by the installed CLI for a local provider with a separate
+  // server. Null means unknown; absence keeps legacy snapshots on `version`.
+  installedVersion: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   status: ServerProviderState,
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,

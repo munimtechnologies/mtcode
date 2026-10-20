@@ -158,33 +158,35 @@ export function isCommandMissingCause(error: unknown): boolean {
   return visit(error);
 }
 
-export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Command) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const child = yield* spawner.spawn(command);
-    // Close stdin immediately. Non-interactive probes (`agent about`, `grok --version`,
-    // etc.) can hang on Windows if stdin stays open waiting for EOF.
-    yield* Stream.run(Stream.empty, child.stdin).pipe(Effect.ignore);
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        collectStreamAsString(child.stdout),
-        collectStreamAsString(child.stderr),
-        child.exitCode.pipe(Effect.map(Number)),
-      ],
-      { concurrency: "unbounded" },
-    );
+export const spawnAndCollect = Effect.fn("snapshotProbe.spawnAndCollect")(function* (
+  binaryPath: string,
+  command: ChildProcess.Command,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(command);
+  // Close stdin immediately. Non-interactive probes (`agent about`, `grok --version`,
+  // etc.) can hang on Windows if stdin stays open waiting for EOF.
+  yield* Stream.run(Stream.empty, child.stdin).pipe(Effect.ignore);
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [
+      collectStreamAsString(child.stdout),
+      collectStreamAsString(child.stderr),
+      child.exitCode.pipe(Effect.map(Number)),
+    ],
+    { concurrency: "unbounded" },
+  );
 
-    const result: CommandResult = { stdout, stderr, code: exitCode };
-    if (yield* isWindowsCommandNotFound(exitCode, stderr)) {
-      return yield* new ProviderCommandNotFoundError({
-        binaryPath,
-        exitCode,
-        stdoutLength: stdout.length,
-        stderrLength: stderr.length,
-      });
-    }
-    return result;
-  }).pipe(Effect.scoped);
+  const result: CommandResult = { stdout, stderr, code: exitCode };
+  if (yield* isWindowsCommandNotFound(exitCode, stderr)) {
+    return yield* new ProviderCommandNotFoundError({
+      binaryPath,
+      exitCode,
+      stdoutLength: stdout.length,
+      stderrLength: stderr.length,
+    });
+  }
+  return result;
+}, Effect.scoped);
 
 export function parseGenericCliVersion(output: string): string | null {
   // "opencode v2.0.3"-style output: the optional "v" has to be consumed first,

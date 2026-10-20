@@ -29,6 +29,8 @@ type ExecFileSyncLike = (
     timeout: number;
     killSignal?: NodeJS.Signals | number;
     maxBuffer?: number;
+    detached?: true;
+    stdio?: ["ignore", "pipe", "ignore"];
   },
 ) => string;
 
@@ -292,10 +294,14 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
     return {};
   }
 
+  // Interactive startup loads PATH entries; detaching prevents job control on an
+  // inherited controlling TTY from stopping the probe while the parent waits.
   const output = execFile(shell, ["-ilc", buildEnvironmentCaptureCommand(names)], {
     encoding: "utf8",
     timeout: 5000,
     killSignal: "SIGKILL",
+    detached: true,
+    stdio: ["ignore", "pipe", "ignore"],
   });
 
   const environment: Partial<Record<string, string>> = {};
@@ -356,6 +362,8 @@ export const readFullEnvironmentFromLoginShell: FullShellEnvironmentReader = (
       encoding: "utf8",
       timeout: 5000,
       maxBuffer: FULL_ENV_MAX_BUFFER,
+      detached: true,
+      stdio: ["ignore", "pipe", "ignore"],
     }),
   );
 
@@ -635,8 +643,9 @@ const PathDirectoryListings = Context.Reference<
   Cache.Cache<string, PathDirectoryListing, never, FileSystem.FileSystem> | undefined
 >("@t3tools/shared/shell/PathDirectoryListings", { defaultValue: () => undefined });
 
-export const withPathDirectoryListings = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
+export const withPathDirectoryListings =
+  /* Directory reads are cached inside one shell operation; a span for each lookup adds noise. */
+  Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
     const listings = yield* Cache.make({
       capacity: 1024,
       lookup: listPathDirectory,

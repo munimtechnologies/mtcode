@@ -29,6 +29,7 @@ import {
   ProviderThreadId,
   ProviderTurnId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -77,6 +78,14 @@ import * as RuntimeLayer from "./runtimeLayer.ts";
 import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as PreviewManager from "../preview/Manager.ts";
+import * as TerminalManager from "../terminal/Manager.ts";
+import * as ResourceCleanupService from "./ResourceCleanupService.ts";
+import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -297,6 +306,30 @@ const layerLegacyImportTest = RuntimeLayer.layer.pipe(
   Layer.provide(layerPlatformTest),
 );
 
+const layerScheduledTasksTest = ScheduledTaskService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/projects",
+        isScratchProject: () => Effect.succeed(false),
+      }),
+      Scheduler.layer,
+    ),
+  ),
+);
+const layerResourceCleanupTest = ResourceCleanupService.layer.pipe(
+  Layer.provideMerge(layerScheduledTasksTest),
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(PreviewManager.PreviewManager)({ close: () => Effect.void }),
+      Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
+    ),
+  ),
+);
+
 const layerProjectDeletionTest = Layer.mergeAll(
   RuntimeLayer.layer.pipe(Layer.provide(RuntimeLayer.layerProjectService)),
   RuntimeLayer.layerProjectService,
@@ -325,6 +358,7 @@ const layerProjectDeletionTest = Layer.mergeAll(
       normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
     }),
   ),
+  Layer.provideMerge(layerResourceCleanupTest),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provide(McpProviderSessions.layer),
   Layer.provide(SqlitePersistence.layerMemory),
@@ -337,6 +371,129 @@ const layerProjectDeletionTest = Layer.mergeAll(
 );
 
 it.layer(layerProjectDeletionTest)("project deletion during thread commands", (it) => {
+  it.effect.each(["thread", "project"] as const)(
+    "deleting a %s removes its thread-bound automations through the effect worker",
+    (deletion) =>
+      Effect.gen(function* () {
+        const projects = yield* ProjectService.ProjectService;
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const tasks = yield* ScheduledTaskService.ScheduledTaskService;
+        const projectId = ProjectId.make(`automation-delete-project:${deletion}`);
+        const threadId = ThreadId.make(`automation-delete-thread:${deletion}`);
+        const otherThreadId = ThreadId.make(`automation-surviving-thread:${deletion}`);
+        yield* projects.create({
+          commandId: CommandId.make(`automation-create-project:${deletion}`),
+          projectId,
+          title: "Automation lifecycle",
+          workspaceRoot: `/work/automation-lifecycle/${deletion}`,
+        });
+        for (const id of [threadId, otherThreadId]) {
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make(`automation-create:${id}`),
+            createdBy: "user",
+            creationSource: "web",
+            threadId: id,
+            projectId: id === threadId ? projectId : ProjectId.make("automation-other-project"),
+            title: "Automation target",
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+          });
+        }
+        const save = (name: string, target: ThreadId | null, webhook = false) =>
+          tasks.upsert({
+            id: ScheduledTaskId.make(`automation:${deletion}:${name}`),
+            title: name,
+            prompt: "Check orchestration progress",
+            enabled: !webhook,
+            schedule: webhook ? { type: "webhook" } : { type: "interval", everyMs: 60_000 },
+            projectId,
+            threadId: target,
+            workspaceStrategy: { type: "root" },
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdBy: "agent",
+            creationSource: "mcp",
+          });
+        const { task: bound } = yield* save("bound", threadId);
+        const { task: webhook } = yield* save("webhook", threadId, true);
+        const { task: independent } = yield* save("independent", null);
+        yield* save("detached", threadId);
+        const { task: detached } = yield* save("detached", null);
+        yield* save("moved", threadId);
+        const { task: moved } = yield* save("moved", otherThreadId);
+        const { task: other } = yield* save("other", otherThreadId);
+        yield* tasks.triggerWebhook({
+          hookId: webhook.id,
+          token: webhook.webhook!.path.split("/").at(-1)!,
+          method: "POST",
+          path: webhook.webhook!.path,
+          query: "",
+          headers: {},
+          body: new Uint8Array(),
+          bodyText: "",
+        });
+        assert.lengthOf((yield* tasks.listWebhookDeliveries({ id: webhook.id })).deliveries, 1);
+
+        yield* orchestrator.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.make(`automation-archive:${deletion}`),
+          threadId,
+        });
+        yield* worker.drain();
+        assert.include(
+          (yield* tasks.list()).tasks.map((task) => task.id),
+          bound.id,
+        );
+
+        if (deletion === "thread") {
+          yield* orchestrator.dispatch({
+            type: "thread.delete",
+            commandId: CommandId.make(`automation-delete:${deletion}`),
+            threadId,
+          });
+        } else {
+          yield* projects.delete({
+            commandId: CommandId.make(`automation-delete:${deletion}`),
+            projectId,
+            force: true,
+          });
+        }
+        yield* worker.drain();
+        const remainingIds = (yield* tasks.list()).tasks.map((task) => task.id);
+        assert.notInclude(remainingIds, bound.id);
+        assert.notInclude(remainingIds, webhook.id);
+        assert.includeMembers(remainingIds, [independent.id, detached.id, moved.id, other.id]);
+        assert.lengthOf((yield* tasks.listWebhookDeliveries({ id: webhook.id })).deliveries, 0);
+        const rejected = yield* tasks.runNow({ id: bound.id }).pipe(Effect.flip);
+        assert.equal(rejected.message, "Schedule task not found.");
+        assert.equal(
+          (yield* tasks.triggerWebhook({
+            hookId: webhook.id,
+            token: webhook.webhook!.path.split("/").at(-1)!,
+            method: "POST",
+            path: webhook.webhook!.path,
+            query: "",
+            headers: {},
+            body: new Uint8Array(),
+            bodyText: "",
+          }))._tag,
+          "not_found",
+        );
+        // Retried cleanup is harmless and cannot affect unrelated tasks.
+        yield* tasks.deleteForThread(threadId);
+        assert.sameMembers(
+          (yield* tasks.list()).tasks.map((task) => task.id),
+          remainingIds,
+        );
+      }),
+  );
+
   it.effect("waits for an in-flight thread update before planning deletion", () =>
     Effect.gen(function* () {
       const projects = yield* ProjectService.ProjectService;
@@ -3201,6 +3358,248 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect.each(["deadline", "fingerprint lost", "fingerprint changed", "mixed-age remarks"])(
+    "delivers edited cached review replies: %s",
+    (mode) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const projectId = ProjectId.make(`pr-watch-tail-project-${mode}`);
+        const threadId = ThreadId.make(`runtime-pr-watch-tail-${mode}`);
+        const startedAt = "2026-10-02T12:00:00.000Z";
+        yield* TestClock.setTime(Date.parse(startedAt));
+        yield* seedProject({
+          projectId,
+          title: "Watch edited replies",
+          workspaceRoot: "/workspace/watch-tail",
+          defaultModelSelection: null,
+          createdAt: startedAt,
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`pr-watch-tail-create-${mode}`),
+          threadId,
+          projectId,
+          title: "Watch edited replies",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.pull-request.watch",
+          commandId: CommandId.make(`pr-watch-tail-start-${mode}`),
+          threadId,
+          host: "github.com",
+          repository: "pingdotgg/t3code",
+          number: 12,
+          watching: true,
+          link: { url: "https://github.com/pingdotgg/t3code/pull/12", source: "agent" },
+        });
+        const reply: PullRequestComment = {
+          id: "reply-11",
+          kind: "review-comment",
+          author: { login: "reviewer", name: null, avatarUrl: null },
+          body: "Original feedback.",
+          createdAt: "2026-10-02T11:00:00.000Z",
+          url: null,
+          path: "src/index.ts",
+          reviewState: null,
+        };
+        let replies = Array.from(
+          { length: mode === "fingerprint changed" ? 2 : 1 },
+          (_, index) => ({
+            ...reply,
+            id: `reply-${index}-11`,
+          }),
+        );
+        const reviewThreads = replies.map((reply, index) => ({
+          id: `review-thread-${index}`,
+          path: "src/index.ts",
+          line: index + 1,
+          side: "right" as const,
+          isResolved: false,
+          isOutdated: false,
+          comments: Array.from({ length: 10 }, (_, index) => ({
+            ...reply,
+            id: `${reply.id}-preview-${index}`,
+          })),
+          commentCount: 11,
+          nextCommentsCursor: "after-10",
+        }));
+        let fingerprint: string | null = mode === "mixed-age remarks" ? null : "before";
+        let failPage = false;
+        let activityReads = 0;
+        const pageReads: Array<{ threadId: string; cursor: string }> = [];
+        const expectedPages = reviewThreads.map((thread) => ({
+          threadId: thread.id,
+          cursor: "after-10",
+        }));
+        const reactor = yield* PullRequestWatchReactor.make.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              Layer.mock(ProjectionStore.ProjectionStoreV2)({
+                getThreadsWithPullRequests: () =>
+                  projections
+                    .getThreadsWithPullRequests()
+                    .pipe(
+                      Effect.map((threads) => threads.filter((thread) => thread.id === threadId)),
+                    ),
+              }),
+              Layer.mock(PullRequestService.PullRequestService)({
+                watchFingerprint: () =>
+                  Effect.succeed(
+                    fingerprint === null ? null : { status: "OPEN pending", remarks: fingerprint },
+                  ),
+                invalidate: () => Effect.void,
+                detail: () =>
+                  Effect.succeed({
+                    ...watchedPullRequestDetail({ projectId, number: 12, at: startedAt }),
+                    checks: [{ name: "test", status: "pending", description: null, url: null }],
+                  }),
+                activity: () =>
+                  Effect.sync(() => {
+                    activityReads += 1;
+                    return {
+                      comments: reviewThreads.flatMap((thread) => thread.comments),
+                      commentCount: reviewThreads.length * 11,
+                      commentsTruncated: true,
+                      reviewThreadsTruncated: false,
+                      reviewThreads,
+                      commits: [],
+                    };
+                  }),
+                threadComments: (input) =>
+                  Effect.suspend(() => {
+                    const index = reviewThreads.findIndex((thread) => thread.id === input.threadId);
+                    assert.isAtLeast(index, 0);
+                    pageReads.push({ threadId: input.threadId, cursor: input.cursor });
+                    return failPage && index === 1
+                      ? Effect.fail(
+                          new PullRequestOperationError({
+                            operation: "threadComments",
+                            detail: "Page unavailable",
+                          }),
+                        )
+                      : Effect.succeed({ comments: [replies[index]!], nextCursor: null });
+                  }),
+              }),
+            ),
+          ),
+        );
+        const messages = orchestrator
+          .getThreadRecords(threadId, ["messages"])
+          .pipe(Effect.map((records) => records.messages));
+        const watch = orchestrator
+          .getThreadShell(threadId)
+          .pipe(Effect.map((thread) => thread?.pullRequests?.[0]?.watch));
+        yield* reactor.sweep;
+        const baseline = yield* watch;
+        replies = replies.map((reply) => ({
+          ...reply,
+          body: "Edited feedback.",
+          editedAt: "2026-10-02T12:00:01.000Z",
+        }));
+
+        if (mode === "mixed-age remarks") {
+          const thread = reviewThreads[0]!;
+          const visibleReply = {
+            ...thread.comments[0]!,
+            body: "Edited visible feedback.",
+            editedAt: "2026-10-02T12:02:00.000Z",
+          };
+          thread.comments[0] = visibleReply;
+          yield* TestClock.adjust("5 minutes");
+          yield* reactor.sweep;
+          const intermediateWatch = yield* watch;
+          const intermediatePageReads = [...pageReads];
+          yield* TestClock.adjust("5 minutes");
+          yield* reactor.sweep;
+          const wakes = yield* messages;
+          assert.isTrue(wakes.every((wake) => wake.notification?.summary === "#12: new comments"));
+          assert.equal((yield* watch)?.remarksThrough, visibleReply.editedAt);
+          assert.deepEqual((yield* watch)?.remarkIds, [visibleReply.id]);
+          assert.deepEqual(pageReads, [...expectedPages, ...expectedPages]);
+          const wakeText = wakes.map((wake) => wake.text).join("\n");
+          for (const reply of [visibleReply, ...replies]) {
+            assert.include(wakeText, reply.body);
+            assert.equal(wakeText.split(reply.body).length - 1, 1);
+          }
+          // A watermark past the deep edit requires a fresh tail, even before its deadline.
+          if (intermediateWatch?.remarksThrough === visibleReply.editedAt) {
+            assert.deepEqual(intermediatePageReads, [...expectedPages, ...expectedPages]);
+          } else {
+            assert.equal(intermediateWatch?.remarksThrough, baseline?.remarksThrough);
+          }
+          yield* reactor.sweep;
+          yield* TestClock.adjust("30 minutes");
+          yield* reactor.sweep;
+          assert.deepEqual(yield* messages, wakes);
+          assert.equal((yield* watch)?.remarksThrough, visibleReply.editedAt);
+          assert.deepEqual(pageReads, [...expectedPages, ...expectedPages, ...expectedPages]);
+          return;
+        }
+
+        if (mode === "fingerprint changed") {
+          yield* TestClock.adjust("1 minute");
+          fingerprint = "after";
+          failPage = true;
+          yield* reactor.sweep;
+          assert.deepEqual(yield* messages, []);
+          assert.deepEqual(yield* watch, baseline);
+          assert.deepEqual(pageReads, [...expectedPages, ...expectedPages]);
+          yield* TestClock.adjust("2 seconds");
+          // Neither deep edit changes the host fingerprint or the thread's comment count.
+          replies = replies.map((reply, index) => ({
+            ...reply,
+            body: `Latest feedback ${index + 1}.`,
+            editedAt: `2026-10-02T12:01:0${index + 1}.000Z`,
+          }));
+          failPage = false;
+        } else {
+          if (mode === "fingerprint lost") fingerprint = null;
+          yield* TestClock.adjust(mode === "deadline" ? "29 minutes" : "5 minutes");
+          yield* reactor.sweep;
+          assert.deepEqual(pageReads, expectedPages);
+          assert.deepEqual(yield* messages, []);
+          // An activity read at five minutes must not move the tail's ten-minute deadline.
+          assert.equal(activityReads, mode === "deadline" ? 1 : 2);
+          yield* TestClock.adjust(mode === "deadline" ? "1 minute" : "5 minutes");
+        }
+        yield* reactor.sweep;
+        const wakes = yield* messages;
+        assert.deepEqual(
+          wakes.map((message) => message.notification?.summary),
+          ["#12: new comments"],
+        );
+        for (const reply of replies) {
+          assert.include(wakes[0]?.text ?? "", reply.body);
+        }
+        assert.notInclude(wakes[0]?.text ?? "", "Original feedback.");
+        assert.deepEqual(
+          pageReads,
+          Array.from(
+            { length: mode === "fingerprint changed" ? 3 : 2 },
+            () => expectedPages,
+          ).flat(),
+        );
+        const latestReply = replies.at(-1)!;
+        assert.equal((yield* watch)?.remarksThrough, latestReply.editedAt);
+        assert.deepEqual((yield* watch)?.remarkIds, [latestReply.id]);
+        yield* reactor.sweep;
+        assert.lengthOf(yield* messages, 1);
+        assert.lengthOf(pageReads, mode === "fingerprint changed" ? 6 : 2);
+        yield* TestClock.adjust("30 minutes");
+        yield* reactor.sweep;
+        assert.lengthOf(yield* messages, 1);
+        assert.lengthOf(pageReads, mode === "fingerprint changed" ? 8 : 3);
+      }),
+  );
+
   it.effect.each([
     "single page",
     "paginated",
@@ -5377,7 +5776,8 @@ it.layer(Layer.fresh(layerSharedApplicationDataPlaneTest))("compact PR events", 
         worktreePath: null,
       });
       const key = { host: "github.com", repository: "pingdotgg/t3code" };
-      for (const number of [1, 2, 3]) {
+      const repositoryWebUrl = "https://github.com/pingdotgg/t3code/pull/2";
+      for (const number of [1, 2]) {
         yield* orchestrator.dispatch({
           type: "thread.pull-request.link",
           commandId: CommandId.make(`compact-pr-link-${number}`),
@@ -5386,8 +5786,31 @@ it.layer(Layer.fresh(layerSharedApplicationDataPlaneTest))("compact PR events", 
           number,
           url: `https://github.com/pingdotgg/t3code/pull/${number}`,
           source: "manual",
+          ...(number === 2 ? { repositoryWebUrl } : {}),
         });
       }
+      const watchedLink = {
+        url: "https://github.com/pingdotgg/t3code/pull/3",
+        repositoryWebUrl: "https://github.com/pingdotgg/t3code/pull/3",
+        source: "manual" as const,
+      };
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.watch",
+        commandId: CommandId.make("compact-pr-watch-new"),
+        threadId,
+        ...key,
+        number: 3,
+        watching: true,
+        link: watchedLink,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.watch",
+        commandId: CommandId.make("compact-pr-watch-existing"),
+        threadId,
+        ...key,
+        number: 2,
+        watching: true,
+      });
       const before = yield* orchestrator.getThreadShell(threadId);
       yield* orchestrator.dispatch({
         type: "thread.pull-request-link.sync",
@@ -5427,6 +5850,8 @@ it.layer(Layer.fresh(layerSharedApplicationDataPlaneTest))("compact PR events", 
       assert.deepEqual(after?.pullRequests?.[0], before?.pullRequests?.[0]);
       assert.deepEqual(after?.pullRequests?.[2], before?.pullRequests?.[2]);
       assert.equal(after?.pullRequests?.[1]?.stack?.id, "updated");
+      assert.propertyVal(after?.pullRequests?.[1], "repositoryWebUrl", repositoryWebUrl);
+      assert.deepInclude(after?.pullRequests?.[2], watchedLink);
       assert.isTrue((yield* maintenance.rebuild).valid);
       assert.deepEqual(
         (yield* orchestrator.getThreadShell(threadId))?.pullRequests,

@@ -1,26 +1,26 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import * as Duration from "effect/Duration";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { TestClock } from "effect/testing";
 import * as Scope from "effect/Scope";
+import * as TestClock from "effect/testing/TestClock";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
 import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
-import { killQuietly, readPidFile, waitForProcessExit } from "../testUtils/processProbe.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -34,6 +34,7 @@ const layerCodexTextGenerationTest = ServerConfig.ServerConfig.layerTest(process
 
 interface FakeCodexInput {
   output: string;
+  lifecycle?: { port: number; command: "exec" | "mcp list" };
   exitCode?: number;
   stderr?: string;
   requireImage?: boolean;
@@ -44,8 +45,6 @@ interface FakeCodexInput {
   forbidArg?: string;
   stdinMustContain?: string;
   stdinMustNotContain?: string;
-  /** Stall after reading the prompt: ignore SIGTERM and write the pid here. */
-  hangPidFile?: string;
   /** What `codex mcp list --json` answers; a number exits with that code instead. */
   mcpServers?: ReadonlyArray<{ name: string; enabled: boolean }> | number;
 }
@@ -64,7 +63,6 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     stderr: input.stderr ?? null,
     output: input.output,
     exitCode: input.exitCode ?? 0,
-    hangPidFile: input.hangPidFile ?? null,
   });
   return Effect.gen(function* () {
     const path = yield* Path.Path;
@@ -75,7 +73,17 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         'import * as NodeFS from "node:fs";',
         `const check = ${check};`,
         "const args = process.argv.slice(2);",
-        'if (args.includes("mcp") && args.includes("list")) {',
+        'const isMcpList = args.includes("mcp") && args.includes("list");',
+        ...(input.lifecycle === undefined
+          ? []
+          : [
+              `if (isMcpList === ${input.lifecycle.command === "mcp list"}) {`,
+              'process.on("SIGTERM", () => {});',
+              processProbeSource(input.lifecycle.port),
+              "await new Promise(() => {});",
+              "}",
+            ]),
+        "if (isMcpList) {",
         '  if (typeof check.mcpServers === "number") process.exit(check.mcpServers);',
         "  process.stdout.write(JSON.stringify(check.mcpServers));",
         "  process.exit(0);",
@@ -102,12 +110,6 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         "const chunks = [];",
         "for await (const chunk of process.stdin) chunks.push(chunk);",
         'const stdinContent = Buffer.concat(chunks).toString("utf8");',
-        "if (check.hangPidFile !== null) {",
-        '  process.on("SIGTERM", () => {});',
-        "  setInterval(() => {}, 1_000);",
-        "  NodeFS.writeFileSync(check.hangPidFile, String(process.pid));",
-        "  await new Promise(() => {});",
-        "}",
         "function fail(message, code) {",
         '  process.stderr.write(message + "\\n");',
         "  process.exit(code);",
@@ -187,6 +189,34 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
+  it.effect.each(["exec", "mcp list"] as const)(
+    "kills a stalled %s CLI when its request is interrupted",
+    (command) =>
+      Effect.gen(function* () {
+        const probe = yield* makeProcessProbe;
+        yield* withFakeCodexEnv(
+          { output: "", lifecycle: { port: probe.port, command } },
+          (textGeneration) =>
+            Effect.gen(function* () {
+              const fiber = yield* textGeneration
+                .generateThreadTitle({
+                  cwd: process.cwd(),
+                  message: "Name this thread",
+                  modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+                })
+                .pipe(Effect.forkScoped);
+              yield* probe.started;
+
+              const interrupted = yield* Fiber.interrupt(fiber).pipe(Effect.forkScoped);
+              yield* probe.exited;
+              yield* Fiber.join(interrupted);
+              const exit = yield* Fiber.await(fiber);
+              expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+            }),
+        );
+      }),
+  );
+
   it.effect.each(["gpt-5.6-luna", "openai.gpt-5.6-luna"])(
     "dispatches the qualified live model for %s",
     (selectedModel) =>
@@ -208,34 +238,26 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
           }),
       ),
   );
-  it.effect("SIGKILLs a Codex CLI that ignores SIGTERM after the request times out", () =>
+  it.effect("kills a stalled exec CLI when the request times out", () =>
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-hang-" });
-      const pidFile = path.join(tempDir, "codex.pid");
-      return yield* withFakeCodexEnv({ output: "", hangPidFile: pidFile }, (textGeneration) =>
-        Effect.gen(function* () {
-          const fiber = yield* textGeneration
-            .generateThreadTitle({
-              cwd: process.cwd(),
-              message: "Describe this change",
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.exit, Effect.forkScoped);
-          const pid = yield* readPidFile(pidFile);
-          expect(pid).toBeDefined();
-          yield* Effect.addFinalizer(() => Effect.sync(() => killQuietly(pid!)));
+      const probe = yield* makeProcessProbe;
+      yield* withFakeCodexEnv(
+        { output: "", lifecycle: { port: probe.port, command: "exec" } },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const fiber = yield* textGeneration
+              .generateThreadTitle({
+                cwd: process.cwd(),
+                message: "Describe this change",
+                modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              })
+              .pipe(Effect.exit, Effect.forkScoped);
+            yield* probe.started;
 
-          // The Codex request timeout; the kill grace after it runs on native time.
-          yield* TestClock.adjust(Duration.minutes(3));
-
-          // Without the force kill the release waits on the CLI forever, so the
-          // request would hang here instead of failing; check the process first.
-          expect(yield* waitForProcessExit(pid!)).toBe(true);
-          const exit = yield* Fiber.join(fiber);
-          expect(exit._tag).toBe("Failure");
-        }),
+            yield* TestClock.adjust("180 seconds");
+            yield* probe.exited;
+            expect(Exit.isFailure(yield* Fiber.join(fiber))).toBe(true);
+          }),
       );
     }),
   );

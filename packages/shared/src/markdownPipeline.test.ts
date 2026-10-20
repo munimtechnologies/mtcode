@@ -28,34 +28,6 @@ it("preserves in-app thread links through the shared Markdown sanitizer", () => 
   expect(JSON.stringify(tree)).not.toContain("javascript:");
 });
 
-it("keeps parsed math through raw HTML and strips math metadata that raw HTML supplies", () => {
-  const processor = unified()
-    .use(remarkParse)
-    .use(CHAT_MARKDOWN_REMARK_PLUGINS)
-    .use(remarkRehype, { allowDangerousHtml: true })
-    .use(CHAT_MARKDOWN_REHYPE_PLUGINS);
-  const tree = processor.runSync(
-    processor.parse(
-      'Inline $x^2$ here.\n\n<code class="math-display" data-math-source="forged">y</code>',
-    ),
-  );
-  expect(tree.children[0]).toMatchObject({
-    tagName: "p",
-    children: [
-      { type: "text", value: "Inline " },
-      {
-        tagName: "code",
-        properties: { className: ["math-inline"], dataMathSource: "$x^2$" },
-        children: [{ type: "text", value: "x^2" }],
-      },
-      { type: "text", value: " here." },
-    ],
-  });
-  const serialized = JSON.stringify(tree.children.slice(1));
-  expect(serialized).not.toContain("forged");
-  expect(serialized).not.toContain("math-display");
-});
-
 it("keeps backslashes that CommonMark would read as escapes in prose Windows paths", () => {
   const processor = unified()
     .use(remarkParse)

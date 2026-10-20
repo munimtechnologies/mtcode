@@ -37,6 +37,11 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import { isTerminalRunStatus } from "./ThreadManagementService.ts";
 
 const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
+// Every server polls every open linked pull request, and most of them sit untouched for days.
+// One nobody has updated for QUIET_AFTER_MS is read on the quiet cadence instead of each sweep;
+// requested refreshes, watches and `gh pr merge` still read it at once.
+const QUIET_AFTER_MS = 30 * 60 * 1_000;
+const QUIET_SYNC_INTERVAL_MS = 5 * 60 * 1_000;
 const PULL_REQUEST_CLOSE_COMMAND = /\b(?:gh\s+pr|glab\s+mr)\s+(?:merge|close)\b/u;
 
 const isPullRequestProviderError = Schema.is(PullRequestProviderError);
@@ -152,9 +157,10 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   const lastSyncedAt = new Map<string, number>();
-  const requested = new Map<string, number>();
-  let requestGeneration = 0;
-  // Requested keys wait in `requested` for one queued sweep, so a burst of links (an agent
+  const requested = new Set<string>();
+  // Requests arriving during a host read wait for the next sweep.
+  const pendingRequests = new Set<string>();
+  // PR keys wait in `pendingRequests` for one queued sweep, so a burst of links (an agent
   // linking dozens of pull requests) is read together and shares the summary batches.
   let requestedSweepQueued = false;
   const retryStacks = new Set<string>();
@@ -176,9 +182,17 @@ export const make = Effect.gen(function* () {
     ) {
       return false;
     }
-    if (active.some((entry) => entry.link.snapshot?.state === "open")) return true;
     const last = lastSyncedAt.get(key);
-    return last === undefined || nowMs - last >= SLOW_SYNC_INTERVAL_MS;
+    const sinceLastMs = last === undefined ? Number.POSITIVE_INFINITY : nowMs - last;
+    const open = active.filter((entry) => entry.link.snapshot?.state === "open");
+    if (open.length > 0) {
+      const quiet = open.every((entry) => {
+        const updatedAt = entry.link.snapshot?.updatedAt;
+        return updatedAt != null && nowMs - Date.parse(updatedAt) >= QUIET_AFTER_MS;
+      });
+      return !quiet || sinceLastMs >= QUIET_SYNC_INTERVAL_MS;
+    }
+    return sinceLastMs >= SLOW_SYNC_INTERVAL_MS;
   };
 
   const logSkipped =
@@ -195,12 +209,19 @@ export const make = Effect.gen(function* () {
     const groups = new Map<string, Array<LinkEntry>>();
     for (const thread of threads) {
       for (const link of visibleThreadPullRequests(thread.pullRequests ?? [])) {
-        const key = threadPullRequestKeyOf(link);
+        // Reads depend on the project's checkout and credentials, including their failures.
+        const key = `${thread.projectId}\0${threadPullRequestKeyOf(link)}`;
         const entries = groups.get(key) ?? [];
         entries.push({ thread, link });
         groups.set(key, entries);
       }
     }
+
+    // A host-level refresh reaches every project, each retaining its own pending retry.
+    for (const [key, entries] of groups) {
+      if (pendingRequests.has(threadPullRequestKeyOf(entries[0]!.link))) requested.add(key);
+    }
+    pendingRequests.clear();
 
     for (const key of lastSyncedAt.keys()) if (!groups.has(key)) lastSyncedAt.delete(key);
     for (const key of retryStacks) if (!groups.has(key)) retryStacks.delete(key);
@@ -278,19 +299,19 @@ export const make = Effect.gen(function* () {
         repository: first.link.repository,
         number: first.link.number,
       };
-      const generation = requested.get(key);
+      const refreshRequested = requested.has(key);
       // A held merged summary is served without asking the host, so a snapshot still missing its
       // merge time has to drop it or the slow-cadence re-read would hand back the same gap.
       const missingMergedAt = entries.some(
         (entry) => entry.link.snapshot?.state === "merged" && entry.link.snapshot.mergedAt == null,
       );
-      if (generation !== undefined || missingMergedAt) {
+      if (refreshRequested || missingMergedAt) {
         yield* pullRequests.invalidate({ reference: ref });
       }
       const summary = yield* pullRequests.summary(ref, { recoverTransientFailure: false });
       const fields = snapshotFieldsOf(summary);
       const needsStack =
-        generation !== undefined ||
+        refreshRequested ||
         retryStacks.has(key) ||
         entries.some(
           (entry) =>
@@ -330,8 +351,7 @@ export const make = Effect.gen(function* () {
       }
       // The host answered, so the cadence clock ticks even if a dispatch below is rejected.
       lastSyncedAt.set(key, nowMs);
-      // A refresh requested while the host read was in flight belongs to the next sweep.
-      if (requested.get(key) === generation) requested.delete(key);
+      requested.delete(key);
       yield* Effect.forEach(
         entries,
         (entry) =>
@@ -473,7 +493,7 @@ export const make = Effect.gen(function* () {
 
   const requestSync: PullRequestSyncReactor["Service"]["requestSync"] = (key) =>
     Effect.suspend(() => {
-      requested.set(threadPullRequestKeyOf(key), ++requestGeneration);
+      pendingRequests.add(threadPullRequestKeyOf(key));
       if (requestedSweepQueued) return Effect.void;
       requestedSweepQueued = true;
       return worker.enqueue("requested");

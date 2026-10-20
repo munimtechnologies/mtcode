@@ -563,7 +563,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const { allowBuilds = {} } = yield* readWorkspaceConfig();
       const repoRoot = path.join(import.meta.dirname, "..");
       for (const key of Object.keys(allowBuilds)) {
-        const tarball = key.split("@file:")[1];
+        const tarball = key.split("@file:")[1]?.replace(/\(patch_hash=[a-f0-9]+\)$/, "");
         if (tarball === undefined) continue;
         assert.isTrue(
           yield* fs.exists(path.join(repoRoot, tarball)),
@@ -736,6 +736,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ]);
       assert.deepStrictEqual(win.nsis, {
         differentialPackage: true,
+        include: "apps/desktop/resources/installer.nsh",
         shortcutName: "T3 Code",
         uninstallDisplayName: "T3 Code",
       });
@@ -823,17 +824,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(mac.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
-
-  it("excludes foreign node-pty prebuilds from macOS and Linux packages", () => {
-    assert.deepStrictEqual(MAC_FILE_EXCLUSIONS, [
-      "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
-      "!**/node_modules/node-pty/third_party/conpty/**/*",
-    ]);
-    assert.deepStrictEqual(LINUX_FILE_EXCLUSIONS, [
-      ...MAC_FILE_EXCLUSIONS,
-      "!**/node_modules/node-pty/prebuilds/darwin-*/**/*",
-    ]);
-  });
 
   it("unpacks native binaries while keeping their JavaScript and metadata archived", () => {
     for (const file of [

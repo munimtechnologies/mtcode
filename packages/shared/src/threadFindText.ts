@@ -34,7 +34,6 @@ import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
 } from "./markdownPipeline.ts";
-import { isChatMathHastProperties } from "./markdownMath.ts";
 import { splitInlineVisualizations } from "./inlineVisualization.ts";
 
 // Inline wrappers (including Shiki token spans) must not split a search phrase.
@@ -167,12 +166,6 @@ function markdownThreadFindText(
         text += fileLinkLabel(splitFilePathPosition(target), parentSuffixes);
         return;
       }
-    }
-    if (node.tagName === "code" && isChatMathHastProperties(node.properties)) {
-      // Typeset formulas are not searchable: the renderer marks them
-      // `data-thread-find-ignore`, so counts must skip them here too.
-      flush();
-      return;
     }
     const template = artifactTemplateFromHastProperties(node.properties);
     if (template) {

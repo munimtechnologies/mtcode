@@ -177,10 +177,17 @@ describe("isAutoSettlementCandidate", () => {
     ).toBe(true);
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ ...snoozed, latestRunCompletedAt: at(-30 * 60 * 1_000) }),
+        shell({ ...snoozed, status: "completed", latestRunCompletedAt: at(-30 * 60 * 1_000) }),
         NOW_MS,
       ),
     ).toBe(true);
+    // An interrupted run leaves the thread snoozed, as the sidebar shows it.
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ ...snoozed, status: "interrupted", latestRunCompletedAt: at(-30 * 60 * 1_000) }),
+        NOW_MS,
+      ),
+    ).toBe(false);
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(
         shell({ ...snoozed, status: "failed", latestRunCompletedAt: at(-2 * 60 * 60 * 1_000) }),
@@ -297,8 +304,28 @@ describe("resolveAutoSettlementAt", () => {
     expect(
       ThreadSettlementService.resolveAutoSettlementAt({ ...input, autoSettleAfterDays: null }),
     ).toBeNull();
+  });
+
+  it("anchors an empty thread's inactivity at its creation time", () => {
+    const input = {
+      thread: shell({ createdAt: at(-3 * DAY_MS) }),
+      pullRequest: null,
+      nowMs: NOW_MS,
+      autoSettleAfterDays: 2,
+      autoSettleOnMerge: false,
+    };
+    expect(ThreadSettlementService.resolveAutoSettlementAt(input)).toEqual(at(-3 * DAY_MS));
     expect(
-      ThreadSettlementService.resolveAutoSettlementAt({ ...input, thread: shell() }),
+      ThreadSettlementService.resolveAutoSettlementAt({
+        ...input,
+        thread: shell({ createdAt: at(-DAY_MS) }),
+      }),
+    ).toBeNull();
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        ...input,
+        thread: { ...input.thread, lastSnoozeWakeAt: at(-DAY_MS) },
+      }),
     ).toBeNull();
   });
 

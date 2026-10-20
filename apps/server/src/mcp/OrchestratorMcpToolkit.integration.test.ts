@@ -136,16 +136,15 @@ const delegatedTaskStatusTranscriptFile = new URL(
   import.meta.url,
 );
 
-const readDelegatedTaskStatusTranscript = Effect.fn("readDelegatedTaskStatusTranscript")(
-  function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const text = yield* fs.readFileString(
-      decodeURIComponent(delegatedTaskStatusTranscriptFile.pathname),
-    );
-    return yield* decodeProviderReplayNdjson(text);
-  },
-  Effect.provide(NodeServices.layer),
-);
+const readDelegatedTaskStatusTranscript = Effect.fn("readDelegatedTaskStatusTranscript")(function* (
+  followupResult: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const text = yield* fs.readFileString(
+    decodeURIComponent(delegatedTaskStatusTranscriptFile.pathname),
+  );
+  return yield* decodeProviderReplayNdjson(text.replaceAll(queuedFollowupResult, followupResult));
+}, Effect.provide(NodeServices.layer));
 
 interface CapturedTurn {
   readonly instanceId: ProviderInstanceId;
@@ -521,6 +520,7 @@ const layerUnusedScheduledTaskStub = Layer.succeed(
     upsert: () => Effect.die("ScheduledTaskService.upsert is unused in this test"),
     setEnabled: () => Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
     delete: () => Effect.die("ScheduledTaskService.delete is unused in this test"),
+    deleteForThread: () => Effect.die("unused in this test"),
     runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
     rotateWebhookToken: () => Effect.die("unused in this test"),
     listWebhookDeliveries: () => Effect.die("unused in this test"),
@@ -680,6 +680,7 @@ describe("orchestrator MCP toolkit", () => {
                 Ref.update(scheduledStore, (all) =>
                   all.filter((candidate) => candidate.id !== input.id),
                 ).pipe(Effect.as({ id: input.id })),
+              deleteForThread: () => Effect.die("unused in this test"),
               runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
               rotateWebhookToken: () => Effect.die("unused in this test"),
               listWebhookDeliveries: () => Effect.die("unused in this test"),
@@ -1757,10 +1758,10 @@ describe("orchestrator MCP toolkit", () => {
               hasPendingChildRuns: false,
               latestTerminalRunId: delegated.childRunId,
               latestTerminalStatus: "completed",
-              latestTerminalSummary: delegatedResult,
+              latestTerminalSummary: null,
+              latestTerminalResultContextTransferId: null,
             });
             expect(delegatedStatus.resultContextTransferId).not.toBeNull();
-            expect(delegatedStatus.latestTerminalResultContextTransferId).not.toBeNull();
 
             yield* expectOffersToStay(0);
 
@@ -3990,11 +3991,14 @@ describe("orchestrator MCP toolkit", () => {
       ),
   );
 
-  it.live("reports running and queued child follow-ups from a Codex replay transcript", () =>
+  it.live.each([
+    { label: "distinct", result: queuedFollowupResult, latestSummary: queuedFollowupResult },
+    { label: "identical", result: delegatedResult, latestSummary: null },
+  ])("reports $label child results", ({ result, latestSummary }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const cwd = yield* checkpointWorkspace("delegated-task-status");
-        const rawTranscript = yield* readDelegatedTaskStatusTranscript();
+        const rawTranscript = yield* readDelegatedTaskStatusTranscript(result);
         const transcript = yield* CodexOrchestratorReplayHarness.decodeTranscript(
           materializeReplayTranscriptWorkspace(rawTranscript, cwd),
         );
@@ -4163,12 +4167,10 @@ describe("orchestrator MCP toolkit", () => {
             hasPendingChildRuns: false,
             latestTerminalRunId: delegated.childRunId,
             latestTerminalStatus: "completed",
-            latestTerminalSummary: delegatedResult,
+            latestTerminalSummary: null,
+            latestTerminalResultContextTransferId: null,
           });
           expect(delegated.resultContextTransferId).not.toBeNull();
-          expect(delegated.latestTerminalResultContextTransferId).toBe(
-            delegated.resultContextTransferId,
-          );
 
           const delegatedChild = yield* orchestrator.getThreadProjection(delegated.childThreadId);
           expect(delegatedChild.thread.lineage.relationshipToParent).toBe("subagent");
@@ -4262,8 +4264,8 @@ describe("orchestrator MCP toolkit", () => {
             hasPendingChildRuns: true,
             latestTerminalRunId: delegated.childRunId,
             latestTerminalStatus: "completed",
-            latestTerminalSummary: delegatedResult,
-            latestTerminalResultContextTransferId: delegated.resultContextTransferId,
+            latestTerminalSummary: null,
+            latestTerminalResultContextTransferId: null,
           });
 
           const finalSequence = yield* orchestrator.getThreadEventSequence(delegated.childThreadId);
@@ -4336,7 +4338,7 @@ describe("orchestrator MCP toolkit", () => {
             finishedParent.subagents.find((task) => task.id === followupTasks[1]!.id),
           ).toMatchObject({
             status: "completed",
-            result: queuedFollowupResult,
+            result,
           });
           expect(
             finishedParent.contextTransfers.filter(
@@ -4363,9 +4365,18 @@ describe("orchestrator MCP toolkit", () => {
             hasPendingChildRuns: false,
             latestTerminalRunId: queuedFollowup.runId,
             latestTerminalStatus: "completed",
-            latestTerminalSummary: queuedFollowupResult,
+            latestTerminalSummary: latestSummary,
           });
-          expect(finalStatus.latestTerminalResultContextTransferId).not.toBeNull();
+          const followupTransfer = finishedParent.contextTransfers.find(
+            (transfer) =>
+              transfer.type === "subagent_result" &&
+              transfer.sourcePoint.runId === queuedFollowup.runId,
+          );
+          expect(followupTransfer).toBeDefined();
+          expect(finalStatus.latestTerminalResultContextTransferId).toBe(followupTransfer?.id);
+          expect(finalStatus.latestTerminalResultContextTransferId).not.toBe(
+            delegated.resultContextTransferId,
+          );
           const read = yield* invoke("t3_thread_read", {
             threadId: delegated.childThreadId,
             limit: 100,

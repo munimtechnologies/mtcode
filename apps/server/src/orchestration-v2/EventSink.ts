@@ -67,11 +67,20 @@ export type EventSinkV2Error = typeof EventSinkV2Error.Type;
 
 export interface EventSinkV2Shape {
   readonly write: (input: {
+    /** Return no events if another thread owns this native session at commit time. */
+    readonly unlessNativeThreadOwned?: Pick<
+      OrchestrationV2ProviderThread,
+      "driver" | "providerInstanceId" | "appThreadId" | "nativeThreadRef"
+    >;
     readonly guardPendingUserInputCancellations?: boolean;
     readonly commandId?: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
   }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
   readonly writeWithEffects: (input: {
+    readonly unlessNativeThreadOwned?: Pick<
+      OrchestrationV2ProviderThread,
+      "driver" | "providerInstanceId" | "appThreadId" | "nativeThreadRef"
+    >;
     readonly guardPendingUserInputCancellations?: boolean;
     readonly commandId?: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
@@ -218,8 +227,9 @@ const layerBase: Layer.Layer<
       OrchestrationV2DomainEvent["type"],
       PubSub.PubSub<OrchestrationV2StoredEvent>
     >();
-    const publishLiveEvents = (events: ReadonlyArray<OrchestrationV2StoredEvent>) =>
-      Effect.gen(function* () {
+    const publishLiveEvents =
+      /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
+      Effect.fnUntraced(function* (events: ReadonlyArray<OrchestrationV2StoredEvent>) {
         yield* PubSub.publishAll(liveEvents, events);
         for (const [type, pubsub] of liveEventsByType) {
           yield* PubSub.publishAll(
@@ -262,8 +272,9 @@ const layerBase: Layer.Layer<
 
     // A user can answer after terminal normalization reads the pending request.
     // Recheck inside the write transaction so stale cleanup cannot erase answers.
-    const guardUserInputCancellations = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
-      Effect.gen(function* () {
+    const guardUserInputCancellations =
+      /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
+      Effect.fnUntraced(function* (events: ReadonlyArray<OrchestrationV2DomainEvent>) {
         const staleRequests = new Set<RuntimeRequestId>();
         const staleNodes = new Set<NodeId>();
         for (const event of events) {
@@ -328,8 +339,9 @@ const layerBase: Layer.Layer<
       );
     };
 
-    const applyStoredEvents = (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) =>
-      Effect.gen(function* () {
+    const applyStoredEvents =
+      /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
+      Effect.fnUntraced(function* (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) {
         yield* Effect.forEach(storedEvents, (stored) => projectionStore.apply(stored.event), {
           concurrency: 1,
         });
@@ -369,6 +381,20 @@ const layerBase: Layer.Layer<
 
       return yield* commitThenPublish(
         Effect.gen(function* () {
+          // Check ownership in the same transaction that claims the native session.
+          const imported = input.unlessNativeThreadOwned;
+          if (imported?.nativeThreadRef != null) {
+            const owners = yield* sql`
+              SELECT provider_thread_id
+              FROM orchestration_v2_projection_provider_threads
+              WHERE driver = ${imported.driver}
+                AND provider_instance_id = ${imported.providerInstanceId}
+                AND thread_id IS NOT ${imported.appThreadId}
+                AND json_extract(payload_json, '$.nativeThreadRef.nativeId') = ${imported.nativeThreadRef.nativeId}
+              LIMIT 1
+            `;
+            if (owners.length > 0) return [];
+          }
           const normalized = yield* normalizeEvents(
             input.guardPendingUserInputCancellations === true
               ? yield* guardUserInputCancellations(input.events)
@@ -541,8 +567,9 @@ const layerBase: Layer.Layer<
       );
     });
 
-    const existingCommandResult = (commandId: CommandId) =>
-      Effect.gen(function* () {
+    const existingCommandResult =
+      /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
+      Effect.fnUntraced(function* (commandId: CommandId) {
         const existing = yield* commandReceipts.getByCommandId(commandId);
         if (Option.isNone(existing)) {
           return yield* Effect.die(
