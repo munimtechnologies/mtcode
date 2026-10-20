@@ -5,6 +5,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import {
   EnvironmentId,
   OrchestratorMcpFailure,
@@ -1167,6 +1168,7 @@ it.effect("HTTP tool discovery only advertises monitors to monitoring credential
         Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
         Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
         Layer.mock(ThreadSearch.ThreadSearch)({}),
+        McpProviderSessions.layer,
         ServerSettings.layerTest(),
       ).pipe(
         Layer.provideMerge(

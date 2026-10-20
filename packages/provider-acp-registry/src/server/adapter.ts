@@ -8,6 +8,7 @@ import {
   normalizeDevinToolCall,
   extractDevinSubagentUpdate,
 } from "./devinAcp.ts";
+import { extractDroidElicitationForm } from "./droidAcp.ts";
 import {
   copilotClientCapabilitiesMeta,
   extractCopilotSubagentUpdate,
@@ -219,6 +220,9 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
     capabilities: AcpProviderCapabilitiesV2,
     customModels: readCustomModelEntries(options.settings.customModels).map((entry) => entry.slug),
     promptFailure: (cause) => acpRegistryPromptFailure(registryAgentId, cause),
+    ...(registryAgentId === "factory-droid"
+      ? { extractElicitationForm: extractDroidElicitationForm }
+      : {}),
     ...(registryAgentId === "mistral-vibe"
       ? { registerExtensions: registerMistralVibeAcpExtensions }
       : {}),

@@ -72,6 +72,10 @@ export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const homeDirectory = yield* HostProcess.HomeDirectory;
   return yield* Effect.sync((): DesktopPreReadyElectronOptions["Service"] => {
+    // Chromium reads the safeStorage key's name before startup first yields.
+    // MT Code builds always shipped under their packaged productName ("MT Code",
+    // or "T3 Code" for the private fleet), which Electron already uses here, so
+    // upstream's pre-ready rename to "T3 Code (Alpha)" would orphan saved keys.
     const linuxPasswordStoreCommandLine =
       platform === "linux"
         ? readCommandLineSwitchValue(Electron.app.commandLine, "password-store")
@@ -110,14 +114,21 @@ export const make = Effect.gen(function* () {
           : undefined;
         if (iconPath !== undefined) {
           try {
-            NodeFS.mkdirSync(NodePath.posix.dirname(iconPath), { recursive: true });
-            NodeFS.copyFileSync(
+            // Electron's copyFile extracts ASAR entries to temporary files it never removes.
+            const icon = NodeFS.readFileSync(
               NodePath.posix.join(
                 Electron.app.getAppPath(),
                 "apps/desktop/prod-resources/icon.png",
               ),
-              iconPath,
             );
+            let current: Buffer | null = null;
+            try {
+              current = NodeFS.readFileSync(iconPath);
+            } catch {}
+            if (current === null || !current.equals(icon)) {
+              NodeFS.mkdirSync(NodePath.posix.dirname(iconPath), { recursive: true });
+              NodeFS.writeFileSync(iconPath, icon, { mode: 0o600 });
+            }
           } catch {}
         }
         NodeFS.writeFileSync(

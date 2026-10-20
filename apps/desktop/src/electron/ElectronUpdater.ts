@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
@@ -69,6 +70,7 @@ export class ElectronUpdater extends Context.Service<
     readonly setFullChangelog: (value: boolean) => Effect.Effect<void>;
     readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
     readonly setRequestHeaders: (headers: Readonly<Record<string, string>>) => Effect.Effect<void>;
+    readonly pendingDownloadDirectory: Effect.Effect<Option.Option<string>>;
     readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
     readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterDownloadUpdateError>;
     readonly quitAndInstall: (options: {
@@ -169,6 +171,17 @@ export const make = ElectronUpdater.of({
       autoUpdater.requestHeaders = { ...headers };
       return Effect.void;
     }),
+  // Use the updater's helper so cache lookup follows the same configuration as downloads.
+  pendingDownloadDirectory: Effect.tryPromise(() =>
+    (
+      autoUpdater as unknown as {
+        getOrCreateDownloadHelper: () => Promise<{ readonly cacheDirForPendingUpdate: string }>;
+      }
+    ).getOrCreateDownloadHelper(),
+  ).pipe(
+    Effect.map((helper) => helper.cacheDirForPendingUpdate),
+    Effect.option,
+  ),
   checkForUpdates: Effect.suspend(() => {
     const channel = autoUpdater.channel;
     return Effect.tryPromise({

@@ -148,7 +148,8 @@ prefix**, enter a custom prefix or clear the field to create branches without a 
 ## Create a pull request
 
 Use a thread's Git actions to commit, push, and create a pull request. T3 Code can generate commit
-messages, review titles, and descriptions from your changes.
+messages, review titles, and descriptions from your changes. Descriptions also draw on the work in
+the thread, including the checks it ran.
 
 An existing fork PR can appear beside the branch even if you pushed without setting an upstream.
 If its badge is missing because several remotes hold that branch, set the branch's upstream to

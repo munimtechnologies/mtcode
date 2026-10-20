@@ -22,6 +22,7 @@ export interface UsageRecord {
   readonly recordCount: number;
   readonly reportedCostUsd: number | null;
   readonly speed: UsageSpeed;
+  readonly unresolvedServiceTierTurnId?: string;
   readonly dedupeKey: string | null;
 }
 
@@ -120,6 +121,9 @@ export type ProviderUsageReader<Config, R> =
       readonly kind: "transcripts";
       readonly provider: UsageProviderKind;
       readonly format: TranscriptUsageFormat<unknown>;
+      readonly resolveServiceTiers?: (
+        records: readonly UsageRecord[],
+      ) => Effect.Effect<ReadonlyMap<UsageRecord, UsageSpeed>, never, R>;
       readonly directories: (
         instance: ProviderUsageInstance<Config>,
       ) => Effect.Effect<

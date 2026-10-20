@@ -773,7 +773,7 @@ export const make = Effect.gen(function* () {
           yield* Ref.set(installRunningBackendsRef, runningInstances);
           yield* Effect.forEach(
             instances,
-            (instance) => instance.stop({ timeout: Duration.seconds(5) }),
+            (instance) => instance.stop({ timeout: Duration.seconds(45) }),
             { concurrency: "unbounded" },
           );
           yield* electronUpdater.quitAndInstall({
@@ -888,6 +888,24 @@ export const make = Effect.gen(function* () {
     }),
   );
 
+  // Personal fork: download as soon as an update is available (no rocket click).
+  // downloadUpdate reuses an artifact an earlier launch already cached, which
+  // also restores install readiness after relaunching with a downloaded update.
+  const autoDownloadUpdate = Effect.fn("desktop.updates.autoDownloadUpdate")(function* (
+    version: string,
+  ) {
+    yield* awaitCheckRelease;
+    if (yield* Ref.get(desktopState.quitting)) return;
+    const state = yield* Ref.get(updateStateRef);
+    if (state.status !== "available" || state.availableVersion !== version) return;
+    const downloadResult = yield* downloadAvailableUpdate;
+    yield* logUpdaterInfo("auto-download finished", {
+      version,
+      accepted: downloadResult.accepted,
+      completed: downloadResult.completed,
+    });
+  });
+
   const handleUpdateAvailable = Effect.fn("desktop.updates.handleUpdateAvailable")(function* (
     raw: unknown,
   ) {
@@ -927,14 +945,7 @@ export const make = Effect.gen(function* () {
             releaseNoteGroups: releaseNotes.length,
             omittedReleaseCount,
           });
-          // Personal fork: download as soon as an update is available (no rocket click).
-          yield* awaitCheckRelease;
-          const downloadResult = yield* downloadAvailableUpdate;
-          yield* logUpdaterInfo("auto-download finished", {
-            version: info.version,
-            accepted: downloadResult.accepted,
-            completed: downloadResult.completed,
-          });
+          yield* autoDownloadUpdate(info.version);
         }),
       ),
       Effect.catchCause((cause) => {

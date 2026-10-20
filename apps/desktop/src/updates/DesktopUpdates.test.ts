@@ -317,6 +317,129 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("auto-downloads an update an earlier launch cached once its check finishes", () => {
+    const checkStarted = Deferred.makeUnsafe<void>();
+    const releaseCheck = Deferred.makeUnsafe<void>();
+    const harness = makeHarness({
+      cachedDownloadSha512: "sha-1.2.4",
+      // electron-updater reports update-available while the check is running.
+      checkForUpdates: Effect.sync(() =>
+        harness.emit("update-available", {
+          version: "1.2.4",
+          files: [{ url: "T3-Code-1.2.4.zip", sha512: "sha-1.2.4" }],
+        }),
+      ).pipe(
+        Effect.andThen(Deferred.succeed(checkStarted, undefined)),
+        Effect.andThen(Deferred.await(releaseCheck)),
+      ),
+      downloadUpdate: Effect.sync(() => harness.emit("update-downloaded", { version: "1.2.4" })),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const check = yield* Effect.forkChild(updates.check("startup"));
+        yield* Deferred.await(checkStarted);
+        yield* flushCallbacks;
+        assert.equal(harness.downloadCount(), 0);
+        assert.equal((yield* updates.getState).status, "available");
+
+        yield* Deferred.succeed(releaseCheck, undefined);
+        yield* Fiber.join(check);
+        yield* flushCallbacks;
+
+        assert.equal(harness.downloadCount(), 1);
+        assert.equal((yield* updates.getState).downloadedVersion, "1.2.4");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  // Personal fork: every available update downloads without a click, whatever
+  // electron-updater's cache holds; downloadUpdate decides whether to reuse it.
+  it.effect.each([
+    { name: "a newer release", cachedDownloadSha512: "older-release" },
+    { name: "an interrupted download", cachedFileExists: false },
+    { name: "unfinished metadata", cachedDownloadInfo: "{" },
+  ])("auto-downloads despite $name in the cache", (cache) => {
+    const harness = makeHarness({ cachedDownloadSha512: "release-sha", ...cache });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-available", {
+          version: "1.2.5",
+          files: [{ url: "T3-Code-1.2.5.zip", sha512: "release-sha" }],
+        });
+        yield* flushCallbacks;
+
+        assert.equal(harness.downloadCount(), 1);
+        assert.equal((yield* updates.getState).status, "downloading");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect.each(["quitting", "newer release", "no longer available"] as const)(
+    "abandons a pending auto-download after %s",
+    (change) => {
+      const checkStarted = Deferred.makeUnsafe<void>();
+      const releaseCheck = Deferred.makeUnsafe<void>();
+      const harness = makeHarness({
+        cachedDownloadSha512: "cached-release",
+        checkForUpdates: Effect.sync(() =>
+          harness.emit("update-available", {
+            version: "1.2.4",
+            files: [{ url: "T3-Code-1.2.4.zip", sha512: "cached-release" }],
+          }),
+        ).pipe(
+          Effect.andThen(Deferred.succeed(checkStarted, undefined)),
+          Effect.andThen(Deferred.await(releaseCheck)),
+        ),
+      });
+
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          const check = yield* Effect.forkChild(updates.check("startup"));
+          yield* Deferred.await(checkStarted);
+          yield* flushCallbacks;
+          assert.equal((yield* updates.getState).status, "available");
+          assert.equal(harness.downloadCount(), 0);
+
+          if (change === "quitting") {
+            const desktop = yield* DesktopState.DesktopState;
+            yield* Ref.set(desktop.quitting, true);
+          } else if (change === "newer release") {
+            harness.emit("update-available", {
+              version: "1.2.5",
+              files: [{ url: "T3-Code-1.2.5.zip", sha512: "new-release" }],
+            });
+          } else {
+            harness.emit("update-not-available");
+          }
+          yield* flushCallbacks;
+          yield* Deferred.succeed(releaseCheck, undefined);
+          yield* Fiber.join(check);
+          yield* flushCallbacks;
+
+          const state = yield* updates.getState;
+          if (change === "newer release") {
+            // Only the newer release downloads; the stale 1.2.4 attempt is dropped.
+            assert.equal(harness.downloadCount(), 1);
+            assert.equal(state.availableVersion, "1.2.5");
+            assert.equal(state.status, "downloading");
+          } else {
+            assert.equal(harness.downloadCount(), 0);
+            assert.equal(state.status, change === "quitting" ? "available" : "up-to-date");
+          }
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    },
+  );
+
   it.effect("preserves a queued installer when the feed has no update", () => {
     const harness = makeHarness();
 
@@ -895,7 +1018,10 @@ describe("DesktopUpdates", () => {
 
         const result = yield* updates.install;
         assert.equal(result.state.errorContext, "install");
-        assert.deepEqual(harness.installSteps, ["quitAndInstall"]);
+        // Personal fork: update-downloaded already auto-installed once (and failed),
+        // so the manual install is a retry; neither attempt restarts the backend.
+        assert.isNotEmpty(harness.installSteps);
+        assert.isTrue(harness.installSteps.every((step) => step === "quitAndInstall"));
         assert.isFalse((yield* (yield* pool.primary).snapshot).desiredRunning);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));

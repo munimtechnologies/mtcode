@@ -33,8 +33,11 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { AgentScope, AgentScopeThreadId } from "@t3tools/shared/AgentScope";
+import { HTML_RENDER_TOOL_NAME } from "@t3tools/shared/htmlRender";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { type SelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
+import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
+import { compactDynamicToolOutput, htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -226,6 +229,14 @@ export interface AcpAdapterV2Flavor {
     readonly url: string;
     readonly message: string;
   }) => Effect.Effect<boolean>;
+  readonly extractElicitationForm?: (request: EffectAcpSchema.CreateElicitationRequest) =>
+    | {
+        readonly questions: ReadonlyArray<OrchestrationV2UserInputQuestion>;
+        readonly respond: (
+          answers: ProviderUserInputAnswers,
+        ) => EffectAcpSchema.CreateElicitationResponse;
+      }
+    | undefined;
   readonly withRuntimeStartup?: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   readonly makeRuntime: (
     input: AcpAdapterV2RuntimeInput,
@@ -3732,6 +3743,46 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               });
             }
           } else if (mcpIdentity !== undefined) {
+            const toolName = `${mcpIdentity.server}.${mcpIdentity.tool}`;
+            const input =
+              mcpIdentity.input ?? unknownRecord(rawInputRecord?.arguments) ?? rawInputRecord ?? {};
+            let output = rawOutput === undefined ? undefined : acpMcpToolCallOutput(rawOutput);
+            const isHtmlRender = resolveT3McpToolId(toolName) === HTML_RENDER_TOOL_NAME;
+            const isError =
+              compactDynamicToolOutput(output)?.isError === true ||
+              compactDynamicToolOutput(rawOutputRecord?.result)?.isError === true;
+            if (
+              isHtmlRender &&
+              (status === "failed" || (status === "completed" && isError)) &&
+              previous?.status !== "failed" &&
+              previous?.status !== "completed"
+            ) {
+              // A failed call may have published before the provider lost its result.
+              yield* mcpSessions.takeHtmlRender(
+                context.input.threadId,
+                input,
+                htmlRenderFromToolItem({ toolName, output }),
+              );
+            }
+            if (status === "completed" && isHtmlRender && !isError) {
+              const reportedPage = htmlRenderFromToolItem({ toolName, output });
+              // Antigravity replaces MCP results with summaries, including on repeated completions.
+              const previousPage = htmlRenderFromToolItem({
+                toolName,
+                output: acpMcpToolCallOutput(previous?.data.rawOutput ?? previous?.data.content),
+              });
+              const page = reportedPage
+                ? yield* mcpSessions.takeHtmlRender(context.input.threadId, input, reportedPage)
+                : (previousPage ??
+                  (yield* mcpSessions.takeHtmlRender(context.input.threadId, input)));
+              if (reportedPage === undefined && page !== undefined) {
+                output = { htmlRender: page };
+                context.tools.set(toolCall.toolCallId, {
+                  ...toolCall,
+                  data: { ...toolCall.data, rawOutput: output },
+                });
+              }
+            }
             turnItem = {
               ...base,
               title: null,
@@ -3743,13 +3794,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 )?.source,
               }),
               type: "dynamic_tool",
-              toolName: `${mcpIdentity.server}.${mcpIdentity.tool}`,
-              input:
-                mcpIdentity.input ??
-                unknownRecord(rawInputRecord?.arguments) ??
-                rawInputRecord ??
-                {},
-              ...(rawOutput === undefined ? {} : { output: acpMcpToolCallOutput(rawOutput) }),
+              toolName,
+              input,
+              ...(output === undefined ? {} : { output }),
             };
             yield* emitProviderEvent({ type: "turn_item.updated", driver, turnItem });
             yield* rearmDeferredFinalize(context);
@@ -6205,31 +6252,34 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               }
               const requestedSchema = unknownRecord(params.requestedSchema);
               const properties = unknownRecord(requestedSchema?.properties) ?? {};
+              const nativeForm = flavor.extractElicitationForm?.(params);
               const elicitationScopeId =
                 "sessionId" in params ? params.sessionId : `request:${params.requestId}`;
-              const questions = Object.entries(properties).map(
-                ([id, property], index): OrchestrationV2UserInputQuestion => {
-                  const record = unknownRecord(property);
-                  const enumValues = Array.isArray(record?.enum)
-                    ? record.enum.filter((value): value is string => typeof value === "string")
-                    : [];
-                  const options =
-                    enumValues.length > 0
-                      ? enumValues.map((value) => ({ label: value, description: value }))
-                      : record?.type === "boolean"
-                        ? [
-                            { label: "true", description: "Yes" },
-                            { label: "false", description: "No" },
-                          ]
-                        : [];
-                  return {
-                    id,
-                    header: nonEmptyText(record?.title, `Question ${index + 1}`),
-                    question: nonEmptyText(record?.description, params.message),
-                    options,
-                  };
-                },
-              );
+              const questions =
+                nativeForm?.questions ??
+                Object.entries(properties).map(
+                  ([id, property], index): OrchestrationV2UserInputQuestion => {
+                    const record = unknownRecord(property);
+                    const enumValues = Array.isArray(record?.enum)
+                      ? record.enum.filter((value): value is string => typeof value === "string")
+                      : [];
+                    const options =
+                      enumValues.length > 0
+                        ? enumValues.map((value) => ({ label: value, description: value }))
+                        : record?.type === "boolean"
+                          ? [
+                              { label: "true", description: "Yes" },
+                              { label: "false", description: "No" },
+                            ]
+                          : [];
+                    return {
+                      id,
+                      header: nonEmptyText(record?.title, `Question ${index + 1}`),
+                      question: nonEmptyText(record?.description, params.message),
+                      options,
+                    };
+                  },
+                );
               const userInput = yield* requestUserInputWithAdmission(
                 handlerGeneration,
                 Effect.gen(function* () {
@@ -6249,13 +6299,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               const response =
                 userInput.answers === null
                   ? ({ action: "cancel" } as const)
-                  : ({
+                  : (nativeForm?.respond(userInput.answers) ??
+                    ({
                       action: "accept",
                       content: elicitationContent(
                         userInput.answers,
                         new Set(Object.keys(properties)),
                       ),
-                    } as const);
+                    } as const));
               yield* userInput.acknowledgeNativeResponse;
               return response;
             }).pipe(holdingAgentRequest(handlerGeneration)),

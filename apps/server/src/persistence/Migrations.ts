@@ -97,6 +97,8 @@ import Migration0072 from "./Migrations/063_DropUnusedV1Projections.ts";
 import Migration0073 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 // Upstream 065; registered as the next free fork id.
 import Migration0074 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
+// Upstream 066 (repair client settlement timestamps); registered as the next free fork id.
+import Migration0075 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
 
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -181,6 +183,8 @@ export const migrationEntries = [
   [73, "CanonicalizeThreadPullRequestLinks", Migration0073],
   // Upstream 065 (Codex usage native turn index); registered as the next free fork id.
   [74, "CodexUsageNativeTurnIndex", Migration0074],
+  // Upstream 066 (repair client settlement timestamps); registered as the next free fork id.
+  [75, "RepairClientSettlementTimestamps", Migration0075],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
