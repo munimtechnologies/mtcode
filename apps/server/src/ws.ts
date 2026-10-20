@@ -133,6 +133,7 @@ import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
+  bufferShellLiveStream,
   coalesceShellApplicationEvents,
   coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
@@ -1049,7 +1050,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       );
 
     const liveFrom = (afterSequence: number) =>
-      bufferLiveStream(
+      bufferShellLiveStream(
         toShellStream(
           applicationEvents.streamProjectedApplicationEvents({
             afterSequence,
