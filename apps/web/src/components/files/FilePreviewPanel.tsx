@@ -257,6 +257,7 @@ function WorkspaceBrowserPreview(props: {
   return (
     <BrowserDocumentFrame
       src={`${assetUrl.url}${revisionSuffix}`}
+      documentKey={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}:${props.workspaceMutationId}`}
       title={props.title}
       pdf={isPdfPreviewFile(props.absolutePath)}
     />
@@ -1246,6 +1247,7 @@ export default function FilePreviewPanel({
               enableShortcut={openInShortcutEnabled}
               openInCwd={absolutePath}
               terminalCwd={cwd}
+              openInCwdIsFile={file.isFile}
               compact
               revealFileManager={revealsInFileManager}
             />

@@ -321,6 +321,8 @@ export function buildServerProvider(input: {
     version: input.probe.version,
     status: input.enabled ? input.probe.status : "disabled",
     auth: input.probe.auth,
+    // Drivers with in-app setup replace these CLI-owned defaults.
+    setup: { canAuthenticate: false, canInstall: false },
     checkedAt: input.checkedAt,
     ...(input.probe.message ? { message: input.probe.message } : {}),
     ...(input.probe.codexStatus ? { codexStatus: input.probe.codexStatus } : {}),

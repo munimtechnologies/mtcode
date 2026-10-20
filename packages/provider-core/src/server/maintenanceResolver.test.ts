@@ -544,6 +544,49 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     }),
   );
 
+  it.effect.each([
+    {
+      name: "the default home",
+      resolved: "/Users/theo/.vite-plus/bin/claude",
+      real: "/Users/theo/.vite-plus/current/bin/vp",
+      platform: "darwin",
+    },
+    {
+      name: "the XDG home",
+      resolved: "/home/theo/.local/share/vite-plus/bin/claude",
+      real: "/home/theo/.local/share/vite-plus/current/bin/vp",
+      platform: "linux",
+    },
+    {
+      name: "the Windows home",
+      resolved: "C:\\Users\\Theo\\AppData\\Local\\vite-plus\\bin\\claude.cmd",
+      real: "C:\\Users\\Theo\\AppData\\Local\\vite-plus\\packages\\@anthropic-ai\\claude-code\\lib\\node_modules\\@anthropic-ai\\claude-code\\cli.js",
+      platform: "win32",
+    },
+  ] as const)("updates a Vite+ global install in $name with vp", (fixture) =>
+    Effect.gen(function* () {
+      const capabilities = yield* resolveInstall({ definition: claudeUpdate, ...fixture });
+
+      expect(capabilities.update).toMatchObject({
+        command: "vp i -g @anthropic-ai/claude-code",
+        lockKey: "vite-plus-global",
+      });
+    }),
+  );
+
+  it.effect("keeps a project folder named vite-plus manual-only", () =>
+    Effect.gen(function* () {
+      const capabilities = yield* resolveInstall({
+        definition: claudeUpdate,
+        resolved: "/work/vite-plus/bin/claude",
+        real: "/work/vite-plus/node_modules/@anthropic-ai/claude-code/cli.js",
+        platform: "linux",
+      });
+
+      expect(capabilities.update).toBeNull();
+    }),
+  );
+
   it.effect("proves Windows npm ownership from the package manifest beside the shim", () =>
     Effect.gen(function* () {
       const tempDir = yield* makeTempDir("t3-npm-windows-capabilities");
@@ -757,6 +800,43 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
         },
       });
     }),
+  );
+
+  it.effect.each(["wrapper", "symlink"])(
+    "keeps a mise-owned %s in a native install location manual-only",
+    (launcher, { skip }) => {
+      if (windowsHost || (launcher === "symlink" && !symlinksSupported)) skip();
+      return Effect.gen(function* () {
+        const tempDir = yield* makeTempDir("t3-native-mise");
+        const nativePath = NodePath.join(tempDir, ".local", "bin", "native-package-tool");
+        if (launcher === "wrapper") {
+          writeExecutable(nativePath);
+          NodeFS.writeFileSync(
+            nativePath,
+            '#!/bin/sh\nexec mise x native-package-tool -- native-package-tool "$@"\n',
+          );
+        } else {
+          const target = NodePath.join(
+            tempDir,
+            "mise",
+            "installs",
+            "native-package-tool",
+            "1.0.0",
+            "native-package-tool",
+          );
+          writeExecutable(target);
+          NodeFS.mkdirSync(NodePath.dirname(nativePath), { recursive: true });
+          NodeFS.symlinkSync(target, nativePath);
+        }
+
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
+          nativePackageToolUpdate,
+          { binaryPath: nativePath, env: { PATH: "" } },
+        ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
+
+        expect(capabilities.update).toBeNull();
+      });
+    },
   );
 
   it.effect.skipIf(windowsHost)("runs an explicit native updater outside PATH", () =>

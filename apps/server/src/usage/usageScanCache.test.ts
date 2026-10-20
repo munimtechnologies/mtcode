@@ -12,6 +12,7 @@ import {
 import type { UsageRecord } from "@t3tools/provider-core/server/usage";
 
 import { TEST_FORMAT_MAP } from "./usageTestFormats.ts";
+import { initialCodexScanState } from "../provider/Drivers/codexUsage.ts";
 
 function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
   return {
@@ -53,6 +54,7 @@ function cacheWith(entries: readonly [string, number, readonly UsageRecord[]][])
       provider: "claude",
       records,
       tailRecords: [],
+      malformedRecords: 0,
       position: position(),
     });
   }
@@ -87,6 +89,7 @@ describe("scan cache round trip", () => {
     ]);
     original.set("/grok.jsonl", {
       size: 40,
+      malformedRecords: 2,
       mtimeMs: 300,
       provider: "grok",
       records: [
@@ -98,6 +101,7 @@ describe("scan cache round trip", () => {
     });
     original.set("/codex.jsonl", {
       size: 80,
+      malformedRecords: 3,
       mtimeMs: 400,
       provider: "codex",
       records: [
@@ -106,13 +110,12 @@ describe("scan cache round trip", () => {
       tailRecords: [],
       position: position({
         state: {
+          ...initialCodexScanState(),
           model: "gpt-6-astra",
           speed: "ultrafast",
           sessionId: "session-c",
           lastUsageSignature: '{"input_tokens":1}',
           sawSessionMeta: true,
-          suppressingForkCopies: false,
-          forkCopyAnchorMs: 0,
         },
       }),
     });
@@ -136,7 +139,56 @@ describe("scan cache round trip", () => {
       TEST_FORMAT_MAP,
     );
 
+    expect(restored.size).toBe(4);
     expect(restored).toEqual(original);
+  });
+
+  it("retains v5 history and stateless positions but invalidates obsolete Codex state", () => {
+    const original = cacheWith([["/gone.jsonl", 100, [record({ speed: "fast" })]]]);
+    original.set("/gone-codex.jsonl", {
+      ...original.get("/gone.jsonl")!,
+      provider: "codex",
+      records: [record({ provider: "codex", speed: "fast", dedupeKey: null })],
+      position: position({
+        state: {
+          model: "gpt-6-astra",
+          speed: "fast",
+          sessionId: "session-a",
+          lastUsageSignature: null,
+          sawSessionMeta: true,
+          suppressingForkCopies: false,
+          forkCopyAnchorMs: 0,
+        },
+      }),
+    });
+    const encoded = encodeScanCache(original);
+    const entry = encoded.files["/gone.jsonl"]!;
+    const legacy = {
+      ...encoded,
+      version: 5,
+      files: {
+        ...encoded.files,
+        "/gone.jsonl": {
+          s: entry.s,
+          m: entry.m,
+          p: entry.p,
+          r: entry.r,
+          t: entry.t,
+          o: entry.o,
+          gl: entry.gl,
+          gh: entry.gh,
+          cs: entry.cs,
+        },
+      },
+    };
+
+    const restored = decodeScanCache(JSON.parse(JSON.stringify(legacy)), TEST_FORMAT_MAP);
+    expect(restored.get("/gone.jsonl")).toEqual(original.get("/gone.jsonl"));
+    expect(restored.get("/gone-codex.jsonl")).toEqual({
+      ...original.get("/gone-codex.jsonl"),
+      size: -1,
+      position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+    });
   });
 
   it("drops an entry whose persisted parse state is corrupt", () => {
@@ -191,12 +243,14 @@ describe("scan cache round trip", () => {
       ["/a.jsonl", 100, [record()]],
       ["/b.jsonl", 200, [record({ sessionId: "session-b" })]],
     ]);
+    cache.set("/b.jsonl", { ...cache.get("/b.jsonl")!, malformedRecords: 2 });
     const sources = { "claude\u0000/projects": { dir: "/projects", volumeId: "1:2" } };
     expect(decodeScanCache(JSON.parse(write(cache, { sources })), TEST_FORMAT_MAP)).toEqual(cache);
 
     cache.set("/b.jsonl", {
       ...cache.get("/b.jsonl")!,
       size: 30,
+      malformedRecords: 4,
       records: [record({ sessionId: "session-c", model: "claude-opus-5-5", dedupeKey: "msg_3:" })],
     });
     const document = JSON.parse(write(cache, { sources }));

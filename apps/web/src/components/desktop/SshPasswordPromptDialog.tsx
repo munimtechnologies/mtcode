@@ -26,6 +26,7 @@ export function SshPasswordPromptDialog() {
     <SshPasswordRequestDialog
       key={currentRequest.requestId}
       request={currentRequest}
+      purpose="connection"
       onRespond={(password) =>
         window.desktopBridge?.resolveSshPasswordPrompt(currentRequest.requestId, password) ??
         Promise.resolve()

@@ -17,6 +17,7 @@ import {
   normalizeModelSlug,
   resolveReasoningTransition,
 } from "@t3tools/shared/model";
+import { REASONING_EFFORT_OPTION_IDS } from "@t3tools/client-runtime/state/thread-execution";
 import { memo } from "react";
 import { BrainIcon } from "lucide-react";
 import {
@@ -93,10 +94,7 @@ type TraitsPersistence =
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
 const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
-  "reasoningEffort",
-  "reasoning",
-  "effort",
-  "variant",
+  ...REASONING_EFFORT_OPTION_IDS,
   "thinking",
 ]);
 

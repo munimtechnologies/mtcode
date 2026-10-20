@@ -74,6 +74,7 @@ import type {
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import { ProviderDriverError } from "./Errors.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
   makeManualOnlyProviderMaintenanceCapabilities,
   makeProviderMaintenanceCapabilities,
@@ -451,6 +452,7 @@ it.layer(
         assert.strictEqual(status.auth.type, "chatgpt");
         assert.strictEqual(status.auth.label, "ChatGPT Pro 20x Subscription");
         assert.strictEqual(status.auth.email, "test@example.com");
+        assert.deepStrictEqual(status.setup, { canAuthenticate: false, canInstall: false });
         assert.deepStrictEqual(status.models, [
           {
             slug: "gpt-live-codex",
@@ -597,6 +599,7 @@ it.layer(
         assert.strictEqual(status.status, "error");
         assert.strictEqual(status.installed, false);
         assert.strictEqual(status.auth.status, "unknown");
+        assert.deepStrictEqual(status.setup, { canAuthenticate: false, canInstall: false });
         assert.include(status.message, binaryPath);
         assert.include(status.message, "Settings → Providers → Codex → Binary path on the server");
         assert.strictEqual(
@@ -2603,6 +2606,44 @@ it.layer(
             [latestSkills],
           );
 
+          // With no cached snapshot, an older scan must leave publication and
+          // request deduplication to the forced scan even when it finishes first.
+          const olderStarted = yield* Deferred.make<void>();
+          const releaseOlder = yield* Deferred.make<void>();
+          yield* Ref.set(scanGate, { started: olderStarted, release: releaseOlder });
+          yield* Ref.set(scopedResult, scopedProvider);
+          const olderScan = yield* registry
+            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace2" })
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(olderStarted);
+          const newerStarted = yield* Deferred.make<void>();
+          const releaseNewer = yield* Deferred.make<void>();
+          yield* Ref.set(scanGate, { started: newerStarted, release: releaseNewer });
+          yield* Ref.set(scopedResult, { ...scopedProvider, skills: latestSkills });
+          const newerScan = yield* registry
+            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace2", fresh: true })
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(newerStarted);
+          yield* Deferred.succeed(releaseOlder, undefined);
+          yield* Fiber.join(olderScan);
+          assert.strictEqual(
+            (yield* registry.getProviders)[0]?.workspaceSnapshots?.find(
+              (snapshot) => snapshot.cwd === "/workspace2",
+            ),
+            undefined,
+          );
+          const callsWhileForced = yield* Ref.get(snapshotCalls);
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace2" });
+          assert.strictEqual(yield* Ref.get(snapshotCalls), callsWhileForced);
+          yield* Deferred.succeed(releaseNewer, undefined);
+          yield* Fiber.join(newerScan);
+          assert.deepStrictEqual(
+            (yield* registry.getProviders)[0]?.workspaceSnapshots?.find(
+              (snapshot) => snapshot.cwd === "/workspace2",
+            )?.skills,
+            latestSkills,
+          );
+
           yield* Ref.set(instancesRef, [rebuiltInstance]);
           yield* PubSub.publish(registryChanges, undefined);
           let rebuilt = yield* registry.getProviders;
@@ -3854,6 +3895,7 @@ it.layer(
           assert.notStrictEqual(ghost, undefined);
           assert.strictEqual(ghost?.driver, "ghostDriver");
           assert.strictEqual(ghost?.availability, "unavailable");
+          assert.strictEqual(Object.hasOwn(ghost ?? {}, "setup"), false);
           assert.match(ghost?.unavailableReason ?? "", /ghostDriver/);
         }).pipe(Effect.provide(runtimeServices));
       }),
@@ -4157,6 +4199,76 @@ it.layer(
       ),
     );
 
+    it.effect.each([
+      {
+        name: "accepts a healthy claude --version response after 19 seconds",
+        answer: Effect.sleep("19 seconds"),
+        elapsed: 19_000,
+        status: "ready",
+        version: "1.0.0",
+      },
+      {
+        name: "bounds a hung claude --version probe",
+        answer: Effect.never,
+        elapsed: 21_000,
+        status: null,
+        version: null,
+      },
+    ])("$name", ({ answer, elapsed, status: expectedStatus, version }) =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const statusFiber = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities(),
+        ).pipe(
+          Effect.provide(
+            Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              ChildProcessSpawner.make((command) => {
+                assert.deepStrictEqual(
+                  (command as unknown as { args: ReadonlyArray<string> }).args,
+                  ["--version"],
+                );
+                return Effect.succeed(
+                  ChildProcessSpawner.makeHandle({
+                    ...mockHandle({ stdout: "", stderr: "", code: 0 }),
+                    exitCode: answer.pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+                    stdout: Stream.fromEffect(
+                      Deferred.succeed(started, undefined).pipe(
+                        Effect.andThen(answer),
+                        Effect.as(encoder.encode("1.0.0\n")),
+                      ),
+                    ),
+                  }),
+                );
+              }),
+            ),
+          ),
+          Effect.result,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        yield* TestClock.adjust(elapsed);
+
+        const result = yield* Fiber.join(statusFiber);
+        if (expectedStatus === null) {
+          assert.strictEqual(Result.isFailure(result), true);
+          assert.deepInclude(Result.isFailure(result) ? result.failure : null, {
+            _tag: "ProviderProbeTimeoutError",
+            probe: "version",
+            timeoutMs: 20_000,
+            installed: true,
+          });
+          return;
+        }
+        assert.strictEqual(Result.isSuccess(result), true);
+        const status = Result.getOrThrow(result);
+        assert.strictEqual(status.status, expectedStatus);
+        assert.strictEqual(status.installed, true);
+        assert.strictEqual(status.version, version);
+      }),
+    );
+
     it.effect("returns ready and labels Bedrock-backed Claude as authenticated", () =>
       Effect.gen(function* () {
         // Bedrock authenticates via external AWS credentials, so the SDK init
@@ -4192,9 +4304,84 @@ it.layer(
             apiKeySource: "none",
             apiProvider: "firstParty",
           }),
+          { ANTHROPIC_BASE_URL: "" },
         );
         assert.strictEqual(status.status, "error");
         assert.strictEqual(status.auth.status, "unauthenticated");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect.each([
+      { source: "inherited HTTPS endpoint", baseUrl: "https://proxy.example/api", overrides: [] },
+      {
+        source: "instance HTTP endpoint overriding Anthropic",
+        baseUrl: "https://api.anthropic.com",
+        overrides: [
+          { name: "ANTHROPIC_BASE_URL", value: "http://localhost:8080", sensitive: false },
+        ],
+      },
+    ])("keeps Claude ready with an empty first-party account: $source", ({ baseUrl, overrides }) =>
+      Effect.gen(function* () {
+        const environment = yield* mergeProviderInstanceEnvironment(overrides, {
+          ANTHROPIC_BASE_URL: baseUrl,
+        });
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            tokenSource: "none",
+            apiKeySource: "none",
+            apiProvider: "firstParty",
+          }),
+          environment,
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.auth.status, "authenticated");
+        assert.strictEqual(status.auth.type, "customEndpoint");
+        assert.strictEqual(status.auth.label, "Custom API endpoint");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect.each([
+      "https://api.anthropic.com",
+      "https://api.anthropic.com:443",
+      "https://api.anthropic.com:8443",
+      "openrouter.ai/api",
+      "localhost:8080",
+      "ftp://proxy.example",
+    ])("keeps Claude logged out when the instance endpoint is %s", (baseUrl) =>
+      Effect.gen(function* () {
+        const environment = yield* mergeProviderInstanceEnvironment(
+          [{ name: "ANTHROPIC_BASE_URL", value: baseUrl, sensitive: false }],
+          { ANTHROPIC_BASE_URL: "https://proxy.example/api" },
+        );
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            tokenSource: "none",
+            apiKeySource: "none",
+            apiProvider: "firstParty",
+          }),
+          environment,
+        );
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.auth.status, "unauthenticated");
+        assert.strictEqual(status.auth.type, undefined);
       }).pipe(
         Effect.provide(
           layerMockSpawner((args) => {

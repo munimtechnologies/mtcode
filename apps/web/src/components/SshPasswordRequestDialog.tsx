@@ -1,5 +1,5 @@
 import type { SourceControlSshPasswordPromptRequest } from "@t3tools/contracts";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "./ui/button";
 import {
@@ -14,6 +14,7 @@ import {
 import { Input } from "./ui/input";
 import { canSubmitSshPassword } from "./sshPasswordRequestForm";
 import { APP_DISPLAY_NAME } from "~/branding";
+import { useStableCallback } from "~/hooks/useStableCallback";
 
 export interface SshPasswordPromptRequestPresentation {
   readonly requestId: string;
@@ -30,17 +31,16 @@ export function useSshPasswordRequest() {
     readonly resolve: (password: string | null) => void;
   } | null>(null);
 
-  const request = useCallback(
+  const request = useStableCallback(
     (nextPrompt: SourceControlSshPasswordPromptRequest) =>
       new Promise<string | null>((resolve) => {
         pendingRef.current?.resolve(null);
         pendingRef.current = { requestId: nextPrompt.requestId, resolve };
         setPrompt(nextPrompt);
       }),
-    [],
   );
 
-  const resolve = useCallback((requestId: string, password: string | null) => {
+  const resolve = useStableCallback((requestId: string, password: string | null) => {
     const pending = pendingRef.current;
     if (pending?.requestId !== requestId) {
       return;
@@ -48,14 +48,14 @@ export function useSshPasswordRequest() {
     pendingRef.current = null;
     setPrompt(null);
     pending.resolve(password);
-  }, []);
+  });
 
-  const cancel = useCallback(() => {
+  const cancel = useStableCallback(() => {
     const pending = pendingRef.current;
     pendingRef.current = null;
     setPrompt(null);
     pending?.resolve(null);
-  }, []);
+  });
 
   useEffect(() => () => pendingRef.current?.resolve(null), []);
 
@@ -70,22 +70,46 @@ function formatRemainingSeconds(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function getPromptErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "SSH password prompt failed.";
+export type SshPasswordRequestPurpose = "source-control" | "connection";
+
+const PURPOSE_COPY = {
+  "source-control": {
+    title: "SSH Authentication Required",
+    failed: "SSH password prompt failed.",
+    expired: "This SSH password prompt expired. Try again.",
+    hint: "Add the key to your SSH agent to avoid repeated prompts.",
+  },
+  connection: {
+    title: "SSH verification required",
+    failed: "SSH verification prompt failed.",
+    expired: "This SSH verification prompt expired. Try connecting again.",
+    hint: "SSH keys may replace a password, but your server can still require a verification code.",
+  },
+} as const satisfies Record<
+  SshPasswordRequestPurpose,
+  { title: string; failed: string; expired: string; hint: string }
+>;
+
+function getPromptErrorMessage(error: unknown, purpose: SshPasswordRequestPurpose): string {
+  const copy = PURPOSE_COPY[purpose];
+  const message = error instanceof Error ? error.message : copy.failed;
   return message.includes("expired") || message.includes("no longer pending")
-    ? "This SSH password prompt expired. Try again."
+    ? copy.expired
     : message;
 }
 
 export function SshPasswordRequestDialog({
   request,
+  purpose = "source-control",
   onRespond,
   onRemove,
 }: {
   readonly request: SshPasswordPromptRequestPresentation;
+  readonly purpose?: SshPasswordRequestPurpose;
   readonly onRespond: (password: string | null) => Promise<void>;
   readonly onRemove: (requestId: string) => void;
 }) {
+  const copy = PURPOSE_COPY[purpose];
   const [password, setPassword] = useState("");
   const [isResponding, setIsResponding] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -119,9 +143,7 @@ export function SshPasswordRequestDialog({
   const remainingSeconds = remainingMs === null ? null : Math.ceil(remainingMs / 1_000);
   const remainingLabel =
     remainingSeconds === null ? null : formatRemainingSeconds(remainingSeconds);
-  const visibleResponseError = isExpired
-    ? "This SSH password prompt expired. Try again."
-    : responseError;
+  const visibleResponseError = isExpired ? copy.expired : responseError;
   const canSubmit = canSubmitSshPassword({ password, isResponding, isExpired });
 
   const respond = async (nextPassword: string | null) => {
@@ -131,7 +153,7 @@ export function SshPasswordRequestDialog({
 
     const requestId = request.requestId;
     if (nextPassword !== null && isExpired) {
-      setResponseError("This SSH password prompt expired. Try again.");
+      setResponseError(copy.expired);
       return;
     }
 
@@ -145,7 +167,7 @@ export function SshPasswordRequestDialog({
       if (nextPassword === null) {
         onRemove(requestId);
       } else {
-        setResponseError(getPromptErrorMessage(error));
+        setResponseError(getPromptErrorMessage(error, purpose));
       }
     } finally {
       isRespondingRef.current = false;
@@ -174,13 +196,22 @@ export function SshPasswordRequestDialog({
     >
       <DialogPopup className="max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>SSH Authentication Required</DialogTitle>
-          <DialogDescription>
-            T3 needs your SSH key passphrase or password to connect to <code>{target}</code>. It is
-            passed to the SSH process for this attempt and is not saved by ${APP_DISPLAY_NAME}.
-          </DialogDescription>
+          <DialogTitle>{copy.title}</DialogTitle>
+          {purpose === "connection" ? (
+            <DialogDescription>
+              Enter the password or verification code required by <code>{target}</code>.{" "}
+              {APP_DISPLAY_NAME} passes your response to the local SSH process and keeps it in
+              memory to reuse for this host. {APP_DISPLAY_NAME} does not write it to disk.
+            </DialogDescription>
+          ) : (
+            <DialogDescription>
+              {APP_DISPLAY_NAME} needs your SSH key passphrase or password to connect to{" "}
+              <code>{target}</code>. It is passed to the SSH process for this attempt and is not
+              saved by {APP_DISPLAY_NAME}.
+            </DialogDescription>
+          )}
         </DialogHeader>
-        <DialogPanel className="space-y-3" scrollFade={false}>
+        <DialogPanel scrollFade={false}>
           <form
             className="space-y-3"
             id={formId}
@@ -219,9 +250,7 @@ export function SshPasswordRequestDialog({
             {visibleResponseError ? (
               <p className="text-sm text-destructive">{visibleResponseError}</p>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                Add the key to your SSH agent to avoid repeated prompts.
-              </p>
+              <p className="text-sm text-muted-foreground">{copy.hint}</p>
             )}
           </form>
         </DialogPanel>

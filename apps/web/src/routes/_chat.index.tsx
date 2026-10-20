@@ -55,14 +55,13 @@ function IndexDraftLanding() {
   const startedAttemptRef = useRef<number | null>(null);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
-  const mostRecentProject = bootstrapped
-    ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
-    : null;
+  const mostRecentProject =
+    sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null;
   const attempt = startState.retryRequest;
 
   useEffect(() => {
     // Starting a draft after the user has left would replace the page they picked.
-    if (!bootstrapped || startedAttemptRef.current === attempt || !isStillOnIndex()) {
+    if (startedAttemptRef.current === attempt || !isStillOnIndex()) {
       return;
     }
     if (mostRecentProject !== null) {
@@ -85,6 +84,10 @@ function IndexDraftLanding() {
         });
       return;
     }
+    // A pending environment may still hold a project; only then fall back to the computer.
+    if (!bootstrapped) {
+      return;
+    }
     startedAttemptRef.current = attempt;
     void startComputerThread()
       .then((started) => {
@@ -97,9 +100,6 @@ function IndexDraftLanding() {
       });
   }, [attempt, bootstrapped, handleNewThread, mostRecentProject, startComputerThread]);
 
-  if (!bootstrapped) {
-    return null;
-  }
   if (mostRecentProject !== null) {
     return startState.failed ? (
       <DraftStartError
@@ -112,7 +112,8 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  return <NoProjectsHero />;
+  // A pending environment cannot prove the workspace is empty.
+  return bootstrapped ? <NoProjectsHero /> : null;
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
