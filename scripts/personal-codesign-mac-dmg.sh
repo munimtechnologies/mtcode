@@ -162,7 +162,14 @@ ln -s /Applications "$STAGE/Applications"
 
 VOL_NAME="$(basename "$DMG" .dmg | sed 's/MT-Code-/MT Code /; s/-arm64//; s/$/ Installer/')"
 SIGNED_DMG="$WORK/signed.dmg"
-hdiutil create -volname "$VOL_NAME" -srcfolder "$STAGE" -ov -format UDZO "$SIGNED_DMG"
+# hdiutil create intermittently fails "Resource busy" while the volume from an
+# earlier attach is still being released.
+for attempt in 1 2 3 4 5; do
+  hdiutil create -volname "$VOL_NAME" -srcfolder "$STAGE" -ov -format UDZO "$SIGNED_DMG" && break
+  [[ $attempt -eq 5 ]] && exit 1
+  echo "hdiutil create failed (attempt $attempt); retrying in 15s" >&2
+  sleep 15
+done
 codesign --force --sign "$IDENTITY" --timestamp "$SIGNED_DMG"
 
 SIGNED_ZIP="$WORK/signed.zip"
