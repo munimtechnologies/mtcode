@@ -73,8 +73,8 @@ require apps/server/src/usage/UsageService.ts "retentionCutoffMs" "All-window sc
 # a per-run hidden message id, and the shared timeline visibility rule hides
 # it on every client. A merge that re-takes upstream's onResume or visibility
 # code would quietly bring the message back.
-require apps/web/src/components/ChatView.tsx "interruptedRunContinuationMessageId(resumableRunId)" "composer Continue sends the hidden continuation message"
-require apps/web/src/components/ChatView.tsx "buildInterruptedTurnContinuationPrompt()" "composer Continue sends the authored interrupted-turn prompt"
+require apps/web/src/components/chat/useComposerResume.ts "interruptedRunContinuationMessageId(resumableRunId)" "composer Continue sends the hidden continuation message"
+require apps/web/src/components/chat/useComposerResume.ts "buildInterruptedTurnContinuationPrompt()" "composer Continue sends the authored interrupted-turn prompt"
 require packages/shared/src/orchestrationV2Timeline.ts "if (isOrchestrationV2HiddenContinuationMessage(item)) return false;" "timeline visibility hides the continuation message"
 require apps/server/src/orchestration-v2/ProjectionStore.ts "messageId: MessageId.make(row.message_id)" "SQL timeline index carries message ids for the hidden continuation"
 
@@ -84,8 +84,8 @@ require apps/server/src/orchestration-v2/ProjectionStore.ts "messageId: MessageI
 # returns the message to the composer.
 require apps/web/src/components/ChatView.tsx "{ messageEdit }" "ChatView passes the edit state to the timeline"
 require apps/web/src/components/ChatView.tsx "restoreFiles: false" "message edit rolls back without restoring files"
-require apps/web/src/components/chat/MessagesTimeline.tsx "<EditUserMessageButton" "edit affordance on the last user message"
-require apps/web/src/components/chat/MessagesTimeline.tsx "<InlineUserMessageEditor" "inline editor in the user message bubble"
+require apps/web/src/components/chat/TimelineUserMessageRow.tsx "<EditUserMessageButton" "edit affordance on the last user message"
+require apps/web/src/components/chat/TimelineUserMessageRow.tsx "<InlineUserMessageEditor" "inline editor in the user message bubble"
 
 # --- Cross-thread tools (a0d8862a1, ae1be5092, 146cd13a6) ---
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/mcp/McpHttpServer.ts "ThreadReferenceToolkit" "thread_read toolkit registered"
@@ -151,15 +151,15 @@ require apps/server/src/desktopControl/desktopMcpBinary.ts "packagedDesktopMcpCa
 # --- Sidebar linked-PR badge (upstream #4755/#8160 wiring, restored 2026-09-02) ---
 # Rows read the linked PR from the host and hold merged/closed state in the
 # parent atom; a merge dropped this once and left the sidebar blind to links.
-require apps/web/src/components/Sidebar.tsx "useLinkedThreadPullRequest(" "sidebar rows read linked PR status"
+require apps/web/src/components/sidebar/SidebarThreadRow.tsx "useLinkedThreadPullRequest(" "sidebar rows read linked PR status"
 # Upstream #10101 (223ff4490) moved PR linking to the server, deleting the
 # client-side ThreadChangeRequestSnapshot atom this used to check. The badge
 # itself is the fork feature, so the check now follows it to its new source.
-require apps/web/src/components/Sidebar.tsx "prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider)" "sidebar renders the linked-PR badge"
+require apps/web/src/components/sidebar/SidebarThreadRow.tsx "prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider)" "sidebar renders the linked-PR badge"
 
 # --- Artwork + app icon pickers (44cf90dc0, 0efc0e293) ---
-require apps/web/src/components/settings/SettingsPanels.tsx "SidebarArtworkRow" "artwork picker in settings"
-require apps/web/src/components/settings/SettingsPanels.tsx "AppIconRow" "app icon picker in settings"
+require apps/web/src/components/settings/AppearanceSettingsPanel.tsx "SidebarArtworkRow" "artwork picker in settings"
+require apps/web/src/components/settings/AppearanceSettingsPanel.tsx "AppIconRow" "app icon picker in settings"
 
 # --- Usage refresh rule (e7c556759) ---
 require apps/web/src/state/usage.ts "usageEnvironmentScope" "refresh-must-answer rule feeds usage state"
@@ -172,7 +172,7 @@ require apps/server/src/appDisplayName.ts "appDisplayName" "backend self-naming 
 require apps/web/index.html "boot-shell-wordmark" "MT wordmark boot splash"
 
 # --- PR upstream cards (27553c695) ---
-require apps/web/src/routes/_chat.pull-requests.tsx "PullRequestUpstreamCard" "upstream PR cards in pull-requests route"
+require apps/web/src/components/pullRequest/PullRequestsPage.tsx "PullRequestUpstreamCard" "upstream PR cards in pull-requests route"
 
 # --- Connect providers: T3 relay baked + relay-capable default (2026-08-25) ---
 require scripts/lib/connect-public-providers.ts "T3_CONNECT_PUBLIC_PROVIDER" "T3 Connect provider baked into every client build"
@@ -189,7 +189,7 @@ require apps/web/src/hooks/useHandleNewThread.ts "shouldReadProjectFileForNewThr
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require packages/contracts/src/orchestration.ts "ChatUnknownAttachment" "forward-compatible unknown attachment schema"
 require apps/server/src/attachmentStore.ts 'case "file"' "file attachments get a stored path"
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/provider/Layers/CursorAdapter.ts 'attachment.type !== "image"' "non-image attachments sent as ACP resource links"
-require apps/web/src/components/chat/MessagesTimeline.tsx "filter(isImageAttachment)" "timeline image grid filters non-images"
+require apps/web/src/components/chat/TimelineUserMessageRow.tsx "filter(isImageAttachment)" "timeline image grid filters non-images"
 
 # --- WS client analytics props (restored 2026-08-29) ---
 # The merge dropped this argument from the makeWsRpcLayer call, so per-client
