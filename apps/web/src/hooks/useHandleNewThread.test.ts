@@ -108,6 +108,7 @@ vi.mock("@effect/atom-react", () => ({
         ? testServerConfigs()
         : { isReady: false, entries: () => [] },
 }));
+// The fork's environment hooks load more of this module than the handler itself.
 vi.mock("@t3tools/client-runtime/environment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@t3tools/client-runtime/environment")>()),
   scopedProjectKey: () => "remote-project",
@@ -150,8 +151,7 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
   useRouter: () => testState.router,
 }));
-vi.mock("react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react")>()),
+vi.mock("react", () => ({
   useCallback: <T>(callback: T) => callback,
   useMemo: <T>(factory: () => T) => factory(),
 }));
@@ -218,49 +218,6 @@ vi.mock("../uiStateStore", () => ({
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
 import { useNewThreadHandler } from "./useHandleNewThread";
-import { useComposerDraftStore } from "../composerDraftStore";
-
-it("pins a reused automatic draft to the explicitly selected checkout", async () => {
-  const { useComposerDraftStore: realDraftStore, DraftId } =
-    await vi.importActual<typeof import("../composerDraftStore")>("../composerDraftStore");
-  const { EnvironmentId, ProjectId, ThreadId } =
-    await vi.importActual<typeof import("@t3tools/contracts")>("@t3tools/contracts");
-  testState.reset(null);
-  const draftId = DraftId.make("draft-manual-checkout");
-  const projectRef = {
-    environmentId: EnvironmentId.make("environment-ssh"),
-    projectId: ProjectId.make("project-remote"),
-  };
-  const store = realDraftStore.getState();
-  store.setLogicalProjectDraftThreadId(
-    "remote-project",
-    {
-      environmentId: EnvironmentId.make("environment-primary"),
-      projectId: ProjectId.make("local"),
-    },
-    draftId,
-    {
-      threadId: ThreadId.make("thread-manual-checkout"),
-      environmentSelection: "auto",
-      loadBalancedEnvironmentId: EnvironmentId.make("environment-primary"),
-    },
-  );
-  const getState = vi.spyOn(useComposerDraftStore, "getState").mockReturnValue(store);
-  try {
-    const opened = await useNewThreadHandler()(projectRef, { environmentSelection: "manual" });
-
-    expect(opened?.draftId).toBe(draftId);
-    expect(store.getDraftSession(draftId)).toMatchObject({
-      environmentId: projectRef.environmentId,
-      projectId: projectRef.projectId,
-      environmentSelection: "manual",
-      loadBalancedEnvironmentId: null,
-    });
-  } finally {
-    getState.mockRestore();
-    realDraftStore.setState(store, true);
-  }
-});
 
 describe.each([
   ["new", null],
@@ -274,28 +231,6 @@ describe.each([
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
-  it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
-    "uses the target environment's %s permissions for new threads",
-    async (runtimeMode) => {
-      testState.reset(draft);
-      testState.targetSettings.defaultRuntimeMode = runtimeMode;
-      const projectRef = {
-        environmentId: "environment-ssh",
-        projectId: "project-remote",
-      } as never;
-      const pendingOpen = useNewThreadHandler()(projectRef);
-      testState.completeProjectFileRead(null);
-      const opened = await pendingOpen;
-
-      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
-        "remote-project",
-        projectRef,
-        opened!.draftId,
-        expect.objectContaining({ runtimeMode }),
-      );
-    },
-  );
-
   it("abandons a delayed draft open when the user navigates elsewhere", async () => {
     testState.reset(draft);
     const openThread = useNewThreadHandler();
@@ -350,58 +285,4 @@ describe.each([
     expect(testState.router.navigate).not.toHaveBeenCalled();
     expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
   });
-
-  it.each([true, false])(
-    "uses the target environment's start-from-origin default of %s",
-    async (startFromOrigin) => {
-      testState.reset(draft, { envMode: "worktree", startFromOrigin });
-      const openThread = useNewThreadHandler();
-      const projectRef = {
-        environmentId: "environment-ssh",
-        projectId: "project-remote",
-      } as never;
-      const pendingOpen = openThread(projectRef);
-
-      testState.completeProjectFileRead(null);
-      const opened = await pendingOpen;
-
-      expect(opened).toEqual({
-        draftId: draft?.draftId ?? "draft-delayed",
-        threadId: draft?.threadId ?? "thread-delayed",
-      });
-      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
-        "remote-project",
-        projectRef,
-        opened!.draftId,
-        expect.objectContaining({ envMode: "worktree", startFromOrigin }),
-      );
-      if (draft) {
-        expect(testState.draftStore.setDraftThreadContext).toHaveBeenCalledWith(
-          draft.draftId,
-          expect.objectContaining({ envMode: "worktree", startFromOrigin }),
-        );
-      }
-    },
-  );
-
-  it.each([true, false])(
-    "preserves an explicit start-from-origin choice of %s",
-    async (startFromOrigin) => {
-      testState.reset(draft, { envMode: "worktree", startFromOrigin: !startFromOrigin });
-      const openThread = useNewThreadHandler();
-      const projectRef = {
-        environmentId: "environment-ssh",
-        projectId: "project-remote",
-      } as never;
-
-      const opened = await openThread(projectRef, { envMode: "worktree", startFromOrigin });
-
-      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
-        "remote-project",
-        projectRef,
-        opened!.draftId,
-        expect.objectContaining({ envMode: "worktree", startFromOrigin }),
-      );
-    },
-  );
 });

@@ -226,6 +226,7 @@ import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
+import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
 import { projectMutationOperation } from "./project/ProjectMutation.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -237,6 +238,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as DefectReporter from "./observability/DefectReporter.ts";
+import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
@@ -248,6 +250,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import { featureUsage } from "./telemetry/FeatureUsage.ts";
+import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -269,6 +272,7 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import { isTelemetryIdHash } from "@t3tools/shared/telemetryId";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -289,7 +293,7 @@ const resolveDiscoveryForConfig = <A, E, R>(
     Effect.map(Option.getOrElse(onTimeout)),
   );
 
-export const resolveAvailableEditorsForConfig = <A, E, R>(
+const resolveAvailableEditorsForConfig = <A, E, R>(
   discovery: Effect.Effect<ReadonlyArray<A>, E, R>,
 ) => resolveDiscoveryForConfig(discovery, () => []);
 
@@ -628,14 +632,14 @@ const MAX_CLIENT_APP_VERSION_LENGTH = 64;
 const MAX_CLIENT_BROWSER_LENGTH = 64;
 const MAX_CLIENT_DEVICE_MODEL_LENGTH = 80;
 
-export function hasCompatibleOrchestrationProtocol(url: URL): boolean {
+function hasCompatibleOrchestrationProtocol(url: URL): boolean {
   return (
     url.searchParams.get(ORCHESTRATION_PROTOCOL_QUERY_PARAM) ===
     String(ORCHESTRATION_PROTOCOL_VERSION)
   );
 }
 
-export function shouldUseBoundedThreadSnapshot(input: {
+function shouldUseBoundedThreadSnapshot(input: {
   readonly acceptBoundedSnapshot?: boolean;
 }): boolean {
   return input.acceptBoundedSnapshot === true;
@@ -702,6 +706,28 @@ function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) 
     ...(hasDeviceModel ? { deviceModel, clientDeviceModel: deviceModel } : {}),
     ...(isClientConnectionMethod(connectionMethod) ? { connectionMethod } : {}),
   };
+}
+
+/**
+ * Owners a connecting client reports: its hashed T3 Connect account and its
+ * hashed device id. Only hashes are accepted, so a raw id never reaches analytics.
+ */
+function readClientOwners(
+  request: HttpServerRequest.HttpServerRequest,
+): ReadonlyArray<TelemetryOwner> {
+  const url = HttpServerRequest.toURL(request);
+  if (Option.isNone(url)) {
+    return [];
+  }
+  const params = url.value.searchParams;
+  return (
+    [
+      ["connect", params.get("clientOwner")],
+      ["device", params.get("clientDevice")],
+    ] as const
+  ).flatMap(([source, ownerId]) =>
+    ownerId !== null && isTelemetryIdHash(ownerId) ? [{ source, ownerId }] : [],
+  );
 }
 
 const canReplayPersistedRange = Effect.fnUntraced(function* (
@@ -1208,6 +1234,7 @@ export const layerWsRpc = (
     const projectStore = yield* ProjectStore.ProjectStoreV2;
     const projectService = yield* ProjectService.ProjectService;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+    const eventLoopMonitor = yield* EventLoopMonitor.EventLoopMonitor;
     const threadSearch = yield* ThreadSearch.ThreadSearch;
 
     const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
@@ -1258,6 +1285,7 @@ export const layerWsRpc = (
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+    const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
     const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
@@ -1342,7 +1370,6 @@ export const layerWsRpc = (
       currentSession.scopes.includes(AuthOrchestrationOperateScope)
         ? result
         : {
-            ...result,
             tasks: result.tasks.map(({ webhook: _webhook, ...task }) => task),
           };
     // RpcScopeAuthorization checks each RPC's declared scope before its handler
@@ -1703,6 +1730,7 @@ export const layerWsRpc = (
       const environment = yield* serverEnvironment.getDescriptor;
       const auth = yield* serverAuth.getDescriptor();
       const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
+      const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
       const editorConfig = yield* resolveEditorConfig(
         yield* resolveAvailableEditorsForConfig(externalLauncher.resolveAvailableEditors()),
         resolveFileManagerRevealKindForConfig(externalLauncher.resolveFileManagerRevealKind()),
@@ -1744,6 +1772,7 @@ export const layerWsRpc = (
           onSome: (root) => ({ scratchWorkspaceRoot: root }),
         }),
         newProjectsRoot: managedFolders.namedProjectsRoot,
+        ...(lastEventLoopStall === undefined ? {} : { lastEventLoopStall }),
       };
     });
 
@@ -2741,6 +2770,8 @@ export const layerWsRpc = (
         withPullRequestViewer(input, pullRequests.diffFileContents(input)),
       [WS_METHODS.pullRequestsFilesViewed]: (input) =>
         withPullRequestViewer(input, pullRequests.filesViewed(input)),
+      [WS_METHODS.pullRequestsChangeBreakdown]: (input) =>
+        withPullRequestViewer(input, pullRequests.changeBreakdown(input)),
       [WS_METHODS.pullRequestsSetFilesViewed]: (input) =>
         withPullRequestViewer(input, pullRequests.setFilesViewed(input)),
       [WS_METHODS.pullRequestsRunAction]: (input) =>
@@ -2848,6 +2879,10 @@ export const layerWsRpc = (
                 }),
               ),
               Effect.andThen(refreshGitStatus(project.workspaceRoot)),
+              // The folder was empty when the project was created, so the cached
+              // enrichment says "no repository" and clients cannot group it yet.
+              Effect.andThen(projectEnrichment.invalidate([project.workspaceRoot])),
+              Effect.andThen(projectEnrichment.request(project.workspaceRoot)),
               Effect.ignoreCause({ log: true }),
             ),
         }),
@@ -2936,6 +2971,17 @@ export const layerWsRpc = (
         ),
       [WS_METHODS.projectsListEntries]: (input) =>
         workspaceEntries.list(input).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProjectListEntriesError({
+                ...input,
+                ...projectEntriesFailureContext(cause),
+                cause,
+              }),
+          ),
+        ),
+      [WS_METHODS.projectsListIgnoredFiles]: (input) =>
+        workspaceEntries.listIgnoredFiles(input).pipe(
           Effect.mapError(
             (cause) =>
               new ProjectListEntriesError({
@@ -3070,10 +3116,9 @@ export const layerWsRpc = (
               ...(project.value.faviconPath
                 ? { projectFaviconPath: project.value.faviconPath }
                 : {}),
-              projectCheckoutPending:
-                clone !== null &&
-                clone.phase !== "done" &&
-                clone.destinationPath === project.value.workspaceRoot,
+              ...(clone !== null && clone.destinationPath === project.value.workspaceRoot
+                ? { projectCheckout: clone.phase === "done" ? "cloned" : "pending" }
+                : {}),
             });
           }
           const thread = yield* threadManagement.getThreadRecords(resource.threadId, []).pipe(
@@ -3323,6 +3368,7 @@ export const layerWsRpc = (
       [WS_METHODS.subscribePreviewEvents]: (_input) => previewManager.events,
       [WS_METHODS.deviceConfigure]: (input) => deviceService.configure(input),
       [WS_METHODS.deviceTestHost]: (input) => deviceService.testHost(input),
+      [WS_METHODS.deviceEasAccount]: (input) => deviceService.easAccount(input),
       [WS_METHODS.deviceList]: (input) =>
         input.inspectOnly && !input.updateTool
           ? deviceService.inspect
@@ -3334,7 +3380,12 @@ export const layerWsRpc = (
                   ? deviceService.retryHost(input.retryHostId)
                   : deviceService.list,
             ),
-      [WS_METHODS.deviceOpen]: (input) => deviceService.open(input),
+      [WS_METHODS.deviceOpen]: (input) =>
+        threadWorkspaceRoot(input.threadId).pipe(
+          Effect.provideService(ThreadManagementService.ThreadManagementService, threadManagement),
+          Effect.provideService(ProjectService.ProjectService, projectService),
+          Effect.flatMap((workspaceRoot) => deviceService.open(input, { workspaceRoot })),
+        ),
       [WS_METHODS.deviceClose]: (input) => deviceService.close(input),
       [WS_METHODS.deviceShutdown]: (input) => deviceService.shutdown(input),
       [WS_METHODS.deviceDetail]: (input) => deviceService.detail(input),
@@ -3621,6 +3672,7 @@ export const layer = Layer.unwrap(
         const clientAnalyticsProps = readClientAnalyticsProps(request);
         yield* sessions.recordClientConnection(session.sessionId, clientOrigin);
         yield* analytics.record("client.connected", clientAnalyticsProps);
+        yield* analytics.recordOwners(readClientOwners(request), "client");
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(

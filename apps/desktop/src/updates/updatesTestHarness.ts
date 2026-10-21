@@ -26,10 +26,7 @@ export interface UpdatesHarnessOptions {
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly downloadUpdate?: Effect.Effect<void>;
-  /** sha512 of a download an earlier launch left in electron-updater's cache. */
-  readonly cachedDownloadSha512?: string;
-  readonly cachedDownloadInfo?: string;
-  readonly cachedFileExists?: boolean;
+  /** Real updater/file system for electron-updater cache integration tests. */
   readonly updater?: ElectronUpdater.ElectronUpdater["Service"];
   readonly fileSystem?: FileSystem.FileSystem;
   readonly runningUnderArm64Translation?: boolean;
@@ -43,8 +40,6 @@ export interface UpdatesHarnessOptions {
   readonly packageType?: string | undefined;
   readonly installRecord?: string | undefined;
 }
-
-const PENDING_DOWNLOAD_DIRECTORY = "/cache/t3code-updater/pending";
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
@@ -94,11 +89,6 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       }),
     setDisableDifferentialDownload: () => options.setDisableDifferentialDownload ?? Effect.void,
     setRequestHeaders: () => Effect.void,
-    pendingDownloadDirectory: Effect.succeed(
-      options.cachedDownloadSha512 === undefined
-        ? Option.none()
-        : Option.some(PENDING_DOWNLOAD_DIRECTORY),
-    ),
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
@@ -246,28 +236,15 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       if (installRecord !== undefined) return Effect.succeed(installRecord);
       return path === "/missing/resources/package-type" && options.packageType !== undefined
         ? Effect.succeed(options.packageType)
-        : path === `${PENDING_DOWNLOAD_DIRECTORY}/update-info.json` &&
-            options.cachedDownloadSha512 !== undefined
-          ? Effect.succeed(
-              options.cachedDownloadInfo ??
-                JSON.stringify({
-                  fileName: "update.zip",
-                  sha512: options.cachedDownloadSha512,
-                }),
-            )
-          : Effect.fail(
-              PlatformError.systemError({
-                module: "FileSystem",
-                method: "readFileString",
-                _tag: "NotFound",
-                pathOrDescriptor: path,
-              }),
-            );
+        : Effect.fail(
+            PlatformError.systemError({
+              module: "FileSystem",
+              method: "readFileString",
+              _tag: "NotFound",
+              pathOrDescriptor: path,
+            }),
+          );
     },
-    exists: (path) =>
-      Effect.succeed(
-        options.cachedFileExists !== false && path === `${PENDING_DOWNLOAD_DIRECTORY}/update.zip`,
-      ),
     makeDirectory: () => Effect.void,
     writeFileString: (path, data) =>
       Effect.sync(() => {

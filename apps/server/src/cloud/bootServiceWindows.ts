@@ -23,6 +23,7 @@ import * as Console from "effect/Console";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -772,7 +773,35 @@ export const make = Effect.fn("cloud.boot_service_windows.make")(function* (
     return "restarted" as const;
   }).pipe(Effect.withSpan("cloud.boot_service_windows.restart"));
 
-  return BootService.BootService.of({ install, restart, uninstall, status });
+  /**
+   * Windows only. The counterpart of the systemd/launchd `withStopped`. The pid
+   * file, stop request and startup script all live under this base directory,
+   * so another home's launcher is never touched: `requestStop` only ever sees
+   * ours. The launcher is started again when one was running beforehand, or
+   * when stopping it failed (the stop may still have landed). The operation's
+   * own failure is reported ahead of a failure to restart.
+   */
+  const withStopped = Effect.fn("cloud.boot_service_windows.with_stopped")(function* <A, E, R>(
+    operation: Effect.Effect<A, E, R>,
+  ): Effect.fn.Return<A, E | BootService.BootServiceError, R> {
+    if (platform !== "win32" || appData === "") return yield* operation;
+    const hasStartupScript = yield* fs
+      .exists(startupScriptPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    return yield* Effect.acquireUseRelease(
+      Effect.exit(requestStop),
+      (stopped): Effect.Effect<A, E | BootService.BootServiceError, R> =>
+        Exit.isSuccess(stopped) ? operation : Effect.failCause(stopped.cause),
+      (stopped, exit) => {
+        const restore = hasStartupScript && (Exit.isFailure(stopped) || stopped.value);
+        if (!restore) return Effect.void;
+        const start = runPowerShellScript("restarting the service", startupScriptPath);
+        return Exit.isFailure(exit) ? Effect.ignore(start) : start;
+      },
+    );
+  });
+
+  return BootService.BootService.of({ install, restart, withStopped, uninstall, status });
 });
 
 export const layer = (input: WindowsBootServiceInput) =>

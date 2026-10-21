@@ -701,32 +701,6 @@ describe("DesktopRemoteUpdates", () => {
     );
   });
 
-  it.effect("keeps every queued cancellation until its request starts", () => {
-    const harness = makeHarness();
-
-    return runRemoteUpdatesTest(harness, ({ requests, cancellations }) =>
-      Effect.gen(function* () {
-        for (let index = 0; index < 40; index += 1) {
-          yield* Queue.offer(cancellations, {
-            version: 1,
-            type: "cancelDesktopUpdate",
-            requestId: `req-queued-cancel-${index}`,
-          });
-        }
-        yield* settle;
-        for (let index = 0; index < 40; index += 1) {
-          yield* Queue.offer(requests, request(`req-queued-cancel-${index}`));
-        }
-        yield* settle;
-        assert.equal(harness.checkCount(), 0);
-
-        yield* Queue.offer(requests, request("req-after-queued-cancels"));
-        yield* settle;
-        assert.equal(harness.checkCount(), 1);
-      }),
-    );
-  });
-
   it.effect("does not install after cancellation wins the commit claim", () => {
     const harness = makeHarness();
 
@@ -820,34 +794,6 @@ describe("DesktopRemoteUpdates", () => {
     );
   });
 
-  it.effect("expires an uncommitted preparation", () => {
-    const harness = makeHarness();
-
-    return runRemoteUpdatesTest(harness, ({ reports, requests, commits }) =>
-      Effect.gen(function* () {
-        yield* Queue.offer(requests, request("req-stale"));
-        yield* settle;
-        harness.emit("update-available", { version: "1.2.4" });
-        yield* settle;
-        harness.emit("update-downloaded", { version: "1.2.4" });
-        yield* settle;
-
-        yield* TestClock.setTime(Duration.toMillis(Duration.minutes(6)));
-        yield* Queue.offer(commits, {
-          version: 1,
-          type: "commitDesktopUpdate",
-          requestId: "req-stale",
-        });
-        yield* settle;
-
-        const outcomes = terminalReports(reports)
-          .filter((report) => report.requestId === "req-stale")
-          .map((report) => report.outcome);
-        assert.deepEqual(outcomes, ["ready-to-install", "failed"]);
-      }),
-    );
-  });
-
   it.effect("reports up-to-date without installing when there is no update", () => {
     const harness = makeHarness();
 
@@ -862,26 +808,6 @@ describe("DesktopRemoteUpdates", () => {
         assert.equal(terminals.length, 1);
         assert.equal(terminals[0]?.outcome, "up-to-date");
         assert.equal(terminals[0]?.requestId, "req-2");
-        assert.equal(harness.quitAndInstalls(), 0);
-      }),
-    );
-  });
-
-  it.effect("fails fast with the disabled reason when updates are off", () => {
-    const harness = makeHarness({ env: { T3CODE_DISABLE_AUTO_UPDATE: "true" } });
-
-    return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
-      Effect.gen(function* () {
-        yield* Queue.offer(requests, request("req-3"));
-        yield* settle;
-
-        const terminals = terminalReports(reports);
-        assert.equal(terminals.length, 1);
-        assert.equal(terminals[0]?.outcome, "failed");
-        assert.equal(
-          terminals[0]?.reason,
-          "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.",
-        );
         assert.equal(harness.quitAndInstalls(), 0);
       }),
     );

@@ -219,7 +219,7 @@ import {
   pickWorkspaceBasenameMatch,
   stripRepeatedWorkspacePrefix,
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
-} from "../workspaceBasenameLookup";
+} from "@t3tools/client-runtime/workspace-basename-lookup";
 import {
   parseChangeRequestUrl,
   pullRequestCandidateUrlFromReferenceAutolink,
@@ -1107,7 +1107,7 @@ function MarkdownMermaidCodeBlock({
               </pre>
             }
           >
-            <MermaidDiagram source={code} theme={theme} onExpand={onExpand} />
+            <MermaidDiagram source={code} onExpand={onExpand} />
           </Suspense>
           {searching ? (
             <pre ref={sourceRevealRef} hidden aria-hidden>

@@ -1,7 +1,6 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it } from "vite-plus/test";
 
+import { render } from "../../test/render";
 import { presetConditions } from "../artwork/skyConditions";
 import {
   DEV_BACKDROP,
@@ -9,22 +8,6 @@ import {
   StageBackdropArt,
   StageBackdropButtonArt,
 } from "./SidebarStageBackdrop";
-
-let root: Root;
-let container: HTMLDivElement;
-
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(() => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
 
 // Gradients and patterns resolve url(#id) document-wide, so a repeated id would paint one
 // backdrop with another's definitions.
@@ -35,15 +18,13 @@ it.each([
 ] as const)(
   "gives every $kind backdrop its own SVG definitions when two are on the page",
   async (variant) => {
-    await act(() =>
-      root.render(
-        <>
-          <StageBackdropArt variant={variant} />
-          <StageBackdropArt variant={variant} />
-        </>,
-      ),
+    await using screen = await render(
+      <>
+        <StageBackdropArt variant={variant} />
+        <StageBackdropArt variant={variant} />
+      </>,
     );
-    const [first, second] = container.querySelectorAll("svg");
+    const [first, second] = screen.container.querySelectorAll("svg");
     const ids = (svg: Element | undefined) => [...svg!.querySelectorAll("[id]")].map((el) => el.id);
 
     expect(ids(first).length).toBeGreaterThan(0);
@@ -62,10 +43,10 @@ it.each([
 );
 
 it("paints each artwork variant with theme-owned color tokens", async () => {
-  await act(() => root.render(<StageBackdropArt variant={NIGHTLY_BACKDROP} />));
-  const nightlyMarkup = container.innerHTML;
-  await act(() => root.render(<StageBackdropArt variant={DEV_BACKDROP} />));
-  const devMarkup = container.innerHTML;
+  await using screen = await render(<StageBackdropArt variant={NIGHTLY_BACKDROP} />);
+  const nightlyMarkup = screen.container.innerHTML;
+  await screen.rerender(<StageBackdropArt variant={DEV_BACKDROP} />);
+  const devMarkup = screen.container.innerHTML;
 
   expect(nightlyMarkup).toContain("var(--stage-night-bottom)");
   expect(nightlyMarkup).toContain("var(--stage-night-line)");
@@ -79,8 +60,8 @@ it.each([
   [NIGHTLY_BACKDROP, "96 0 8192 96", "nightly"],
   [DEV_BACKDROP, "64 0 8192 96", "blueprint"],
 ] as const)("uses the compact crop inside the send button", async (variant, viewBox, art) => {
-  await act(() => root.render(<StageBackdropButtonArt variant={variant} />));
-  const svg = container.querySelector(`svg[data-stage-art="${art}"]`);
+  await using screen = await render(<StageBackdropButtonArt variant={variant} />);
+  const svg = screen.container.querySelector(`svg[data-stage-art="${art}"]`);
 
   expect(svg).not.toBeNull();
   expect(svg!.getAttribute("viewBox")).toBe(viewBox);

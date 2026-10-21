@@ -122,7 +122,7 @@ interface DrawerLayout {
   composerHeight?: number;
 }
 
-export function resolveTerminalDrawerMaxHeight(input: DrawerLayout): number {
+function resolveTerminalDrawerMaxHeight(input: DrawerLayout): number {
   const windowCap = Math.max(
     MIN_DRAWER_HEIGHT,
     Math.floor(input.viewportHeight * MAX_DRAWER_HEIGHT_RATIO),
@@ -136,7 +136,7 @@ export function resolveTerminalDrawerMaxHeight(input: DrawerLayout): number {
   );
 }
 
-export function clampDrawerHeight(height: number, maxHeight: number): number {
+function clampDrawerHeight(height: number, maxHeight: number): number {
   const safeHeight = Number.isFinite(height) ? height : DEFAULT_THREAD_TERMINAL_HEIGHT;
   return Math.min(Math.max(Math.round(safeHeight), MIN_DRAWER_HEIGHT), maxHeight);
 }
@@ -357,10 +357,10 @@ export function terminalThemeFromApp(mountElement?: HTMLElement | null): Ghostty
   };
 }
 
-export function terminalSelectionLineRange(position: {
-  start: { y: number };
-  end: { y: number };
-}): { lineStart: number; lineEnd: number } {
+function terminalSelectionLineRange(position: { start: { y: number }; end: { y: number } }): {
+  lineStart: number;
+  lineEnd: number;
+} {
   const lineStart = position.start.y + 1;
   return {
     lineStart,
@@ -375,7 +375,7 @@ export type TerminalContextMenuAction =
   | "select-all"
   | "scroll-to-bottom";
 
-export function terminalSelectionMenuItems(options?: {
+function terminalSelectionMenuItems(options?: {
   canAddToChat?: boolean;
 }): ContextMenuItem<"add-to-chat" | "copy">[] {
   return [
@@ -386,7 +386,7 @@ export function terminalSelectionMenuItems(options?: {
   ];
 }
 
-export function terminalContextMenuItems(options: {
+function terminalContextMenuItems(options: {
   hasSelection: boolean;
   canAddToChat?: boolean;
   readOnly?: boolean;

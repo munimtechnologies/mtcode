@@ -99,8 +99,10 @@ import Migration0073 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.t
 import Migration0074 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
 // Upstream 066 (repair client settlement timestamps); registered as the next free fork id.
 import Migration0075 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
+// Upstream 067 (webhook dedupe); registered as the next free fork id.
+import Migration0076 from "./Migrations/067_WebhookDedupe.ts";
 
-export const migrationEntries = [
+const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
@@ -185,6 +187,8 @@ export const migrationEntries = [
   [74, "CodexUsageNativeTurnIndex", Migration0074],
   // Upstream 066 (repair client settlement timestamps); registered as the next free fork id.
   [75, "RepairClientSettlementTimestamps", Migration0075],
+  // Upstream 067 (webhook dedupe); registered as the next free fork id.
+  [76, "WebhookDedupe", Migration0076],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

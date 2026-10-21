@@ -1,5 +1,3 @@
-"use client";
-
 import {
   closestCenter,
   DndContext,
@@ -108,7 +106,7 @@ export function groupModelsForDisplay<
   ];
 }
 
-export function nextHiddenModelsForBulkToggle(
+function nextHiddenModelsForBulkToggle(
   models: ReadonlyArray<Pick<ServerProviderModel, "slug" | "isCustom">>,
   hiddenModels: ReadonlyArray<string>,
 ): string[] {

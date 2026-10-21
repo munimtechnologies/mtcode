@@ -27,7 +27,7 @@ export const TerminalActionButton = ({
       render={
         <button
           type="button"
-          className={cn(className, disabled && "opacity-45 cursor-not-allowed")}
+          className={cn(className, disabled && "opacity-64 cursor-not-allowed")}
           onClick={disabled ? undefined : onClick}
           onMouseDown={onMouseDown}
           aria-label={label}

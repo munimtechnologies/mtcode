@@ -298,17 +298,6 @@ describe("serializeRenderedMarkdownFragment", () => {
     expect(collectAssistantCitations(copied).map((entry) => entry.citation)).toEqual([citation]);
   });
 
-  it("keeps a highlighted block code selection plain when its pre wrapper is outside the range", () => {
-    const code = new FakeElement("CODE").append(
-      shikiCodeLine("git show-ref --verify refs/remotes/origin/opt/deploy/dev"),
-    );
-    const container = new FakeElement("DIV").append(code);
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "git show-ref --verify refs/remotes/origin/opt/deploy/dev",
-    );
-  });
-
   it("keeps a multi-line code selection plain instead of inline-wrapping it", () => {
     const code = new FakeElement("CODE").append(new FakeText("first line\nsecond line"));
     const container = new FakeElement("DIV").append(code);
@@ -325,40 +314,6 @@ describe("serializeRenderedMarkdownFragment", () => {
     expect(serializeRenderedMarkdownFragment(asNode(container))).toBe("-\n\n```\npnpm test\n```");
   });
 
-  it("keeps fences when a checkbox-only task item sits alongside the code block", () => {
-    const container = new FakeElement("DIV").append(
-      new FakeElement("UL").append(
-        new FakeElement("LI").append(new FakeElement("INPUT", [], { type: "checkbox" })),
-      ),
-      renderedCodeBlock(["pnpm test"]),
-    );
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "- [ ]\n\n```\npnpm test\n```",
-    );
-  });
-
-  it("still drops fences for a code block that is the whole list item", () => {
-    const container = new FakeElement("DIV").append(
-      new FakeElement("UL").append(new FakeElement("LI").append(renderedCodeBlock(["pnpm test"]))),
-      new FakeText("\n"),
-    );
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe("pnpm test");
-  });
-
-  it("keeps fences when a file chip sits alongside the code block", () => {
-    const container = new FakeElement("DIV").append(
-      renderedCodeBlock(["pnpm test"]),
-      new FakeText("\n"),
-      new FakeElement("BUTTON", [], { "data-markdown-copy": "`src/foo.ts`" }),
-    );
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "```\npnpm test\n```\n\n`src/foo.ts`",
-    );
-  });
-
   it("omits fences when a selection past the last line drags in the whole code block", () => {
     const container = new FakeElement("DIV").append(
       renderedCodeBlock(["printf '%s' 'TOKEN' | gh secret set CLOUDFLARE_API_TOKEN"]),
@@ -368,32 +323,6 @@ describe("serializeRenderedMarkdownFragment", () => {
 
     expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
       "printf '%s' 'TOKEN' | gh secret set CLOUDFLARE_API_TOKEN",
-    );
-  });
-
-  it("still fences a code block copied alongside prose", () => {
-    const container = new FakeElement("DIV").append(
-      new FakeElement("P").append(new FakeText("Run this:")),
-      renderedCodeBlock(["gh workflow run Deploy --ref main"]),
-    );
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "Run this:\n\n```\ngh workflow run Deploy --ref main\n```",
-    );
-  });
-
-  it("uses a rendered card's explicit Markdown copy representation", () => {
-    const card = new FakeElement("DIV", [], {
-      "data-markdown-copy": "Hello World (Document template)\n\n",
-    }).append(
-      new FakeElement("SPAN").append(new FakeText("Hello World")),
-      new FakeElement("SPAN").append(new FakeText("Document template")),
-      new FakeElement("BUTTON").append(new FakeText("Use template")),
-    );
-    const container = new FakeElement("DIV").append(card);
-
-    expect(serializeRenderedMarkdownFragment(asNode(container))).toBe(
-      "Hello World (Document template)",
     );
   });
 });

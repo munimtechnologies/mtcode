@@ -1,9 +1,12 @@
 import { getCloneDestinationPath } from "@t3tools/client-runtime/operations/projects";
 import { APP_BASE_NAME } from "../../branding";
-import { getBrowseDirectoryPath, getBrowseLeafPathSegment } from "../../lib/projectPaths";
+import { getBrowseDirectoryPath } from "../../lib/projectPaths";
 import { DirectoryPicker } from "../DirectoryPicker";
 import { useRef, useState } from "react";
-import { copyProjectToEnvironment } from "@t3tools/client-runtime/state/projects";
+import {
+  copyProjectToEnvironment,
+  getBrowseLeafPathSegment,
+} from "@t3tools/client-runtime/state/projects";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectTransferMode } from "@t3tools/contracts";
 import type { SidebarProjectGroupMember } from "../../sidebarProjectGrouping";
@@ -167,7 +170,7 @@ export function ProjectTransferDialog({
               intact.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-5">
+          <DialogPanel>
             <div className="grid gap-1.5">
               <Label htmlFor="transfer-source">Source checkout</Label>
               <Select

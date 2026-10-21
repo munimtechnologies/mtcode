@@ -112,16 +112,17 @@ function formatWebhookRequest(request: WebhookRequest): string {
   ].join("\n");
 }
 
-export function renderWebhookPrompt(
-  template: string,
+/**
+ * Resolves a placeholder expression (`body.action`, `headers.x-github-event`)
+ * against the request. Webhook filters share it, so both read the same value.
+ */
+export function webhookExpressionResolver(
   request: WebhookRequest,
-  frameId: string,
-): RenderedWebhookPrompt {
-  const missing: string[] = [];
+): (expression: string) => unknown {
   let body: { parsed: unknown } | undefined;
   const parsedBody = () => (body ??= { parsed: parseBody(request) }).parsed;
 
-  const resolve = (expression: string): unknown => {
+  return (expression) => {
     const [root, ...segments] = expression.split(".");
     switch (root) {
       case "request":
@@ -143,6 +144,16 @@ export function renderWebhookPrompt(
         return undefined;
     }
   };
+}
+
+export function renderWebhookPrompt(
+  template: string,
+  request: WebhookRequest,
+  frameId: string,
+  raw = false,
+): RenderedWebhookPrompt {
+  const missing: string[] = [];
+  const resolve = webhookExpressionResolver(request);
 
   const tag = `webhook-data-${frameId}`;
   let framed = false;
@@ -150,12 +161,13 @@ export function renderWebhookPrompt(
     const expression = rawExpression.trim();
     const value = resolve(expression);
     const text = value === undefined || value === null ? undefined : stringify(value);
-    if (text === undefined) {
+    if (text === undefined || (raw && text === "")) {
       if (!missing.includes(expression)) missing.push(expression);
       return "";
     }
     // An empty value carries no request data, so it needs no frame or note.
     if (text === "") return "";
+    if (raw) return text;
     framed = true;
     return `<${tag}>${text.replace(MENTION, "$&\u2060")}</${tag}>`;
   });

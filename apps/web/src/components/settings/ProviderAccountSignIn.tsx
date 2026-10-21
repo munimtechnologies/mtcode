@@ -1,5 +1,3 @@
-"use client";
-
 import { CheckIcon, CopyIcon, ExternalLinkIcon, KeyRoundIcon, LoaderIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {

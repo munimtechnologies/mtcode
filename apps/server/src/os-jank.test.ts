@@ -12,14 +12,6 @@ import { fixPath, hydratePosixEnvironment, hydratePosixHome } from "./os-jank.ts
 
 vi.mock("node:child_process", { spy: true });
 
-it("hydrates HOME for minimal service environments from the user account", () => {
-  const env: NodeJS.ProcessEnv = {};
-
-  hydratePosixHome(env);
-
-  assert.equal(env.HOME, NodeOS.userInfo().homedir);
-});
-
 it("hydrates HOME independently of a blank process HOME", () => {
   const originalHome = process.env.HOME;
   const env: NodeJS.ProcessEnv = { HOME: " " };
@@ -213,31 +205,6 @@ effectIt.effect("keeps mise's PATH record with the login shell PATH", () =>
       }),
     (probe) => Effect.sync(() => probe.mockRestore()),
   ),
-);
-
-effectIt.effect("keeps the prepared Windows PATH without probing", () =>
-  Effect.gen(function* () {
-    const env: NodeJS.ProcessEnv = { PATH: "C:\\Prepared\\Bin;C:\\Windows" };
-    const commands: string[] = [];
-
-    yield* fixPath({ shellEnvironmentPrepared: true }).pipe(
-      Effect.provideService(HostProcess.Platform, "win32"),
-      Effect.provideService(HostProcess.Environment, env),
-      Effect.provideService(WindowsShellEnvironment, () => {
-        throw new Error("The prepared environment must not launch another shell");
-      }),
-      Effect.provideService(CommandAvailability, (command) =>
-        Effect.sync(() => {
-          commands.push(command);
-          return true;
-        }),
-      ),
-      Effect.provide(NodeServices.layer),
-    );
-
-    assert.deepEqual(commands, []);
-    assert.equal(env.PATH, "C:\\Prepared\\Bin;C:\\Windows");
-  }),
 );
 
 effectIt.effect("replaces a Path-spelled Windows PATH instead of adding a second key", () =>

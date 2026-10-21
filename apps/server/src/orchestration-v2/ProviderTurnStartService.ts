@@ -47,7 +47,10 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import {
+  knownProviderFailureMessage,
+  makeProviderFailure,
+} from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import {
@@ -249,8 +252,16 @@ export const layer: Layer.Layer<
       const checkpointScope = projection.checkpointScopes.find(
         (candidate) => candidate.id === rootNode?.checkpointScopeId,
       );
+      // Older versions also stored subagent replies as history handoffs. Their
+      // queued completion messages carry the results without a history budget.
+      const subagentResultTransfers = new Set(
+        projection.contextTransfers
+          .filter((transfer) => transfer.type === "subagent_result")
+          .map((transfer) => transfer.id),
+      );
       const handoffs = projection.contextHandoffs.filter(
         (handoff) =>
+          (handoff.transferId == null || !subagentResultTransfers.has(handoff.transferId)) &&
           handoff.status === "ready" &&
           (handoff.targetRunId === run.id ||
             (handoff.toProviderThreadId === run.providerThreadId &&
@@ -569,11 +580,12 @@ export const layer: Layer.Layer<
               failure: makeProviderFailure({
                 cause: failed.error,
                 message:
-                  nestedCause instanceof Error
+                  knownProviderFailureMessage(failed.error) ??
+                  (nestedCause instanceof Error
                     ? nestedCause.message
                     : typeof nestedCause === "string"
                       ? nestedCause
-                      : failed.error.message,
+                      : failed.error.message),
                 class: "provider_error",
               }),
             },

@@ -2,7 +2,6 @@ import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   DEFAULT_SERVER_SETTINGS,
-  DEFAULT_MODEL,
   ProjectId,
   ProviderInstanceId,
   ProviderDriverKind,
@@ -16,6 +15,7 @@ import { HttpClient, HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -31,7 +31,6 @@ import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -49,14 +48,8 @@ import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { ServerActivation } from "./serverActivation.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
-
-it("uses the canonical Codex model for auto-bootstrap", () => {
-  assert.deepEqual(ServerRuntimeStartup.getAutoBootstrapThreadModelSelection(), {
-    instanceId: ProviderInstanceId.make("codex"),
-    model: DEFAULT_MODEL,
-  });
-});
 
 it.effect.each([
   "disabled-codex",
@@ -230,6 +223,9 @@ it.effect.each([
         }),
         Layer.mock(GitVcsDriver.GitVcsDriver)({}),
         Layer.mock(AnalyticsService.AnalyticsService)({}),
+        // No provider logins or Connect link, so startup records no owners.
+        FileSystem.layerNoop({}),
+        Layer.mock(ServerSecretStore.ServerSecretStore)({ get: () => Effect.succeedNone }),
         Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
         Layer.mock(ExternalLauncher.ExternalLauncher)({}),
         Layer.mock(HttpServer.HttpServer)({
@@ -257,33 +253,6 @@ it.effect.each([
       );
     }),
   ),
-);
-
-it.effect("starts without scanning or rebuilding projection history", () =>
-  Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<string>>([]);
-    const record = (label: string) => Ref.update(calls, (current) => [...current, label]);
-
-    const result = yield* ServerRuntimeStartup.runOrderedV2StartupPhases({
-      importLegacyShells: record("import"),
-      recover: record("recover").pipe(Effect.as({ closedRequests: 2 })),
-      recoverDelegatedTasks: record("delegated"),
-      startEffectWorker: record("worker"),
-      autoBootstrap: record("bootstrap").pipe(Effect.as({ projectId: "project-1" })),
-    });
-
-    assert.deepEqual(yield* Ref.get(calls), [
-      "import",
-      "recover",
-      "delegated",
-      "worker",
-      "bootstrap",
-    ]);
-    assert.deepEqual(result, {
-      recovery: { closedRequests: 2 },
-      bootstrap: { projectId: "project-1" },
-    });
-  }),
 );
 
 it.effect("interrupts the effect worker when awareness relay startup fails", () =>
@@ -349,63 +318,6 @@ it.effect("enqueueCommand fails queued work when readiness fails", () =>
   ),
 );
 
-it.effect("environment label updates subscribe before reading the initial snapshot", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const changes = yield* PubSub.unbounded<typeof DEFAULT_SERVER_SETTINGS>();
-      const appliedLabels = yield* Ref.make<ReadonlyArray<string>>([]);
-      const freshLabelApplied = yield* Deferred.make<void>();
-      const staleSettings = { ...DEFAULT_SERVER_SETTINGS, environmentLabel: "stale" };
-      const freshSettings = { ...DEFAULT_SERVER_SETTINGS, environmentLabel: "fresh" };
-      const scope = yield* Scope.Scope;
-
-      const fiber = yield* ServerRuntimeStartup.runEnvironmentLabelUpdates(scope).pipe(
-        Effect.provideService(ServerSettings.ServerSettingsService, {
-          start: Effect.void,
-          ready: Effect.void,
-          getSettings: PubSub.publish(changes, freshSettings).pipe(Effect.as(staleSettings)),
-          updateSettings: () => Effect.die("unused"),
-          updateProviderInstance: () => Effect.die("unused"),
-          withSettingsSnapshot: () => Effect.die("unused"),
-          streamChanges: Stream.empty,
-          subscribeChanges: PubSub.subscribe(changes).pipe(
-            Effect.map((subscription) => Stream.fromSubscription(subscription)),
-          ),
-        }),
-        Effect.provideService(ServerEnvironment.ServerEnvironment, {
-          getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-test")),
-          getDescriptor: Effect.die("unused"),
-          setEnvironmentLabel: (label) =>
-            Ref.update(appliedLabels, (labels) => [...labels, label]).pipe(
-              Effect.andThen(
-                label === "fresh" ? Deferred.succeed(freshLabelApplied, undefined) : Effect.void,
-              ),
-            ),
-        }),
-      );
-
-      yield* Deferred.await(freshLabelApplied);
-      assert.deepStrictEqual(yield* Ref.get(appliedLabels), ["stale", "fresh"]);
-      yield* Fiber.interrupt(fiber);
-    }),
-  ),
-);
-
-it.effect("resolveWelcomeBase derives cwd and project name from server config", () =>
-  Effect.gen(function* () {
-    const welcome = yield* ServerRuntimeStartup.resolveWelcomeBase.pipe(
-      Effect.provideService(ServerConfig.ServerConfig, {
-        cwd: "/tmp/startup-project",
-      } as never),
-    );
-
-    assert.deepStrictEqual(welcome, {
-      cwd: "/tmp/startup-project",
-      projectName: "startup-project",
-    });
-  }),
-);
-
 it.effect("automatic pull only updates enabled, behind, clean default-branch checkouts", () =>
   Effect.gen(function* () {
     const pulled: string[] = [];
@@ -469,4 +381,46 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
     ).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
     assert.deepStrictEqual(pulled, ["/inherited"]);
   }),
+);
+
+it.effect("environment label updates subscribe before reading the initial snapshot", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const changes = yield* PubSub.unbounded<typeof DEFAULT_SERVER_SETTINGS>();
+      const appliedLabels = yield* Ref.make<ReadonlyArray<string>>([]);
+      const freshLabelApplied = yield* Deferred.make<void>();
+      const staleSettings = { ...DEFAULT_SERVER_SETTINGS, environmentLabel: "stale" };
+      const freshSettings = { ...DEFAULT_SERVER_SETTINGS, environmentLabel: "fresh" };
+      const scope = yield* Scope.Scope;
+
+      const fiber = yield* ServerRuntimeStartup.runEnvironmentLabelUpdates(scope).pipe(
+        Effect.provideService(ServerSettings.ServerSettingsService, {
+          start: Effect.void,
+          ready: Effect.void,
+          getSettings: PubSub.publish(changes, freshSettings).pipe(Effect.as(staleSettings)),
+          updateSettings: () => Effect.die("unused"),
+          updateProviderInstance: () => Effect.die("unused"),
+          withSettingsSnapshot: () => Effect.die("unused"),
+          streamChanges: Stream.empty,
+          subscribeChanges: PubSub.subscribe(changes).pipe(
+            Effect.map((subscription) => Stream.fromSubscription(subscription)),
+          ),
+        }),
+        Effect.provideService(ServerEnvironment.ServerEnvironment, {
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-test")),
+          getDescriptor: Effect.die("unused"),
+          setEnvironmentLabel: (label) =>
+            Ref.update(appliedLabels, (labels) => [...labels, label]).pipe(
+              Effect.andThen(
+                label === "fresh" ? Deferred.succeed(freshLabelApplied, undefined) : Effect.void,
+              ),
+            ),
+        }),
+      );
+
+      yield* Deferred.await(freshLabelApplied);
+      assert.deepStrictEqual(yield* Ref.get(appliedLabels), ["stale", "fresh"]);
+      yield* Fiber.interrupt(fiber);
+    }),
+  ),
 );

@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { migrationEntries, runMigrations } from "../Migrations.ts";
+import { migrationManifest, runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -14,8 +14,8 @@ layer("055_OrchestrationV2", (it) => {
   it.effect("keeps released migrations contiguous", () =>
     Effect.sync(() => {
       assert.deepStrictEqual(
-        migrationEntries.map(([id]) => id),
-        Array.from({ length: 75 }, (_, index) => index + 1),
+        migrationManifest.map(([id]) => id),
+        Array.from({ length: 76 }, (_, index) => index + 1),
       );
     }),
   );
@@ -41,6 +41,7 @@ layer("055_OrchestrationV2", (it) => {
         [73, "CanonicalizeThreadPullRequestLinks"],
         [74, "CodexUsageNativeTurnIndex"],
         [75, "RepairClientSettlementTimestamps"],
+        [76, "WebhookDedupe"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -68,6 +69,7 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 73, name: "CanonicalizeThreadPullRequestLinks" },
         { migration_id: 74, name: "CodexUsageNativeTurnIndex" },
         { migration_id: 75, name: "RepairClientSettlementTimestamps" },
+        { migration_id: 76, name: "WebhookDedupe" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

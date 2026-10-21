@@ -9,7 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { desktopLocalConnectionId } from "../../connection/desktopLocal";
 import { resolveRemoteOpenState } from "../../remoteOpen";
 
-import { resolveRenameCommit, shouldShowComputerView } from "./ChatHeader";
+import { shouldShowComputerView } from "./ChatHeader";
 
 describe("shouldShowComputerView", () => {
   it("offers the view for a thread on another computer", () => {
@@ -121,26 +121,5 @@ describe("Computer View machine resolution", () => {
         { isDesktopRenderer: false },
       ),
     ).toBe(false);
-  });
-});
-
-describe("resolveRenameCommit", () => {
-  it("commits a trimmed changed title", () => {
-    expect(resolveRenameCommit({ title: "  New title ", originalTitle: "Old" })).toEqual({
-      action: "commit",
-      title: "New title",
-    });
-  });
-
-  it("rejects empty and whitespace-only titles", () => {
-    expect(resolveRenameCommit({ title: "   ", originalTitle: "Old" })).toEqual({
-      action: "reject-empty",
-    });
-  });
-
-  it("no-ops when the trimmed title is unchanged", () => {
-    expect(resolveRenameCommit({ title: " Old ", originalTitle: "Old" })).toEqual({
-      action: "noop",
-    });
   });
 });

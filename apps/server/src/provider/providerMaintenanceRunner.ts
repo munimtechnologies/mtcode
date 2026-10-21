@@ -30,6 +30,7 @@ import * as ProviderRegistry from "./ProviderRegistry.ts";
 import { makeProviderMaintenanceCommandCoordinator } from "./providerMaintenanceCommandCoordinator.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  invalidateLatestProviderVersion,
   makeTargetedProviderUpdateAction,
   resolveLatestProviderUpdateAction,
   resolveLatestProviderVersion,
@@ -429,9 +430,11 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             }
 
             const manifest = yield* manifestService.current;
+            // Check compatibility against what an unpinned command would install now.
             const candidateVersion =
               targetVersion ??
-              (yield* resolveLatestProviderVersion(fresh).pipe(
+              (yield* invalidateLatestProviderVersion(fresh).pipe(
+                Effect.andThen(resolveLatestProviderVersion(fresh)),
                 Effect.provideService(HttpClient.HttpClient, httpClient),
                 Effect.provideService(
                   ProviderLatestVersions.ProviderLatestVersions,
@@ -484,11 +487,13 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             }
 
             yield* setRunningMessage("Verifying the installed version");
-            // Homebrew's "latest" moves once the upgrade lands; read it again.
             const verified = yield* providerRegistry.getProviderMaintenanceCapabilitiesForInstance(
               instanceId,
               provider,
               { fresh: true },
+            );
+            yield* invalidateLatestProviderVersion(verified).pipe(
+              Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
             );
             const { verifiedProviders } = yield* verifyRefreshedProvider(
               provider,

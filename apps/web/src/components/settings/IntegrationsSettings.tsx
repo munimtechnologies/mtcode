@@ -4,6 +4,7 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 import { APP_BASE_NAME } from "~/branding";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { DeviceHostsSettings } from "./DeviceHostsSettings";
+import { EasDeviceHostsSettings } from "./EasDeviceHostsSettings";
 import { ExternalTerminalSetting } from "./ExternalTerminalSetting";
 /**
  * Integrations settings - preferences for surfaces T3 Code embeds rather than
@@ -164,7 +165,7 @@ export async function clearBrowserProfileData(
   ]);
 }
 
-export function browserProfileRemovalAvailable(
+function browserProfileRemovalAvailable(
   bridgeAvailable: boolean,
   environmentsReady: boolean,
   environmentCount: number,
@@ -829,7 +830,7 @@ function DeviceIntegrationSettings() {
   );
 }
 
-export function DeviceIntegrationControls({
+function DeviceIntegrationControls({
   environmentId,
   enabled,
   agentAccessEnabled,
@@ -1078,6 +1079,7 @@ export function DeviceIntegrationControls({
         />
       ) : null}
       <DeviceHostsSettings environmentId={environmentId} />
+      {state.supportsEasHosts ? <EasDeviceHostsSettings environmentId={environmentId} /> : null}
     </>
   );
 }

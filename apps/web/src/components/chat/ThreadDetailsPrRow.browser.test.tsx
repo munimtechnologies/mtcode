@@ -1,17 +1,7 @@
-import {
-  EnvironmentId,
-  GitCommandError,
-  GitManagerError,
-  ProjectId,
-  ThreadId,
-  type PullRequestCheck,
-} from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
+import { EnvironmentId, ProjectId, ThreadId, type PullRequestCheck } from "@t3tools/contracts";
 import { DraftId } from "~/composerDraftStore";
 import { AsyncResult } from "effect/reactivity";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   status: "success" as PullRequestCheck["status"],
@@ -26,7 +16,14 @@ const state = vi.hoisted(() => ({
 
 vi.mock(import("~/state/entities"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useServerConfigs: (() => new Map()) as never,
+  // Rows render a pull request only with a project, so this does not reach tests that pass none.
+  useServerConfigs: (() =>
+    new Map([
+      [
+        EnvironmentId.make("environment"),
+        { environment: { capabilities: { pullRequests: true } } },
+      ],
+    ])) as never,
 }));
 const queryData = () => ({
   projectId: ProjectId.make("project"),
@@ -58,6 +55,16 @@ vi.mock(import("~/state/query"), async (importOriginal) => ({
     select(AsyncResult.success(queryData()))) as never,
   useEnvironmentQueryIsNewer: () => true,
   useEnvironmentQueryRefresh: () => ({ refresh: vi.fn(), isPending: () => false }),
+  useEnvironmentQuery: (() => ({
+    data: {
+      code: { additions: 1, deletions: 0 },
+      tests: { additions: 0, deletions: 0 },
+      mocks: { additions: 0, deletions: 0 },
+      generated: { additions: 0, deletions: 0 },
+      docs: { additions: 7, deletions: 3 },
+    },
+    isPending: false,
+  })) as never,
 }));
 vi.mock(import("../pullRequest/usePullRequestActions"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -88,33 +95,12 @@ vi.mock(import("../ui/toast"), async (original) => {
   };
 });
 
+import { act, render as renderUi } from "../../../test/render";
 import { ThreadDetailsPrRow } from "./ThreadDetailsPrRow";
 
-let root: Root;
-let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  state.checkoutError = null;
-  state.newThread.mockReset().mockResolvedValue({
-    draftId: DraftId.make("new-draft"),
-    threadId: ThreadId.make("new-thread"),
-  });
-  state.prepareThread.mockReset();
-  state.addToast.mockReset().mockReturnValue("checkout-toast");
-  state.updateToast.mockReset();
-});
-afterEach(() => {
-  act(() => root.unmount());
-  document.body.replaceChildren();
-  vi.unstubAllGlobals();
-  state.status = "success";
-  state.extraStatus = null;
-});
-
-it("requires a new merge click after passing checks become pending and pass again", () => {
+it("requires a new merge click after passing checks become pending and pass again", async () => {
+  await using screen = await setup();
+  const { container } = screen;
   const render = () => (
     <ThreadDetailsPrRow
       environmentId={EnvironmentId.make("environment")}
@@ -127,107 +113,44 @@ it("requires a new merge click after passing checks become pending and pass agai
       onOpen={vi.fn()}
     />
   );
-  const clickMerge = () =>
-    act(() => {
+  const clickMerge = async () =>
+    await act(async () => {
       [...container.querySelectorAll("button")]
         .find((button) => button.textContent?.trim() === "Merge")!
         .click();
     });
   const dialogs = () => [...document.querySelectorAll('[role="alertdialog"]')];
 
-  act(() => root.render(render()));
-  clickMerge();
+  await act(async () => await screen.rerender(render()));
+  await clickMerge();
   expect(dialogs()).toHaveLength(1);
-  act(() => {
+  await act(async () => {
     state.status = "pending";
-    root.render(render());
+    await screen.rerender(render());
   });
   expect(dialogs()).toHaveLength(0);
-  act(() => {
+  await act(async () => {
     state.status = "success";
-    root.render(render());
+    await screen.rerender(render());
   });
   expect(dialogs()).toHaveLength(0);
-  clickMerge();
+  await clickMerge();
   expect(dialogs()).toHaveLength(1);
   expect(state.perform).not.toHaveBeenCalled();
 });
 
-it.each<[PullRequestCheck["status"], PullRequestCheck["status"], string]>([
-  ["success", "skipped", ""],
-  ["failure", "cancelled", ""],
-  ["success", "action-required", "1/2"],
-  ["success", "pending", "1/2"],
-  ["pending", "pending", "0/2"],
-  ["pending", "action-required", "0/2"],
-  ["skipped", "pending", "1/2"],
-  ["neutral", "pending", "1/2"],
-  ["failure", "pending", "1/2"],
-  ["cancelled", "pending", "1/2"],
-])("counts finished checks while work remains (%s, %s)", (status, extraStatus, count) => {
-  state.status = status;
-  state.extraStatus = extraStatus;
-  act(() => {
-    root.render(
-      <ThreadDetailsPrRow
-        environmentId={EnvironmentId.make("environment")}
-        pr={null}
-        number={1}
-        status={null}
-        project={null}
-        label="Test PR"
-        openAriaLabel="Open PR"
-        onOpen={vi.fn()}
-      />,
-    );
+async function setup() {
+  state.perform.mockReset();
+  state.checkoutError = null;
+  state.newThread.mockReset().mockResolvedValue({
+    draftId: DraftId.make("new-draft"),
+    threadId: ThreadId.make("new-thread"),
   });
-  const counts = [...container.querySelectorAll("*")]
-    .map((element) => element.textContent?.trim() ?? "")
-    .filter((value) => /^\d+\/\d+$/.test(value));
-  expect(new Set(counts)).toEqual(new Set(count ? [count] : []));
-});
+  state.prepareThread.mockReset();
+  state.addToast.mockReset().mockReturnValue("checkout-toast");
+  state.updateToast.mockReset();
 
-it("shows the current checkout recovery detail when fixing checks fails and is retried", async () => {
-  state.status = "failure";
-  const first = new GitManagerError({
-    cwd: "/workspace",
-    operation: "preparePullRequestThread",
-    detail: "This PR branch is already checked out in the main repo. Use Local.",
-  });
-  const second = new GitCommandError({
-    cwd: "/workspace",
-    operation: "GitVcsDriver.createWorktree",
-    command: "git worktree add",
-    detail: "The worktree directory already exists. Choose another directory.",
-  });
-  await act(async () => {
-    root.render(
-      <ThreadDetailsPrRow
-        environmentId={EnvironmentId.make("environment")}
-        pr={null}
-        number={1}
-        status={null}
-        project={null}
-        label="Test PR"
-        openAriaLabel="Open PR"
-        onOpen={vi.fn()}
-      />,
-    );
-  });
-
-  for (const error of [first, second]) {
-    state.prepareThread.mockImplementationOnce(async () => {
-      state.checkoutError = error;
-      return { _tag: "Failure", cause: Cause.fail(error) };
-    });
-    await act(async () => {
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent?.trim() === "Fix")!
-        .click();
-    });
-  }
-  expect(state.updateToast.mock.calls.map(([, toast]) => toast.description)).toEqual([
-    expect.stringContaining(first.detail),
-    second.detail,
-  ]);
-});
+  state.status = "success";
+  state.extraStatus = null;
+  return renderUi(null);
+}

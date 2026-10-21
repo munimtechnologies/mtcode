@@ -5,6 +5,7 @@ import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -13,7 +14,6 @@ import { HttpClient, HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -33,6 +33,7 @@ import { ServerActivation } from "./serverActivation.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 
@@ -175,6 +176,9 @@ it.effect("parks automatic pull until activation without delaying command readin
             ),
         }),
         Layer.mock(AnalyticsService.AnalyticsService)({ record: () => Effect.void }),
+        // No provider logins or Connect link, so startup records no owners.
+        FileSystem.layerNoop({}),
+        Layer.mock(ServerSecretStore.ServerSecretStore)({ get: () => Effect.succeedNone }),
         NodeCrypto.layer,
         Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
         Layer.mock(ExternalLauncher.ExternalLauncher)({}),

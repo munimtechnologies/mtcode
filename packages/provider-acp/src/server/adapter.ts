@@ -52,6 +52,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -206,6 +207,24 @@ export interface AcpAdapterV2ExtensionContext {
   readonly lastProposedPlanMarkdown: Effect.Effect<string | undefined>;
 }
 
+/**
+ * Raised when an agent does not accept the session's model selection: the
+ * session's model option does not offer it, or the agent answers the write
+ * with invalid params. `makeProviderFailure` shows its message to the user;
+ * the agent's reply stays on `cause`.
+ */
+class AcpModelSelectionError extends Schema.TaggedError<AcpModelSelectionError>()(
+  "AcpModelSelectionError",
+  {
+    model: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `The agent did not accept the model "${this.model}". Choose another model for this provider, then retry.`;
+  }
+}
+
 export interface AcpAdapterV2Flavor {
   readonly promptFailure?: (cause: unknown) => OrchestrationV2ProviderFailure;
   readonly driver: ProviderDriverKind;
@@ -356,7 +375,7 @@ export interface AcpAdapterV2Flavor {
   readonly supportsImagePrompts?: boolean;
 }
 
-export function acpSupportsImagePrompts(input: {
+function acpSupportsImagePrompts(input: {
   readonly flavorSupportsImagePrompts?: boolean | undefined;
   readonly negotiatedImage?: boolean | undefined;
 }): boolean {
@@ -367,7 +386,7 @@ export function acpScopedNativeId(instanceId: ProviderInstanceId, nativeId: stri
   return `provider-instance:${encodeURIComponent(instanceId)}:${nativeId}`;
 }
 
-export function acpProviderItemNativeId(input: {
+function acpProviderItemNativeId(input: {
   readonly instanceId: ProviderInstanceId;
   readonly itemIdentityVersion: 2 | undefined;
   readonly nativeId: string;
@@ -838,7 +857,7 @@ function commandExitCode(value: unknown): number | undefined {
  * Mid-stream Grok Bash re-reports carry exit_code 0 while still in progress;
  * interrupted tools must not retain that stale success code.
  */
-export function acpProjectedCommandExitCode(
+function acpProjectedCommandExitCode(
   status: "pending" | "running" | "waiting" | "completed" | "failed" | "interrupted",
   rawOutput: unknown,
 ): number | undefined {
@@ -1221,7 +1240,7 @@ export function acpPostSettleContinuationOfferEvidence(
   return false;
 }
 
-export function acpPostSettleWakeShouldBuffer(
+function acpPostSettleWakeShouldBuffer(
   notification: EffectAcpSchema.SessionNotification,
   backgroundWorkRunning: boolean,
 ): boolean {
@@ -1238,7 +1257,7 @@ export function acpPostSettleWakeShouldBuffer(
  * nothing about this session's own pending wake frames, so it must not discard
  * them the way a real user turn does.
  */
-export function acpIsAppOwnedWakeTurn(message: {
+function acpIsAppOwnedWakeTurn(message: {
   readonly createdBy: string;
   readonly creationSource: string;
 }): boolean {
@@ -1252,14 +1271,14 @@ function acpIsProviderContinuationMessage(message: {
   return message.createdBy === "agent" && message.creationSource === "provider";
 }
 
-export function acpCarryoverTerminalShouldClearContinuation(input: {
+function acpCarryoverTerminalShouldClearContinuation(input: {
   readonly continuationOffered: boolean;
   readonly wakeBufferLength: number;
 }): boolean {
   return !input.continuationOffered && input.wakeBufferLength === 0;
 }
 
-export function acpTurnStartShouldPreserveContinuation(input: {
+function acpTurnStartShouldPreserveContinuation(input: {
   readonly continuationRequested: boolean;
   readonly isContinuationTurn: boolean;
   readonly wakeBufferLength: number;
@@ -1267,7 +1286,7 @@ export function acpTurnStartShouldPreserveContinuation(input: {
   return !input.isContinuationTurn && input.continuationRequested && input.wakeBufferLength > 0;
 }
 
-export function acpPostSettleMonitorPromptShouldSuppress(
+function acpPostSettleMonitorPromptShouldSuppress(
   mutation:
     | {
         readonly taskId: string;
@@ -1327,9 +1346,7 @@ function acpSubagentStatusIsTerminal(status: OrchestrationV2Subagent["status"]):
   );
 }
 
-export function acpSubagentStatusBlocksTurnSettlement(
-  status: OrchestrationV2Subagent["status"],
-): boolean {
+function acpSubagentStatusBlocksTurnSettlement(status: OrchestrationV2Subagent["status"]): boolean {
   return status === "running" || status === "pending";
 }
 
@@ -6674,13 +6691,23 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ) {
           yield* Ref.set(activeSelection, null);
           const requestedModel = flavor.resolveModelId?.(modelSelection) ?? modelSelection.model;
+          // Invalid params is the agent refusing the value, and the runtime
+          // raises the same code when the session's model option does not offer
+          // it. Other failures, such as sign-in or a lost connection, keep their
+          // own error.
+          const rejectedModel = (error: EffectAcpErrors.AcpError) =>
+            error._tag === "AcpRequestError" && error.code === -32602
+              ? new AcpModelSelectionError({ model: modelSelection.model, cause: error })
+              : error;
           let appliedModel: string | undefined;
           if (flavor.applyModelSelection !== undefined) {
-            appliedModel = yield* flavor.applyModelSelection({
-              runtime,
-              startResult,
-              modelSelection,
-            });
+            appliedModel = yield* flavor
+              .applyModelSelection({
+                runtime,
+                startResult,
+                modelSelection,
+              })
+              .pipe(Effect.mapError(rejectedModel));
           } else if (requestedModel.length > 0) {
             // Stored catalog choices can expire; explicitly configured custom IDs
             // are validated by the agent instead.
@@ -6696,7 +6723,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     : entry.options.some((choice) => choice.value === requestedModel),
                 )
               ) {
-                yield* runtime.setConfigOption(modelOption.id, requestedModel);
+                yield* runtime
+                  .setConfigOption(modelOption.id, requestedModel)
+                  .pipe(Effect.mapError(rejectedModel));
                 appliedModel = requestedModel;
               }
             } else if (
@@ -6705,7 +6734,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 modelState.availableModels.some((model) => model.modelId === requestedModel))
             ) {
               if (modelState.currentModelId !== requestedModel) {
-                yield* runtime.setSessionModel(requestedModel);
+                yield* runtime.setSessionModel(requestedModel).pipe(Effect.mapError(rejectedModel));
               }
               appliedModel = requestedModel;
             }

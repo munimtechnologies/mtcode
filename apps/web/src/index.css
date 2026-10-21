@@ -497,16 +497,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     var(--app-scrollbar-width) 100%;
 }
 
-@utility timeline-scroll-bottom-fade {
-  --virtualized-scroll-fade-mask: linear-gradient(
-    to bottom,
-    black 0,
-    black calc(100% - var(--timeline-composer-overlay-height) - 0.75rem),
-    transparent calc(100% - var(--timeline-composer-overlay-height)),
-    transparent 100%
-  );
-}
-
 /* Stage-channel art needs a mask and pseudo-element gradient, so keep the
    behavior composable without tying it to the global components layer. */
 @utility sidebar-stage-backdrop {
@@ -1743,6 +1733,20 @@ code {
   --diffs-header-font-family: var(--font-sans);
 }
 
+/* Pele diagrams read their colors through these, so a theme change recolors
+   them without re-rendering. */
+.pele {
+  --pele-bg: var(--background);
+  --pele-fg: var(--foreground);
+  --pele-muted: var(--muted-foreground);
+  --pele-line: var(--muted-foreground);
+  --pele-surface: var(--secondary);
+  --pele-surface-alt: var(--accent);
+  --pele-border: color-mix(in srgb, var(--foreground) 28%, transparent);
+  --pele-accent: var(--primary);
+  --pele-critical: var(--destructive);
+}
+
 /* Window drag region (frameless titlebar) */
 .drag-region {
   -webkit-app-region: drag;
@@ -2060,7 +2064,7 @@ code {
 }
 
 .chat-markdown pre::-webkit-scrollbar {
-  height: 7px;
+  height: var(--app-scrollbar-width);
 }
 
 .chat-markdown pre::-webkit-scrollbar-thumb {
@@ -2122,7 +2126,7 @@ code {
 .chat-markdown th,
 .chat-markdown td {
   padding: 0.45rem 0.75rem;
-  text-align: center;
+  text-align: left;
 }
 
 .chat-markdown thead th {

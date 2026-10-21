@@ -98,6 +98,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -197,7 +198,7 @@ import {
 } from "@t3tools/provider-core/server/subagentProjection";
 
 export const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
-export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
+const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
 
 function claudeContextWindow(modelSelection: ModelSelection): number | null {
   return (
@@ -312,6 +313,9 @@ const CLAUDE_WAKE_TURN_START_DEADLINE = "2 minutes";
 // reply can land after the progress frame that settles it. Its transcript
 // stays the source of its answer this long after it settles.
 const WORKFLOW_MEMBER_TRANSCRIPT_FLUSH_MS = 500;
+// A steer waits at most this long, from its request, for its foreground
+// subagents to move to the background before it is sent.
+const BACKGROUND_MOVE_TIMEOUT_MS = 5_000;
 
 /**
  * When the CLI exits it stops the MCP servers it started, but not their children: a plugin's
@@ -778,7 +782,7 @@ export function loggedClaudeQueryOptions(
   };
 }
 
-export function makeClaudeAgentSdkProtocolLogger(input: {
+function makeClaudeAgentSdkProtocolLogger(input: {
   readonly nativeEventLogger: ProviderEventLoggers.EventNdjsonLogger | undefined;
   readonly threadId: ThreadId;
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
@@ -2227,7 +2231,7 @@ const CLAUDE_KNOWN_TOOL_CLASSIFICATIONS: Record<
   write: { itemType: "file_change", requestKind: "file-change" },
 };
 
-export function classifyClaudeNativeTool(toolName: string): ClaudeToolClassification {
+function classifyClaudeNativeTool(toolName: string): ClaudeToolClassification {
   const normalizedName = normalizedClaudeToolName(toolName);
   const known = CLAUDE_KNOWN_TOOL_CLASSIFICATIONS[normalizedName];
   return known === undefined
@@ -3623,7 +3627,7 @@ export function claudeSdkUserInputAnswers(
   );
 }
 
-export function claudeTodoSteps(input: unknown): ReadonlyArray<OrchestrationV2PlanStep> {
+function claudeTodoSteps(input: unknown): ReadonlyArray<OrchestrationV2PlanStep> {
   const value =
     typeof input === "object" && input !== null && Reflect.get(input, "type") === "record"
       ? Reflect.get(input, "value")
@@ -3791,7 +3795,7 @@ function claudeTaskSteps(tasks: ClaudeTaskList): ReadonlyArray<OrchestrationV2Pl
   return [...tasks].map(([id, task]) => ({ id: `task-${id}`, ...task }));
 }
 
-export function claudeProposedPlan(input: unknown): string | null {
+function claudeProposedPlan(input: unknown): string | null {
   const value =
     typeof input === "object" && input !== null && Reflect.get(input, "type") === "record"
       ? Reflect.get(input, "value")
@@ -9758,6 +9762,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         // its result arrives as a task notification like any background agent.
         const backgroundForegroundSubagents = Effect.fnUntraced(function* (
           live: ClaudeLiveQueryContext,
+          deadline: number,
         ) {
           const foreground: Array<{
             readonly taskId: string;
@@ -9813,11 +9818,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             backgroundMovesByToolUseId.set(toolUseId, move);
             moves.push(move);
           }
-          yield* Fiber.joinAll(moves).pipe(Effect.timeoutOption("5 seconds"));
+          const remaining = deadline - (yield* Clock.currentTimeMillis);
+          yield* Fiber.joinAll(moves).pipe(Effect.timeoutOption(Math.max(0, remaining)));
         });
 
         const steerTurn = Effect.fn("ClaudeAdapterV2.steerTurn")(
           function* (turnInput: ProviderAdapter.ProviderAdapterV2SteerInput) {
+            // Measured from the request, not from when the moves are forked:
+            // building the message and the moves can take clock time a timer
+            // started later would not count, and the steer would wait past it.
+            const backgroundDeadline =
+              (yield* Clock.currentTimeMillis) + BACKGROUND_MOVE_TIMEOUT_MS;
             const existing = yield* Ref.get(queryContext);
             if (existing === null) {
               return yield* new ProviderAdapter.ProviderAdapterProtocolError({
@@ -9843,7 +9854,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               fileSystem,
               skills: yield* userInvocableSkills(currentTurn.input.runtimePolicy.cwd),
             });
-            yield* backgroundForegroundSubagents(existing);
+            yield* backgroundForegroundSubagents(existing, backgroundDeadline);
             // The turn can end while the moves are answered. A steer offered
             // then would start a new turn the orchestrator never asked for, so
             // the steer fails and the orchestrator starts the follow-up turn.

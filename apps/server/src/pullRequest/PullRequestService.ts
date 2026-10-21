@@ -40,6 +40,7 @@ import {
   type PullRequestDiffFileContentsResult,
   type PullRequestDiffStat,
   type PullRequestDiffInput,
+  type PullRequestChangeBreakdown,
   type PullRequestFilesViewedResult,
   type PullRequestDiffResult,
   type PullRequestInvalidateInput,
@@ -97,6 +98,7 @@ import {
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
 import * as PullRequestProviderRegistry from "./PullRequestProviderRegistry.ts";
 import * as ViewedFiles from "./pullRequestViewedFiles.ts";
+import { toChangeBreakdown } from "./pullRequestChangeBreakdown.ts";
 
 export interface PullRequestMergeEvent extends PullRequestRef {
   readonly mergedAt: string;
@@ -276,6 +278,9 @@ export class PullRequestService extends Context.Service<
     readonly setFilesViewed: (
       input: PullRequestSetFilesViewedInput,
     ) => Effect.Effect<void, PullRequestError>;
+    readonly changeBreakdown: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestChangeBreakdown, PullRequestError>;
     readonly runAction: (input: PullRequestActionInput) => Effect.Effect<void, PullRequestError>;
     readonly update: (input: PullRequestUpdateInput) => Effect.Effect<void, PullRequestError>;
     readonly comment: (input: PullRequestCommentInput) => Effect.Effect<void, PullRequestError>;
@@ -596,6 +601,9 @@ function withRateLimitBackoff(
     ...(api.getFilesViewed === undefined
       ? {}
       : { getFilesViewed: wrap("getFilesViewed", api.getFilesViewed) }),
+    ...(api.getFileStats === undefined
+      ? {}
+      : { getFileStats: wrap("getFileStats", api.getFileStats) }),
     ...(api.setFilesViewed === undefined
       ? {}
       : { setFilesViewed: interactive("setFilesViewed", api.setFilesViewed) }),
@@ -3221,6 +3229,32 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const changeBreakdownCache = yield* Cache.makeWith(
+    (key: string) => {
+      const ref = refOfCacheKey(key);
+      return requireProject(ref).pipe(
+        Effect.flatMap((project) => {
+          const read = project.api.getFileStats;
+          if (read === undefined) return Effect.succeed(null);
+          return read({
+            cwd: project.project.workspaceRoot,
+            repository: project.repository,
+            host: project.host,
+            number: ref.number,
+          }).pipe(
+            Effect.map(toChangeBreakdown),
+            Effect.mapError(toPullRequestError("changeBreakdown")),
+          );
+        }),
+      );
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      timeToLive: (exit, key) =>
+        Exit.isSuccess(exit) ? detailTimeToLive(lastGoodSummary.peek(key)?.state) : Duration.zero,
+    },
+  );
+
   const previewCache = yield* Cache.makeWith(
     (key: string) => {
       return previewUncached(refOfCacheKey(key));
@@ -3647,6 +3681,9 @@ export const make = Effect.gen(function* () {
     diffFileContents,
     filesViewed: credentialCached(filesViewed),
     setFilesViewed,
+    changeBreakdown: credentialCached((input) =>
+      Cache.get(changeBreakdownCache, refCacheKey(input)),
+    ),
     runAction: runActionAndInvalidate,
     update: invalidatedByMutation(update),
     comment: invalidatedByMutation(comment),

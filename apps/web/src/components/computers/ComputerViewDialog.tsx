@@ -1,5 +1,3 @@
-"use client";
-
 import {
   COMPUTER_VIEW_MAX_WIDTH_LIMIT,
   type ComputerViewInput,

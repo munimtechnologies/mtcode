@@ -1,4 +1,13 @@
 import {
+  buildTraitsTriggerDisplay,
+  getDescriptorStringValue,
+  getPromptControlledTraits,
+  replaceDescriptorCurrentValue,
+  selectableProviderOptionChoices,
+  REASONING_SELECT_DESCRIPTOR_IDS,
+  ULTRATHINK_PROMPT_PREFIX,
+} from "@t3tools/client-runtime/model-traits";
+import {
   type ModelSelection,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -11,13 +20,10 @@ import {
   applyClaudePromptEffortPrefix,
   buildProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentLabel,
-  getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
-  isClaudeUltrathinkPrompt,
   normalizeModelSlug,
   resolveReasoningTransition,
 } from "@t3tools/shared/model";
-import { REASONING_EFFORT_OPTION_IDS } from "@t3tools/client-runtime/state/thread-execution";
 import { memo } from "react";
 import { BrainIcon } from "lucide-react";
 import {
@@ -59,7 +65,7 @@ function savedOptionLabel(id: string): string {
   );
 }
 
-export function buildUnavailableModelOptionDescriptors(
+function buildUnavailableModelOptionDescriptors(
   selections: ProviderOptions | null | undefined,
 ): ReadonlyArray<ProviderOptionDescriptor> {
   return (selections ?? []).map((selection) =>
@@ -91,51 +97,12 @@ type TraitsPersistence =
       onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
     };
 
-const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
-
-const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
-  ...REASONING_EFFORT_OPTION_IDS,
-  "thinking",
-]);
-
 function DefaultBadge() {
   return (
     <Badge variant="outline" size="sm" className="min-w-0">
       Default
     </Badge>
   );
-}
-
-function replaceDescriptorCurrentValue(
-  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
-  descriptorId: string,
-  currentValue: string | boolean | undefined,
-): ReadonlyArray<ProviderOptionDescriptor> {
-  return descriptors.map((descriptor) =>
-    descriptor.id !== descriptorId
-      ? descriptor
-      : descriptor.type === "boolean"
-        ? {
-            ...descriptor,
-            ...(typeof currentValue === "boolean" ? { currentValue } : {}),
-          }
-        : {
-            ...descriptor,
-            ...(typeof currentValue === "string" ? { currentValue } : {}),
-          },
-  );
-}
-
-function getDescriptorStringValue(
-  descriptor: Extract<ProviderOptionDescriptor, { type: "select" }> | null,
-  selection?: ModelSelection | null,
-  reportedSelection?: ModelSelection | null,
-): string | null {
-  if (!descriptor) {
-    return null;
-  }
-  const value = getProviderOptionCurrentValue(descriptor, selection, reportedSelection);
-  return typeof value === "string" ? value : null;
 }
 
 export function resolveTraitsSelectChange(input: {
@@ -207,13 +174,11 @@ function getSelectedTraits(
   const thinkingDescriptor =
     booleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
 
-  const ultrathinkPromptControlled =
-    allowPromptInjectedEffort &&
-    (primarySelectDescriptor?.promptInjectedValues?.length ?? 0) > 0 &&
-    isClaudeUltrathinkPrompt(prompt);
-
-  const ultrathinkInBodyText =
-    ultrathinkPromptControlled && isClaudeUltrathinkPrompt(prompt.replace(/^Ultrathink:\s*/i, ""));
+  const { ultrathinkPromptControlled, ultrathinkInBodyText } = getPromptControlledTraits(
+    descriptors,
+    prompt,
+    allowPromptInjectedEffort,
+  );
   const effort =
     (ultrathinkPromptControlled
       ? "ultrathink"
@@ -289,6 +254,8 @@ function getTraitsSectionVisibility(input: {
   };
 }
 
+// MT Code: unlike client-runtime's getTraitSelectChange, this routes through
+// resolveReasoningTransition so linked reasoning options stay consistent.
 function getTraitSelectChange(
   selected: ReturnType<typeof getSelectedTraits>,
   descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
@@ -557,7 +524,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 value={selectedValue}
                 onValueChange={(value) => handleSelectChange(descriptor, value)}
               >
-                {descriptor.options.map((option) => (
+                {selectableProviderOptionChoices(descriptor).map((option) => (
                   <MenuRadioItem
                     key={option.id}
                     value={option.id}
@@ -618,83 +585,6 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     </>
   );
 });
-
-export function buildTraitsTriggerDisplay(input: {
-  provider: ProviderDriverKind;
-  descriptors: ReadonlyArray<ProviderOptionDescriptor>;
-  primarySelectDescriptorId: string | null;
-  ultrathinkPromptControlled: boolean;
-  modelSelection?: ModelSelection | null;
-  reportedModelSelection?: ModelSelection | null | undefined;
-}): { label: string } {
-  let fastModeFallbackLabel: string | null = null;
-  let speedLabel: string | null = null;
-  let reasoningLabelIndex = -1;
-  const labels: Array<string> = [];
-  for (const descriptor of input.descriptors) {
-    if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
-      speedLabel = descriptor.currentValue === true ? "Fast" : null;
-      fastModeFallbackLabel = speedLabel ?? "Normal";
-      continue;
-    }
-    if (
-      input.provider === "codex" &&
-      descriptor.id === "serviceTier" &&
-      descriptor.type === "select"
-    ) {
-      const currentValue = getProviderOptionCurrentValue(descriptor);
-      const fastTier = descriptor.options.find(({ label }) => label === "Fast");
-      const ultrafastTier = descriptor.options.find(({ label }) => label === "Ultrafast");
-      if (
-        ((fastTier || ultrafastTier) && currentValue === "default") ||
-        (fastTier && currentValue === fastTier.id) ||
-        (ultrafastTier && currentValue === ultrafastTier.id)
-      ) {
-        speedLabel =
-          ultrafastTier && currentValue === ultrafastTier.id
-            ? "Ultrafast"
-            : fastTier && currentValue === fastTier.id
-              ? "Fast"
-              : null;
-        fastModeFallbackLabel =
-          descriptor.options.find(({ id }) => id === currentValue)?.label ?? "Normal";
-        continue;
-      }
-    }
-    const label =
-      input.ultrathinkPromptControlled && descriptor.id === input.primarySelectDescriptorId
-        ? "Ultrathink"
-        : descriptor.type === "boolean"
-          ? `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
-          : getProviderOptionCurrentLabel(
-              descriptor,
-              input.modelSelection,
-              input.reportedModelSelection,
-            );
-    if (typeof label === "string" && label.length > 0) {
-      if (
-        reasoningLabelIndex === -1 &&
-        descriptor.type === "select" &&
-        REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id)
-      ) {
-        reasoningLabelIndex = labels.length;
-      }
-      labels.push(label);
-    }
-  }
-
-  if (labels.length === 0 && fastModeFallbackLabel !== null) {
-    return { label: fastModeFallbackLabel };
-  }
-  if (speedLabel) {
-    if (reasoningLabelIndex >= 0) {
-      labels[reasoningLabelIndex] = `${labels[reasoningLabelIndex]} ${speedLabel}`;
-    } else {
-      labels.push(speedLabel);
-    }
-  }
-  return { label: labels.join(" · ") };
-}
 
 export const TraitsPicker = memo(function TraitsPicker({
   provider,

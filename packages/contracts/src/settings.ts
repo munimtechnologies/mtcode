@@ -1,4 +1,4 @@
-import { SshDeviceHostConfigs } from "./device.ts";
+import { EasDeviceHostConfigs, SshDeviceHostConfigs } from "./device.ts";
 import { ExternalTerminalId } from "./externalTerminal.ts";
 import {
   AuthOrchestrationOperateScope,
@@ -957,25 +957,26 @@ export const SourceControlWritingStyleSettings = Schema.Struct({
 });
 export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
 
-const SourceControlWritingStyleSetting = Schema.Union([
-  TrimmedString,
-  SourceControlWritingStyleSettings,
-]).pipe(
+const LegacySourceControlWritingStyle = TrimmedString.pipe(
   Schema.decodeTo(
     Schema.toType(SourceControlWritingStyleSettings),
     SchemaTransformation.transform({
-      decode: (value) =>
-        typeof value === "string"
-          ? {
-              mode: value.length > 0 ? ("custom" as const) : ("repo_conventions" as const),
-              customInstructions: value,
-              followChangeRequestTemplates: true,
-            }
-          : value,
-      encode: (value) => value,
+      decode: (value): SourceControlWritingStyleSettings => ({
+        mode: value.length > 0 ? "custom" : "repo_conventions",
+        customInstructions: value,
+        followChangeRequestTemplates: true,
+      }),
+      encode: (value) => value.customInstructions,
     }),
   ),
 );
+
+// The struct member comes first so encoding uses its defaulted fields: the server strips
+// default sub-fields before writing settings.json, and a toType target would reject them.
+const SourceControlWritingStyleSetting = Schema.Union([
+  SourceControlWritingStyleSettings,
+  LegacySourceControlWritingStyle,
+]);
 
 export const BranchNamingMode = Schema.Literals(["static", "semantic", "custom"]);
 export type BranchNamingMode = typeof BranchNamingMode.Type;
@@ -1376,6 +1377,7 @@ export const ServerSettings = Schema.Struct({
   enableDeviceSupport: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceHosts: SshDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  easDeviceHosts: EasDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -1737,6 +1739,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
+  easDeviceHosts: Schema.optionalKey(EasDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleScope: Schema.optionalKey(Schema.Literals(["all", "without-pr"])),
   compactIdleThreads: Schema.optionalKey(Schema.Boolean),

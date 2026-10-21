@@ -1,5 +1,3 @@
-"use client";
-
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   computerPeerFromPresentation,
