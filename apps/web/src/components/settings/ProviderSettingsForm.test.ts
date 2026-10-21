@@ -89,6 +89,7 @@ describe("ProviderSettingsForm helpers", () => {
       "homePath",
       "advisorModel",
       "autoCompactWindow",
+      "idleCompaction",
       "launchArgs",
     ]);
   });

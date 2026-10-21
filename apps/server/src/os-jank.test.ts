@@ -207,6 +207,42 @@ effectIt.effect("keeps mise's PATH record with the login shell PATH", () =>
   ),
 );
 
+effectIt.effect("hydrates a missing JAVA_HOME from the login shell and keeps an explicit one", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      vi
+        .spyOn(NodeChildProcess, "execFileSync")
+        .mockReturnValue(
+          "__T3CODE_ENV_ALL_START__\n" +
+            "PATH=/opt/homebrew/bin\0" +
+            "JAVA_HOME=/opt/homebrew/opt/openjdk@17\0" +
+            "__T3CODE_ENV_ALL_END__\n",
+        ),
+    ),
+    () =>
+      Effect.gen(function* () {
+        const missing: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+        const explicit: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          JAVA_HOME: "/custom/jdk",
+        };
+
+        for (const env of [missing, explicit]) {
+          yield* fixPath().pipe(
+            Effect.provideService(HostProcess.Platform, "darwin"),
+            Effect.provideService(HostProcess.Environment, env),
+            Effect.provide(NodeServices.layer),
+          );
+        }
+
+        assert.equal(missing.JAVA_HOME, "/opt/homebrew/opt/openjdk@17");
+        assert.equal(explicit.JAVA_HOME, "/custom/jdk");
+      }),
+    (probe) => Effect.sync(() => probe.mockRestore()),
+  ),
+);
+
 effectIt.effect("replaces a Path-spelled Windows PATH instead of adding a second key", () =>
   Effect.gen(function* () {
     const env: NodeJS.ProcessEnv = { Path: "C:\\Windows" };

@@ -2,20 +2,53 @@ import type {
   OrchestrationV2ThreadProjection,
   OrchestrationV2RuntimeRequest,
   OrchestrationV2UserInputQuestion,
+  ProviderApprovalFullAccessOverride,
   ProviderApprovalOption,
+  ProviderApprovalDecision,
   ProviderRequestKind,
   RuntimeRequestId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import type { AtomCommandResult } from "./runtime.ts";
+
+export type ApprovalResponder = (
+  requestId: RuntimeRequestId,
+  decision: ProviderApprovalDecision,
+) => Promise<AtomCommandResult<unknown, unknown> | undefined>;
+
+/** Declines every approval a redirect replaces; any one still pending would block the agent. */
+export async function declinePendingApprovals(
+  approvals: ReadonlyArray<ThreadPendingApproval>,
+  respond: ApprovalResponder,
+): Promise<boolean> {
+  for (const approval of approvals) {
+    // A request the provider can no longer answer has nothing to decline.
+    if (approval.responseCapability !== "live") continue;
+    if ((await respond(approval.requestId, "decline"))?._tag !== "Success") return false;
+  }
+  return true;
+}
 
 export interface ThreadPendingApproval {
   readonly requestId: RuntimeRequestId;
   readonly requestKind: ProviderRequestKind;
   readonly createdAt: string;
   readonly detail?: string;
+  readonly reason?: string;
+  readonly fullAccessOverride?: ProviderApprovalFullAccessOverride;
   readonly appName?: string;
   readonly options?: ReadonlyArray<ProviderApprovalOption>;
   readonly responseCapability: "live" | "not_resumable";
+}
+
+export const FULL_ACCESS_OVERRIDE_QUESTION = "Why am I being asked this?";
+
+export function fullAccessOverrideExplanation(
+  override: ProviderApprovalFullAccessOverride,
+): string {
+  return override === "ask_rule"
+    ? "Full access skips approvals, but an ask rule in the agent's own settings matches this action, so it still asks. Remove or narrow that rule to stop these prompts."
+    : "Full access skips approvals, but the agent still stops for a few safety checks of its own that no setting can skip, such as a delete whose path it can't verify. T3 Code can't turn these off, so check the request and approve it if it's what you expect.";
 }
 
 export interface ThreadUserInputQuestion extends Omit<
@@ -99,6 +132,10 @@ export function derivePendingThreadRequests(
       requestKind: request.kind,
       createdAt: DateTime.formatIso(request.createdAt),
       ...(item?.type === "approval_request" && item.prompt ? { detail: item.prompt } : {}),
+      ...(item?.type === "approval_request" && item.reason ? { reason: item.reason } : {}),
+      ...(item?.type === "approval_request" && item.fullAccessOverride
+        ? { fullAccessOverride: item.fullAccessOverride }
+        : {}),
       ...(item?.type === "approval_request" && item.appName ? { appName: item.appName } : {}),
       ...(item?.type === "approval_request" && item.options !== undefined
         ? { options: item.options }

@@ -1,7 +1,6 @@
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
-  getPromptControlledTraits,
   replaceDescriptorCurrentValue,
   selectableProviderOptionChoices,
   REASONING_SELECT_DESCRIPTOR_IDS,
@@ -21,6 +20,7 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentLabel,
   getProviderOptionDescriptors,
+  isClaudeUltrathinkPrompt,
   normalizeModelSlug,
   resolveReasoningTransition,
 } from "@t3tools/shared/model";
@@ -50,6 +50,23 @@ import { useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
+
+/**
+ * All the picker reads from the prompt while rendering. Passing this instead of
+ * the prompt keeps the picker from re-rendering on every keystroke.
+ */
+export type PromptUltrathink = "none" | "prefix" | "body";
+
+export function readPromptUltrathink(prompt: string): PromptUltrathink {
+  if (!isClaudeUltrathinkPrompt(prompt)) return "none";
+  return isClaudeUltrathinkPrompt(prompt.replace(/^Ultrathink:\s*/i, "")) ? "body" : "prefix";
+}
+
+function representativeUltrathinkPrompt(promptUltrathink: PromptUltrathink | undefined): string {
+  if (promptUltrathink === "prefix") return ULTRATHINK_PROMPT_PREFIX;
+  if (promptUltrathink === "body") return "ultrathink";
+  return "";
+}
 
 const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   agent: "Agent",
@@ -138,7 +155,7 @@ function getSelectedTraits(
   provider: ProviderDriverKind,
   models: ReadonlyArray<ServerProviderModel>,
   model: string | null | undefined,
-  prompt: string,
+  promptUltrathink: PromptUltrathink,
   modelOptions: ProviderOptions | null | undefined,
   allowPromptInjectedEffort: boolean,
   planModeEnabled: boolean,
@@ -174,11 +191,11 @@ function getSelectedTraits(
   const thinkingDescriptor =
     booleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
 
-  const { ultrathinkPromptControlled, ultrathinkInBodyText } = getPromptControlledTraits(
-    descriptors,
-    prompt,
-    allowPromptInjectedEffort,
-  );
+  const ultrathinkPromptControlled =
+    allowPromptInjectedEffort &&
+    (primarySelectDescriptor?.promptInjectedValues?.length ?? 0) > 0 &&
+    promptUltrathink !== "none";
+  const ultrathinkInBodyText = ultrathinkPromptControlled && promptUltrathink === "body";
   const effort =
     (ultrathinkPromptControlled
       ? "ultrathink"
@@ -216,7 +233,7 @@ function getTraitsSectionVisibility(input: {
   provider: ProviderDriverKind;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
-  prompt: string;
+  promptUltrathink?: PromptUltrathink | undefined;
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
   planModeEnabled: boolean;
@@ -225,7 +242,7 @@ function getTraitsSectionVisibility(input: {
     input.provider,
     input.models,
     input.model,
-    input.prompt,
+    input.promptUltrathink ?? "none",
     input.modelOptions,
     input.allowPromptInjectedEffort ?? true,
     input.planModeEnabled,
@@ -316,7 +333,7 @@ export function getReasoningTraitStep(input: {
     input.provider,
     input.models,
     input.model,
-    input.prompt,
+    readPromptUltrathink(input.prompt),
     input.modelOptions,
     true,
     input.planModeEnabled,
@@ -369,7 +386,7 @@ export function shouldRenderTraitsControls(input: {
   provider: ProviderDriverKind;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
-  prompt: string;
+  promptUltrathink?: PromptUltrathink | undefined;
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
   planModeEnabled: boolean;
@@ -382,8 +399,9 @@ export interface TraitsMenuContentProps {
   instanceId?: ProviderInstanceId;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
-  prompt: string;
-  onPromptChange: (prompt: string) => void;
+  promptUltrathink?: PromptUltrathink | undefined;
+  /** Receives an edit of the live prompt; the picker never holds the prompt text itself. */
+  onPromptEdit?: (edit: (prompt: string) => string) => void;
   modelOptions?: ProviderOptions | null | undefined;
   reportedModelSelection?: ModelSelection | null | undefined;
   allowPromptInjectedEffort?: boolean;
@@ -397,8 +415,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   instanceId,
   models,
   model,
-  prompt,
-  onPromptChange,
+  promptUltrathink,
+  onPromptEdit,
   modelOptions,
   reportedModelSelection,
   allowPromptInjectedEffort = true,
@@ -427,7 +445,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     provider,
     models,
     model,
-    prompt,
+    promptUltrathink,
     modelOptions,
     allowPromptInjectedEffort,
     planModeEnabled,
@@ -452,18 +470,13 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     value: string,
   ) => {
     if (!value) return;
-    const change = resolveTraitsSelectChange({
-      caps,
-      descriptors,
-      descriptor,
-      value,
-      prompt,
-      modelOptions,
-    });
+    const resolveChange = (prompt: string) =>
+      resolveTraitsSelectChange({ caps, descriptors, descriptor, value, prompt, modelOptions });
+    // The written options only depend on the prompt's ultrathink state, so a
+    // stand-in prompt decides the pick; the live prompt is edited separately.
+    const change = resolveChange(representativeUltrathinkPrompt(promptUltrathink));
     if (!change) return;
-    if (change.prompt !== prompt) {
-      onPromptChange(change.prompt);
-    }
+    onPromptEdit?.((prompt) => resolveChange(prompt)?.prompt ?? prompt);
     if (change.modelOptions !== (modelOptions ?? undefined)) {
       updateModelOptions(change.modelOptions);
     }
@@ -591,8 +604,8 @@ export const TraitsPicker = memo(function TraitsPicker({
   instanceId,
   models,
   model,
-  prompt,
-  onPromptChange,
+  promptUltrathink,
+  onPromptEdit,
   modelOptions,
   reportedModelSelection,
   allowPromptInjectedEffort = true,
@@ -616,7 +629,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       provider,
       models,
       model,
-      prompt,
+      promptUltrathink,
       modelOptions,
       allowPromptInjectedEffort,
       planModeEnabled,
@@ -626,7 +639,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       provider,
       models,
       model,
-      prompt,
+      promptUltrathink,
       modelOptions,
       allowPromptInjectedEffort,
       planModeEnabled,
@@ -702,8 +715,8 @@ export const TraitsPicker = memo(function TraitsPicker({
           {...(instanceId ? { instanceId } : {})}
           models={models}
           model={model}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
+          promptUltrathink={promptUltrathink}
+          {...(onPromptEdit ? { onPromptEdit } : {})}
           modelOptions={modelOptions}
           reportedModelSelection={reportedModelSelection}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
