@@ -76,7 +76,14 @@ hdiutil detach "$MOUNT" -quiet || hdiutil detach "$MOUNT" -force
 
 APP="$WORK/MT Code.app"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OSX_SIGN_DIR="$(find "$REPO_ROOT/node_modules" -type d -path '*/node_modules/@electron/osx-sign' 2>/dev/null | head -1)"
+# Use the copy electron-builder signs with: other dependencies pull in
+# osx-sign 2.x, which is ESM-only and cannot be require()d below.
+OSX_SIGN_DIR="$(find "$REPO_ROOT/node_modules/.pnpm" -maxdepth 4 -path '*/app-builder-lib@*/node_modules/@electron/osx-sign' 2>/dev/null | head -1)"
+if [[ -n "$OSX_SIGN_DIR" ]]; then
+  OSX_SIGN_DIR="$(cd -P "$OSX_SIGN_DIR" && pwd)"
+else
+  OSX_SIGN_DIR="$(find "$REPO_ROOT/node_modules" -type d -path '*/node_modules/@electron/osx-sign' 2>/dev/null | head -1)"
+fi
 if [[ -z "$OSX_SIGN_DIR" || ! -f "$OSX_SIGN_DIR/package.json" ]]; then
   echo "missing @electron/osx-sign" >&2
   exit 1
