@@ -260,7 +260,7 @@ export function pullRequestRepositoryKey(value: string): string | null {
   try {
     const url = new URL(value);
     const match =
-      /^(.*)(?:\/pull\/|\/-\/merge_requests\/|\/pull-requests\/|\/pullrequest\/)\d+(?:\/.*)?$/iu.exec(
+      /^(.*)(?:\/pulls?\/|\/-\/merge_requests\/|\/pull-requests\/|\/pullrequest\/)\d+(?:\/.*)?$/iu.exec(
         url.pathname,
       );
     if (match?.[1] === undefined) return null;
@@ -1223,21 +1223,27 @@ export const make = Effect.gen(function* () {
     return prLookupFailureTtl(streak);
   };
   const pullRequestStateChanges = yield* PubSub.sliding<ThreadPullRequestKey>(64);
-  const lookupStates = new Map<string, PullRequestInfo["state"]>();
+  const lookupStates = new Map<
+    string,
+    { readonly state: PullRequestInfo["state"]; readonly isDraft: boolean }
+  >();
   const noteLookupState = (pr: PullRequestInfo) =>
     Effect.suspend(() => {
       const parsed = parseChangeRequestUrl(pr.url);
       if (parsed === null || parsed.number !== pr.number) return Effect.void;
       const key = normalizeThreadPullRequestKey(parsed);
       const id = threadPullRequestKeyOf(key);
-      const previous = lookupStates.get(id) ?? "open";
+      const previous = lookupStates.get(id);
       lookupStates.delete(id);
       if (lookupStates.size >= PR_LOOKUP_CACHE_CAPACITY) {
         const oldest = lookupStates.keys().next().value;
         if (oldest !== undefined) lookupStates.delete(oldest);
       }
-      lookupStates.set(id, pr.state);
-      return previous === pr.state ? Effect.void : PubSub.publish(pullRequestStateChanges, key);
+      lookupStates.set(id, { state: pr.state, isDraft: pr.isDraft === true });
+      return (previous?.state ?? "open") === pr.state &&
+        (previous?.isDraft === true) === (pr.isDraft === true)
+        ? Effect.void
+        : PubSub.publish(pullRequestStateChanges, key);
     });
   const prLookupCache = yield* Cache.makeWith(
     (key: string) => {

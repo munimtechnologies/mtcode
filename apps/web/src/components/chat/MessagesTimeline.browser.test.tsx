@@ -1,6 +1,6 @@
-import { EnvironmentId, MessageId, RunId, ScheduledTaskId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, RunId, ScheduledTaskId, ThreadId } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { createRef, type ComponentProps, type ReactElement } from "react";
+import { createRef, Profiler, type ComponentProps, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import "~/index.css";
@@ -129,6 +129,51 @@ const TASK_ID = ScheduledTaskId.make("task-1");
 const AUTOMATION_PROMPT = "Triage the inbox\n\nLabel every new issue and close duplicates.";
 
 describe("MessagesTimeline messages", () => {
+  it("settles when equally long messages have very different rendered heights", async () => {
+    const props = baseProps();
+    const tall = message("a\n\n".repeat(6000), { role: "assistant" }, "tall");
+    const earlier = Array.from({ length: 80 }, (_, index) =>
+      message(
+        `<details><summary>Reply ${index}</summary>${"compact ".repeat(2250)}</details>`,
+        { role: "assistant" },
+        `earlier-${index}`,
+      ),
+    );
+    let nestedCommits = 0;
+    let maxNestedCommits = 0;
+    const onRender = (_id: string, phase: string) => {
+      nestedCommits = phase === "nested-update" ? nestedCommits + 1 : 0;
+      maxNestedCommits = Math.max(maxNestedCommits, nestedCommits);
+    };
+    const timeline = (entries: Entry[]) => (
+      <Profiler id="timeline" onRender={onRender}>
+        <MessagesTimeline {...props} timelineEntries={entries} />
+      </Profiler>
+    );
+    await using screen = await renderElement(timeline([tall]));
+    await vi.waitFor(() =>
+      expect(props.listRef.current?.getState().sizeAtIndex(0)).toBeGreaterThan(100_000),
+    );
+    const viewport = props.listRef.current!.getScrollableNode()!;
+    await act(() => {
+      viewport.scrollTop = 0;
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    await screen.rerender(timeline([...earlier, tall]));
+    await act(() => {
+      void props.listRef.current!.scrollToIndex({ index: 0, animated: false });
+    });
+    await vi.waitFor(async () => {
+      await act(() => {
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll"));
+      });
+      expect(screen.text().includes("Reply 0")).toBe(true);
+      expect(props.listRef.current!.getState().sizeAtIndex(0)).toBeGreaterThan(0);
+    });
+    expect(maxNestedCommits).toBeLessThan(20);
+  });
+
   it("preserves XML-like tags and comparisons in user messages as text", async () => {
     const source = [
       'Without reading a file, do you have <global-agent-instructions scope="workspace">',
@@ -304,6 +349,64 @@ describe("MessagesTimeline automation prompts", () => {
     expect(screen.buttons("Edit from here")).toHaveLength(0);
     await click(screen.button(/^Automation/));
     expect(screen.buttons("Edit from here")).toHaveLength(1);
+  });
+});
+
+const SENDER_THREAD_ID = ThreadId.make("thread-sender");
+const AGENT_MESSAGE = "Review finished\n\nThe migration drops the index before backfilling it.";
+
+describe("MessagesTimeline agent messages", () => {
+  it("folds a message from another agent into a one-line preview", async () => {
+    setup();
+    const onOpenThread = vi.fn();
+    await using screen = await renderTimeline(
+      [message(AGENT_MESSAGE, { createdBy: "agent", senderThreadId: SENDER_THREAD_ID })],
+      { onOpenThread },
+    );
+    const row = screen.button(/^Agent/);
+    expect(row.textContent).toContain("Review finished");
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.text()).not.toContain("drops the index");
+    expect(screen.buttons("Open thread")).toHaveLength(0);
+
+    await click(row);
+    expect(screen.text()).toContain("The migration drops the index before backfilling it.");
+    await click(screen.button("Open thread"));
+    expect(onOpenThread).toHaveBeenCalledWith(SENDER_THREAD_ID);
+
+    await click(screen.button(/^Agent/));
+    expect(screen.text()).not.toContain("drops the index");
+  });
+
+  it("leaves messages sent by T3 Code as full bubbles", async () => {
+    setup();
+    await using screen = await renderTimeline([
+      message(AGENT_MESSAGE, { createdBy: "agent", creationSource: "server" }),
+    ]);
+    expect(screen.buttons(/^Agent/)).toHaveLength(0);
+    expect(screen.text()).toContain("drops the index");
+  });
+
+  it("reveals a find match inside a folded agent message", async () => {
+    setup();
+    const text = `${"Checked the next file.\n\n".repeat(16)}The migration drops the index.`;
+    await using screen = await renderTimeline(
+      [message(text, { createdBy: "agent", senderThreadId: SENDER_THREAD_ID })],
+      {
+        findExpanded: true,
+        findQuery: "drops the index",
+        activeFindMatch: { entryId: "entry-message-1", runId: null, occurrence: 0 },
+      },
+    );
+    await vi.waitFor(() =>
+      expect(screen.button(/^Agent/).getAttribute("aria-expanded")).toBe("true"),
+    );
+    const { range } = collectThreadFindRanges(screen.container, "drops the index")[0]!;
+    const body = screen.container.querySelector("[data-user-message-body]")!;
+    expect(range.getBoundingClientRect().height).toBeGreaterThan(0);
+    expect(range.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      body.getBoundingClientRect().bottom,
+    );
   });
 });
 

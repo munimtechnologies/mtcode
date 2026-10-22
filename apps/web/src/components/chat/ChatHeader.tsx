@@ -43,6 +43,7 @@ import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { useEnvironment } from "../../state/environments";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useClientSettings, useTabsEnabled } from "~/hooks/useSettings";
+import { textDirection } from "~/textDirection";
 import { ComputerViewDialog } from "../computers/ComputerViewDialog";
 import { Button } from "../ui/button";
 import { WorkspaceTabs } from "./WorkspaceTabs";
@@ -424,6 +425,7 @@ export const ChatHeader = memo(function ChatHeader({
             {renamingTitle !== null ? (
               <input
                 autoFocus
+                dir="auto"
                 aria-label="Thread title"
                 className="min-w-0 flex-1 rounded-sm bg-transparent text-sm font-medium text-foreground outline-none ring-1 ring-inset ring-ring/50 focus:ring-ring"
                 defaultValue={renamingTitle}
@@ -459,7 +461,7 @@ export const ChatHeader = memo(function ChatHeader({
                     />
                   }
                 >
-                  <h2 className="min-w-0">
+                  <h2 className="min-w-0" dir={textDirection(activeThreadTitle)}>
                     <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
                   </h2>
                   <ChevronDownIcon
@@ -473,7 +475,13 @@ export const ChatHeader = memo(function ChatHeader({
             ) : (
               <Tooltip>
                 <TooltipTrigger
-                  render={<h2 aria-label={activeThreadTitle} className="min-w-0 flex-1" />}
+                  render={
+                    <h2
+                      aria-label={activeThreadTitle}
+                      className="min-w-0 flex-1"
+                      dir={textDirection(activeThreadTitle)}
+                    />
+                  }
                 >
                   <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
                 </TooltipTrigger>

@@ -2,7 +2,10 @@ import {
   ClientSettingsSchema,
   type ClientSettingsPatch,
   type EnvironmentId,
+  globalIdleCompaction,
+  idleCompactionPatch,
   isNullableProjectSettingsOverride,
+  readsIdleCompactionModes,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectId,
   type ProjectScopedServerSettingKey,
@@ -142,6 +145,19 @@ export function scopedSettingsAreMixed(
   );
 }
 
+/**
+ * Servers store the idle compaction mode differently by version, so selected
+ * environments are compared by the mode each resolves to, and "Never" is offered
+ * only when every one of them can store it.
+ */
+export function scopedIdleCompaction(targets: readonly Pick<ScopedSettingsTarget, "settings">[]) {
+  const modes = targets.map((candidate) => globalIdleCompaction(candidate.settings));
+  return {
+    mixed: modes.some((mode) => mode !== modes[0]),
+    neverAvailable: targets.every((candidate) => readsIdleCompactionModes(candidate.settings)),
+  };
+}
+
 export type ScopedSettingSource = ProjectSettingSource | "mixed";
 
 export function scopedSettingsSource(
@@ -203,6 +219,13 @@ function projectOverrideWrites(
     });
   }
   return [...writes.values()];
+}
+
+/** Puts an idle compaction mode in the form each destination server reads. */
+function forDestination(previous: ServerSettings, patch: ServerSettingsPatch): ServerSettingsPatch {
+  if (patch.idleCompaction === undefined) return patch;
+  const { idleCompaction, compactIdleThreads: _legacy, ...rest } = patch;
+  return { ...rest, ...idleCompactionPatch(previous, idleCompaction) };
 }
 
 export function planScopedSettingsPatch(
@@ -282,12 +305,13 @@ export function planScopedSettingsPatch(
                   environmentId: environment.environmentId,
                   label: environment.label,
                   previous,
-                  patch:
+                  patch: forDestination(
+                    previous,
                     previous.worktreeCleanup != null &&
-                    serverPatch.storageCleanup &&
-                    Object.keys(serverPatch.storageCleanup).some((key) =>
-                      key.startsWith("worktree"),
-                    )
+                      serverPatch.storageCleanup &&
+                      Object.keys(serverPatch.storageCleanup).some((key) =>
+                        key.startsWith("worktree"),
+                      )
                       ? {
                           ...serverPatch,
                           worktreeCleanup: {
@@ -303,6 +327,7 @@ export function planScopedSettingsPatch(
                           },
                         }
                       : serverPatch,
+                  ),
                 },
               ];
             })

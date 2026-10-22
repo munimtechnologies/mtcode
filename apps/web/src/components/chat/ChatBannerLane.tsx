@@ -23,6 +23,7 @@ export function ChatBannerLane(props: {
   threadProviderName: string | null;
   threadError: string | null;
   threadErrorClass: OrchestrationV2ProviderFailureClass | null;
+  threadErrorCode: string | null;
   threadErrorBannerKey: string | null;
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   setThreadErrorBannerDismissTick: Dispatch<SetStateAction<number>>;
@@ -37,6 +38,7 @@ export function ChatBannerLane(props: {
     threadProviderName,
     threadError,
     threadErrorClass,
+    threadErrorCode,
     threadErrorBannerKey,
     setThreadError,
     setThreadErrorBannerDismissTick,
@@ -53,6 +55,7 @@ export function ChatBannerLane(props: {
         error={threadError}
         copyContext={{ title: threadTitle, provider: threadProviderName, threadId }}
         errorClass={threadErrorClass}
+        errorCode={threadErrorCode}
         onDismiss={() => {
           setThreadError(threadId, null);
           dismissThreadErrorBannerForSession(threadErrorBannerKey);

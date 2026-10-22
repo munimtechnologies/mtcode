@@ -371,7 +371,7 @@ for (const {} of [
     platform: "darwin",
     installPath: "Applications/WebStorm.app/Contents/MacOS/webstorm",
     editor: "webstorm",
-    args: ["--line", "12", "--column", "4", "/workspace with spaces/file.ts"],
+    args: ["--line", "12", "--column", "3", "/workspace with spaces/file.ts"],
   },
   {
     platform: "darwin",
@@ -395,13 +395,13 @@ for (const {} of [
     platform: "win32",
     installPath: "Programs/JetBrains/WebStorm 2026.2/bin/webstorm64.exe",
     editor: "webstorm",
-    args: ["--line", "12", "--column", "4", "/workspace with spaces/file.ts"],
+    args: ["--line", "12", "--column", "3", "/workspace with spaces/file.ts"],
   },
   {
     platform: "win32",
     installPath: "Programs/WebStorm/bin/webstorm64.exe",
     editor: "webstorm",
-    args: ["--line", "12", "--column", "4", "/workspace with spaces/file.ts"],
+    args: ["--line", "12", "--column", "3", "/workspace with spaces/file.ts"],
   },
   {
     platform: "win32",
@@ -413,7 +413,7 @@ for (const {} of [
     platform: "linux",
     installPath: ".local/share/JetBrains/Toolbox/scripts/idea",
     editor: "idea",
-    args: ["--line", "12", "--column", "4", "/workspace with spaces/file.ts"],
+    args: ["--line", "12", "--column", "3", "/workspace with spaces/file.ts"],
   },
   {
     platform: "linux",
@@ -503,7 +503,7 @@ it.effect.each([
         "--line",
         "12",
         "--column",
-        "4",
+        "3",
         "/workspace with spaces/file.ts",
       ]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
