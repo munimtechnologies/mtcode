@@ -68,6 +68,7 @@ import {
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
 import { hasClerkPublicConfig, hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { isElectron } from "~/env";
 import { useOptionalConnectProviders } from "~/cloud/connectProviderContext";
 import {
   canEmbedClerkProvider,
@@ -91,6 +92,7 @@ import {
   ServerUpdateProgress,
 } from "../ServerUpdateAction";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
+import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 
 type SavedBackendListRowProps = {
   environment: EnvironmentPresentation;
@@ -697,6 +699,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     operationError,
     reconcileCloudState,
   } = useCloudLinkController();
+  const { openAuthPrompt } = useT3ConnectAuthPrompt();
   const connect = useOptionalConnectProviders();
   // Label + relay checks follow the Clerk instance that is actually mounted.
   const embeddedProvider = connect?.embedded ?? null;
@@ -705,19 +708,32 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
 
-  const sessionDisabledReason = !isSignedIn
-    ? `Sign in to ${connectLabel} to manage this environment.`
-    : !canManageRelay
-      ? `Your session does not have permission to manage ${connectLabel} access.`
-      : null;
+  const disabledReason = canManageRelay
+    ? null
+    : `Your session does not have permission to manage ${connectLabel} access.`;
   // Publish works without a managed tunnel; Share needs an https relay URL on
   // the embedded Connect provider.
   const shareDisabledReason =
-    sessionDisabledReason ??
+    disabledReason ??
     (!hasRelay
       ? `${connectLabel} has no managed relay. Publish agent activity still works; Share needs one.`
       : null);
   const isBusy = isUpdating || isUpdatingPreference;
+  const switchDisabled =
+    !canManageRelay ||
+    !isSignedIn ||
+    primaryCloudLinkState.data === null ||
+    primaryCloudLinkState.isPending ||
+    isBusy;
+  // `isSignedIn` is undefined until Clerk loads. Signed out, one row shows a
+  // sign-in button instead of its switch; the onboarding dialog that opens after
+  // a fresh sign-in offers both linking and publishing.
+  const signedOut = isSignedIn === false;
+  const signInButton = (
+    <Button size="sm" variant="outline" onClick={openAuthPrompt}>
+      Sign in
+    </Button>
+  );
   const refreshLinkState = useEffectEvent(primaryCloudLinkState.refresh);
   // The server rechecks reachability when the tunnel's 30 s readiness poll changes.
   // Poll while mounted, so a failed read does not stop later ones.
@@ -812,40 +828,39 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
 
   return (
     <>
-      {window.desktopBridge ? (
+      {isElectron ? (
         <SettingsRow
           title={`Share via ${connectLabel}`}
           description={
-            !hasRelay
-              ? `Sharing needs a managed ${connectLabel} relay. Publish agent activity still works without one.`
-              : linkRevoked
-                ? `This environment was removed from ${connectLabel}. Turn it on to link it again.`
-                : managedTunnelActive
-                  ? reachability?.status === "unreachable"
-                    ? `${connectLabel} is on, but other devices cannot reach this environment.`
-                    : reachability?.status === "reachable"
-                      ? `This environment is available to your other devices through ${connectLabel}.`
-                      : `${connectLabel} is on. Reachability has not been checked yet.`
-                  : managedTunnelOutOfSync
-                    ? `${connectLabel} is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn ${connectLabel} on to repair it.`
-                    : `Make this environment available to your other devices through ${connectLabel}.`
+            signedOut
+              ? `Sign in to make this environment available to your other devices through ${connectLabel}.`
+              : !hasRelay
+                ? `Sharing needs a managed ${connectLabel} relay. Publish agent activity still works without one.`
+                : linkRevoked
+                  ? `This environment was removed from ${connectLabel}. Turn it on to link it again.`
+                  : managedTunnelActive
+                    ? reachability?.status === "unreachable"
+                      ? `${connectLabel} is on, but other devices cannot reach this environment.`
+                      : reachability?.status === "reachable"
+                        ? `This environment is available to your other devices through ${connectLabel}.`
+                        : `${connectLabel} is on. Reachability has not been checked yet.`
+                    : managedTunnelOutOfSync
+                      ? `${connectLabel} is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn ${connectLabel} on to repair it.`
+                      : `Make this environment available to your other devices through ${connectLabel}.`
           }
           status={operationError ?? primaryCloudLinkState.error ?? reachabilityStatus}
           control={
-            <CloudLinkSwitch
-              ariaLabel={`Share this environment via ${connectLabel}`}
-              checked={managedTunnelActive}
-              disabled={
-                !canManageRelay ||
-                !isSignedIn ||
-                !hasRelay ||
-                primaryCloudLinkState.data === null ||
-                primaryCloudLinkState.isPending ||
-                isBusy
-              }
-              disabledReason={shareDisabledReason}
-              onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
-            />
+            signedOut ? (
+              signInButton
+            ) : (
+              <CloudLinkSwitch
+                ariaLabel={`Share this environment via ${connectLabel}`}
+                checked={managedTunnelActive}
+                disabled={switchDisabled || !hasRelay}
+                disabledReason={shareDisabledReason}
+                onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
+              />
+            )
           }
         />
       ) : linkRevoked ? (
@@ -854,26 +869,30 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           description={`This environment was removed from ${connectLabel}. Run \`t3 connect link\` on the host to link it again.`}
         />
       ) : null}
-      <SettingsRow
-        title={searchableSetting("publish-agent-activity").title}
-        description={`Send activity to mobile notifications and Live Activities without ${connectLabel}.`}
-        control={
-          <CloudLinkSwitch
-            ariaLabel="Publish agent activity to mobile clients"
-            checked={publishAgentActivity}
-            disabled={
-              !canManageRelay ||
-              !isSignedIn ||
-              primaryCloudLinkState.data === null ||
-              primaryCloudLinkState.isPending ||
-              isBusy
-            }
-            disabledReason={sessionDisabledReason}
-            onCheckedChange={(enabled) => void updatePublishAgentActivity(enabled)}
-          />
-        }
-      />
-      {managedTunnelActive ? (
+      {signedOut && isElectron ? null : (
+        <SettingsRow
+          title={searchableSetting("publish-agent-activity").title}
+          description={
+            signedOut
+              ? "Sign in to send activity to mobile notifications and Live Activities."
+              : `Send activity to mobile notifications and Live Activities without ${connectLabel}.`
+          }
+          control={
+            signedOut ? (
+              signInButton
+            ) : (
+              <CloudLinkSwitch
+                ariaLabel="Publish agent activity to mobile clients"
+                checked={publishAgentActivity}
+                disabled={switchDisabled}
+                disabledReason={disabledReason}
+                onCheckedChange={(enabled) => void updatePublishAgentActivity(enabled)}
+              />
+            )
+          }
+        />
+      )}
+      {managedTunnelActive && !signedOut ? (
         <SettingsRow
           title={searchableSetting("hold-webhooks-while-offline").title}
           description={`Keep webhook requests for up to 24 hours while this environment is offline, then deliver them. Off: ${connectLabel} only forwards requests and stores nothing.`}
@@ -881,8 +900,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             <CloudLinkSwitch
               ariaLabel="Hold webhook requests while this environment is offline"
               checked={holdWebhooksWhileOffline}
-              disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
-              disabledReason={sessionDisabledReason}
+              disabled={switchDisabled}
+              disabledReason={disabledReason}
               onCheckedChange={(enabled) => void updateHoldWebhooks(enabled)}
             />
           }

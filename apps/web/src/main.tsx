@@ -60,8 +60,6 @@ function ClerkGate({ children }: { readonly children: React.ReactNode }) {
   );
 }
 
-// A failed split-chunk fetch usually means the hashed assets went stale under
-// a deploy; one guarded reload picks up the fresh index.html.
 let chunkLoadFailed = false;
 let reloadScheduled = false;
 window.addEventListener("vite:preloadError", (event) => {

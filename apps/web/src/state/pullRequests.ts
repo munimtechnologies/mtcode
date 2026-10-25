@@ -9,6 +9,7 @@ import type {
   EnvironmentId,
   ProjectId,
   PullRequestListInput,
+  PullRequestFilterOptionsInput,
   PullRequestListStatsInput,
   PullRequestRankInput,
   PullRequestListEntry,
@@ -19,7 +20,7 @@ import type {
 import {
   threadPullRequestKeyOf,
   visibleThreadPullRequests,
-} from "@t3tools/shared/threadPullRequests";
+} from "@t3tools/client-runtime/thread-pull-requests";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useLayoutEffect } from "react";
@@ -92,8 +93,7 @@ export function pullRequestListEntryToSummary(entry: PullRequestListEntry): Pull
   };
 }
 
-// A project has one remote, so its id already pins the host. Leaving the host out lets a list
-// row, a hostless legacy reference and a URL-derived thread reference share one entry.
+// Project ids pin the remote host; omit host so legacy, URL, and list references share entries.
 function pullRequestSummaryKey(environmentId: EnvironmentId, reference: PullRequestRef): string {
   return JSON.stringify([
     environmentId,
@@ -216,7 +216,6 @@ export function useSharedPullRequestSummary(
         : savedPullRequestKey(environmentId, reference),
     ),
   );
-  // Keyed structurally so a fresh reference object for the same pull request is a no-op.
   useLayoutEffect(() => {
     if (key === "none" || current === null || observedAt === null) return;
     observePullRequestSummary(key, current, observedAt);
@@ -247,12 +246,7 @@ interface MergedEnvironmentQueryView<Input, A> {
   readonly observations: ReadonlyArray<readonly [EnvironmentId, A, number]>;
 }
 
-/**
- * React cannot subscribe to a list of atoms whose length changes, so the fan-out happens inside
- * one derived atom keyed by the targets — the same shape the cross-environment thread search uses.
- * An environment that fails contributes nothing rather than blanking the page: the pull request
- * list is a union, and one unreachable machine should not hide the others' rows.
- */
+// Use one derived atom for variable fan-out; unreachable environments must not hide other rows.
 function createMergedEnvironmentQuery<Input, A>(
   label: string,
   atomFor: (
@@ -309,6 +303,11 @@ const usePullRequestListsQuery = createMergedEnvironmentQuery(
 const usePullRequestStatsQuery = createMergedEnvironmentQuery(
   "web-pull-requests:list-stats",
   pullRequestEnvironment.listStats,
+);
+
+const usePullRequestFilterOptionsQuery = createMergedEnvironmentQuery(
+  "web-pull-requests:filter-options",
+  pullRequestEnvironment.filterOptions,
 );
 
 const usePullRequestTurnRefreshQuery = createMergedEnvironmentQuery(
@@ -416,4 +415,16 @@ export function usePullRequestListStats(
           result.stats.map((stat) => ({ ...stat, environmentId: target.environmentId })),
         );
   return { stats, isPending: query.isPending, refresh: query.refresh };
+}
+
+export function usePullRequestFilterOptions(
+  targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestFilterOptionsInput>>,
+) {
+  const query = usePullRequestFilterOptionsQuery(targets);
+  return {
+    labels: query.values.flatMap(([, options]) => options.labels),
+    authors: query.values.flatMap(([, options]) => options.authors),
+    error: query.error,
+    isPending: query.isPending,
+  };
 }

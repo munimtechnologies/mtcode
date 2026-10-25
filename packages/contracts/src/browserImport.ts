@@ -11,6 +11,7 @@ const BROWSER_IMPORT_SOURCE_IDS = [
   "arc",
   "helium",
   "firefox",
+  "zen",
   "safari",
 ] as const;
 
@@ -80,7 +81,7 @@ const BROWSER_IMPORT_UNAVAILABLE_COPY: Readonly<Record<BrowserImportUnavailableR
   notInstalled: "Not installed on this machine.",
   needsKeychainApproval: "Needs Keychain access to read its cookies.",
   keychainItemMissing:
-    "No encryption key in your Keychain — sign in to that browser once, then retry.",
+    "No encryption key in your Keychain. Sign in to that browser once, then retry.",
   appBoundEncryption: "This browser binds its cookie key to itself, so no other app can read it.",
   needsFullDiskAccess:
     "Give T3 Code Full Disk Access in System Settings → Privacy & Security, then retry.",

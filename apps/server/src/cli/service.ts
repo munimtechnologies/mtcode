@@ -13,6 +13,7 @@ import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { resolveAppDisplayName } from "../appDisplayName.ts";
+import { resolveEntryPath } from "./invocation.ts";
 
 export const layer = (config: ServerConfig.ServerConfig["Service"]) => {
   const input = {
@@ -123,9 +124,9 @@ export function formatServiceStatus(
   ].join("\n");
 }
 
-const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
+const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E, R>(
   flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
-  run: Effect.Effect<A, E, BootService.BootService>,
+  run: Effect.Effect<A, E, R>,
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
@@ -140,14 +141,9 @@ const WINDOWS_SERVICE_NOTICE = [
 ].join("\n");
 
 /** Shared by install and update. The Linux output is unchanged. */
-const reportReconcileResult = Effect.fn("cli.service.report")(function* (
-  result: ServiceReconcileResult,
-  unchangedMessage: string,
+const reportServiceChange = Effect.fn("cli.service.report")(function* (
+  result: Extract<ServiceReconcileResult, { readonly changed: true }>,
 ) {
-  if (!result.changed) {
-    yield* Console.log(unchangedMessage);
-    return;
-  }
   yield* Console.log(formatServiceChange(result));
   if ((yield* HostProcess.Platform) === "win32") {
     yield* Console.log(WINDOWS_SERVICE_NOTICE);
@@ -171,10 +167,13 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
       flags,
       Effect.gen(function* () {
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
-        yield* reportReconcileResult(
-          result,
-          `${resolveAppDisplayName()} service is already installed with t3@${packageJson.version}.`,
-        );
+        if (!result.changed) {
+          yield* Console.log(
+            `${resolveAppDisplayName()} service is already installed with t3@${packageJson.version} (${yield* resolveEntryPath}).`,
+          );
+          return;
+        }
+        yield* reportServiceChange(result);
       }),
     ),
   ),
@@ -191,10 +190,13 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
           "`t3 service update` is deprecated: run `t3 update` to move to a newer release, or `t3 service install` to repair the service. Repairing now.",
         );
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
-        yield* reportReconcileResult(
-          result,
-          `${resolveAppDisplayName()} service is already using t3@${packageJson.version}.`,
-        );
+        if (!result.changed) {
+          yield* Console.log(
+            `${resolveAppDisplayName()} service is already using t3@${packageJson.version} (${yield* resolveEntryPath}).`,
+          );
+          return;
+        }
+        yield* reportServiceChange(result);
       }),
     ),
   ),

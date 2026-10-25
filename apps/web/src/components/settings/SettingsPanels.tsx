@@ -68,6 +68,7 @@ import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
   getCustomModelOptionsByInstance,
@@ -90,7 +91,6 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
-import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -569,6 +569,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["Background turn chime"]
       : []),
     ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+    ...(settings.threadTitleInstructions !== DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions
+      ? ["Thread title instructions"]
+      : []),
     ...getChangedBrowserSettingLabels(settings),
     ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
       ? ["Agent browser access"]
@@ -614,9 +617,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         }),
       );
     };
-    // Rollback restores the base preference first (which clears any mix) and
-    // then re-applies the captured mix on top, so no failure path can leave
-    // the pair of keys half-restored.
+    // Restore the base preference before the mix because restoring the base clears the mix.
     const previousHalves = liveHalves;
     const rollbackThemeState = () => {
       if (needsThemeReset) setTheme(previousTheme);
@@ -698,6 +699,7 @@ export function useSettingsRestore(onRestored?: () => void) {
             voiceTranscriptionModel: DEFAULT_UNIFIED_SETTINGS.voiceTranscriptionModel,
           }
         : {}),
+      threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -1398,7 +1400,6 @@ export function GeneralSettingsPanel() {
   );
   const mixedWorktreeBranchPrefix = useScopedSettingsMixed(["worktreeBranchPrefix"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
-  const mixedThreadTitleInstructions = useScopedSettingsMixed(["threadTitleInstructions"]);
 
   return (
     <SettingsPageContainer>
@@ -1530,33 +1531,6 @@ export function GeneralSettingsPanel() {
                 updateSettings({ snoozeLimitedThreads: Boolean(checked) })
               }
               aria-label="Snooze limited threads"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("working-shelf")}
-          description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
-          resetAction={
-            settings.sidebarWorkingShelfEnabled !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
-              <SettingResetButton
-                label="working section"
-                onClick={() =>
-                  updateSettings({
-                    sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.sidebarWorkingShelfEnabled}
-              onCheckedChange={(checked) =>
-                updateSettings({ sidebarWorkingShelfEnabled: Boolean(checked) })
-              }
-              aria-label="Working section (beta)"
             />
           }
         />
@@ -2508,47 +2482,7 @@ export function GeneralSettingsPanel() {
             )
           }
         />
-        <SettingsRow
-          serverScoped
-          {...searchableSetting("thread-title-instructions")}
-          settingKeys={["threadTitleInstructions"]}
-          description="Additional instructions for new and regenerated thread titles on selected environments. Leave blank to use the default style."
-          resetAction={
-            mixedThreadTitleInstructions ||
-            settings.threadTitleInstructions !==
-              DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions ? (
-              <SettingResetButton
-                label="thread title instructions"
-                onClick={() =>
-                  updateSettings({
-                    threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
-                  })
-                }
-              />
-            ) : null
-          }
-        >
-          <div className="mt-3 max-w-2xl pb-3.5">
-            <Textarea
-              key={`${scope.environmentIds.join(",")}:${mixedThreadTitleInstructions}:${settings.threadTitleInstructions}`}
-              defaultValue={mixedThreadTitleInstructions ? "" : settings.threadTitleInstructions}
-              onBlur={(event) => {
-                const threadTitleInstructions = event.target.value.trim();
-                if (threadTitleInstructions !== event.target.defaultValue.trim()) {
-                  updateSettings({ threadTitleInstructions });
-                }
-              }}
-              rows={4}
-              maxLength={20_000}
-              placeholder={
-                mixedThreadTitleInstructions
-                  ? "Mixed. Enter instructions for all selected environments."
-                  : "Start each title with an emoji. Prefer sentence case."
-              }
-              aria-label="Thread title instructions"
-            />
-          </div>
-        </SettingsRow>
+        <ThreadTitleInstructionsSettings />
       </SettingsSection>
 
       <DesktopNotificationsSettings />

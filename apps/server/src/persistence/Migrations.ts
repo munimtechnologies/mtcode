@@ -101,6 +101,9 @@ import Migration0074 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
 import Migration0075 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
 // Upstream 067 (webhook dedupe); registered as the next free fork id.
 import Migration0076 from "./Migrations/067_WebhookDedupe.ts";
+// Upstream 068/069; registered as the next free fork ids.
+import Migration0077 from "./Migrations/068_ShellStopRequestIndex.ts";
+import Migration0078 from "./Migrations/069_ThreadMessageSearch.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -189,6 +192,9 @@ const migrationEntries = [
   [75, "RepairClientSettlementTimestamps", Migration0075],
   // Upstream 067 (webhook dedupe); registered as the next free fork id.
   [76, "WebhookDedupe", Migration0076],
+  // Upstream 068/069 (shell stop request index, thread message search); next free fork ids.
+  [77, "ShellStopRequestIndex", Migration0077],
+  [78, "ThreadMessageSearch", Migration0078],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -206,12 +212,7 @@ const makeMigrationLoader = (throughId?: number) =>
 // Fork: upstream's id is 55; the fork's own migrations run 55-63 before V2.
 const FIRST_V2_MIGRATION_ID = 64;
 
-/**
- * Fail before migrating when the migrator would skip one of V2's own
- * migrations. It skips every id up to the highest recorded one, whatever name
- * was recorded, so a database that took a V2 id for another migration would
- * start without V2's schema and fail on first use.
- */
+// Migrators skip ids up to the highest recorded; reject collisions that would skip V2 schema.
 const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function* (
   throughId?: number,
 ) {

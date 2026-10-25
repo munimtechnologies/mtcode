@@ -32,8 +32,7 @@ import { APP_DISPLAY_NAME } from "~/branding";
  */
 const MAX_THEME_FILE_BYTES = 256 * 1024;
 
-/** Highlighting rebuilds the whole markup on every keystroke, so oversized
- *  pastes fall back to plain text instead of freezing the editor. */
+/** Highlighting rebuilds markup per keystroke; fall back to plain text for oversized pastes. */
 const MAX_HIGHLIGHTED_JSON_LENGTH = 20_000;
 
 function formatByteSize(bytes: number): string {
@@ -171,7 +170,6 @@ export function ThemeImportDialog({
       setConflicts(null);
     }
   }
-  // Opening or closing drops any read still in flight.
   useEffect(() => {
     if (!open) return;
     importRequestRef.current += 1;
@@ -251,7 +249,7 @@ export function ThemeImportDialog({
     }
     if (installed.length > 0) onImportedMany(installed, { updated: false });
     if (failures.length > 0) {
-      setError(failures.join(" — "));
+      setError(failures.join("; "));
     } else if (conflicting.length > 0) {
       setConflicts(conflicting);
     } else if (installed.length > 0) {
@@ -353,7 +351,7 @@ export function ThemeImportDialog({
     }
     if (resolved.length > 0) onImportedMany(resolved, { updated: mode === "update" });
     setConflicts(null);
-    if (failures.length > 0) setError(failures.join(" — "));
+    if (failures.length > 0) setError(failures.join("; "));
     else onOpenChange(false);
   };
 

@@ -23,7 +23,7 @@ allowBuilds:
   playwright: false
   # Ships N-API prebuilds; its install script only rebuilds from source.
   objc-js: false
-  "react-native-enriched-markdown@file:apps/mobile/deps/react-native-enriched-markdown-1.2.0-t3.15-fee84114.tgz": true
+  "react-native-enriched-markdown@file:apps/mobile/deps/react-native-enriched-markdown-1.2.0-t3.16-8d2f84a8.tgz": true
   sharp: true
   "@tsc-rs/typescript": true
   utf-8-validate: false
@@ -34,7 +34,7 @@ catalog:
   "@clerk/clerk-js": 6.40.0
   "@clerk/electron": 0.1.3
   "@clerk/electron-passkeys": 0.0.3
-  "@clerk/expo": 4.13.0
+  "@clerk/expo": 4.14.0
   "@clerk/react": 6.18.0
   "@clerk/shared": 4.41.0
   # Must match the version alchemy depends on: the relay overrides its
@@ -52,7 +52,8 @@ catalog:
   "@legendapp/list": 3.3.5
   "@noble/curves": 1.9.1
   "@noble/hashes": 1.8.0
-  "@pierre/diffs": 1.5.2
+  "@pierre/diffs": 1.6.1
+  "@pierre/highlights": 0.2.0
   "@tailwindcss/node": 4.3.3
   "@tailwindcss/oxide": 4.3.3
   "@tailwindcss/vite": 4.3.3
@@ -73,8 +74,8 @@ catalog:
   tldts: 7.4.2
   typescript: npm:@tsc-rs/typescript@0.8.0
   undici: 8.11.2
-  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
-  vite-plus: 1.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
   ws: 8.22.0
   yaml: ^2.9.0
   # Markdown pipeline: the server counts find matches with the same parser the
@@ -101,8 +102,8 @@ minimumReleaseAgeExclude:
   - "@clerk/backend@3.25.0"
   - "@clerk/clerk-js@6.40.0"
   - "@clerk/electron@0.1.3"
-  - "@clerk/expo-native-components@0.2.0"
-  - "@clerk/expo@4.13.0"
+  - "@clerk/expo-native-components@0.4.0"
+  - "@clerk/expo@4.14.0"
   - "@clerk/react@6.18.0"
   - "@clerk/shared@4.41.0"
   - "@distilled.cloud/aws@1.0.0-rc.13"
@@ -222,6 +223,9 @@ minimumReleaseAgeExclude:
   - react-native-svg@15.16.0
   - "@expo/schema-utils@58.0.2"
   - pele@1.8.0
+  - "@pierre/diffs@1.6.1"
+  - "@pierre/highlights@0.2.0"
+  - "@pierre/theming@1.0.2"
 
 overrides:
   # Shiki and the hast utilities otherwise resolve two @types/hast copies whose Root types do not unify.
@@ -234,12 +238,12 @@ overrides:
   alchemy: 2.0.0-beta.80
   expo-audio: 58.0.9
   expo-network: 58.0.3
-  "@clerk/expo-native-components": 0.2.0
+  "@clerk/expo-native-components": 0.4.0
   expo-sharing: 58.0.19
   expo-widgets: 58.0.20
   "@ff-labs/fff-node": 0.11.0
   "@legendapp/list": 3.3.5
-  "@pierre/diffs": 1.5.2
+  "@pierre/diffs": 1.6.1
   "@react-native-ai/apple": 0.12.0
   "@react-native-menu/menu": 2.0.0
   "@react-navigation/native-stack": 7.21.0
@@ -369,7 +373,7 @@ patchedDependencies:
   alchemy@2.0.0-beta.80: patches/alchemy@2.0.0-beta.80.patch
   expo-audio@58.0.9: patches/expo-audio@58.0.9.patch
   expo-network@58.0.3: patches/expo-network@58.0.3.patch
-  "@clerk/expo-native-components@0.2.0": patches/@clerk__expo-native-components@0.2.0.patch
+  "@clerk/expo-native-components@0.4.0": patches/@clerk__expo-native-components@0.4.0.patch
   "@effect/vitest@4.0.5": patches/@effect__vitest@4.0.5.patch
   "@expo/metro-config@58.0.14": patches/@expo__metro-config@58.0.14.patch
   expo-sharing@58.0.19: patches/expo-sharing@58.0.19.patch
@@ -378,7 +382,7 @@ patchedDependencies:
   "@legendapp/list@3.3.5": patches/@legendapp__list@3.3.5.patch
   # Exports the dependency-light subpaths mobile and the web diff parser import, and keeps
   # measured wrapped-row heights above an edit (fileEditorVirtualization.test.ts).
-  "@pierre/diffs@1.5.2": patches/@pierre%2Fdiffs@1.5.2.patch
+  "@pierre/diffs@1.6.1": patches/@pierre%2Fdiffs@1.6.1.patch
   "@react-native-ai/apple@0.12.0": patches/@react-native-ai__apple@0.12.0.patch
   "@react-native-menu/menu@2.0.0": patches/@react-native-menu__menu@2.0.0.patch
   "@react-navigation/native-stack@7.21.0": patches/@react-navigation%2Fnative-stack@7.21.0.patch
@@ -399,6 +403,8 @@ patchedDependencies:
   # Android: Maven-resolved gradle plugins (expo-widgets) have no sourceDir; without this
   # skip, the fingerprint silently drops every Expo native module and OTAs reach stale binaries.
   "@expo/fingerprint@0.21.5": patches/@expo__fingerprint@0.21.5.patch
+  # Observe the owned host exit independently of descendants retaining its stdio.
+  "@muse-code/sdk@1.4.6": patches/@muse-code__sdk@1.4.6.patch
   app-builder-lib@26.16.1: patches/app-builder-lib@26.16.1.patch
 
 peerDependencyRules:

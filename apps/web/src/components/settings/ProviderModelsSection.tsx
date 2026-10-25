@@ -431,8 +431,7 @@ export function ProviderModelsSection({
     row.scrollIntoView({ block: "nearest" });
   });
 
-  // CustomModelEditor keys its option list on this array. Derived after the effect and
-  // checked against `hiddenModels` rather than the set built above it, so it stays cached.
+  // Derive after the effect and use hiddenModels directly to preserve the editor's option-array cache.
   const builtInModels = models.filter((model) => !model.isCustom);
   const allBuiltInModelsHidden =
     builtInModels.length > 0 && builtInModels.every((model) => hiddenModels.includes(model.slug));

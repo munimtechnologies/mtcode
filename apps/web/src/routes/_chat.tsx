@@ -1,10 +1,14 @@
 import { AuthPreviewOperateScope } from "@t3tools/contracts";
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
+import { isAppModalPage } from "../components/sidebar/mainAppLocation";
+import { SidebarInset } from "../components/ui/sidebar";
+import type { ThreadRouteTarget } from "../threadRoutes";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { useEnvironmentScope } from "../state/session";
@@ -45,9 +49,7 @@ function ChatRouteGlobalShortcuts() {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
-  // The `previewOpen` shortcut-context flag here uses the store-only value;
-  // the URL-aware arbitration lives inside ChatView's `onTogglePreview`,
-  // which we invoke via the action bus to avoid duplicating the rule.
+  // This flag is store-only; dispatch the action bus to reuse ChatView's URL-aware arbitration.
   const previewOpen = useRightPanelStore((state) =>
     routeThreadRef
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
@@ -174,17 +176,38 @@ function ChatRouteGlobalShortcuts() {
   return null;
 }
 
+function threadRouteTargetKey(target: ThreadRouteTarget | null) {
+  if (!target) return null;
+  return target.kind === "server" ? scopedThreadKey(target.threadRef) : target.draftId;
+}
+
 function ChatRouteLayout() {
-  // Both thread routes render here, not in their own leaf components, so the
-  // draft-to-thread promotion keeps one ChatView mounted across the swap.
+  // Render both routes here so draft promotion keeps the same ChatView mounted.
   const threadTarget = useThreadRouteTarget();
+  // Read matches, not location, so this agrees with the params useThreadRouteTarget reads.
+  const modalOpen = useMatches({
+    select: (matches) => matches.some((match) => isAppModalPage(match.pathname)),
+  });
+  // Settings and Usage render over the thread that opened them, so ChatView never remounts.
+  const [backgroundTarget, setBackgroundTarget] = useState(threadTarget);
+  if (!modalOpen && threadRouteTargetKey(backgroundTarget) !== threadRouteTargetKey(threadTarget)) {
+    setBackgroundTarget(threadTarget);
+  }
+  const shownTarget = modalOpen ? backgroundTarget : threadTarget;
   return (
     <>
-      <ChatRouteGlobalShortcuts />
-      {threadTarget?.kind === "server" ? (
-        <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
+      {modalOpen ? null : <ChatRouteGlobalShortcuts />}
+      {shownTarget?.kind === "server" && !modalOpen ? (
+        <ThreadLinkPrompt threadRef={shownTarget.threadRef} />
       ) : null}
-      {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
+      {shownTarget ? (
+        <ThreadRouteView target={shownTarget} background={modalOpen} />
+      ) : modalOpen ? (
+        <SidebarInset className="h-dvh" />
+      ) : (
+        <Outlet />
+      )}
+      {modalOpen ? <Outlet /> : null}
     </>
   );
 }

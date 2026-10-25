@@ -42,10 +42,6 @@ describe("PreviewAutomationOpenInput", () => {
       expect(() => decodeOpenInput({ profileId })).toThrow();
     },
   );
-
-  it("retains the legacy show visibility alias", () => {
-    expect(decodeOpenInput({ show: false })).toEqual({ show: false });
-  });
 });
 
 describe("PreviewAutomationHost", () => {

@@ -87,8 +87,7 @@ function downloadThemeFile(filename: string, contents: string): void {
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  // Revoking synchronously can abort the download in some browsers; give the
-  // browser time to open the stream first.
+  // Delay revocation so browsers can open the download stream.
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
@@ -579,9 +578,8 @@ export function ThemeLibrary({
     const removedIds = new Set(themeIdsToRemove);
     if (removedIds.size === 0) return;
     const removesBase = removedIds.has(getThemeDefinition(theme)?.id ?? "");
-    // Captured raw before persistTheme clears the mix: a half naming a
-    // published theme whose set has not streamed in yet is pruned from the
-    // `themeHalves` prop, and rebuilding from that would drop it.
+    // Read raw halves before persistTheme clears them; themeHalves omits published themes not yet streamed
+    // in.
     const storedHalves = readThemeHalvesRaw();
     if (removesBase && !persistTheme(appearanceMode === "system" ? "system" : appearanceMode)) {
       return;
@@ -610,13 +608,10 @@ export function ThemeLibrary({
 
   const assignHalf = (appearance: ThemeAppearance, cardId: string | null) => {
     const otherAppearance = appearance === "light" ? "dark" : "light";
-    // Picking the default over a themed base cannot be stored as a half:
-    // the base would still own that appearance. Convert the base into an
-    // explicit half on the other side so this side falls back to default.
+    // To restore one default appearance, move the themed base to the opposite explicit half.
     if (cardId === null && baseCardId !== null) {
-      // Read raw, before persistTheme clears the mix: the other half may
-      // name a published theme that has not streamed in yet, and falling
-      // back to the base would silently rewrite it.
+      // Read raw before persistTheme clears the mix; unstreamed published halves must not fall back to the
+      // base.
       const otherOwner = readThemeHalvesRaw()[otherAppearance] ?? baseCardId;
       if (!persistTheme(appearanceMode === "system" ? "system" : appearanceMode)) return;
       if (!setThemeHalf(otherAppearance, otherOwner)) {
@@ -775,8 +770,7 @@ export function ThemeLibrary({
         {MAINTAINER_THEMES.map(renderMaintainerCard)}
         {environmentThemes
           .filter(
-            // A saved theme with the same id wins resolution, so its card is
-            // the one that must show; rendering both would also collide keys.
+            // Saved themes win id resolution; show only their card to avoid duplicate keys.
             (environmentTheme) => !customThemes.some((theme) => theme.id === environmentTheme.id),
           )
           .map((environmentTheme) => (
