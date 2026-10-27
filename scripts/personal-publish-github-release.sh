@@ -133,10 +133,13 @@ fi
 
 # --- Mac arm64 ---
 EXPECTED_MAC="$REPO/release/MT-Code-${T3CODE_DESKTOP_VERSION}-arm64.dmg"
+# A failed publish leaves a DMG under the same version; reuse it only if it was built from HEAD.
+MAC_BUILD_COMMIT_FILE="$EXPECTED_MAC.commit"
+MAC_BUILD_COMMIT=$(cat "$MAC_BUILD_COMMIT_FILE" 2>/dev/null || true)
 if [[ "${T3_MUNIM_SKIP_MAC:-}" == "1" && -f "$EXPECTED_MAC" ]]; then
   echo "-- reusing existing Munim Mac DMG --"
-elif [[ -f "$EXPECTED_MAC" && "${T3_MUNIM_FORCE_MAC:-}" != "1" ]]; then
-  echo "-- reusing existing Munim Mac DMG (set T3_MUNIM_FORCE_MAC=1 to rebuild) --"
+elif [[ -f "$EXPECTED_MAC" && "$MAC_BUILD_COMMIT" == "$(git rev-parse HEAD)" && "${T3_MUNIM_FORCE_MAC:-}" != "1" ]]; then
+  echo "-- reusing existing Munim Mac DMG built from ${MAC_BUILD_COMMIT:0:10} (set T3_MUNIM_FORCE_MAC=1 to rebuild) --"
 else
   echo "-- building Munim Mac arm64 --"
   # Align package versions so the bundled server and web report this version.
@@ -144,6 +147,7 @@ else
   pnpm dist:desktop:dmg:arm64
   # The stamp is build input only; keep the checkout clean.
   git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
+  git rev-parse HEAD >"$MAC_BUILD_COMMIT_FILE"
 fi
 
 MAC_DMG=$(ls -t "$REPO"/release/MT-Code-*-arm64.dmg 2>/dev/null | head -1 || true)
