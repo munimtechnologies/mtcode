@@ -240,7 +240,6 @@ interface MessagesTimelineProps {
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   routeThreadKey: string;
   displayThreadKey?: string;
-  paintOnly?: boolean;
   /** Off where another region already speaks the thread's status, like a subagent's bar. */
   announceTurnStatus?: boolean;
   onOpenTurnDiff?: (runId: RunId, filePath?: string) => void;
@@ -351,7 +350,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   turnDiffSummaries,
   routeThreadKey,
   displayThreadKey,
-  paintOnly = false,
   announceTurnStatus = true,
   onOpenTurnDiff,
   onOpenThread,
@@ -943,7 +941,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (restoringThreadPosition || state?.data !== rows) return;
     const isAtEnd = resolveTimelineIsAtEnd(state);
     const position = state.data.length ? resolveWorkGroupScrollAnchor(state) : undefined;
-    if (position && isAtEnd !== undefined && !paintOnly) {
+    if (position && isAtEnd !== undefined) {
       const index = state.indexByKey(position.rowId);
       const row = index === undefined ? undefined : state.elementAtIndex(index);
       const element = listRef.current?.getScrollableNode();
@@ -1114,7 +1112,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // starts from a baseline instead of a fresh, silent region.
   const activityAnnouncer = (
     <ThreadActivityAnnouncer
-      threadKey={paintOnly || !announceTurnStatus ? null : listIdentityKey}
+      threadKey={announceTurnStatus ? listIdentityKey : null}
       status={awaitingUser ?? (isWorking ? "working" : "idle")}
       requestId={awaitingRequestId}
       runId={announcedRun?.runId ?? null}

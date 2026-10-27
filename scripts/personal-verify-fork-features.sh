@@ -82,7 +82,7 @@ require apps/server/src/orchestration-v2/ProjectionStore.ts "messageId: MessageI
 # Built on upstream's rollback: Send rolls back to before the message (files
 # kept) and sends the edited text. Upstream has only "Edit from here", which
 # returns the message to the composer.
-require apps/web/src/components/ChatView.tsx "{ messageEdit }" "ChatView passes the edit state to the timeline"
+require apps/web/src/components/ChatView.tsx "messageEdit={messageEdit}" "ChatView passes the edit state to the timeline"
 require apps/web/src/components/ChatView.tsx "restoreFiles: false" "message edit rolls back without restoring files"
 require apps/web/src/components/chat/TimelineUserMessageRow.tsx "<EditUserMessageButton" "edit affordance on the last user message"
 require apps/web/src/components/chat/TimelineUserMessageRow.tsx "<InlineUserMessageEditor" "inline editor in the user message bubble"
