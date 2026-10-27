@@ -1,10 +1,15 @@
 import type { LegendListRef } from "@legendapp/list/react";
 import type { MessageId, RunId } from "@t3tools/contracts";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import type { TimelineEntry } from "../../session-logic";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
-import type { CitationHistoryPage } from "./useAssistantCitationTarget";
 import { toastManager } from "../ui/toast";
+
+/** Pages older history in while a search result is not loaded yet. */
+export interface ChatSearchHistoryPage {
+  readonly loading: boolean;
+  readonly onLoadEarlier: () => void;
+}
 
 export interface ChatSearchRequest {
   messageId: MessageId;
@@ -67,12 +72,19 @@ export function useChatSearchTarget({
   listRef: RefObject<LegendListRef | null>;
   viewport: HTMLElement | null;
   historyLoading: boolean;
-  loadEarlier: CitationHistoryPage | null;
+  loadEarlier: ChatSearchHistoryPage | null;
   onExpandRun: (runId: RunId) => void;
   onManualNavigation: () => void;
 }) {
   const [loaded, setLoaded] = useState(false);
-  const onListLoad = useCallback(() => setLoaded(true), []);
+  const onListLoad = () => setLoaded(true);
+  // Callers pass fresh closures each render; reading them at call time keeps the
+  // positioning effect from re-running (and re-scrolling) on every render.
+  const requestEarlier = useEffectEvent(() => loadEarlier?.onLoadEarlier());
+  const expandRun = useEffectEvent((runId: RunId) => onExpandRun(runId));
+  const navigateManually = useEffectEvent(() => onManualNavigation());
+  const canLoadEarlier = loadEarlier !== null;
+  const earlierLoading = loadEarlier?.loading ?? false;
   const [finishedKey, setFinishedKey] = useState<string | null>(null);
   const navigationRef = useRef<{
     key: string;
@@ -93,7 +105,7 @@ export function useChatSearchTarget({
     }
     if (navigationRef.current?.key !== key) {
       navigationRef.current = { key, pages: new Set(), expanded: false, done: false };
-      onManualNavigation();
+      navigateManually();
     }
     const navigation = navigationRef.current;
     if (navigation.done || !viewport || historyLoading) return;
@@ -110,24 +122,24 @@ export function useChatSearchTarget({
       (entry) => entry.kind === "message" && entry.message.id === request.messageId,
     );
     if (!source) {
-      if (!loadEarlier) {
+      if (!canLoadEarlier) {
         fail();
         return;
       }
-      if (loadEarlier.loading) return;
-      const cursor = loadEarlier.cursor ?? entries[0]?.id ?? "first";
+      if (earlierLoading) return;
+      const cursor = entries[0]?.id ?? "first";
       if (navigation.pages.has(cursor) || navigation.pages.size >= 100) {
         fail();
         return;
       }
       navigation.pages.add(cursor);
-      loadEarlier.onLoadEarlier();
+      requestEarlier();
       return;
     }
     if (index < 0) {
       if (source.kind === "message" && source.message.runId && !navigation.expanded) {
         navigation.expanded = true;
-        onExpandRun(source.message.runId);
+        expandRun(source.message.runId);
       } else {
         fail();
       }
@@ -158,7 +170,7 @@ export function useChatSearchTarget({
           element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
         }
         navigation.done = true;
-        onManualNavigation();
+        navigateManually();
         setFinishedKey(key);
       });
     };
@@ -177,15 +189,14 @@ export function useChatSearchTarget({
       clearTimeout(timeout);
     };
   }, [
+    canLoadEarlier,
+    earlierLoading,
     entries,
     historyLoading,
     index,
     key,
     listRef,
-    loadEarlier,
     loaded,
-    onExpandRun,
-    onManualNavigation,
     request,
     viewport,
   ]);

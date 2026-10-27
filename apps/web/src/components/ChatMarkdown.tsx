@@ -63,7 +63,8 @@ import {
   markdownImageSourceFragment,
 } from "@t3tools/client-runtime/markdown-images";
 import { mediaUrlReference } from "@t3tools/client-runtime/media-reference";
-import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@t3tools/shared/filePreview";
+import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@t3tools/shared/mediaPreview";
+import { InlineAudioPreview } from "./files/InlineAudioPreview";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -226,7 +227,7 @@ interface ChatMarkdownProps {
   environmentId?: EnvironmentId | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
   isStreaming?: boolean;
-  skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  skills?: ReadonlyArray<ServerProviderSkill>;
   className?: string;
   lineBreaks?: boolean;
   parseRawHtml?: boolean;
@@ -249,7 +250,7 @@ export interface ChatMarkdownContextReference {
   label: string;
 }
 
-const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
 const EMPTY_REMARK_PLUGINS: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [];
 
 const ARTIFACT_TEMPLATE_ICON_BY_KIND = {
@@ -957,8 +958,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
     return <div {...props}>{children}</div>;
   },
   p: function MarkdownParagraph({ node: _node, children, ...props }) {
-    const { skills } = use(ChatMarkdownRendererContext);
-    return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+    const { skills, threadRef } = use(ChatMarkdownRendererContext);
+    return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills, threadRef)}</p>;
   },
   blockquote: function MarkdownBlockquote({ node: _node, children, ...props }) {
     const alert =
@@ -993,12 +994,12 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   li: function MarkdownListItem({ node, children, ...props }) {
-    const { skills } = use(ChatMarkdownRendererContext);
+    const { skills, threadRef } = use(ChatMarkdownRendererContext);
     // Resolve checkbox markers by offset to avoid rerendering list items on every streamed token.
     const isTaskItem = String(props.className ?? "").includes("task-list-item");
     return (
       <li {...props} data-list-item-offset={isTaskItem ? node?.position?.start.offset : undefined}>
-        {renderSkillInlineMarkdownChildren(children, skills)}
+        {renderSkillInlineMarkdownChildren(children, skills, threadRef)}
       </li>
     );
   },
@@ -1131,6 +1132,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
               href &&
               faviconHost !== null &&
               mediaKindFromPath(href) !== null &&
+              mediaKindFromPath(href) !== "audio" &&
               !event.defaultPrevented &&
               !event.metaKey &&
               !event.ctrlKey &&
@@ -1345,6 +1347,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       threadRef,
       workspaceMutationId,
       renderContextReference,
+      fileLinkChip,
     } = use(ChatMarkdownRendererContext);
     const imageExpand = use(MarkdownLinkContext) ? undefined : expandMedia;
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
@@ -1370,7 +1373,42 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const { className, style: _style, width, height, ...imageProps } = props;
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
     const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
-    const kind = mediaKindFromPath(classifiedSrc) ?? "image";
+    const mediaKind = mediaKindFromPath(classifiedSrc);
+    if (mediaKind === "audio") {
+      const filePath = imageSource._tag === "WorkspaceFile" ? imageSource.path : null;
+      const name =
+        (filePath ?? classifiedSrc.split(/[?#]/, 1)[0] ?? "").split(/[\\/]/).at(-1) ||
+        altText ||
+        "Audio";
+      if (imageSource._tag !== "Direct" && !(filePath && threadRef)) {
+        return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind="audio" />;
+      }
+      return (
+        <InlineAudioPreview
+          key={classifiedSrc}
+          name={name}
+          copyMarkdown={copyMarkdown}
+          {...(filePath && threadRef
+            ? {
+                environmentId: threadRef.environmentId,
+                resource: {
+                  _tag: "media-file" as const,
+                  threadId: threadRef.threadId,
+                  path: filePath,
+                },
+                onOpen: () => useRightPanelStore.getState().openFile(threadRef, filePath),
+              }
+            : imageSource._tag === "Direct"
+              ? { src: resolveProtocolRelativeMediaUrl(imageSource.uri) }
+              : {})}
+        />
+      );
+    }
+    if (mediaKind === null && imageSource._tag === "WorkspaceFile") {
+      const fileLinkMeta = resolveMarkdownFileLinkMeta(srcString, cwd, imageBaseDir ?? cwd);
+      if (fileLinkMeta) return fileLinkChip(fileLinkMeta, copyMarkdown, srcString);
+    }
+    const kind = mediaKind ?? "image";
     const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
     const hostMediaUrl =
       directUri === null
@@ -1590,7 +1628,7 @@ function ChatMarkdown({
       className={cn(
         "chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word]",
         !inline &&
-          "text-sm leading-relaxed text-foreground/[calc(80%+var(--appearance-contrast-boost)/5)]",
+          "text-sm leading-relaxed text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]",
         className,
       )}
       data-streaming={componentState.isStreaming ? "" : undefined}

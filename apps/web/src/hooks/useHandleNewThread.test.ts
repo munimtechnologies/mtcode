@@ -101,27 +101,33 @@ const testServerConfigs = () =>
     ["environment-ssh", { settings: testState.targetSettings }],
   ]);
 
+const testPresentations = () =>
+  new Map(
+    ["environment-primary", "environment-ssh"].map((environmentId) => [
+      environmentId,
+      {
+        connection: {
+          phase: testState.connectedEnvironmentIds.includes(environmentId)
+            ? "connected"
+            : "offline",
+        },
+      },
+    ]),
+  );
+
 vi.mock("../rpc/atomRegistry", () => ({
   appAtomRegistry: {
     get: (atom: unknown) =>
-      atom === "connected-environment-ids"
-        ? testState.connectedEnvironmentIds
-        : testServerConfigs(),
+      atom === "environment-presentations" ? testPresentations() : testServerConfigs(),
   },
 }));
-
-vi.mock("@effect/atom-react", () => ({
-  // The hook subscribes to the primary settings it asserts on and the
-  // environment catalog / presentation map that `useEnvironments` walks
-  // (stubbed empty); server configs are read through the registry mock.
-  useAtomValue: (atom: unknown) =>
-    atom === "primary-settings"
-      ? { newWorktreesStartFromOrigin: !testState.targetSettings.newWorktreesStartFromOrigin }
-      : atom === "environment-configs"
-        ? testServerConfigs()
-        : { isReady: false, entries: () => [] },
+vi.mock("../state/environments", () => ({
+  readPrimaryEnvironmentId: () => "environment-primary",
 }));
-// The fork's environment hooks load more of this module than the handler itself.
+vi.mock("../state/presentation", () => ({
+  environmentPresentations: { presentationsAtom: "environment-presentations" },
+}));
+
 vi.mock("@t3tools/client-runtime/environment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@t3tools/client-runtime/environment")>()),
   scopedProjectKey: () => "remote-project",
@@ -229,7 +235,7 @@ vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
   useUiStateStore: () => [],
 }));
-vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
+vi.mock("./useSettings", () => ({ getClientSettings: () => ({}) }));
 
 import { useNewThreadHandler } from "./useHandleNewThread";
 

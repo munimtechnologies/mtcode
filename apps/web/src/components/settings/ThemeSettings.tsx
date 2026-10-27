@@ -195,7 +195,7 @@ function ThemeLibraryCard({
                                 : `Use ${mode} variant, currently ${selected.option.label}`
                             }
                             aria-pressed={isActive}
-                            className="absolute left-1/2 top-2 z-20 flex size-14 items-center justify-center rounded-full outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                            className="absolute left-1/2 top-2 z-20 flex size-14 items-center justify-center rounded-full outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring redesign:focus-visible:-outline-offset-5 redesign:focus-visible:outline-foreground/60"
                             style={{
                               transform: `translateX(calc(-50% + ${rootOffsetX}px))`,
                             }}
@@ -650,7 +650,7 @@ export function ThemeLibrary({
 
   // Rings always show the effective owner of each appearance: an unpicked
   // half belongs to the default card (a null owner), so a fresh install
-  // shows ${APP_DISPLAY_NAME} selected instead of nothing.
+  // shows MT Code selected instead of nothing.
   const pickedModesFor = (cardId: string | null): ThemeMode[] => {
     const rings: ThemeMode[] = [];
     if (lightOwner === cardId) rings.push("light");
@@ -684,13 +684,13 @@ export function ThemeLibrary({
             aria-label={mode === "system" ? "Follow the system appearance" : `Use ${mode} mode`}
             aria-pressed={isActive}
             className={cn(
-              "flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              // The accent ring marks the picked tile; focus is a neutral ring set inside it with a gap.
+              "flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring redesign:focus-visible:-outline-offset-7 redesign:focus-visible:outline-foreground/60",
               isActive
-                ? "border-transparent bg-accent/30"
+                ? "border-transparent bg-accent/30 ring-1 ring-inset ring-ring redesign:ring-2"
                 : "border-border/70 bg-card/60 hover:bg-accent/10",
             )}
             key={mode}
-            style={isActive ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
             onClick={() => setMode(mode)}
             type="button"
           >
@@ -834,15 +834,15 @@ export function ThemeLibrary({
 
   return (
     <div className="space-y-3">
-      <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
-        Choose how ${APP_DISPLAY_NAME} looks. Use a built-in theme or make your own.
+      <p className="px-3 text-xs leading-relaxed text-muted-foreground/80 sm:px-4">
+        Choose how {APP_DISPLAY_NAME} looks. Use a built-in theme or make your own.
       </p>
-      <h3 className="px-3 text-sm font-normal text-foreground/70 sm:px-4">
+      <h3 className="flex min-h-7 items-center px-3 text-sm font-normal text-foreground/70 sm:px-4 redesign:text-base redesign:font-semibold redesign:text-foreground">
         {searchableSetting("color-scheme").title}
       </h3>
       {renderModeTiles()}
-      <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-3 pt-2 sm:px-4">
-        <h3 className="text-sm font-normal text-foreground/70">
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-3 pt-2 sm:px-4 redesign:pt-5">
+        <h3 className="text-sm font-normal text-foreground/70 redesign:text-base redesign:font-semibold redesign:text-foreground">
           {searchableSetting("theme").title}
         </h3>
         <div className="flex flex-wrap items-center justify-end gap-2">

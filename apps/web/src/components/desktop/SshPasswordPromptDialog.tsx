@@ -1,22 +1,44 @@
 import type { DesktopSshPasswordPromptRequest } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 import { SshPasswordRequestDialog } from "../SshPasswordRequestDialog";
 
+let promptQueue: readonly DesktopSshPasswordPromptRequest[] = [];
+const promptQueueListeners = new Set<() => void>();
+
+function setPromptQueue(next: readonly DesktopSshPasswordPromptRequest[]) {
+  promptQueue = next;
+  for (const listener of promptQueueListeners) listener();
+}
+
+/**
+ * Queues the desktop's SSH password prompts for the life of the page, so a prompt
+ * that arrives while no dialog is mounted still waits for one.
+ */
+export function startSshPasswordPromptQueue(): () => void {
+  return (
+    window.desktopBridge?.onSshPasswordPrompt?.((request) => {
+      setPromptQueue([...promptQueue, request]);
+    }) ?? (() => undefined)
+  );
+}
+
+function subscribePromptQueue(listener: () => void): () => void {
+  promptQueueListeners.add(listener);
+  return () => {
+    promptQueueListeners.delete(listener);
+  };
+}
+
+const readPromptQueue = () => promptQueue;
+
+function removeSshPasswordPrompt(requestId: string) {
+  if (promptQueue[0]?.requestId === requestId) setPromptQueue(promptQueue.slice(1));
+}
+
 export function SshPasswordPromptDialog() {
-  const [queue, setQueue] = useState<readonly DesktopSshPasswordPromptRequest[]>([]);
+  const queue = useSyncExternalStore(subscribePromptQueue, readPromptQueue, readPromptQueue);
   const currentRequest = queue[0] ?? null;
-
-  useEffect(() => {
-    const bridge = window.desktopBridge;
-    if (!bridge?.onSshPasswordPrompt) {
-      return;
-    }
-
-    return bridge.onSshPasswordPrompt((request) => {
-      setQueue((currentQueue) => [...currentQueue, request]);
-    });
-  }, []);
 
   if (!currentRequest) {
     return null;
@@ -31,11 +53,7 @@ export function SshPasswordPromptDialog() {
         window.desktopBridge?.resolveSshPasswordPrompt(currentRequest.requestId, password) ??
         Promise.resolve()
       }
-      onRemove={(requestId) => {
-        setQueue((currentQueue) =>
-          currentQueue[0]?.requestId === requestId ? currentQueue.slice(1) : currentQueue,
-        );
-      }}
+      onRemove={removeSshPasswordPrompt}
     />
   );
 }

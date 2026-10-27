@@ -127,25 +127,6 @@ function awaitState(
   );
 }
 
-const eventuallyState = Effect.fn("TestConnectionHarness.eventuallyState")(function* (
-  state: SubscriptionRef.SubscriptionRef<SupervisorConnectionState>,
-  predicate: (value: SupervisorConnectionState) => boolean,
-) {
-  let lastState = yield* SubscriptionRef.get(state);
-  for (let iteration = 0; iteration < 100; iteration += 1) {
-    lastState = yield* SubscriptionRef.get(state);
-    if (predicate(lastState)) {
-      return lastState;
-    }
-    yield* Effect.yieldNow;
-  }
-  return yield* Effect.die(
-    new Error(
-      `Expected supervisor state was not observed. Last state: phase=${lastState.phase}, stage=${lastState.stage ?? "none"}, attempt=${lastState.attempt}, generation=${lastState.generation}`,
-    ),
-  );
-});
-
 const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?: {
   readonly networkStatus?: NetworkStatus;
   readonly prepare?: (
@@ -473,7 +454,7 @@ describe("EnvironmentSupervisor", () => {
       expect(yield* Ref.get(harness.prepareCount)).toBe(1);
 
       yield* TestClock.adjust("15 seconds");
-      const retrying = yield* eventuallyState(
+      const retrying = yield* awaitState(
         supervisor.state,
         (state) => state.phase === "backoff" && state.attempt === 1,
       );
@@ -801,7 +782,7 @@ describe("EnvironmentSupervisor", () => {
       yield* TestClock.adjust("1999 millis");
       expect(yield* Ref.get(harness.prepareCount)).toBe(2);
       yield* TestClock.adjust("1 milli");
-      yield* eventuallyState(
+      yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2,
       );
@@ -835,7 +816,7 @@ describe("EnvironmentSupervisor", () => {
 
       // The retry answers, so a busy backend never becomes a visible
       // disconnect and the composer is never disabled.
-      yield* eventuallyState(
+      yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 1,
       );

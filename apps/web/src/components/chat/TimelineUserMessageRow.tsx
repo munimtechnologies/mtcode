@@ -1,3 +1,5 @@
+import { InlineAudioPreview } from "../files/InlineAudioPreview";
+import { filePreviewKind } from "@t3tools/shared/filePreview";
 import { findRevealRef } from "./markdownFindContext";
 import { type MessageId, type ServerProviderSkill, ThreadId } from "@t3tools/contracts";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
@@ -170,6 +172,7 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           expanded && "w-full",
         )}
       >
+        <MessageAuthorHeading>Automation</MessageAuthorHeading>
         <FoldedMessageHeader
           icon={CalendarClockIcon}
           label="Automation"
@@ -294,7 +297,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const userImages = (messageWithPreviews.attachments ?? []).filter(isImageAttachment);
   const userFiles = (row.message.attachments ?? []).filter(isFileAttachment);
   const userVideos = userFiles.filter(isVideoAttachment);
-  const otherUserFiles = userFiles.filter((file) => !isVideoAttachment(file));
+  const userAudio = userFiles.filter(
+    (file) => file.downloadable !== false && filePreviewKind(file) === "audio",
+  );
+  const otherUserFiles = userFiles.filter(
+    (file) => !isVideoAttachment(file) && !userAudio.includes(file),
+  );
   const unknownAttachments = (row.message.attachments ?? []).filter(
     (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
   );
@@ -319,6 +327,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       ? { environmentId: ctx.activeThreadEnvironmentId, threadId: senderThreadId }
       : null,
   );
+  const senderLabel = senderShell?.title.trim() || "Agent";
   const resolvedContext = resolveUserMessageContext(
     userMessage.attribution === "guest" ? { ...row.message, text: userMessage.text } : row.message,
   );
@@ -394,6 +403,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   };
   const renderContextReference = (reference: ChatMarkdownContextReference) => {
     const record = asKnownContextRecord(resolvedContext.recordsById.get(reference.contextId));
+    if (record?.kind === "file" && userAudio.some((file) => file.id === record.attachmentId))
+      return null;
     const annotationImage =
       record?.kind === "preview-annotation"
         ? resolvePreviewAnnotationImage({
@@ -463,10 +474,18 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           folded && expanded && "w-full",
         )}
       >
+        {/* Outside the fold so a collapsed message still has a heading to navigate to. */}
+        <MessageAuthorHeading>
+          {folded
+            ? senderLabel
+            : userMessage.guestName === undefined
+              ? "You"
+              : `${userMessage.guestName} (guest)`}
+        </MessageAuthorHeading>
         {folded ? (
           <FoldedMessageHeader
             icon={MessagesSquareIcon}
-            label={senderShell?.title.trim() || "Agent"}
+            label={senderLabel}
             summary={foldSummary}
             expanded={expanded}
             onToggle={() => setExpanded((value) => !value)}
@@ -482,9 +501,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
               folded && !ctx.findActive && "max-h-96 overflow-auto",
             )}
           >
-            <MessageAuthorHeading>
-              {userMessage.guestName === undefined ? "You" : `${userMessage.guestName} (guest)`}
-            </MessageAuthorHeading>
             {(regularImages.length > 0 || userVideos.length > 0) && (
               <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
                 {regularImages.map((image) => (
@@ -514,6 +530,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                           src={image.previewUrl}
                           alt={image.name}
                           decoding="async"
+                          loading="lazy"
                           className="block size-full object-cover"
                         />
                       </button>
@@ -532,6 +549,25 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 ))}
               </div>
             )}
+            {userAudio.length > 0 ? (
+              <div className="mb-2 flex max-w-full flex-col gap-1">
+                {userAudio.map((file) => (
+                  <InlineAudioPreview
+                    key={file.id}
+                    name={file.name}
+                    environmentId={ctx.activeThreadEnvironmentId}
+                    resource={{
+                      _tag: "attachment",
+                      attachmentId: file.id,
+                      fileName: file.name,
+                      mimeType: file.mimeType,
+                      disposition: "inline",
+                    }}
+                    onOpen={() => ctx.onFileOpen(file)}
+                  />
+                ))}
+              </div>
+            ) : null}
             {unchippedFiles.length > 0 || unknownAttachments.length > 0 ? (
               <div className="mb-2 flex flex-col gap-1">
                 {unchippedFiles.map((file) => {
@@ -821,7 +857,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   searchExpanded?: boolean;
   text: string;
   renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  skills: ReadonlyArray<ServerProviderSkill>;
   markdownCwd: string | undefined;
   collapsible?: boolean;
   footer?: ReactNode;
@@ -903,7 +939,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   renderContextReference?: (reference: ChatMarkdownContextReference) => ReactNode;
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  skills: ReadonlyArray<ServerProviderSkill>;
   markdownCwd: string | undefined;
 }) {
   const ctx = use(TimelineRowCtx);

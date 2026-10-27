@@ -5,15 +5,6 @@ import { APP_BASE_NAME } from "~/branding";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { DeviceHostsSettings } from "./DeviceHostsSettings";
 import { EasDeviceHostsSettings } from "./EasDeviceHostsSettings";
-import { ExternalTerminalSetting } from "./ExternalTerminalSetting";
-/**
- * Integrations settings - preferences for surfaces T3 Code embeds rather than
- * owns. Browser is the first section: the defaults a preview tab opens at,
- * applied to both hand-opened tabs and agent `preview_open` calls that don't
- * state their own size.
- *
- * @module IntegrationsSettings
- */
 import {
   AuthSettingsWriteScope,
   BrowserImportFailureReason,
@@ -128,6 +119,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
@@ -771,7 +763,7 @@ function BrowserSearchEngineSetting() {
   );
 }
 
-function PullRequestLinksOpenInAppSetting() {
+export function PullRequestLinksOpenInAppSetting() {
   const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
   const updateSettings = useUpdatePrimarySettings();
 
@@ -1145,30 +1137,6 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
     />
   );
 }
-
-/**
- * Profile list, its header menu, and the import flow.
- *
- * One menu creates profiles and imports into them, because the two are the
- * same decision from the user's side: "I want a profile that has my Helium
- * logins in it". Import targets include "New profile" so that case does not
- * require creating one first and then finding a second control.
- *
- * Built-ins render without a rename field: they are synthesized rather than
- * stored, so there is nothing to rename and removing them would strand every
- * tab that opened under them.
- *
- * Sources are listed lazily on open: detection touches the other browser's
- * files, and the answer changes while the app is running (quitting the browser
- * clears `browserRunning`), so a value cached at mount would go stale.
- */
-/**
- * Opens System Settings → Privacy & Security → Full Disk Access. The scheme is
- * unchanged from the old System Preferences and still resolves on Ventura and
- * later.
- */
-const FULL_DISK_ACCESS_SETTINGS_URL =
-  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFilesAccess";
 
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
@@ -1632,37 +1600,50 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-export function IntegrationsSettingsPanel() {
-  const previewDefaultsDisabled = !isElectron;
-  const previewDefaults = (
-    <>
-      <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
-      <BrowserViewportSetting disabled={previewDefaultsDisabled} />
-      <BrowserZoomSetting disabled={previewDefaultsDisabled} />
-      <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingInputSettings disabled={previewDefaultsDisabled} />
-      <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />
-      <BrowserAutoShowFloatingPreviewSetting disabled={previewDefaultsDisabled} />
-    </>
-  );
+export function BrowserSettingsPanel() {
+  const desktopOnly = !isElectron;
+  const desktopOnlyMessage = desktopOnly ? "Only available in the desktop app." : undefined;
 
   return (
     <SettingsPageContainer>
-      <ExternalTerminalSetting />
-      <SettingsSection id="browser" title="Browser">
+      <SettingsSection id="browser-agent-access" title="Agent access">
         <AgentBrowserAccessSetting />
-        {previewDefaultsDisabled ? (
-          <SettingsUnavailableGroup message="Only available in the desktop app.">
-            {previewDefaults}
-          </SettingsUnavailableGroup>
-        ) : (
-          previewDefaults
-        )}
+      </SettingsSection>
+      <SettingsSection id="browser" title="Browsing">
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserProfilesSetting disabled={desktopOnly} />
+          <BrowserLinkTargetSetting disabled={desktopOnly} />
+          <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
         {/* Not desktop-only: web clients search from server-run browser tabs too. */}
         <BrowserSearchEngineSetting />
-        <PullRequestLinksOpenInAppSetting />
+        <AdvancedSettings
+          targetIds={[
+            searchableSetting("browser-default-viewport").id,
+            searchableSetting("browser-default-zoom").id,
+            searchableSetting("browser-default-appearance").id,
+          ]}
+        >
+          <SettingsUnavailableGroup message={desktopOnlyMessage}>
+            <BrowserViewportSetting disabled={desktopOnly} />
+            <BrowserZoomSetting disabled={desktopOnly} />
+            <BrowserAppearanceSetting disabled={desktopOnly} />
+          </SettingsUnavailableGroup>
+        </AdvancedSettings>
       </SettingsSection>
+      <SettingsSection id="browser-recordings" title="Recordings">
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserRecordingFrameRateSetting disabled={desktopOnly} />
+          <BrowserRecordingInputSettings disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function DevicesSettingsPanel() {
+  return (
+    <SettingsPageContainer>
       <DeviceIntegrationSettings />
     </SettingsPageContainer>
   );

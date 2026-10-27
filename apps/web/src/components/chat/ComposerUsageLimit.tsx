@@ -1,18 +1,14 @@
-import { useEffect, useState } from "react";
 import { HourglassIcon, TimerResetIcon } from "lucide-react";
 
+import { useDeadlinePassed } from "../../hooks/useDeadline";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 import { UsageLimitCountdown } from "./UsageLimitCountdown";
 
 /**
- * The toggle for the usage-limit card. The unavailable state stays visible the
- * whole window; the action toggles auto-resume on and back off. Auto-resume
- * here mirrors the server's own sweep — both dispatch an ordinary turn when
- * the window passes. The window tracking lives in this component (not in the
- * `usageLimitBannerItem` factory) so hooks stay tied to a stable element and
- * ChatView's hook order is unaffected by the banner appearing or disappearing.
+ * The toggle for the usage-limit card: auto-resume on and back off. It mirrors the
+ * server's own sweep; both dispatch an ordinary turn when the window passes.
  */
 function UsageLimitAutoResumeAction(input: {
   readonly resetsAt: string;
@@ -21,18 +17,9 @@ function UsageLimitAutoResumeAction(input: {
   readonly onCancelAutoResume: () => void;
 }) {
   const { resetsAt, autoResumeArmed, onArmAutoResume, onCancelAutoResume } = input;
-  // Track whether the window has passed so the arm action can't fire once the
-  // server would reject it; the countdown flips its label at the same moment,
-  // and a re-render every 30s is enough to catch the flip. Re-syncing whenever
-  // a new window arrives keeps a passed window from disabling the next one.
-  const [windowPassed, setWindowPassed] = useState(() => Date.now() >= Date.parse(resetsAt));
-  useEffect(() => {
-    setWindowPassed(Date.now() >= Date.parse(resetsAt));
-    const interval = window.setInterval(() => {
-      setWindowPassed(Date.now() >= Date.parse(resetsAt));
-    }, 30_000);
-    return () => window.clearInterval(interval);
-  }, [resetsAt]);
+  // Once the window passes the server would reject an arm; a new window re-arms it.
+  const resetsAtMs = Date.parse(resetsAt);
+  const windowPassed = useDeadlinePassed(Number.isFinite(resetsAtMs) ? resetsAtMs : null);
   return (
     <Button
       size="xs"
@@ -44,9 +31,9 @@ function UsageLimitAutoResumeAction(input: {
       disabled={windowPassed && !autoResumeArmed}
     >
       {autoResumeArmed
-        ? "Auto-resume on — cancel"
+        ? "Auto-resume on (cancel)"
         : windowPassed
-          ? "Window passed — send a message to continue"
+          ? "Window passed. Send a message to continue"
           : "Continue when tokens return"}
     </Button>
   );
@@ -93,7 +80,6 @@ export function usageLimitBannerItem(input: {
   return {
     id: `thread-usage-limit:${threadId}`,
     variant: "warning",
-    priority: "urgent",
     icon: autoResumeArmed ? <TimerResetIcon /> : <HourglassIcon />,
     title: (
       <span className="flex min-w-0 items-center gap-1">

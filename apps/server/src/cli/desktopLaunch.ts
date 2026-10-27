@@ -90,7 +90,7 @@ const spawnExitOk = Effect.fn("desktopLaunch.spawnExitOk")(function* (
     .exitCode(ChildProcess.make(command, [...args], WAIT_IGNORE_STDIO_OPTIONS))
     .pipe(
       Effect.map((code) => code === 0),
-      Effect.catch(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
 });
 
@@ -105,7 +105,7 @@ const spawnDetachedOk = Effect.fn("desktopLaunch.spawnDetachedOk")(function* (
     .pipe(
       Effect.flatMap((handle) => handle.unref.pipe(Effect.as(true))),
       Effect.scoped,
-      Effect.catch(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
 });
 
@@ -139,12 +139,12 @@ const discoverLinuxDesktopEntryIds = Effect.fn("desktopLaunch.discoverLinuxDeskt
 
     const entries: Array<{ readonly fileName: string; readonly contents: string }> = [];
     for (const dir of dirs) {
-      const fileNames = yield* fs.readDirectory(dir).pipe(Effect.catch(() => Effect.succeed([])));
+      const fileNames = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => []));
       for (const fileName of fileNames) {
         if (!fileName.toLowerCase().endsWith(".desktop")) continue;
         const contents = yield* fs
           .readFileString(path.join(dir, fileName))
-          .pipe(Effect.catch(() => Effect.succeed("")));
+          .pipe(Effect.orElseSucceed(() => ""));
         if (contents.length === 0) continue;
         entries.push({ fileName, contents });
       }

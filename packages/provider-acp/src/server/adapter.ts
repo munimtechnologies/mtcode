@@ -219,6 +219,11 @@ class AcpModelSelectionError extends Schema.TaggedError<AcpModelSelectionError>(
 }
 
 export interface AcpAdapterV2Flavor {
+  readonly buildPrompt?: (input: {
+    readonly text: string;
+    readonly attachments: ReadonlyArray<ChatAttachment>;
+    readonly promptCapabilities: EffectAcpSchema.AgentCapabilities["promptCapabilities"];
+  }) => Effect.Effect<ReadonlyArray<EffectAcpSchema.ContentBlock>, EffectAcpErrors.AcpError>;
   readonly promptFailure?: (cause: unknown) => OrchestrationV2ProviderFailure;
   /**
    * Runs before attachment paths, T3 instructions and native slash-command detection,
@@ -1406,8 +1411,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver,
-    getCapabilities: () => Effect.succeed(flavor.capabilities),
-    planSelectionTransition: (input) => Effect.succeed(acpSelectionTransition(input)),
+    getCapabilities: Effect.fn("AcpAdapter.getCapabilities")(function () {
+      return Effect.succeed(flavor.capabilities);
+    }),
+    planSelectionTransition: Effect.fn("AcpAdapter.planSelectionTransition")(function (input) {
+      return Effect.succeed(acpSelectionTransition(input));
+    }),
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
@@ -3933,6 +3942,43 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* rearmDeferredFinalize(context);
         });
 
+        /**
+         * Notices have no id; each is its own item, numbered by the turn's item count.
+         * A notice is not conversation content, so an open message keeps streaming across it.
+         */
+        const emitNotice = Effect.fnUntraced(function* (
+          context: ActiveAcpTurn,
+          notice: { readonly title: string; readonly description?: string },
+        ) {
+          const nativeItemId = `${context.nativeTurnId}:notice:${context.itemOrdinals.size}`;
+          const now = yield* DateTime.now;
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem: {
+              id: providerTurnItemId(nativeItemId),
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId: context.input.rootNodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef: { driver, nativeId: nativeItemId, strength: "weak" },
+              parentItemId: null,
+              ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+              type: "system_notice",
+              status: "completed",
+              title: notice.title,
+              message:
+                notice.description === undefined
+                  ? notice.title
+                  : `${notice.title}\n\n${notice.description}`,
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+            },
+          });
+        });
+
         const emitPlan = Effect.fnUntraced(function* (
           context: ActiveAcpTurn,
           update: AcpPlanUpdate,
@@ -5081,6 +5127,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   yield* emitTool(context, event.toolCall);
                 } else if (event._tag === "PlanUpdated") {
                   yield* emitPlan(context, event.payload);
+                } else if (event._tag === "NoticeReceived") {
+                  yield* emitNotice(context, event);
                 } else if (event._tag === "UnknownUpdate") {
                   yield* emitTool(context, {
                     toolCallId: `${context.nativeTurnId}:unsupported:${event.updateType}`,
@@ -5398,12 +5446,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   Effect.ensuring(
                     runRuntimeCallbackAtGeneration(
                       generation,
-                      Effect.gen(function* () {
-                        yield* Ref.update(pendingRuntimeRequests, (current) => {
-                          const updated = new Map(current);
-                          updated.delete(String(requestId));
-                          return updated;
-                        });
+                      Ref.update(pendingRuntimeRequests, (current) => {
+                        const updated = new Map(current);
+                        updated.delete(String(requestId));
+                        return updated;
                       }),
                     ).pipe(Effect.asVoid),
                   ),
@@ -6091,12 +6137,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 Effect.ensuring(
                   runRuntimeCallbackAtGeneration(
                     handlerGeneration,
-                    Effect.gen(function* () {
-                      yield* Ref.update(pendingRuntimeRequests, (current) => {
-                        const updated = new Map(current);
-                        updated.delete(String(requestId));
-                        return updated;
-                      });
+                    Ref.update(pendingRuntimeRequests, (current) => {
+                      const updated = new Map(current);
+                      updated.delete(String(requestId));
+                      return updated;
                     }),
                   ).pipe(Effect.asVoid),
                 ),
@@ -7121,31 +7165,30 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* Deferred.succeed(context.completed, undefined).pipe(Effect.ignore);
         });
 
-        scheduleDeferredFinalize = (context) =>
-          Effect.gen(function* () {
-            if (!flavor.deferFinalizeForBackgroundWork) return;
-            if (!context.promptSettled || context.finalized || context.interrupted) return;
+        scheduleDeferredFinalize = Effect.fn("scheduleDeferredFinalize")(function* (context) {
+          if (!flavor.deferFinalizeForBackgroundWork) return;
+          if (!context.promptSettled || context.finalized || context.interrupted) return;
+          if (hasDeferredBackgroundWork(context)) return;
+          context.backgroundFinalizeGeneration += 1;
+          const generation = context.backgroundFinalizeGeneration;
+          yield* Effect.gen(function* () {
+            yield* Effect.sleep(ACP_DEFERRED_FINALIZE_DEBOUNCE);
+            if (
+              context.finalized ||
+              context.interrupted ||
+              context.backgroundFinalizeGeneration !== generation
+            ) {
+              return;
+            }
             if (hasDeferredBackgroundWork(context)) return;
-            context.backgroundFinalizeGeneration += 1;
-            const generation = context.backgroundFinalizeGeneration;
-            yield* Effect.gen(function* () {
-              yield* Effect.sleep(ACP_DEFERRED_FINALIZE_DEBOUNCE);
-              if (
-                context.finalized ||
-                context.interrupted ||
-                context.backgroundFinalizeGeneration !== generation
-              ) {
-                return;
-              }
-              if (hasDeferredBackgroundWork(context)) return;
-              const status = context.promptSettledStatus ?? "completed";
-              yield* finalizeTurn(context, status);
-            }).pipe(Effect.forkIn(sessionScope), Effect.asVoid);
-            yield* (
-              options.testHooks?.onDeferredFinalizeScheduled?.(ACP_DEFERRED_FINALIZE_DEBOUNCE) ??
-                Effect.void
-            );
-          });
+            const status = context.promptSettledStatus ?? "completed";
+            yield* finalizeTurn(context, status);
+          }).pipe(Effect.forkIn(sessionScope), Effect.asVoid);
+          yield* (
+            options.testHooks?.onDeferredFinalizeScheduled?.(ACP_DEFERRED_FINALIZE_DEBOUNCE) ??
+              Effect.void
+          );
+        });
 
         const resolvePromptParts = Effect.fnUntraced(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -7169,10 +7212,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       childProcessSpawner,
                     ),
                   );
-          const messageText = providerMessageTextWithAttachmentPaths({
+          const messageText = yield* providerMessageTextWithAttachmentPaths({
             text: userText,
             attachments: turnInput.message.attachments,
             resolveAttachmentPath: host.resolveAttachmentPath,
+            resolveExtractedTextPath: host.resolveExtractedTextPath,
           });
           const isNativeSlashCommand = userText.trimStart().startsWith("/");
           const text = t3AcpPromptWithInstructions({
@@ -7194,7 +7238,27 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               detail: "ACP driver did not negotiate image prompt support",
             });
           }
-          for (const attachment of imageAttachments) {
+          if (flavor.buildPrompt) {
+            const setup = yield* Ref.get(activeSessionSetup);
+            const blocks = yield* flavor
+              .buildPrompt({
+                text,
+                attachments: turnInput.message.attachments,
+                promptCapabilities: setup?.initializeResult.agentCapabilities?.promptCapabilities,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterProtocolError({
+                      driver,
+                      detail: "Failed to build ACP attachment prompt",
+                      payload: cause,
+                    }),
+                ),
+              );
+            prompt.splice(0, prompt.length, ...blocks);
+          }
+          for (const attachment of flavor.buildPrompt ? [] : imageAttachments) {
             const path = host.resolveAttachmentPath(attachment as ChatAttachment);
             if (path === null) {
               return yield* new ProviderAdapter.ProviderAdapterProtocolError({

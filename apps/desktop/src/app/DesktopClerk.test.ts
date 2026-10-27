@@ -280,8 +280,8 @@ describe("DesktopClerk", () => {
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const electronWindow = {
-      main: Effect.succeed(Option.some(mainWindow)),
-      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      main: Effect.succeedSome(mainWindow),
+      currentMainOrFirst: Effect.succeedSome(mainWindow),
       reveal: (window: unknown) =>
         Effect.sync(() => {
           revealed.push(window);
@@ -338,8 +338,8 @@ describe("DesktopClerk", () => {
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const electronWindow = {
-      main: Effect.succeed(Option.some(mainWindow)),
-      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      main: Effect.succeedSome(mainWindow),
+      currentMainOrFirst: Effect.succeedSome(mainWindow),
       reveal: (window: unknown) =>
         Effect.sync(() => {
           revealed.push(window);
@@ -383,8 +383,8 @@ describe("DesktopClerk", () => {
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const electronWindow = {
-      main: Effect.succeed(Option.some(mainWindow)),
-      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      main: Effect.succeedSome(mainWindow),
+      currentMainOrFirst: Effect.succeedSome(mainWindow),
       reveal: (window: unknown) =>
         Effect.sync(() => {
           revealed.push(window);
@@ -434,8 +434,8 @@ describe("DesktopClerk", () => {
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const electronWindow = {
-      main: Effect.succeed(Option.none()),
-      currentMainOrFirst: Effect.succeed(Option.none()),
+      main: Effect.succeedNone,
+      currentMainOrFirst: Effect.succeedNone,
       reveal: () => Effect.die("unexpected reveal before main exists"),
     } as unknown as ElectronWindow.ElectronWindow["Service"];
     const desktopWindow = {
@@ -550,8 +550,8 @@ describe("DesktopClerk", () => {
     } as unknown as ElectronApp.ElectronApp["Service"];
     const createMainAttempts: string[] = [];
     const electronWindow = {
-      main: Effect.succeed(Option.none()),
-      currentMainOrFirst: Effect.succeed(Option.some(splashWindow)),
+      main: Effect.succeedNone,
+      currentMainOrFirst: Effect.succeedSome(splashWindow),
       reveal: (window: unknown) =>
         Effect.sync(() => {
           revealed.push(window);
@@ -638,7 +638,7 @@ it.effect(
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const electronWindow = {
-      currentMainOrFirst: Effect.succeed(Option.some(window)),
+      currentMainOrFirst: Effect.succeedSome(window),
       reveal: () => Effect.sync(() => revealed.resolve()),
     } as unknown as ElectronWindow.ElectronWindow["Service"];
     return Effect.gen(function* () {

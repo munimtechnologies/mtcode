@@ -744,7 +744,7 @@ export const openLiveProjectIfPresent = Effect.fn("openLiveProjectIfPresent")(fu
       return true;
     }
     if (outcome._tag === "Fail") {
-      return yield* Effect.fail(outcome.error);
+      return yield* outcome.error;
     }
 
     yield* Effect.logDebug("Failed to reach a discovered live server for open.", {

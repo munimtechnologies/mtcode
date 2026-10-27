@@ -46,7 +46,6 @@ import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
@@ -1510,7 +1509,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         messageId: wake.messageId,
         ...(notification === null ? {} : { notification }),
         dispatchIfCurrent: (dispatch) =>
-          wake.dropped ? Effect.succeed(Option.none()) : Effect.map(dispatch, Option.some),
+          wake.dropped ? Effect.succeedNone : Effect.asSome(dispatch),
       });
     });
 
@@ -2969,12 +2968,16 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       };
     });
 
-    const promptText = (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) =>
-      providerMessageTextWithAttachmentPaths({
+    const promptText = Effect.fnUntraced(function* (
+      turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+    ) {
+      return (yield* providerMessageTextWithAttachmentPaths({
         text: turnInput.message.text,
         attachments: turnInput.message.attachments,
         resolveAttachmentPath: host.resolveAttachmentPath,
-      }).trim();
+        resolveExtractedTextPath: host.resolveExtractedTextPath,
+      })).trim();
+    });
 
     const promptFiles = Effect.fnUntraced(function* (attachments: ReadonlyArray<ChatAttachment>) {
       const files: Array<{ uri: string; name: string }> = [];
@@ -3004,8 +3007,8 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
      * Use off removes the one this instance added. The tools are an addition,
      * so failures only log.
      */
-    const syncDesktopMcp = (directory: string) =>
-      Effect.gen(function* () {
+    const syncDesktopMcp = Effect.fn("syncDesktopMcp")(
+      function* (directory: string) {
         if (resolveDesktopMcp === undefined || connection.external) return;
         const desktopMcp = yield* resolveDesktopMcp();
         if (desktopMcp === undefined) {
@@ -3039,11 +3042,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           })
           .pipe(Effect.timeout(INVENTORY_TIMEOUT));
         desktopMcpDirectories.add(directory);
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Could not add Computer Use's MCP server to OpenCode.", cause),
-        ),
-      );
+      },
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not add Computer Use's MCP server to OpenCode.", cause),
+      ),
+    );
 
     // T3's MCP registrations outlive a session only on an external server; a
     // spawned one forgets them when it stops.
@@ -3370,12 +3373,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           )
         : [];
       const files = yield* promptFiles(turnInput.message.attachments);
+      const messageText = yield* promptText(turnInput);
       if (!sending()) return;
       return yield* client.session
         .prompt({
           sessionID,
           id,
-          text: promptText(turnInput),
+          text: messageText,
           ...(files.length === 0 ? {} : { files }),
           ...(skills.length === 0
             ? {}
@@ -3699,7 +3703,26 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           if (turn.settledInbox.has(inboxID)) return;
           turn.steers.add(inboxID);
           state.strandedSteers.delete(inboxID);
-          const files = yield* promptFiles(steerInput.message.attachments);
+          const { files, messageText } = yield* Effect.gen(function* () {
+            const files = yield* promptFiles(steerInput.message.attachments);
+            const messageText = (yield* providerMessageTextWithAttachmentPaths({
+              text: steerInput.message.text,
+              attachments: steerInput.message.attachments,
+              resolveAttachmentPath: host.resolveAttachmentPath,
+              resolveExtractedTextPath: host.resolveExtractedTextPath,
+            })).trim();
+            return { files, messageText };
+          }).pipe(
+            Effect.onInterrupt(() =>
+              lock.withPermit(
+                Effect.gen(function* () {
+                  turn.steers.delete(inboxID);
+                  state.strandedSteers.delete(inboxID);
+                  if (state.active === turn) yield* endIfSettled(state, turn);
+                }),
+              ),
+            ),
+          );
           if (state.active !== turn || turn.interrupted) {
             yield* lock.withPermit(
               Effect.gen(function* () {
@@ -3723,11 +3746,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             .prompt({
               sessionID: Session.ID.make(sessionId),
               id: inboxID,
-              text: providerMessageTextWithAttachmentPaths({
-                text: steerInput.message.text,
-                attachments: steerInput.message.attachments,
-                resolveAttachmentPath: host.resolveAttachmentPath,
-              }).trim(),
+              text: messageText,
               ...(files.length === 0 ? {} : { files }),
               delivery: "steer",
             })
@@ -4073,8 +4092,12 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId,
     driver,
-    getCapabilities: () => Effect.succeed(OpenCode2ProviderCapabilities),
-    planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    getCapabilities: Effect.fn("OpencodeAdapter.getCapabilities")(function () {
+      return Effect.succeed(OpenCode2ProviderCapabilities);
+    }),
+    planSelectionTransition: Effect.fn("OpencodeAdapter.planSelectionTransition")(function () {
+      return Effect.succeed(turnScopedSelectionTransition());
+    }),
     // The session borrows the instance's server for as long as it is open, so a
     // spawned server is not idle-stopped under a long tool call.
     openSession: Effect.fn("OpenCode2Adapter.borrowAndOpenSession")(

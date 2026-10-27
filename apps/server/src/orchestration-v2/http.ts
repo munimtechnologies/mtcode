@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
@@ -40,6 +41,7 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import * as ServerConfig from "../config.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import {
   buildActiveShellSnapshot,
@@ -83,16 +85,19 @@ export const layer = HttpApiBuilder.group(
       launches: Effect.serviceOption(ThreadLaunchService.ThreadLaunchService),
       config: Effect.serviceOption(ServerConfig.ServerConfig),
       fileSystem: Effect.serviceOption(FileSystem.FileSystem),
+      documentText: Effect.serviceOption(DocumentText.DocumentText),
     });
     const intakeContext =
       Option.isSome(intakeServices.launches) &&
       Option.isSome(intakeServices.config) &&
-      Option.isSome(intakeServices.fileSystem)
+      Option.isSome(intakeServices.fileSystem) &&
+      Option.isSome(intakeServices.documentText)
         ? Option.some(
             Context.make(ThreadManagementService.ThreadManagementService, threadManagement).pipe(
               Context.add(ThreadLaunchService.ThreadLaunchService, intakeServices.launches.value),
               Context.add(ServerConfig.ServerConfig, intakeServices.config.value),
               Context.add(FileSystem.FileSystem, intakeServices.fileSystem.value),
+              Context.add(DocumentText.DocumentText, intakeServices.documentText.value),
             ),
           )
         : Option.none();
@@ -104,6 +109,7 @@ export const layer = HttpApiBuilder.group(
         | ThreadLaunchService.ThreadLaunchService
         | FileSystem.FileSystem
         | ServerConfig.ServerConfig
+        | DocumentText.DocumentText
       >,
     ): Effect.Effect<A, E | ThreadIntakeUnavailableError> =>
       Option.isSome(intakeContext)
@@ -366,9 +372,11 @@ export const layer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.threadHistoryPage")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          try {
-            decodeThreadHistoryCursor(args.query.cursor);
-          } catch (cause) {
+          const decoded = yield* Effect.try(() =>
+            decodeThreadHistoryCursor(args.query.cursor),
+          ).pipe(Effect.result);
+          if (Result.isFailure(decoded)) {
+            const cause = decoded.failure.cause;
             if (cause instanceof InvalidThreadHistoryCursorError)
               return yield* failEnvironmentInvalidRequest("invalid_history_cursor");
             return yield* failEnvironmentInternal("orchestration_thread_history_failed", cause);

@@ -21,9 +21,9 @@ const readHistorySettings = Effect.fn("desktop.computerHistory.readSettings")(fu
   const raw = yield* fileSystem
     .readFileString(environment.serverSettingsPath)
     .pipe(Effect.orElseSucceed(() => "{}"));
-  const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings))(
-    raw,
-  ).pipe(Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS));
+  const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(ServerSettings))(raw).pipe(
+    Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+  );
   return decoded.computerHistory;
 });
 

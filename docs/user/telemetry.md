@@ -36,7 +36,7 @@ another. The update server keeps each code for two days, then deletes it.
 ## Export diagnostics to your own receiver
 
 To send traces, metrics, or logs to an OpenTelemetry receiver, open
-**Settings > General > Diagnostics**, select an environment, and enter each signal's OTLP HTTP
+**Settings > Maintenance > Diagnostics**, select an environment, and enter each signal's OTLP HTTP
 endpoint under **OpenTelemetry export** (for example `http://localhost:4318/v1/traces`). Save, then
 restart that environment's server. The receiver must be reachable from the server's machine.
 **Test** sends an empty export from the server to check an endpoint before or after you save it;

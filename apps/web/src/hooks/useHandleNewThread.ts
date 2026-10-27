@@ -4,8 +4,13 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
-import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
-import { useRouter } from "@tanstack/react-router";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  type EnvironmentId,
+  type ScopedProjectRef,
+  type ThreadId,
+} from "@t3tools/contracts";
+import { type AnyRouter, useRouter } from "@tanstack/react-router";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
@@ -31,7 +36,8 @@ import {
   useProjects,
   useQuietThreadShell,
 } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { readPrimaryEnvironmentId } from "../state/environments";
+import { environmentPresentations } from "../state/presentation";
 import {
   hasExplicitComposerModelSelection,
   resolveAvailableNewThreadProjectRef,
@@ -39,6 +45,7 @@ import {
   resolveNewThreadModelSelectionOverride,
   resolveWorkspaceOptionsAfterEnvironmentRetarget,
 } from "../lib/chatThreadActions";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { shouldReadProjectFileForNewThreadDefaults } from "../session-logic";
@@ -46,7 +53,7 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { useClientSettings } from "./useSettings";
+import { getClientSettings } from "./useSettings";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 
@@ -67,10 +74,17 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 }
 
 export function useNewThreadHandler() {
-  const { environments } = useEnvironments();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const router = useRouter();
+  return createNewThreadHandler(useRouter());
+}
+
+export type NewThreadHandler = ReturnType<typeof createNewThreadHandler>;
+
+function readEnvironmentConnectionPhase(environmentId: EnvironmentId) {
+  return appAtomRegistry.get(environmentPresentations.presentationsAtom).get(environmentId)
+    ?.connection.phase;
+}
+
+export function createNewThreadHandler(router: AnyRouter) {
   const getCurrentRouteTarget = () => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
@@ -87,6 +101,8 @@ export function useNewThreadHandler() {
     },
   ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
     const projects = readProjects();
+    const projectGroupingSettings = selectProjectGroupingSettings(getClientSettings());
+    const primaryEnvironmentId = readPrimaryEnvironmentId();
     // Read at call time; status pushes replace the config map and would recreate every sidebar handler.
     const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
     const {
@@ -150,10 +166,7 @@ export function useNewThreadHandler() {
         isPrimary: candidate.environmentId === primaryEnvironmentId,
       })),
       isEnvironmentReachable: (environmentId) =>
-        canCreateProjectInEnvironment(
-          environments.find((environment) => environment.environmentId === environmentId)
-            ?.connection.phase,
-        ),
+        canCreateProjectInEnvironment(readEnvironmentConnectionPhase(environmentId)),
     });
     const targetServerConfig = environmentServerConfigs.get(projectRef.environmentId);
     const project =
@@ -207,9 +220,7 @@ export function useNewThreadHandler() {
     // environment cannot serve: executeAtomQuery waits on a live RPC, so
     // a down machine would leave New Thread hanging.
     const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-      const connectionPhase = environments.find(
-        (environment) => environment.environmentId === projectRef.environmentId,
-      )?.connection.phase;
+      const connectionPhase = readEnvironmentConnectionPhase(projectRef.environmentId);
       const consultProjectFile =
         project !== undefined &&
         shouldReadProjectFileForNewThreadDefaults(
@@ -467,6 +478,22 @@ export function useNewThreadHandler() {
   };
 }
 
+export function resolveDefaultProjectRef(
+  projects: ReadonlyArray<EnvironmentProject>,
+  projectOrder: readonly string[],
+): ScopedProjectRef | null {
+  const [defaultProject] = orderItemsByPreferredIds({
+    items: projects,
+    preferredIds: projectOrder,
+    getId: getProjectOrderKey,
+    getPreferenceIds: (project) => [
+      getProjectOrderKey(project),
+      legacyProjectCwdPreferenceKey(project.workspaceRoot),
+    ],
+  });
+  return defaultProject ? scopeProjectRef(defaultProject.environmentId, defaultProject.id) : null;
+}
+
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useThreadRouteTarget();
@@ -483,18 +510,7 @@ export function useHandleNewThread() {
   );
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
-  const [defaultProject] = orderItemsByPreferredIds({
-    items: projects,
-    preferredIds: projectOrder,
-    getId: getProjectOrderKey,
-    getPreferenceIds: (project) => [
-      getProjectOrderKey(project),
-      legacyProjectCwdPreferenceKey(project.workspaceRoot),
-    ],
-  });
-  const defaultProjectRef = defaultProject
-    ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
-    : null;
+  const defaultProjectRef = resolveDefaultProjectRef(projects, projectOrder);
 
   return {
     activeDraftThread,

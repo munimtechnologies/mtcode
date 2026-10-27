@@ -260,6 +260,7 @@ export const make = Effect.gen(function* () {
       threadSnooze: true,
       environmentThemes: true,
       usageLimitSources: true,
+      providerWorkspaceSnapshotsOnDemand: true,
       usagePriceOverrides: true,
       usageModelAliases: true,
       threadPinning: true,
@@ -292,7 +293,9 @@ export const make = Effect.gen(function* () {
 
   return ServerEnvironment.of({
     getEnvironmentId: Effect.succeed(environmentId),
-    setEnvironmentLabel: (label) => Ref.set(environmentLabel, label),
+    setEnvironmentLabel: Effect.fn("ServerEnvironment.setEnvironmentLabel")(function (label) {
+      return Ref.set(environmentLabel, label);
+    }),
     // The publish opt-in and relay link change at runtime (`t3 connect
     // publish`, the client settings toggle), so the capability is read per
     // descriptor request rather than baked in at startup.

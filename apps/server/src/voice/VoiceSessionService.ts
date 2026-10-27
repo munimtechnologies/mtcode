@@ -141,7 +141,7 @@ export const make = Effect.gen(function* () {
 
   // The old provider credential has no consumer after this migration. Remove it
   // during service startup so upgrading does not leave an unused xAI key behind.
-  yield* secretStore.remove(LEGACY_XAI_VOICE_API_KEY_SECRET).pipe(Effect.catch(() => Effect.void));
+  yield* secretStore.remove(LEGACY_XAI_VOICE_API_KEY_SECRET).pipe(Effect.ignore);
 
   const readCredential = secretStore.get(OPENAI_REALTIME_API_KEY_SECRET).pipe(
     Effect.mapError(() => secretStoreFailure("OpenAI Realtime")),

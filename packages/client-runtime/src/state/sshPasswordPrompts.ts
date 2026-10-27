@@ -37,37 +37,40 @@ export const resolveSshPasswordPrompt = (
     ),
   );
 
-export const consumeSshPromptedOperation = <Result, Error, Requirements>(
+export const consumeSshPromptedOperation = Effect.fn("consumeSshPromptedOperation")(function* <
+  Result,
+  Error,
+  Requirements,
+>(
   environmentId: EnvironmentId,
   operation: string,
   stream: Stream.Stream<SshPromptedOperationEvent<Result>, Error, Requirements>,
   onSshPasswordPrompt: SshPasswordPromptHandler,
-) =>
-  Effect.gen(function* () {
-    type ResolutionError = Effect.Error<ReturnType<typeof resolveSshPasswordPrompt>>;
-    const resolutionFailed = yield* Deferred.make<never, ResolutionError>();
-    const consume = stream.pipe(
-      Stream.mapEffect((event) => {
-        if (event._tag === "complete") {
-          return Effect.succeed(event.result);
-        }
-        return resolveSshPasswordPrompt(event.request, onSshPasswordPrompt).pipe(
-          Effect.tapError((error) => Deferred.fail(resolutionFailed, error)),
-          Effect.forkChild({ startImmediately: true }),
-          Effect.as(null),
-        );
-      }),
-      Stream.runFold(
-        () => null as Result | null,
-        (current, next) => next ?? current,
-      ),
-    );
-    const result = yield* Effect.raceFirst(consume, Deferred.await(resolutionFailed));
-    if (result === null) {
-      return yield* new EnvironmentRpcUnavailableError({
-        environmentId,
-        message: `${operation} ended before the server returned a result.`,
-      });
-    }
-    return result;
-  });
+) {
+  type ResolutionError = Effect.Error<ReturnType<typeof resolveSshPasswordPrompt>>;
+  const resolutionFailed = yield* Deferred.make<never, ResolutionError>();
+  const consume = stream.pipe(
+    Stream.mapEffect((event) => {
+      if (event._tag === "complete") {
+        return Effect.succeed(event.result);
+      }
+      return resolveSshPasswordPrompt(event.request, onSshPasswordPrompt).pipe(
+        Effect.tapError((error) => Deferred.fail(resolutionFailed, error)),
+        Effect.forkChild({ startImmediately: true }),
+        Effect.as(null),
+      );
+    }),
+    Stream.runFold(
+      () => null as Result | null,
+      (current, next) => next ?? current,
+    ),
+  );
+  const result = yield* Effect.raceFirst(consume, Deferred.await(resolutionFailed));
+  if (result === null) {
+    return yield* new EnvironmentRpcUnavailableError({
+      environmentId,
+      message: `${operation} ended before the server returned a result.`,
+    });
+  }
+  return result;
+});

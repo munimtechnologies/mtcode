@@ -32,7 +32,7 @@ const desktopAssetsLayer = Layer.succeed(DesktopAssets.DesktopAssets, {
     icns: Option.none(),
     png: Option.some("C:/path/to/icon.png"),
   }),
-  resolveResourcePath: () => Effect.succeed(Option.none()),
+  resolveResourcePath: () => Effect.succeedNone,
 } satisfies DesktopAssets.DesktopAssets["Service"]);
 
 const makeElectronTrayLayer = (

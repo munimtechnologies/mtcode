@@ -373,8 +373,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     const listWorkspaceCapabilities = (workspaceCwd: string) =>
       snapshotForCwd(workspaceCwd).pipe(
         Effect.orElseSucceed(() => undefined),
-        Effect.flatMap((workspace) =>
-          workspace ? Effect.succeed(workspace) : snapshot.getSnapshot,
+        Effect.filterOrElse(
+          (workspace): workspace is NonNullable<typeof workspace> => workspace !== undefined,
+          () => snapshot.getSnapshot,
         ),
         Effect.map(({ slashCommands, skills }) => ({ slashCommands, skills })),
       );

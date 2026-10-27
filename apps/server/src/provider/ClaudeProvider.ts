@@ -323,39 +323,45 @@ type ClaudeRateLimitPromoNotice = {
   readonly text?: unknown;
 };
 
-const readClaudeRateLimitPromo = (environment: NodeJS.ProcessEnv) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const configDirectories = [environment.CLAUDE_CONFIG_DIR, environment.HOME].filter(
-      (value): value is string => typeof value === "string" && value.length > 0,
-    );
+function parseClaudeRateLimitPromo(configContents: string): string | undefined {
+  try {
+    // @effect-diagnostics-next-line preferSchemaOverJson:off - optional local Claude cache.
+    const config = JSON.parse(configContents) as {
+      readonly cachedGrowthBookFeatures?: Record<string, unknown>;
+    };
+    const notices = config.cachedGrowthBookFeatures?.tengu_rate_limit_promo_notices;
+    if (!Array.isArray(notices)) return undefined;
+    const notice = notices.find((entry): entry is ClaudeRateLimitPromoNotice => {
+      if (!entry || typeof entry !== "object") return false;
+      const candidate = entry as ClaudeRateLimitPromoNotice;
+      return candidate.bar === "seven_day" && typeof candidate.text === "string";
+    });
+    if (typeof notice?.text === "string" && notice.text.trim()) return notice.text.trim();
+  } catch {
+    // The promotion is optional; an unavailable local cache must not fail status.
+  }
+  return undefined;
+}
 
-    for (const directory of configDirectories) {
-      const configContents = yield* fs
-        .readFileString(path.join(directory, ".claude.json"))
-        .pipe(Effect.option);
-      if (Option.isNone(configContents)) continue;
+const readClaudeRateLimitPromo = Effect.fn("readClaudeRateLimitPromo")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const configDirectories = [environment.CLAUDE_CONFIG_DIR, environment.HOME].filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
 
-      try {
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - optional local Claude cache.
-        const config = JSON.parse(configContents.value) as {
-          readonly cachedGrowthBookFeatures?: Record<string, unknown>;
-        };
-        const notices = config.cachedGrowthBookFeatures?.tengu_rate_limit_promo_notices;
-        if (!Array.isArray(notices)) continue;
-        const notice = notices.find((entry): entry is ClaudeRateLimitPromoNotice => {
-          if (!entry || typeof entry !== "object") return false;
-          const candidate = entry as ClaudeRateLimitPromoNotice;
-          return candidate.bar === "seven_day" && typeof candidate.text === "string";
-        });
-        if (typeof notice?.text === "string" && notice.text.trim()) return notice.text.trim();
-      } catch {
-        // The promotion is optional; an unavailable local cache must not fail status.
-      }
-    }
-    return undefined;
-  });
+  for (const directory of configDirectories) {
+    const configContents = yield* fs
+      .readFileString(path.join(directory, ".claude.json"))
+      .pipe(Effect.option);
+    if (Option.isNone(configContents)) continue;
+    const promo = parseClaudeRateLimitPromo(configContents.value);
+    if (promo !== undefined) return promo;
+  }
+  return undefined;
+});
 
 function mapClaudeUsageRateLimitWindow(
   window: ClaudeUsageRateLimitWindow | null | undefined,
@@ -578,10 +584,14 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
 ): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
-  const probeResult = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false).pipe(
-    Effect.result,
-  );
-  const capabilities = Result.isSuccess(probeResult) ? probeResult.success : undefined;
+  const fileSystem = yield* FileSystem.FileSystem;
+  // A deleted worktree can never answer the probe. Pending would make clients rescan it forever.
+  const cwdExists = yield* fileSystem.exists(cwd).pipe(Effect.orElseSucceed(() => true));
+  const probeResult = cwdExists
+    ? yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false).pipe(Effect.result)
+    : undefined;
+  const capabilities =
+    probeResult && Result.isSuccess(probeResult) ? probeResult.success : undefined;
   return {
     ...machineSnapshot,
     skills,
@@ -589,7 +599,7 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
       COMPACT_SLASH_COMMAND,
       ...(capabilities?.slashCommands ?? []),
     ]),
-    slashCommandsPending: !capabilities,
+    slashCommandsPending: cwdExists && !capabilities,
   };
 });
 

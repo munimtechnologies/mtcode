@@ -169,7 +169,7 @@ const worktreesDirectorySchema = (path: Path.Path, home: string) =>
 const assertWorktreesDirectory = (value: string, path: Path.Path) =>
   HostProcess.HomeDirectory.pipe(
     Effect.flatMap((home) =>
-      Schema.decodeUnknownEffect(worktreesDirectorySchema(path, home))(value),
+      Schema.decodeEffect(worktreesDirectorySchema(path, home))(value),
     ),
     Effect.asVoid,
     Effect.mapError(

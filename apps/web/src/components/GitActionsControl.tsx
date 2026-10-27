@@ -121,6 +121,7 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useOpenLink } from "~/browser/useOpenLink";
 import { SshPasswordRequestDialog, useSshPasswordRequest } from "./SshPasswordRequestDialog";
+import { useClientSettings } from "~/hooks/useSettings";
 
 interface GitActionsControlProps {
   presentation?: "toolbar" | "menu";
@@ -205,7 +206,7 @@ function getPublishProviderReadiness(input: {
   if (!discovered) {
     return {
       ready: false,
-      hint: "Provider status unavailable. Open Settings -> Source Control and rescan.",
+      hint: "Provider status unavailable. Open Settings -> Source control and rescan.",
     };
   }
   if (discovered.status !== "available") {
@@ -216,7 +217,7 @@ function getPublishProviderReadiness(input: {
       ready: false,
       hint:
         Option.getOrNull(discovered.auth.detail) ??
-        `${discovered.label} is not authenticated. Open Settings -> Source Control for setup guidance.`,
+        `${discovered.label} is not authenticated. Open Settings -> Source control for setup guidance.`,
     };
   }
   return { ready: true, hint: null };
@@ -682,7 +683,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                         />
                         <TooltipPopup side="top" align="end">
                           {readiness.hint ??
-                            "Open Settings -> Source Control to configure this provider."}
+                            "Open Settings -> Source control to configure this provider."}
                         </TooltipPopup>
                       </Tooltip>
                     </div>
@@ -1177,6 +1178,17 @@ export default function GitActionsControl({
       ? (quickAction.hint ?? "This action is currently unavailable.")
       : null;
   const gitActionProgress = resolveGitActionProgressPresentation(vcsActionState);
+  const redesign = useClientSettings((s) => s.redesignEnabled);
+  // A fresh draft or a thread with no turns hides commit, push, and diff rows until there is work.
+  const quietEmptyDraft =
+    redesign &&
+    isPanel &&
+    (draftId !== undefined || activeServerThreadShell?.latestRun === null) &&
+    gitActionProgress === null &&
+    !gitStatusError &&
+    quickAction.disabled &&
+    !changesTotals?.insertions &&
+    !changesTotals?.deletions;
   const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
     ? resolveDefaultBranchActionDialogCopy({
         action: pendingDefaultBranchAction.action,
@@ -1315,9 +1327,12 @@ export default function GitActionsControl({
     const actionResult = result.value;
     syncThreadBranchAfterGitAction(actionResult);
     if (isPanel) {
+      const createdPullRequest = actionResult.pr.status === "created";
       setInlineSuccess({
-        title: actionResult.toast.title,
-        description: actionResult.toast.description ?? null,
+        title: createdPullRequest
+          ? `Created ${changeRequestTerminology.shortLabel}`
+          : actionResult.toast.title,
+        description: createdPullRequest ? null : (actionResult.toast.description ?? null),
         scopeKey: successScopeKey,
       });
       return;
@@ -1713,7 +1728,7 @@ export default function GitActionsControl({
             {initAction.isPending ? "Initializing..." : "Initialize Git"}
           </span>
         </ThreadDetailsControl>
-      ) : compact && !gitActionProgress && !visibleInlineSuccess ? null : (
+      ) : quietEmptyDraft || (compact && !gitActionProgress && !visibleInlineSuccess) ? null : (
         <ActionGroup
           role="group"
           aria-label="Git actions"
@@ -1850,7 +1865,7 @@ export default function GitActionsControl({
         </ActionGroup>
       )}
 
-      {isPanel && isRepo ? (
+      {isPanel && isRepo && !quietEmptyDraft ? (
         <ThreadDetailsControl
           type="button"
           variant="ghost"
@@ -1861,11 +1876,21 @@ export default function GitActionsControl({
         >
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
           <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>Changes</span>
-          <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-            <span className="text-diff-addition">
+          <span className="flex items-center gap-1.5 font-mono text-xs tabular-nums">
+            <span
+              className={
+                changesTotals?.insertions
+                  ? "text-diff-addition-foreground"
+                  : "text-muted-foreground"
+              }
+            >
               +{formatDiffCount(changesTotals?.insertions ?? 0)}
             </span>
-            <span className="text-diff-deletion">
+            <span
+              className={
+                changesTotals?.deletions ? "text-diff-deletion-foreground" : "text-muted-foreground"
+              }
+            >
               -{formatDiffCount(changesTotals?.deletions ?? 0)}
             </span>
           </span>

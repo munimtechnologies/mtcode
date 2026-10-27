@@ -529,6 +529,12 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     discoveredModels.length > 0
       ? grokModelsFromSettings(grokSettings.customModels, discoveredModels)
       : fallbackModels;
+  // The registry replaces cached models on a ready probe, so a fallback-only list must not be ready.
+  const incompleteMessage = acpFailed
+    ? "Grok CLI is installed but ACP initialize failed. Model options may be incomplete."
+    : discoveredModels.length === 0
+      ? "Grok CLI did not list any models. Model options may be incomplete."
+      : undefined;
 
   if (auth.status === "unauthenticated") {
     return buildServerProvider({
@@ -557,7 +563,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
     probe: {
       installed: true,
       version,
-      status: acpFailed ? "warning" : "ready",
+      status: incompleteMessage ? "warning" : "ready",
       auth,
       // Neither the CLI nor its local state exposes subscription quota:
       // `grok usage` only prints per-session tokens and cost.
@@ -566,12 +572,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
         reason: "unsupported",
         message: "Grok Build does not report subscription quota.",
       }),
-      ...(acpFailed
-        ? {
-            message:
-              "Grok CLI is installed but ACP initialize failed. Model options may be incomplete.",
-          }
-        : {}),
+      ...(incompleteMessage ? { message: incompleteMessage } : {}),
     },
   });
 });

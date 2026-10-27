@@ -25,6 +25,7 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("media-file", {
     threadId: ThreadId,
     path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+    disposition: Schema.optionalKey(Schema.Literal("attachment")),
   }),
   Schema.TaggedStruct("visualization", {
     threadId: ThreadId,

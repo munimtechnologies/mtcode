@@ -15,7 +15,6 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -319,16 +318,14 @@ export const make = Effect.gen(function* ComputerTaskBrokerMake() {
         Effect.timeoutOption(COMPUTER_SEND_TIMEOUT_MS),
         Effect.ensuring(removePending),
       );
-      return yield* Option.match(result, {
-        onNone: () =>
-          Effect.fail(
-            new ComputerTaskError({
-              code: "dispatch_failed",
-              detail: "Timed out waiting for the other computer to accept the task.",
-            }),
-          ),
-        onSome: (value) => Effect.succeed(value),
-      });
+      return yield* Effect.fromOption(
+        result,
+        () =>
+          new ComputerTaskError({
+            code: "dispatch_failed",
+            detail: "Timed out waiting for the other computer to accept the task.",
+          }),
+      );
     },
   );
 

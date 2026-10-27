@@ -358,8 +358,12 @@ export const make = Effect.gen(function* () {
   };
 
   return ComputerHistoryManager.of({
-    mergePatchSettings: (stateDir, persisted, patch) =>
-      Effect.tryPromise({
+    mergePatchSettings: Effect.fn("ComputerHistoryManager.mergePatchSettings")(function (
+      stateDir,
+      persisted,
+      patch,
+    ) {
+      return Effect.tryPromise({
         try: () => applyPatchSettings(stateDir, persisted, patch),
         catch: (cause) => {
           const root = resolveComputerHistoryRoot(stateDir);
@@ -369,15 +373,20 @@ export const make = Effect.gen(function* () {
             cause,
           });
         },
-      }),
-    ensureDaemon: (stateDir, settings) =>
-      runDaemonOp("ensureDaemon", resolveComputerHistoryRoot(stateDir), () =>
+      });
+    }),
+    ensureDaemon: Effect.fn("ComputerHistoryManager.ensureDaemon")(function (stateDir, settings) {
+      return runDaemonOp("ensureDaemon", resolveComputerHistoryRoot(stateDir), () =>
         enqueueEnsure(() => ensureDaemonImpl(stateDir, settings)),
-      ),
-    stopDaemon: () =>
-      runDaemonOp("stopDaemon", state.rootPath ?? "", () => enqueueEnsure(() => stopDaemonImpl())),
-    getStatus: (stateDir, settings) =>
-      Effect.tryPromise({
+      );
+    }),
+    stopDaemon: Effect.fn("ComputerHistoryManager.stopDaemon")(function () {
+      return runDaemonOp("stopDaemon", state.rootPath ?? "", () =>
+        enqueueEnsure(() => stopDaemonImpl()),
+      );
+    }),
+    getStatus: Effect.fn("ComputerHistoryManager.getStatus")(function (stateDir, settings) {
+      return Effect.tryPromise({
         try: async () => {
           const root = resolveComputerHistoryRoot(stateDir);
           await ensureComputerHistoryLayout(root);
@@ -424,9 +433,10 @@ export const make = Effect.gen(function* () {
             root: resolveComputerHistoryRoot(stateDir),
             cause,
           }),
-      }),
-    getTimeline: (stateDir) =>
-      Effect.tryPromise({
+      });
+    }),
+    getTimeline: Effect.fn("ComputerHistoryManager.getTimeline")(function (stateDir) {
+      return Effect.tryPromise({
         try: () => listTimeline(resolveComputerHistoryRoot(stateDir)),
         catch: (cause) =>
           new ComputerHistoryOperationError({
@@ -434,9 +444,10 @@ export const make = Effect.gen(function* () {
             root: resolveComputerHistoryRoot(stateDir),
             cause,
           }),
-      }),
-    clear: (stateDir, scope, settings) =>
-      Effect.tryPromise({
+      });
+    }),
+    clear: Effect.fn("ComputerHistoryManager.clear")(function (stateDir, scope, settings) {
+      return Effect.tryPromise({
         try: () => {
           const effectiveSettings = lastMergedSettings ?? settings;
           return clearHistory(resolveComputerHistoryRoot(stateDir), scope, {
@@ -449,9 +460,14 @@ export const make = Effect.gen(function* () {
             root: resolveComputerHistoryRoot(stateDir),
             cause,
           }),
-      }),
-    removeMemory: (stateDir, path, settings) =>
-      Effect.tryPromise({
+      });
+    }),
+    removeMemory: Effect.fn("ComputerHistoryManager.removeMemory")(function (
+      stateDir,
+      path,
+      settings,
+    ) {
+      return Effect.tryPromise({
         try: () => {
           const effectiveSettings = lastMergedSettings ?? settings;
           return deleteMemory(resolveComputerHistoryRoot(stateDir), path, {
@@ -465,9 +481,10 @@ export const make = Effect.gen(function* () {
             path,
             cause,
           }),
-      }),
-    revealMemory: (stateDir, path) =>
-      Effect.tryPromise({
+      });
+    }),
+    revealMemory: Effect.fn("ComputerHistoryManager.revealMemory")(function (stateDir, path) {
+      return Effect.tryPromise({
         try: async () => {
           const root = resolveComputerHistoryRoot(stateDir);
           const resourcesDir = computerHistoryResourcesDir(root);
@@ -487,8 +504,11 @@ export const make = Effect.gen(function* () {
             path,
             cause,
           }),
-      }),
-    currentRoot: () => Effect.sync(() => state.rootPath),
+      });
+    }),
+    currentRoot: Effect.fn("ComputerHistoryManager.currentRoot")(function () {
+      return Effect.sync(() => state.rootPath);
+    }),
   });
 });
 

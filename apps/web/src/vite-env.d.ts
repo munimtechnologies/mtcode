@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_APP_STAGE_LABEL?: string;
   readonly VITE_APP_DISPLAY_NAME?: string;
   readonly VITE_HOSTED_APP_CHANNEL: string;
+  readonly VITE_RELEASE_CHANNEL: string;
   readonly VITE_CLERK_PUBLISHABLE_KEY: string;
   readonly VITE_CLERK_JWT_TEMPLATE: string;
   readonly VITE_CLERK_CLI_OAUTH_CLIENT_ID: string;

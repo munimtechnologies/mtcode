@@ -18,7 +18,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
-import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Layer from "effect/Layer";
@@ -158,7 +157,7 @@ it.effect.each([
           setEnvironmentLabel: () => Effect.void,
         }),
         Layer.mock(ServerSecretStore.ServerSecretStore)({
-          get: () => Effect.succeed(Option.none()),
+          get: () => Effect.succeedNone,
         }),
         Layer.succeed(
           HttpClient.HttpClient,
@@ -219,6 +218,7 @@ it.effect.each([
         }),
         Layer.mock(ServiceLauncherClient.ServiceLauncherClient)({
           managed: false,
+          // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
           prepareTrial: Effect.succeed(undefined),
         }),
         Layer.mock(GitVcsDriver.GitVcsDriver)({}),

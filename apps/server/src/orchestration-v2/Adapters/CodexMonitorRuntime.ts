@@ -311,16 +311,15 @@ export const makeCodexMonitorRuntime = (input: {
         return pump(threadId);
       });
 
-    const subscribe = (threadId: ThreadId, processId: string) =>
-      Effect.gen(function* () {
-        const state = threads.get(threadId);
-        if (closed || state === undefined || state.suppressed || !(yield* available)) {
-          return yield* new MonitorSession.MonitorStoppedError({});
-        }
-        if (!state.tasks.subscribe(processId)) {
-          return yield* new MonitorSession.MonitorProcessMissingError({ processId });
-        }
-      });
+    const subscribe = Effect.fn("subscribe")(function* (threadId: ThreadId, processId: string) {
+      const state = threads.get(threadId);
+      if (closed || state === undefined || state.suppressed || !(yield* available)) {
+        return yield* new MonitorSession.MonitorStoppedError({});
+      }
+      if (!state.tasks.subscribe(processId)) {
+        return yield* new MonitorSession.MonitorProcessMissingError({ processId });
+      }
+    });
 
     const register = (threadId: ThreadId, credentialId: string) =>
       Effect.suspend(() => {
@@ -367,24 +366,23 @@ export const makeCodexMonitorRuntime = (input: {
           );
           return pump(monitor.threadId);
         }),
-      noteTurn: ({ route, message, mcpCredentialId }) =>
-        Effect.gen(function* () {
-          let state = threads.get(route.threadId);
-          if (state === undefined) {
-            state = {
-              route,
-              tasks: new CodexBackgroundTasks(),
-              offer: undefined,
-              suppressed: false,
-            };
-            threads.set(route.threadId, state);
-          } else {
-            state.route = route;
-          }
-          noteMessage(state, message);
-          if (mcpCredentialId !== undefined) yield* register(route.threadId, mcpCredentialId);
-          yield* pump(route.threadId);
-        }),
+      noteTurn: Effect.fn("noteTurn")(function* ({ route, message, mcpCredentialId }) {
+        let state = threads.get(route.threadId);
+        if (state === undefined) {
+          state = {
+            route,
+            tasks: new CodexBackgroundTasks(),
+            offer: undefined,
+            suppressed: false,
+          };
+          threads.set(route.threadId, state);
+        } else {
+          state.route = route;
+        }
+        noteMessage(state, message);
+        if (mcpCredentialId !== undefined) yield* register(route.threadId, mcpCredentialId);
+        yield* pump(route.threadId);
+      }),
       noteSteer: ({ threadId, message }) =>
         Effect.suspend(() => {
           const state = threads.get(threadId);
@@ -392,33 +390,32 @@ export const makeCodexMonitorRuntime = (input: {
           noteMessage(state, message);
           return pump(threadId);
         }),
-      stopThread: (providerThreadId) =>
-        Effect.gen(function* () {
-          const state = Array.from(threads.values()).find(
-            (candidate) => candidate.route.providerThreadId === providerThreadId,
-          );
-          if (state === undefined) return;
-          // Termination output is not a new event to act on.
-          state.suppressed = true;
-          state.offer = undefined;
-          state.tasks.cancelWakes();
-          const owned = Array.from(commands.entries()).filter(
-            ([, monitor]) => monitor.threadId === state.route.threadId,
-          );
-          for (const [, monitor] of owned) monitor.stopped = true;
-          yield* Effect.forEach(
-            owned,
-            ([processId]) =>
-              input.client.terminate(processId).pipe(
-                Effect.timeout("10 seconds"),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("Timed out stopping Codex monitor.", { processId, cause }),
-                ),
+      stopThread: Effect.fn("stopThread")(function* (providerThreadId) {
+        const state = Array.from(threads.values()).find(
+          (candidate) => candidate.route.providerThreadId === providerThreadId,
+        );
+        if (state === undefined) return;
+        // Termination output is not a new event to act on.
+        state.suppressed = true;
+        state.offer = undefined;
+        state.tasks.cancelWakes();
+        const owned = Array.from(commands.entries()).filter(
+          ([, monitor]) => monitor.threadId === state.route.threadId,
+        );
+        for (const [, monitor] of owned) monitor.stopped = true;
+        yield* Effect.forEach(
+          owned,
+          ([processId]) =>
+            input.client.terminate(processId).pipe(
+              Effect.timeout("10 seconds"),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Timed out stopping Codex monitor.", { processId, cause }),
               ),
-            { concurrency: "unbounded", discard: true },
-          );
-          state.tasks.stop();
-        }),
+            ),
+          { concurrency: "unbounded", discard: true },
+        );
+        state.tasks.stop();
+      }),
       hasRunningMonitors: Effect.sync(() => commands.size > 0),
       start,
       unsubscribe,

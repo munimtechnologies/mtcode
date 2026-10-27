@@ -275,9 +275,10 @@ const SettingsUpdate = Schema.Struct({
   patch: ServerSettingsPatch,
   providerInstanceMutation: Schema.optionalKey(ProviderInstanceMutation),
 });
+const decodeSettingsUpdate = Schema.decodeUnknownSync(SettingsUpdate);
 
 const requiredScopesForSettingsUpdate = (payload: unknown) => {
-  const input = Schema.decodeUnknownSync(SettingsUpdate)(payload);
+  const input = decodeSettingsUpdate(payload);
   const scopes = requiredScopesForServerSettingsPatch(input.patch);
   if (input.providerInstanceMutation === undefined) return scopes;
   return Object.values(input.patch).every((value) => value === undefined)
@@ -306,6 +307,7 @@ const requiredScopesForProjectTransfer = (
   }
 };
 const decodeProjectMutation = Schema.decodeUnknownSync(ProjectMutation);
+const decodeAssetCreateUrlInput = Schema.decodeUnknownSync(AssetCreateUrlInput);
 
 const requiredScopesForRpcCall = (
   method: string,
@@ -315,7 +317,7 @@ const requiredScopesForRpcCall = (
     return [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope];
   }
   if (method === WS_METHODS.assetsCreateUrl) {
-    const { resource } = Schema.decodeUnknownSync(AssetCreateUrlInput)(payload);
+    const { resource } = decodeAssetCreateUrlInput(payload);
     return [
       resource._tag === "workspace-file" ||
       resource._tag === "media-file" ||

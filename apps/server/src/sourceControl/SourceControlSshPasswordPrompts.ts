@@ -64,30 +64,29 @@ export const make = Effect.fn("SourceControlSshPasswordPrompts.make")(function* 
   ): SshPasswordPrompt["Service"] =>
     SshPasswordPrompt.of({
       isAvailable: true,
-      request: (input: SshPasswordRequest) =>
-        Effect.gen(function* () {
-          const sequence = yield* Ref.getAndUpdate(nextRequestSequence, (value) => value + 1);
-          const requestId = `source-control-ssh-password-${sequence}`;
-          const deferred = yield* Deferred.make<string | null>();
-          yield* Ref.update(pending, (entries) => new Map(entries).set(requestId, { deferred }));
+      request: Effect.fn("SshPasswordPrompt.request")(function* (input: SshPasswordRequest) {
+        const sequence = yield* Ref.getAndUpdate(nextRequestSequence, (value) => value + 1);
+        const requestId = `source-control-ssh-password-${sequence}`;
+        const deferred = yield* Deferred.make<string | null>();
+        yield* Ref.update(pending, (entries) => new Map(entries).set(requestId, { deferred }));
 
-          return yield* Effect.gen(function* () {
-            const now = yield* DateTime.now;
-            yield* publish({
-              requestId,
-              destination: input.destination,
-              username: input.username,
-              prompt: input.prompt,
-              attempt: input.attempt,
-              expiresAt: DateTime.formatIso(DateTime.add(now, { milliseconds: promptTimeoutMs })),
-            });
+        return yield* Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          yield* publish({
+            requestId,
+            destination: input.destination,
+            username: input.username,
+            prompt: input.prompt,
+            attempt: input.attempt,
+            expiresAt: DateTime.formatIso(DateTime.add(now, { milliseconds: promptTimeoutMs })),
+          });
 
-            return yield* Deferred.await(deferred).pipe(
-              Effect.timeoutOption(Duration.millis(promptTimeoutMs)),
-              Effect.map(Option.getOrNull),
-            );
-          }).pipe(Effect.ensuring(removePending(requestId)));
-        }),
+          return yield* Deferred.await(deferred).pipe(
+            Effect.timeoutOption(Duration.millis(promptTimeoutMs)),
+            Effect.map(Option.getOrNull),
+          );
+        }).pipe(Effect.ensuring(removePending(requestId)));
+      }),
     });
 
   return SourceControlSshPasswordPrompts.of({

@@ -48,7 +48,7 @@
 
 ## Introduction
 
-MT Code is a free, open-source desktop app for running and controlling coding agents — Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity — from one place. It is [Munim Technologies](https://munimtech.com)' fork of [T3 Code](https://github.com/pingdotgg/t3code) with extra features and fixes, and anyone can download and use it.
+MT Code is a free, open-source desktop app for running and controlling coding agents — Claude Code, Codex, Cursor, Grok Build, OpenCode, Vercel fx, and Google Antigravity — from one place. It is [Munim Technologies](https://munimtech.com)' fork of [T3 Code](https://github.com/pingdotgg/t3code) with extra features and fixes, and anyone can download and use it.
 
 ## Download
 
@@ -77,11 +77,12 @@ MT Code drives agents you already have. Install and sign in to at least one prov
 - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
 - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
 - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+- fx: install [fx](https://fx.sh) and run `fx login`, then enable it in Settings → Providers ([setup](./docs/user/providers-fx.md))
 - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
 
 Your existing subscriptions are used directly — MT Code sells nothing and adds no accounts of its own.
 
-Same cost model as T3 Code: the app and its server run on your computer, and model tokens come from Claude / Codex / Cursor / Grok / OpenCode. Munim hosts nothing on your behalf — pairing and Computer Use reach your machine directly. There is no Munim-hosted web app, no model proxy, no Workers AI classifier, and no PlanetScale relay unless you explicitly opt into that paid stack.
+Same cost model as T3 Code: the app and its server run on your computer, and model tokens come from Claude / Codex / Cursor / Grok / OpenCode / fx. Munim hosts nothing on your behalf — pairing and Computer Use reach your machine directly. There is no Munim-hosted web app, no model proxy, no Workers AI classifier, and no PlanetScale relay unless you explicitly opt into that paid stack.
 
 ## MT Code vs T3 Code
 
@@ -96,7 +97,7 @@ This table lists only the differences, roughly in the order of how much they cha
 | **Agent-chosen computers** — `computer_list` / `computer_send` start a task on another connected machine (this Mac, SSH, T3 Connect, or a paired backend) without changing **Run on**                                                                                                         |   ✅    |                                                                              ❌                                                                               |
 | **Realtime voice** — a call panel where you speak to the selected agent and it answers out loud; runs through your ChatGPT account (GPT-Live via Codex) or an OpenAI API key                                                                                                                  |   ✅    |                                                                              ❌                                                                               |
 | **Local sky artwork** — the sidebar header paints your own daylight and weather, and the app icon follows it; ships on by default                                                                                                                                                             |   ✅    |                                                                              ❌                                                                               |
-| **Voice dictation** — Codex-style mic in the web and desktop composer (OpenAI or Groq); T3 Code's dictation is in its mobile app only                                                                                                                                                         |   ✅    |                                                                              ❌                                                                               |
+| **Voice dictation** — Codex-style mic in the web and desktop composer (OpenAI or Groq); T3 Code's voice input is only in its iPhone app                                                                                                                                                       |   ✅    |                                                                              ❌                                                                               |
 | **Monitor toolkit** — `monitor_start` lets any agent end its turn and be woken by background command output (T3 Code relies on the built-in monitors of Claude Code and Grok)                                                                                                                 |   ✅    |                                                                              ❌                                                                               |
 | **Plugin marketplace** — ChatGPT-style Plugins / Apps / MCPs / Skills tabs across Codex, Claude Code, and Cursor, with one-click install and a harness filter                                                                                                                                 |   ✅    |                                                                              ❌                                                                               |
 | **Edit your last message in place** — rewrite the latest prompt where it sits; the thread rolls back and resends (T3 Code's _Edit from here_ moves it back to the composer)                                                                                                                   |   ✅    |                                                                              ❌                                                                               |
@@ -118,12 +119,13 @@ This table lists only the differences, roughly in the order of how much they cha
 | **Mobile app** — MT Code has no app of its own; T3 Code's app pairs with an MT Code desktop and works with it                                                                                                                                                                                 |   ❌    | ✅ [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) · [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) |
 | **Hosted web app** — MT Code's own was retired; use T3 Connect or your own tunnel instead                                                                                                                                                                                                     |   ❌    |                                                            ✅ [app.t3.codes](https://app.t3.codes)                                                            |
 
-Everything else T3 Code does — multi-provider agent control, checkpoints and diffs, remote access from T3 Code's [web](https://app.t3.codes) and mobile apps, Connect tunnels — works here too.
+Everything else T3 Code does — multi-provider agent control, checkpoints and diffs, file previews (office, PDF, fonts, Mermaid, archives, SQLite), remote access from T3 Code's [web](https://app.t3.codes) and mobile apps, Connect tunnels — works here too.
 
 ## Documentation
 
 Full docs live in [docs/](./docs):
 
+- [FAQ](./docs/user/faq.md) (T3 Code's; where MT Code differs, the table above wins)
 - [Install and first run](#download) (the inherited [`t3` CLI install guide](./docs/user/install.md) installs upstream T3 Code, not MT Code)
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)

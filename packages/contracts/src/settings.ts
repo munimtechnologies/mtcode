@@ -539,12 +539,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // Off by default: the tab strip replaced the breadcrumb header and was too
   // prominent for the shipping UI. Opt in from Settings → Workspace tabs.
   tabsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  // Beta: working and monitoring threads fold into a Working shelf and return
-  // to the top of the inbox once they need the user. The inbox then orders by
-  // time, so manual placement there is ignored (and kept) while it is on.
-  sidebarWorkingShelfEnabled: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(false)),
-  ),
+  // Working and monitoring threads fold into a Working shelf and return to the
+  // top of the inbox once they need the user. The inbox then orders by time,
+  // so manual placement there is ignored (and kept) while it is on.
+  sidebarWorkingShelfEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -593,6 +591,8 @@ export const ClientSettingsSchema = Schema.Struct({
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // The quieter sidebar, composer and panel design. Off keeps the classic look.
+  redesignEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -848,7 +848,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Compact idle threads",
         description:
-          "When to compact an idle thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Overrides the default in General settings.",
+          "When to compact an idle thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Overrides the default in Providers > Advanced.",
         providerSettingsForm: {
           control: "select",
           options: INSTANCE_IDLE_COMPACTION_MODES,
@@ -1551,7 +1551,7 @@ export const providerInstanceConfigEnabledFlag = (config: unknown): boolean | un
 
 // Must match each driver's enabled decoding default.
 const DEFAULT_DISABLED_PROVIDER_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set(
-  ["cursor", "grok", "muse", "pi", "opencode", "antigravity"].map((driver) =>
+  ["cursor", "grok", "fx", "muse", "pi", "opencode", "antigravity"].map((driver) =>
     ProviderDriverKind.make(driver),
   ),
 );
@@ -1996,5 +1996,6 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
+  redesignEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

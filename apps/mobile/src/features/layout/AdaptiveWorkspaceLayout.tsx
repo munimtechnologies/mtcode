@@ -1,6 +1,6 @@
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveWorkspaceContext, useAdaptiveWorkspaceLayout } from "./adaptive-workspace-context";
-import { createDeferredNavigation } from "./deferred-navigation";
+import { threadSelectionDeferral } from "./deferred-navigation";
 import { uuidv4 } from "../../lib/uuid";
 import type {
   EnvironmentProject,
@@ -148,6 +148,7 @@ export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefi
     if (focusedRef.current) {
       syncRegistration();
     }
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Changed pane content replaces its existing native workspace registration.
   }, [wrappedRender]);
 
   useEffect(
@@ -324,6 +325,7 @@ function AdaptiveWorkspaceLayoutContent(
       deriveWorkspacePaneLayout({
         layout,
         viewportWidth: width,
+        nativeWorkspace,
         primarySidebarPreferredVisible: showPrimarySidebar,
         auxiliaryPanePreferredVisible,
         auxiliaryPaneRole,
@@ -334,6 +336,7 @@ function AdaptiveWorkspaceLayoutContent(
       auxiliaryPaneRole,
       auxiliaryPanePreferredWidth,
       layout,
+      nativeWorkspace,
       showPrimarySidebar,
       width,
     ],
@@ -488,10 +491,9 @@ function AdaptiveWorkspaceLayoutContent(
   };
   const handleOpenSettings = () => openWorkspaceTab("settings");
 
-  const deferredThreadSelection = useMemo(() => createDeferredNavigation(), []);
   /** The one way to show a page in the detail column; see `selectWorkspaceDetail`. */
   function handleSelectDetail(detail: WorkspaceDetail, sheet?: WorkspaceDetailSheet) {
-    deferredThreadSelection.run(() => {
+    threadSelectionDeferral.run(() => {
       if (Platform.OS === "android") Keyboard.dismiss();
       setFileInspectorPreferredVisible(false);
       if (layout.primarySidebarOverlaysContent) setPrimarySidebarVisible(false);
@@ -743,13 +745,30 @@ function AdaptiveWorkspaceLayoutContent(
     });
   };
 
+  // Rotating flips the overlay; until the new size reaches JS, predict the reset above.
+  const sidebarOverRotates =
+    nativeWorkspace && nativeMetrics?.hasHinge === true && layout.usesSplitView;
+  // The current orientation's panes already account for an inspector that needs the sidebar's room.
+  const sidebarInLandscape = baseLayout.primarySidebarOverlaysContent
+    ? primarySidebarPinned || primarySidebarPreferredVisible
+    : panes.primarySidebarVisible;
+  const sidebarInPortrait =
+    primarySidebarPinned ||
+    (baseLayout.primarySidebarOverlaysContent
+      ? overlaySidebar.visible
+      : isWorkspaceListPath(pathname));
+  const sidebarByOrientation = useMemo(
+    () =>
+      sidebarOverRotates ? { landscape: sidebarInLandscape, portrait: sidebarInPortrait } : null,
+    [sidebarInLandscape, sidebarInPortrait, sidebarOverRotates],
+  );
+
   const contextValue = {
     layout,
     panes,
     fileInspector,
     primarySidebarSearchQuery,
     startNewTask: handleStartNewTask,
-    deferThreadSelectionUntil: deferredThreadSelection.waitFor,
     selectDetail: handleSelectDetail,
     activateAuxiliaryPaneRole,
     registerWorkspaceInspector,
@@ -762,6 +781,7 @@ function AdaptiveWorkspaceLayoutContent(
     setAuxiliaryPaneWidth,
     composerKeyboardActive,
     setComposerEditing,
+    sidebarByOrientation,
   };
 
   if (nativeWorkspace) {

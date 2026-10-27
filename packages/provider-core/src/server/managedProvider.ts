@@ -215,7 +215,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       // timeout. A verdict of "broken" is not, or a provider that was missing
       // when last checked would stay missing after it is installed.
       Effect.tap((snapshot) => Ref.set(hasUsableStatus, snapshot.status !== "error")),
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catchTags({
         ProviderProbeTimeoutError: (error) =>
           Effect.logWarning("Provider status probe timed out.").pipe(

@@ -97,7 +97,10 @@ const unavailable = (detail: string, cause?: unknown) =>
     ...(cause === undefined ? {} : { cause }),
   });
 
-function dispatchLine(pending: Map<number, Deferred.Deferred<McpRpcResponse>>, line: unknown) {
+const dispatchLine = Effect.fn("dispatchLine")(function (
+  pending: Map<number, Deferred.Deferred<McpRpcResponse>>,
+  line: unknown,
+) {
   if (typeof line !== "object" || line === null) return Effect.void;
   const message = line as {
     readonly id?: unknown;
@@ -116,7 +119,7 @@ function dispatchLine(pending: Map<number, Deferred.Deferred<McpRpcResponse>>, l
     return Deferred.succeed(deferred, { errorMessage: detail });
   }
   return Deferred.succeed(deferred, { result: (message.result ?? {}) as McpToolResult });
-}
+});
 
 export const make = Effect.gen(function* ComputerViewBrokerMake() {
   const resolveMcp = yield* makeResolveEnabledDesktopMcp();
@@ -182,18 +185,16 @@ export const make = Effect.gen(function* ComputerViewBrokerMake() {
     return response.result ?? {};
   });
 
-  const shutdownClient = (client: ActiveClient) =>
-    Effect.gen(function* () {
-      yield* Scope.close(client.scope, Exit.void);
-      const orphaned = [...client.pending.values()];
-      client.pending.clear();
-      yield* Effect.forEach(
-        orphaned,
-        (deferred) =>
-          Deferred.succeed(deferred, { errorMessage: "The desktop MCP process stopped." }),
-        { discard: true },
-      );
-    });
+  const shutdownClient = Effect.fn("shutdownClient")(function* (client: ActiveClient) {
+    yield* Scope.close(client.scope, Exit.void);
+    const orphaned = [...client.pending.values()];
+    client.pending.clear();
+    yield* Effect.forEach(
+      orphaned,
+      (deferred) => Deferred.succeed(deferred, { errorMessage: "The desktop MCP process stopped." }),
+      { discard: true },
+    );
+  });
 
   const startClient = Effect.gen(function* () {
     const launch = yield* resolveMcp().pipe(

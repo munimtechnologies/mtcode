@@ -97,7 +97,7 @@ export const makeProjectTransfer = Effect.fn("makeProjectTransfer")(function* ()
           })
           .pipe(
             Effect.map((result) => result.stdout.trim() || null),
-            Effect.catch(() => Effect.succeed(null)),
+            Effect.orElseSucceed(() => null),
           );
         if (input.mode === "clone" && !remote)
           return yield* new ProjectTransferError({

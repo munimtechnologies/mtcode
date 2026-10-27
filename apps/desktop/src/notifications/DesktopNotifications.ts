@@ -187,15 +187,18 @@ export const make = Effect.gen(function* () {
         },
       });
     }),
-    dismiss: (target) => Effect.sync(() => closeNotification(notificationTargetKey(target))),
+    dismiss: Effect.fn("DesktopNotifications.dismiss")(function (target) {
+      return Effect.sync(() => closeNotification(notificationTargetKey(target)));
+    }),
     dismissAll: Effect.sync(closeAllNotifications),
-    showTest: (input) =>
-      showContent({
+    showTest: Effect.fn("DesktopNotifications.showTest")(function (input) {
+      return showContent({
         key: TEST_NOTIFICATION_KEY,
         content: formatAgentNotificationTestContent(),
         silent: input.silent,
         target: null,
-      }),
+      });
+    }),
   });
 });
 

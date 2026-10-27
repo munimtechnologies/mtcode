@@ -353,6 +353,12 @@ export const GROK_MODEL_SELECTION = {
   model: "grok-build",
 } satisfies ModelSelection;
 
+/** fx fixtures run on fx's Default; the replay adapter has no probed model, so it writes none. */
+export const FX_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("fx"),
+  model: "default",
+} satisfies ModelSelection;
+
 export const OPENCODE_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("opencode"),
   model: "openai/gpt-5.4-mini",
@@ -1380,20 +1386,6 @@ export function assertUserMessagesInclude(
         (item) => item.type === "user_message" && item.text.includes(expectedText),
       ),
       `expected user input to include ${JSON.stringify(expectedText)}`,
-    );
-  }
-}
-
-function assertUserMessagesExclude(
-  projection: OrchestrationV2ThreadProjection,
-  rejectedTexts: ReadonlyArray<string>,
-) {
-  for (const rejectedText of rejectedTexts) {
-    assert.isFalse(
-      projection.turnItems.some(
-        (item) => item.type === "user_message" && item.text.includes(rejectedText),
-      ),
-      `expected user input to exclude ${JSON.stringify(rejectedText)}`,
     );
   }
 }

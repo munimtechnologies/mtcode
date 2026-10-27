@@ -18,7 +18,6 @@ import {
   type MessageId,
   type ModelSelection,
   type ProviderInteractionMode,
-  type RuntimeMode,
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
 } from "@t3tools/contracts";
@@ -29,7 +28,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { Keyboard, Platform, View, type ViewStyle } from "react-native";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { filePreviewGallery } from "../../lib/filePreviewGallery";
@@ -45,6 +44,7 @@ import Animated, {
   type LayoutAnimationFunction,
   ReduceMotion,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
@@ -82,15 +82,10 @@ import {
   composerStripAttachments,
   type DraftComposerFileAttachment,
 } from "../../lib/composerImages";
-import {
-  buildModelOptions,
-  groupByProvider,
-  isModelSelectionUnavailable,
-} from "../../lib/modelOptions";
+import { buildModelOptions, isModelSelectionUnavailable } from "../../lib/modelOptions";
 import { useScaledTextRole, type ScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import type { RemoteClientConnectionState } from "../../lib/connection";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
-import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { Menu } from "../../components/ui/Menu";
 import type { ActiveTurnComposerAction } from "@t3tools/client-runtime/state/composer-dispatch";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
@@ -112,14 +107,7 @@ import {
 } from "../voice-input/ComposerDictationControl";
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
-import {
-  rememberModelOptions,
-  withRememberedModelOptions,
-} from "../../state/use-model-option-memory";
-import {
-  type ExistingThreadSettingsRouteSession,
-  useExistingThreadSettingsRoutePresentation,
-} from "./ThreadSettingsSheet";
+import type { ExistingThreadSettingsRouteParams } from "./ThreadSettingsSheet";
 import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
@@ -162,48 +150,18 @@ export function useCompactComposerEditor(text: ScaledTextRole, value: string) {
     (contentHeight > text.lineHeight * 1.5 ||
       (compactWidth > 0 && contentSize.width > compactWidth));
   const compactRowHeight = Math.max(44, minimum);
-  const animatedHeight = useSharedValue(height);
-  const surfaceHeight = useSharedValue(compactRowHeight);
-  const targetSurfaceHeight = isExpanded ? height + 52 : compactRowHeight;
-  const expansion = useSharedValue(0);
-  useLayoutEffect(() => {
-    const config = { duration: 180, reduceMotion: ReduceMotion.System };
-    if (Platform.OS === "android") {
-      animatedHeight.set(height);
-      surfaceHeight.set(targetSurfaceHeight);
-      expansion.set(Number(isExpanded));
-      return;
-    }
-    // Resolve wrapping at the destination width before animating vertically.
-    // Intermediate widths otherwise produce taller measurements mid-transition.
-    let nextFrame: number | undefined;
-    const frame = requestAnimationFrame(() => {
-      nextFrame = requestAnimationFrame(() => {
-        animatedHeight.set(withTiming(height, config));
-        surfaceHeight.set(withTiming(targetSurfaceHeight, config));
-        expansion.set(withTiming(Number(isExpanded), config));
-      });
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      if (nextFrame !== undefined) cancelAnimationFrame(nextFrame);
-    };
-  }, [animatedHeight, expansion, height, isExpanded, surfaceHeight, targetSurfaceHeight]);
-  const containerStyle = useAnimatedStyle(() => ({
-    height: surfaceHeight.value,
-  }));
   const editorStyle = useAnimatedStyle(() => ({
     position: "absolute",
     overflow: "hidden",
-    height: animatedHeight.value,
+    height,
     left: isExpanded ? 14 : editorX.value + 4,
     right: isExpanded ? 14 : rowWidth.value - editorX.value - editorWidth.value + 4,
-    bottom:
-      (compactRowHeight - minimum) / 2 + expansion.value * (52 - (compactRowHeight - minimum) / 2),
+    // The full-width editor must move above the controls in the same frame it widens.
+    bottom: isExpanded ? 52 : (compactRowHeight - minimum) / 2,
   }));
   return {
     isExpanded,
-    containerStyle,
+    containerStyle: { height: isExpanded ? height + 52 : compactRowHeight },
     editorStyle,
     onRowLayout: (event: { nativeEvent: { layout: { width: number } } }) => {
       rowWidth.set(event.nativeEvent.layout.width);
@@ -276,8 +234,6 @@ export interface ThreadComposerProps {
   ) => Promise<MessageId | null>;
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly canSwitchProvider: boolean;
-  readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
-  readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
   readonly onUpdateInteractionMode?: (interactionMode: ProviderInteractionMode) => void;
   readonly onHeightChange?: (height: number) => void;
   readonly onEditorFocusChange?: (focused: boolean) => void;
@@ -383,16 +339,15 @@ export function ComposerSurface(props: {
   const colors = useUniwindTheme();
   const targetBorderRadius =
     typeof props.style.borderRadius === "number" ? props.style.borderRadius : 0;
-  const animatedBorderRadius = useSharedValue(targetBorderRadius);
   const shouldAnimate = props.animateLayout !== false && Platform.OS !== "android";
-  useLayoutEffect(() => {
-    animatedBorderRadius.value = shouldAnimate
+  const animatedBorderRadius = useDerivedValue(() =>
+    shouldAnimate
       ? withTiming(targetBorderRadius, {
           duration: COMPOSER_TRANSITION_DURATION_MS,
           reduceMotion: ReduceMotion.System,
         })
-      : targetBorderRadius;
-  }, [animatedBorderRadius, shouldAnimate, targetBorderRadius]);
+      : targetBorderRadius,
+  );
   const borderCurve = props.style.borderCurve;
   const animatedShapeStyle = useAnimatedStyle(() => ({
     borderRadius: animatedBorderRadius.value,
@@ -453,12 +408,25 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const pendingPastedTextAttachmentCountRef = useRef(0);
   const pendingNativeImagePasteCountRef = useRef(0);
   const [pendingPastedTextAttachmentCount, setPendingPastedTextAttachmentCount] = useState(0);
+  const settingsRoutePresentedRef = useRef(false);
   const settingsSheetPresentation = useThreadSettingsSheetPresentation({
     editorRef: inputRef,
-    isEditorFocused: isFocused,
+    onPresent: () => {
+      if (settingsRoutePresentedRef.current) return;
+      settingsRoutePresentedRef.current = true;
+      // The draft composer edits the new-task flow, which owns its own settings route.
+      navigation.dispatch(
+        props.isDraft
+          ? StackActions.push("NewTaskThreadSettings")
+          : StackActions.push("ThreadSettingsSheet", {
+              environmentId: props.environmentId,
+              threadId: props.selectedThread.id,
+              draftKey: composerDraftKey,
+            } satisfies ExistingThreadSettingsRouteParams),
+      );
+    },
   });
-  const settingsRoutePresentation = useExistingThreadSettingsRoutePresentation();
-  const settingsRoutePresentedRef = useRef(false);
+  const disposeSettingsSheetPresentation = useEffectEvent(settingsSheetPresentation.dispose);
   const wasExpandedBeforePreviewRef = useRef(false);
   const inFlightThreadIdsRef = useRef(new Set<string>());
 
@@ -504,7 +472,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   });
   const sendLabel = sendPresentation.label;
   const currentModelSelection = props.selectedThread.modelSelection;
-  const currentRuntimeMode = props.selectedThread.runtimeMode;
   const modelUnavailable =
     props.connectionState === "connected" &&
     isModelSelectionUnavailable(
@@ -627,6 +594,8 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     !modelUnavailable;
 
   useEffect(() => () => setComposerEditing(false), [setComposerEditing]);
+  // A pending sheet presentation or focus restore has no composer left to act on.
+  useEffect(() => () => disposeSettingsSheetPresentation(), []);
 
   const onPressPreview = (source: FilePreviewSource) => {
     wasExpandedBeforePreviewRef.current = isFocused;
@@ -659,12 +628,14 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const onEditorFocusChange = props.onEditorFocusChange;
   const handleFocus = () => {
     setIsFocused(true);
+    settingsSheetPresentation.onEditorFocusChange(true);
     onEditorFocusChange?.(true);
     setComposerEditing(true);
   };
 
   const handleBlur = () => {
     setIsFocused(false);
+    settingsSheetPresentation.onEditorFocusChange(false);
     onEditorFocusChange?.(false);
     setComposerEditing(false);
   };
@@ -720,63 +691,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     lockedProviderInstanceId,
     props.selectedThread.projectId,
   );
-  const threadProviderGroups = groupByProvider(modelOptions);
   const currentModelOption =
     modelOptions.find(
       (option) =>
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
-  const providerOptionDescriptors = resolveProviderOptionDescriptors({
-    capabilities: currentModelOption?.capabilities,
-    selections: currentModelSelection.options,
-  });
-  const settingsOwnerId = composerOwnerKey;
-  const settingsRouteSession = {
-    ownerId: settingsOwnerId,
-    environmentId: props.environmentId,
-    projectId: props.selectedThread.projectId,
-    providerInstanceId: currentModelSelection.instanceId,
-    ...(lockedProviderInstanceId ? { lockedProviderInstanceId } : {}),
-    providerGroups: threadProviderGroups,
-    selectedModel: currentModelSelection,
-    prompt: draftMessage,
-    onPromptChange: (text) => setComposerDraftText(composerDraftKey, text),
-    reportedModelSelection: props.reportedModelSelection,
-    onSelectModel: (option) =>
-      props.onUpdateModelSelection(withRememberedModelOptions(option.selection)),
-    restoreSelection: withRememberedModelOptions,
-    optionDescriptors: providerOptionDescriptors,
-    onUpdateOptionSelections: (options) => {
-      rememberModelOptions(
-        currentModelSelection.instanceId,
-        currentModelSelection.model,
-        options ?? [],
-      );
-      props.onUpdateModelSelection({ ...currentModelSelection, options });
-    },
-    runtimeMode: currentRuntimeMode,
-    onUpdateRuntimeMode: props.onUpdateRuntimeMode,
-  } satisfies ExistingThreadSettingsRouteSession;
   const openSettings = () => {
-    settingsRoutePresentation.present(settingsRouteSession);
     settingsSheetPresentation.open();
   };
-
-  useEffect(() => {
-    if (settingsSheetPresentation.isActive) {
-      settingsRoutePresentation.present(settingsRouteSession);
-    }
-  }, [settingsRoutePresentation.present, settingsRouteSession, settingsSheetPresentation.isActive]);
-
-  useEffect(() => {
-    if (!settingsSheetPresentation.isVisible || settingsRoutePresentedRef.current) {
-      return;
-    }
-
-    settingsRoutePresentedRef.current = true;
-    navigation.dispatch(StackActions.push("ThreadSettingsSheet"));
-  }, [navigation, settingsSheetPresentation.isVisible]);
 
   useFocusEffect(() => {
     if (!settingsRoutePresentedRef.current) {
@@ -785,7 +708,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
 
     settingsRoutePresentedRef.current = false;
     settingsSheetPresentation.onDismissed();
-    settingsRoutePresentation.clear(settingsOwnerId);
   });
 
   useEffect(

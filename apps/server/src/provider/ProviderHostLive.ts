@@ -17,6 +17,7 @@ import {
   grokUserDefinesDesktopMcp,
 } from "../desktopControl/desktopMcpUserConfig.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DocumentText from "./DocumentText.ts";
 import * as ProviderCredentialStore from "./ProviderCredentialStore.ts";
 
 export const layer = Layer.effect(
@@ -27,13 +28,13 @@ export const layer = Layer.effect(
     const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
     const secrets = yield* ServerSecretStore.ServerSecretStore;
     const crypto = yield* Crypto.Crypto;
+    const fileSystem = yield* FileSystem.FileSystem;
     // MT Code: Computer Use for provider packages; hosts without the platform
     // services (narrow test layers) run sessions without it.
     const resolveDesktopMcp = yield* makeOptionalResolveEnabledDesktopMcp();
-    const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
     const path = yield* Effect.serviceOption(Path.Path);
     const desktopMcp =
-      resolveDesktopMcp === undefined || Option.isNone(fileSystem) || Option.isNone(path)
+      resolveDesktopMcp === undefined || Option.isNone(path)
         ? undefined
         : {
             resolve: resolveDesktopMcp,
@@ -45,7 +46,7 @@ export const layer = Layer.effect(
                 ? cursorUserDefinesDesktopMcp(input)
                 : grokUserDefinesDesktopMcp(input)
               ).pipe(
-                Effect.provideService(FileSystem.FileSystem, fileSystem.value),
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path.value),
               ),
           };
@@ -67,8 +68,15 @@ export const layer = Layer.effect(
       shouldRunBackgroundWork: backgroundPolicy.shouldRunScopeWork,
       resolveAttachmentPath: (attachment) =>
         resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment }),
-      credentials: (namespace, bindingId) =>
-        ProviderCredentialStore.make(namespace, bindingId).pipe(
+      // DocumentText owns the path-resolution span.
+      resolveExtractedTextPath: Effect.fnUntraced(
+        function* (path) {
+          return yield* DocumentText.resolveExtractedTextPath(path);
+        },
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+      ),
+      credentials: Effect.fn("ProviderHost.credentials")(function (namespace, bindingId) {
+        return ProviderCredentialStore.make(namespace, bindingId).pipe(
           Effect.map((store) => ({
             binding: store.binding,
             get: store.get.pipe(
@@ -90,7 +98,8 @@ export const layer = Layer.effect(
           })),
           Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
           Effect.provideService(Crypto.Crypto, crypto),
-        ),
+        );
+      }),
     });
   }),
 );

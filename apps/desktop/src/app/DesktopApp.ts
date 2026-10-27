@@ -253,9 +253,9 @@ const bootstrap = Effect.gen(function* () {
     const raw = yield* fileSystem
       .readFileString(environment.serverSettingsPath)
       .pipe(Effect.orElseSucceed(() => "{}"));
-    const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings))(
-      raw,
-    ).pipe(Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS));
+    const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(ServerSettings))(raw).pipe(
+      Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+    );
     // ensureDaemon keeps ComputerHistoryOperationError in the error channel so
     // bootstrap can Effect.catch without turning spawn/layout failures into defects.
     const manager = yield* ComputerHistoryManager.ComputerHistoryManager;
@@ -270,11 +270,7 @@ const bootstrap = Effect.gen(function* () {
     if (decoded.desktopControl.enabled && decoded.desktopControl.browserControlEnabled) {
       void ensureChromeNativeHostRegistered();
     }
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.logWarning("Computer History daemon bootstrap skipped", { cause }),
-    ),
-  );
+  });
 
   if (!(yield* Ref.get(state.quitting))) {
     if (settings.wslOnly === true && settings.wslBackendEnabled === true) {

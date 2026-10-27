@@ -106,89 +106,88 @@ export const make = Effect.gen(function* () {
     }
   };
 
-  const rank: PullRequestRankingService["Service"]["rank"] = (input) =>
-    Effect.gen(function* () {
-      if (input.candidates.length === 0) {
-        return [];
-      }
-      const asked = new Set(input.candidates.map((candidate) => candidate.number));
-      const now = yield* Clock.currentTimeMillis;
+  const rank: PullRequestRankingService["Service"]["rank"] = Effect.fn("rank")(function* (input) {
+    if (input.candidates.length === 0) {
+      return [];
+    }
+    const asked = new Set(input.candidates.map((candidate) => candidate.number));
+    const now = yield* Clock.currentTimeMillis;
 
-      // Only what has not been judged yet reaches the agent. A page that reloads, or that moves
-      // because one pull request was updated, costs nothing for the rows already scored.
-      const held: Array<PullRequestRanking> = [];
-      const unjudged: Array<(typeof input.candidates)[number]> = [];
-      for (const candidate of input.candidates) {
-        const key = rankingCacheKey(input.repository, input.modelSelection, candidate);
-        const entry = cache.get(key);
-        if (entry !== undefined && now - entry.at <= RANKING_CACHE_TTL_MS) {
-          held.push(entry.ranking);
-          continue;
-        }
-        if (entry !== undefined) cache.delete(key);
-        unjudged.push(candidate);
+    // Only what has not been judged yet reaches the agent. A page that reloads, or that moves
+    // because one pull request was updated, costs nothing for the rows already scored.
+    const held: Array<PullRequestRanking> = [];
+    const unjudged: Array<(typeof input.candidates)[number]> = [];
+    for (const candidate of input.candidates) {
+      const key = rankingCacheKey(input.repository, input.modelSelection, candidate);
+      const entry = cache.get(key);
+      if (entry !== undefined && now - entry.at <= RANKING_CACHE_TTL_MS) {
+        held.push(entry.ranking);
+        continue;
       }
+      if (entry !== undefined) cache.delete(key);
+      unjudged.push(candidate);
+    }
 
-      if (unjudged.length === 0) {
-        return held;
+    if (unjudged.length === 0) {
+      return held;
+    }
+
+    const batches = chunk(unjudged, RANKING_BATCH_SIZE);
+    const ranked = yield* Effect.forEach(
+      batches,
+      (batch) =>
+        textGeneration
+          .rankPullRequests({
+            cwd: input.cwd,
+            repository: input.repository,
+            intoRepository: input.intoRepository,
+            candidates: batch.map((candidate) => ({
+              number: candidate.number,
+              title: candidate.title,
+              ...(candidate.labels === undefined ? {} : { labels: candidate.labels }),
+              ...(candidate.changedFiles === undefined
+                ? {}
+                : { changedFiles: candidate.changedFiles }),
+            })),
+            modelSelection: input.modelSelection,
+          })
+          .pipe(
+            Effect.map((result) => result.rankings),
+            // A batch the agent could not answer costs its own rows and no more: the sections
+            // it did rank are still worth showing, and an unscored row simply sorts last.
+            Effect.orElseSucceed(() => [] as ReadonlyArray<PullRequestRanking>),
+          ),
+      { concurrency: RANKING_BATCH_CONCURRENCY },
+    );
+
+    const byNumber = new Map(input.candidates.map((candidate) => [candidate.number, candidate]));
+    const seen = new Set<number>();
+    const rankings: Array<PullRequestRanking> = [...held];
+    for (const ranking of held) seen.add(ranking.number);
+    for (const ranking of ranked.flat()) {
+      // Only rows that were asked about: a model answering for a pull request nobody named has
+      // invented it, and the page would key the score to nothing.
+      if (!asked.has(ranking.number) || seen.has(ranking.number)) continue;
+      seen.add(ranking.number);
+      rankings.push(ranking);
+      const candidate = byNumber.get(ranking.number);
+      if (candidate !== undefined) {
+        rememberRanking(
+          rankingCacheKey(input.repository, input.modelSelection, candidate),
+          ranking,
+          now,
+        );
       }
+    }
 
-      const batches = chunk(unjudged, RANKING_BATCH_SIZE);
-      const ranked = yield* Effect.forEach(
-        batches,
-        (batch) =>
-          textGeneration
-            .rankPullRequests({
-              cwd: input.cwd,
-              repository: input.repository,
-              intoRepository: input.intoRepository,
-              candidates: batch.map((candidate) => ({
-                number: candidate.number,
-                title: candidate.title,
-                ...(candidate.labels === undefined ? {} : { labels: candidate.labels }),
-                ...(candidate.changedFiles === undefined
-                  ? {}
-                  : { changedFiles: candidate.changedFiles }),
-              })),
-              modelSelection: input.modelSelection,
-            })
-            .pipe(
-              Effect.map((result) => result.rankings),
-              // A batch the agent could not answer costs its own rows and no more: the sections
-              // it did rank are still worth showing, and an unscored row simply sorts last.
-              Effect.orElseSucceed(() => [] as ReadonlyArray<PullRequestRanking>),
-            ),
-        { concurrency: RANKING_BATCH_CONCURRENCY },
-      );
-
-      const byNumber = new Map(input.candidates.map((candidate) => [candidate.number, candidate]));
-      const seen = new Set<number>();
-      const rankings: Array<PullRequestRanking> = [...held];
-      for (const ranking of held) seen.add(ranking.number);
-      for (const ranking of ranked.flat()) {
-        // Only rows that were asked about: a model answering for a pull request nobody named has
-        // invented it, and the page would key the score to nothing.
-        if (!asked.has(ranking.number) || seen.has(ranking.number)) continue;
-        seen.add(ranking.number);
-        rankings.push(ranking);
-        const candidate = byNumber.get(ranking.number);
-        if (candidate !== undefined) {
-          rememberRanking(
-            rankingCacheKey(input.repository, input.modelSelection, candidate),
-            ranking,
-            now,
-          );
-        }
-      }
-
-      if (rankings.length === 0) {
-        return yield* new PullRequestOperationError({
-          operation: "rank",
-          detail: "The pull requests could not be ranked.",
-        });
-      }
-      return rankings;
-    });
+    if (rankings.length === 0) {
+      return yield* new PullRequestOperationError({
+        operation: "rank",
+        detail: "The pull requests could not be ranked.",
+      });
+    }
+    return rankings;
+  });
 
   return { rank } satisfies PullRequestRankingService["Service"];
 });

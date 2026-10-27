@@ -200,9 +200,9 @@ describe("DesktopPreReadyPlatform", () => {
       const preReadyLayer = DesktopPreReadyPlatform.layer.pipe(
         Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
       );
-      const options = yield* Effect.gen(function* () {
-        return yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions;
-      }).pipe(Effect.provide(preReadyLayer));
+      const options = yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions.pipe(
+        Effect.provide(preReadyLayer),
+      );
 
       assert.equal(options.linux?.linuxWmClass, "t3code");
       assert.deepEqual(appendSwitchMock.mock.calls[0], ["class", "t3code"]);
