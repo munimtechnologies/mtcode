@@ -1,5 +1,6 @@
 import { createElement, type SVGProps } from "react";
 import { ProviderDriverKind } from "@t3tools/contracts";
+import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 import { AntigravityIcon, ClaudeAI, DevinIcon, Icon, OpenAI } from "../Icons";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
@@ -76,10 +77,10 @@ export function getProviderRowLabel(
   return `${providerDisplayName} · ${sub}`;
 }
 
-export function getTriggerDisplayModelName(model: ModelEsque): string {
-  return getDisplayModelName(model, { preferShortName: true });
-}
-
-export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  return getTriggerDisplayModelName(model);
+export function getTriggerDisplayModelName(
+  model: ModelEsque,
+  driverKind: ProviderDriverKind | null | undefined,
+): string {
+  const shortName = resolveModelShortName(model, driverKind);
+  return getDisplayModelName({ ...model, shortName }, { preferShortName: true });
 }

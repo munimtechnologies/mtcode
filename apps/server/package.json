@@ -71,7 +71,7 @@
     "undici": "catalog:",
     "yaml": "catalog:",
     "yauzl": "^3.4.0",
-    "zod": "4.6.5"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@effect/graphql-generator": "catalog:",

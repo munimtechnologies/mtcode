@@ -30,7 +30,15 @@ const SETTINGS_SEARCH_TERMS = {
   SettingsNavigation: ["tabs", "tab order", "reorder", "hide tabs"],
   SettingsKeyboard: ["return key", "send message", "new line", "hardware keyboard"],
   SettingsMicrophone: ["voice", "dictation", "audio input", "bluetooth"],
-  SettingsVoiceDictation: ["voice", "dictation", "transcription", "speech", "openai", "groq", "api key"],
+  SettingsVoiceDictation: [
+    "voice",
+    "dictation",
+    "transcription",
+    "speech",
+    "openai",
+    "groq",
+    "api key",
+  ],
   SettingsScheduledTasks: ["automations", "schedule", "cron", "recurring", "webhook"],
   SettingsProjectOverview: ["project", "overview", "checkouts", "delete project"],
   SettingsOrganization: [
@@ -39,6 +47,8 @@ const SETTINGS_SEARCH_TERMS = {
     "organization",
     "sidebar",
     "working section",
+    "new threads",
+    "last project",
   ],
   SettingsThreads: [
     "new threads",

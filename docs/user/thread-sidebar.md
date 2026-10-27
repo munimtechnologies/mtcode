@@ -12,6 +12,12 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 An agent that creates a worktree during a thread can move the thread there with
 the `t3_worktree_handoff` tool, so the branch toolbar and **Open** follow it.
 
+On mobile, **New thread** starts in the current thread's project, or else in the
+last project you opened or chose on that device. If neither is available, the
+project picker opens. Turn off **Settings → General → Use last project** to
+choose a project every time. When you pick a project that is on more than one
+machine, the thread starts on a connected one if any is connected.
+
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
