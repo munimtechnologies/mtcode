@@ -333,6 +333,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
+    id: "effort-display",
+    title: "Effort display",
+    to: "/settings/appearance",
+    searchTerms: ["reasoning effort thinking bars graph word label level composer"],
+  },
+  {
     id: "math-rendering",
     title: "Render math",
     to: "/settings/appearance",
@@ -391,7 +397,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "word-wrap",
     title: "Word wrap",
     to: "/settings/appearance",
-    searchTerms: ["long lines code blocks tables diffs file previews"],
+    searchTerms: ["long lines code blocks diffs file previews"],
   },
   {
     id: "composer-context",
@@ -435,6 +441,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Working section",
     to: "/settings/general",
     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
+  },
+  {
+    id: "boring-sidebar",
+    title: "Boring sidebar (group by project)",
+    to: "/settings/labs",
+    searchTerms: ["beta folders project tree legacy old classic sidebar"],
+  },
+  {
+    id: "boring-sidebar-multiline",
+    title: "Two-line folder rows",
+    to: "/settings/labs",
+    searchTerms: ["beta boring sidebar folder rows multiline branch pull request details"],
   },
   {
     id: "guest-links",
@@ -567,12 +585,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Rich text composer",
     to: "/settings/chat",
     searchTerms: ["composer rich text tiptap bold italic markdown styled wysiwyg"],
-  },
-  {
-    id: "composer-collapse",
-    title: "Collapse composer on scroll",
-    to: "/settings/chat",
-    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
   },
   {
     id: "send-shortcut",
@@ -750,12 +762,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Context window indicator (legacy)",
     to: "/settings/labs",
     searchTerms: ["composer meter usage tokens circle old"],
-  },
-  {
-    id: "legacy-sidebar",
-    title: "Sidebar (legacy)",
-    to: "/settings/labs",
-    searchTerms: ["project thread tree old flat list"],
   },
   {
     id: "workspace-tabs",
@@ -1185,7 +1191,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "T3 Connect",
     to: "/settings/access",
     targetId: "connections-environment",
-    searchTerms: ["managed tunnel cloud other devices remote"],
+    searchTerms: ["managed tunnel cloud other devices remote tunnels limit t3 chat"],
     desktopOnly: true,
     cloudOnly: true,
   },

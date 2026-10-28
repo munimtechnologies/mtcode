@@ -1387,7 +1387,7 @@ describe("persisted environment queries", () => {
         );
         const registry = yield* mountEnvironmentQuery(harness.atom);
         yield* Effect.result(readEnvironmentQuery(registry, harness.atom));
-        expect(Option.getOrNull(AsyncResult.value(registry.get(harness.atom)))).toBe("cached");
+        expect(AsyncResult.getOrElse(registry.get(harness.atom), () => null)).toBe("cached");
       }),
     ),
   );

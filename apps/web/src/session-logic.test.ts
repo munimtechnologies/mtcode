@@ -557,6 +557,20 @@ describe("V2 session presentation", () => {
     if (threadCreatedEntry?.kind === "work") {
       expect(threadCreatedEntry.entry.projectedItem?.item.type).toBe("thread_created");
     }
+    expect(
+      deriveTimelineEntriesFromVisibleTurnItems({
+        visibleTurnItems: [
+          {
+            ...visibleTurnItems.at(-1)!,
+            item: {
+              ...workspacePreparationItem,
+              deferredWork: { cursor: "work-page", itemCount: 100, lastOrdinal: 107 },
+            },
+          },
+        ],
+        optimisticMessages: [],
+      }).map((entry) => entry.id),
+    ).toEqual([workspacePreparationItem.id]);
   });
 
   it.each(["pending", "running", "completed"] as const)(
@@ -672,6 +686,27 @@ describe("V2 session presentation", () => {
       scheduledTaskId: ScheduledTaskId.make("task-queued"),
       senderThreadId: ThreadId.make("thread-agent-sender"),
     } satisfies OrchestrationV2TurnItem;
+    for (const inputIntent of [
+      "queued_turn",
+      "turn_start",
+      "steer",
+      "promoted_queued_to_steer",
+    ] as const) {
+      expect(
+        deriveTimelineEntriesFromVisibleTurnItems({
+          visibleTurnItems: [
+            {
+              position: 0,
+              visibility: "local",
+              sourceThreadId: projection.thread.id,
+              sourceItemId: dispatchedItem.id,
+              item: { ...dispatchedItem, inputIntent, status: "pending" },
+            },
+          ],
+          optimisticMessages: [],
+        }),
+      ).toHaveLength(inputIntent === "queued_turn" ? 0 : 1);
+    }
     const promotedEntries = deriveTimelineEntriesFromVisibleTurnItems({
       visibleTurnItems: [
         {

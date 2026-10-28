@@ -1,3 +1,4 @@
+import { pipe } from "effect/Function";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -145,6 +146,19 @@ function applyProviderInstanceBranding(
       ? { acpRegistryIconUrl: iconUrl.trim() }
       : {}),
   };
+}
+
+/** Picker order: each driver's default instance first, then its custom instances. */
+export function providerInstanceEntriesFor(
+  providers: ReadonlyArray<ServerProvider>,
+  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
+  projectId: ProjectId | null,
+): ReadonlyArray<ProviderInstanceEntry> {
+  return pipe(
+    deriveProviderInstanceEntries(providers),
+    (entries) => applyProviderInstanceSettings(entries, settings, projectId),
+    sortProviderInstanceEntries,
+  );
 }
 
 export function sortProviderInstanceEntries(

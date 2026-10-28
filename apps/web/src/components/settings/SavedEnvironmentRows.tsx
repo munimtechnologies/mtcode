@@ -59,7 +59,7 @@ import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import {
   resolveServerConfigVersionMismatch,
@@ -75,6 +75,9 @@ import {
   providerHasRelay,
 } from "~/cloud/connectProviders";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
+import { useManagedTunnelUsage } from "~/cloud/managedRelayState";
+import { useT3ConnectAccountPage } from "../clerk/T3ConnectAccountPages";
+import { TunnelLimitAlert, TunnelUsageMeter } from "../cloud/TunnelUsage";
 import { environmentCatalog } from "~/connection/catalog";
 import { readEnvironmentScope } from "~/state/session";
 import {
@@ -684,6 +687,56 @@ function CloudLinkSwitch({
   );
 }
 
+/** Tunnel meter, plus the upgrade prompt after the relay refuses a tunnel at the cap. */
+function T3ConnectTunnelUsage({ tunnelLimit }: { readonly tunnelLimit: number | null }) {
+  const usage = useManagedTunnelUsage();
+  const accountPage = useT3ConnectAccountPage();
+  const openAccountPage = accountPage.open;
+  // Usage when the relay refused. The relay also counts tunnels still being set up, so only
+  // a freed tunnel or a higher cap clears the alert, not a meter that merely shows room.
+  const [usedAtRefusal, setUsedAtRefusal] = useState<number | null>(null);
+  if (tunnelLimit === null) {
+    if (usedAtRefusal !== null) setUsedAtRefusal(null);
+  } else if (usedAtRefusal === null && usage.used !== null) {
+    setUsedAtRefusal(usage.used);
+  }
+  const showLimitAlert =
+    tunnelLimit !== null &&
+    !(usedAtRefusal !== null && usage.used !== null && usage.used < usedAtRefusal) &&
+    !(usage.limit !== null && usage.limit > tunnelLimit);
+  const meter =
+    usage.used !== null && usage.limit !== null ? (
+      <TunnelUsageMeter
+        used={usage.used}
+        limit={usage.limit}
+        action={
+          // At the cap the alert below carries the same action.
+          usage.upgrade && openAccountPage && !showLimitAlert ? (
+            <InlineButton onClick={() => openAccountPage("t3-chat")}>Get more tunnels</InlineButton>
+          ) : null
+        }
+      />
+    ) : null;
+  return (
+    <>
+      {meter || showLimitAlert ? (
+        <div className="flex flex-col gap-3 pb-3">
+          {meter}
+          {showLimitAlert ? (
+            <TunnelLimitAlert
+              upgrade={usage.upgrade}
+              onLinkT3Chat={openAccountPage ? () => openAccountPage("t3-chat") : null}
+              onManageTunnels={openAccountPage ? () => openAccountPage("t3-connect") : null}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {/* Kept outside the conditional so an open account page does not remount. */}
+      {accountPage.portals}
+    </>
+  );
+}
+
 function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const {
@@ -695,6 +748,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     publishAgentActivity,
     holdWebhooksWhileOffline,
     operationError,
+    tunnelLimit,
     reconcileCloudState,
   } = useCloudLinkController();
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
@@ -861,7 +915,9 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
               />
             )
           }
-        />
+        >
+          {signedOut ? null : <T3ConnectTunnelUsage tunnelLimit={tunnelLimit} />}
+        </SettingsRow>
       ) : linkRevoked ? (
         <SettingsRow
           title={searchableSetting("t3-connect").title}

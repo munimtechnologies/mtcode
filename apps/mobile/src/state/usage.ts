@@ -20,7 +20,6 @@ import {
 import { needsCursorKeychainAccess, refreshUsage } from "@t3tools/client-runtime/state/usage";
 import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
-import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
@@ -77,7 +76,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
       const { environmentId } = option;
       const connectionResult = get(environmentCatalog.stateAtom(environmentId));
       const sessionResult = get(environmentSession.sessionStateAtom(environmentId));
-      const session = Option.getOrNull(AsyncResult.value(sessionResult));
+      const session = AsyncResult.getOrElse(sessionResult, () => null);
       const access = resolveUsageAccess({
         connectionPhase: option.phase,
         session,
@@ -108,7 +107,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
       // successful value remains visible. Wait through the first connection attempt,
       // then treat retries as terminal coverage so a down machine cannot block the UI.
       const result = get(serverEnvironment.usageSummary({ environmentId, input }));
-      const summary = Option.getOrNull(AsyncResult.value(result));
+      const summary = AsyncResult.getOrElse(result, () => null);
       const failed = option.phase === "connected" && result._tag === "Failure";
       environments.push({
         ...option,

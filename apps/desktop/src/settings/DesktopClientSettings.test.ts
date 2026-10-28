@@ -35,7 +35,6 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   confirmThreadUnpin: false,
   contextWindowMeterEnabled: false,
-  composerCollapseOnScroll: true,
   diffFilesCollapsed: true,
   diffIgnoreWhitespace: true,
   desktopNotifications: {
@@ -71,7 +70,8 @@ const clientSettings: ClientSettings = {
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
   sidebarActiveThreadSortOrder: "updated_at",
-  sidebarThreadPreviewCount: 6,
+  boringSidebarEnabled: false,
+  boringSidebarMultilineRows: false,
   legacySidebarEnabled: false,
   soundNotificationsEnabled: true,
   tabsEnabled: true,
