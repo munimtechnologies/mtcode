@@ -1,3 +1,4 @@
+import { isCommitSha, normalizeHost } from "@t3tools/source-control-core/server/pullRequestUtils";
 import { removeAgentCredits } from "@t3tools/source-control-core/server/mergeMessage";
 import { KnownWorkflowRuns, makeChecksRevalidator } from "./gitHubConditionalChecks.ts";
 import { runGitHubStackAction, type GitHubStackActionError } from "./githubStackActions.ts";
@@ -44,6 +45,7 @@ import {
   type PullRequestPreview,
 } from "@t3tools/contracts";
 
+import * as GitHubAppAccess from "./GitHubAppAccess.ts";
 import * as GitHubRest from "./GitHubRest.ts";
 import * as GitHubRequestPolicy from "./GitHubRequestPolicy.ts";
 import * as GitHubGraphQlClient from "./gitHubGraphQlClient.ts";
@@ -67,7 +69,6 @@ import {
   LenientPullRequestSearch,
   pageRows,
   pullRequestLookup,
-  toActorAvatars,
   toLabelCandidates,
   toRepositoryAuthors,
   toRepositoryLabels,
@@ -139,19 +140,6 @@ export class GitHubViewerLoginUnavailableError extends Schema.TaggedError<GitHub
 ) {
   override get message(): string {
     return "GitHub returned no login for the authenticated account.";
-  }
-}
-
-export class GitHubPullRequestUpdatedAtUnavailableError extends Schema.TaggedError<GitHubPullRequestUpdatedAtUnavailableError>()(
-  "GitHubPullRequestUpdatedAtUnavailableError",
-  {
-    cwd: Schema.String,
-    repository: Schema.String,
-    number: Schema.Int,
-  },
-) {
-  override get message(): string {
-    return `Pull request ${this.repository}#${this.number} reported no update time.`;
   }
 }
 
@@ -320,8 +308,7 @@ export type GitHubPullRequestApiError =
   | GitHubWorkflowApprovalHeadUnavailableError
   | GitHubWorkflowApprovalHeadChangedError
   | SourceControlRateLimit.SourceControlRateLimitPausedError
-  | GitHubViewerLoginUnavailableError
-  | GitHubPullRequestUpdatedAtUnavailableError;
+  | GitHubViewerLoginUnavailableError;
 
 const isGraphQlClientError = (error: unknown): error is GraphQLClientError.GraphQLClientError =>
   GraphQLClientError.isGraphQLClientError(error);
@@ -422,7 +409,7 @@ export class GitHubPullRequestApi extends Context.Service<
   GitHubPullRequestApi,
   {
     readonly withVerifiedCredential: <A, E, R>(
-      input: { readonly cwd: string; readonly host: string },
+      input: { readonly cwd: string; readonly host: string; readonly repository?: string },
       use: (identity: {
         readonly accountId: string;
         readonly viewer: string;
@@ -590,13 +577,6 @@ export class GitHubPullRequestApi extends Context.Service<
       readonly host: string;
       readonly number: number;
     }) => Effect.Effect<GitHubReviewThreadComments, GitHubPullRequestApiError>;
-
-    readonly listActorAvatars: (input: {
-      readonly cwd: string;
-      readonly repository: string;
-      readonly host: string;
-      readonly ids: ReadonlyArray<string>;
-    }) => Effect.Effect<ReadonlyMap<string, string>, GitHubPullRequestApiError>;
 
     readonly getReviewThreadComments: (input: {
       readonly cwd: string;
@@ -781,10 +761,6 @@ function parseRepositorySelector(value: string): {
 /** Bound decimal length to prevent exponential notation in request paths. */
 function diffCursorPage(cursor: string): number | null {
   return /^[1-9][0-9]{0,6}$/.test(cursor) ? Number(cursor) : null;
-}
-
-function isCommitSha(value: string): boolean {
-  return /^[0-9a-f]{7,64}$/i.test(value);
 }
 
 /** Quote user text so GitHub cannot interpret it as qualifiers that widen the listing. */
@@ -992,6 +968,7 @@ interface RestReadInput<A> {
 /** @public */
 export const make = Effect.gen(function* () {
   const api = yield* GitHubRest.GitHubRest;
+  const appAccess = yield* GitHubAppAccess.GitHubAppAccess;
   const policy = yield* GitHubRequestPolicy.GitHubRequestPolicy;
   const httpClient = yield* HttpClient.HttpClient;
   const sourceControlHost = yield* SourceControlHost.SourceControlHost;
@@ -1015,10 +992,18 @@ export const make = Effect.gen(function* () {
   const decodeRoutingIdentity = Schema.decodeUnknownEffect(Schema.fromJsonString(RoutingIdentity));
   const decodeViewerIdentity = Schema.decodeUnknownEffect(RoutingIdentity);
   const captureVerifiedCredential = Effect.fn("GitHubPullRequestApi.captureVerifiedCredential")(
-    function* (input: { readonly cwd: string; readonly host: string }) {
+    function* (input: {
+      readonly cwd: string;
+      readonly host: string;
+      readonly repository?: string;
+    }) {
       const unavailable = () => new GitHubViewerLoginUnavailableError({ cwd: input.cwd });
       const host = input.host.toLowerCase();
-      const { token, fingerprint: key } = yield* api.credential(host);
+      // A pinned credential is never handed on to another, so pick one that reaches the repository.
+      const { token, fingerprint: key } =
+        input.repository === undefined
+          ? yield* api.credential(host)
+          : yield* appAccess.credentialFor(host, input.repository);
       const credential = { host, token, credentialFingerprint: key };
       return yield* Effect.acquireUseRelease(
         Effect.sync(() => {
@@ -1139,7 +1124,7 @@ export const make = Effect.gen(function* () {
       value === null
         ? Effect.fail(
             new GitHubRequestPolicy.GitHubApiNotFoundError({
-              host: GitHubRequestPolicy.normalizeHost(input.host),
+              host: normalizeHost(input.host),
               operation: input.operation,
             }),
           )
@@ -1270,7 +1255,7 @@ export const make = Effect.gen(function* () {
   const revalidatedRestRead = Effect.fn("GitHubPullRequestApi.revalidatedRestRead")(function* <A>(
     input: RestReadInput<A>,
   ) {
-    const host = GitHubRequestPolicy.normalizeHost(input.host);
+    const host = normalizeHost(input.host);
     const { token, fingerprint } = yield* api.credential(host);
     const key = `${fingerprint}\0${host}\0${input.path}`;
     const previous = yield* Cache.get(validators, key);
@@ -2312,15 +2297,6 @@ export const make = Effect.gen(function* () {
       },
     ),
 
-    listActorAvatars: Effect.fn("GitHubPullRequestApi.listActorAvatars")(function (input) {
-      if (input.ids.length === 0) {
-        return Effect.succeed(new Map<string, string>());
-      }
-      return client
-        .ActorAvatars({ ids: input.ids })
-        .pipe(graphql({ ...input, operation: "listActorAvatars" }), Effect.map(toActorAvatars));
-    }),
-
     getRepositoryParent: Effect.fn("GitHubPullRequestApi.getRepositoryParent")(function (input) {
       const { owner, name } = parseRepositorySelector(input.repository);
       // REST rather than GraphQL: the fork parent is one field of the plain repository
@@ -2535,6 +2511,7 @@ export const make = Effect.gen(function* () {
       if (input.stackNumber !== undefined)
         return runGitHubStackAction({ ...input, stackNumber: input.stackNumber }).pipe(
           Effect.provideService(GitHubRest.GitHubRest, api),
+          Effect.provideService(GitHubAppAccess.GitHubAppAccess, appAccess),
           Effect.provideService(GitHubRequestPolicy.GitHubRequestPolicy, policy),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.provideService(SourceControlHost.SourceControlHost, sourceControlHost),

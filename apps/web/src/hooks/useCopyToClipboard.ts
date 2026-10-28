@@ -242,6 +242,7 @@ export function useCopyToClipboard<TContext = void>({
     );
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the copied-state reset timer on unmount
   React.useEffect(() => {
     return (): void => {
       operationIdRef.current += 1;

@@ -61,6 +61,7 @@ import {
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
+import { clientPresentationMetadata } from "./clientMetadata";
 import { APP_DISPLAY_NAME } from "~/branding";
 
 let nextObservedRpcRequestId = 0;
@@ -151,15 +152,21 @@ const layerWakeups = Wakeups.layer({
   ),
 });
 
-function clientMetadata() {
-  const desktop = window.desktopBridge !== undefined;
-  const platform = navigator.platform.trim();
+export function currentClientMetadata() {
+  const metadata = clientPresentationMetadata({
+    appVersion: APP_VERSION,
+    hosted: isHostedStaticApp(),
+    identity: {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      maxTouchPoints: navigator.maxTouchPoints,
+    },
+    desktopBridge: window.desktopBridge,
+  });
+  // Sessions lists on paired servers show this label, so it carries the fork's name.
   return {
-    label: desktop ? `${APP_DISPLAY_NAME} Desktop` : `${APP_DISPLAY_NAME} Web`,
-    deviceType: "desktop" as const,
-    ...(platform === "" ? {} : { os: platform }),
-    surface: desktop ? ("desktop" as const) : ("web" as const),
-    ...(APP_VERSION === "0.0.0" ? {} : { appVersion: APP_VERSION }),
+    ...metadata,
+    label: `${APP_DISPLAY_NAME} ${metadata.surface === "desktop" ? "Desktop" : "Web"}`,
   };
 }
 
@@ -324,7 +331,7 @@ const analyticsDevice = {
 const layerCapabilities = Layer.effectContext(
   Effect.sync(() => {
     const presentation = ClientCapabilities.ClientPresentation.of({
-      metadata: clientMetadata(),
+      metadata: currentClientMetadata(),
     });
     const cloudSession = ClientCapabilities.CloudSession.of({
       identity: Effect.sync(() =>
@@ -461,7 +468,7 @@ const loadSecondaryConnectionRegistration = Effect.fn(
     httpBaseUrl,
     credential: entry.bootstrapToken,
     scopes: AuthStandardClientScopes,
-    clientMetadata: clientMetadata(),
+    clientMetadata: currentClientMetadata(),
   }).pipe(Effect.mapError(mapRemoteEnvironmentError));
   // Desktop operations need the pool backend id to reach the owning instance; RPC uses the environment id.
   const connectionId = desktopLocalConnectionId(entry.id);

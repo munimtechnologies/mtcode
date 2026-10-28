@@ -1,6 +1,6 @@
 import { getCloneDestinationPath } from "@t3tools/client-runtime/operations/projects";
 import { APP_BASE_NAME } from "../../branding";
-import { getBrowseDirectoryPath } from "../../lib/projectPaths";
+import { getBrowseDirectoryPath } from "@t3tools/client-runtime/state/projects";
 import { DirectoryPicker } from "../DirectoryPicker";
 import { useRef, useState } from "react";
 import {

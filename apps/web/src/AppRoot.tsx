@@ -1,30 +1,15 @@
 import { RouterProvider } from "@tanstack/react-router";
-import { useEffect } from "react";
-
-import { subscribeComposerDraftModelReconciliation } from "./composerDraftStore";
-import { environmentThreadShells } from "./state/threads";
-import { environmentShell } from "./state/shell";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { ComputerTaskHosts } from "./components/computers/ComputerTaskHosts";
 import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
-import { appAtomRegistry, AppAtomRegistryProvider } from "./rpc/atomRegistry";
+import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import { VoiceSessionProvider } from "./components/voice/VoiceSession";
 import { useAppIcon } from "./hooks/useAppIcon";
 import type { AppRouter } from "./router";
 
 // Keep webviews outside the router but inside its atom registry so route changes preserve them.
 export function AppRoot({ router }: { readonly router: AppRouter }) {
-  useEffect(
-    () =>
-      subscribeComposerDraftModelReconciliation({
-        registry: appAtomRegistry,
-        threadShellAtom: environmentThreadShells.threadShellAtom,
-        threadRefsAtom: environmentThreadShells.threadRefsAtom,
-        shellStateAtom: environmentShell.stateAtom,
-      }),
-    [],
-  );
   return (
     <AppAtomRegistryProvider>
       <AppIconSync />

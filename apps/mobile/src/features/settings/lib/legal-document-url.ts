@@ -30,20 +30,20 @@ function marketingSiteDocumentUrl(path: string): string {
   return new URL(path, MARKETING_SITE_URL).toString();
 }
 
-export const PRIVACY_POLICY_URL = marketingSiteDocumentUrl(
+const PRIVACY_POLICY_URL = marketingSiteDocumentUrl(
   resolveDocumentPath("EXPO_PUBLIC_PRIVACY_POLICY_PATH", "privacy-policy"),
 );
-export const SECURITY_POLICY_URL = marketingSiteDocumentUrl(
+const SECURITY_POLICY_URL = marketingSiteDocumentUrl(
   resolveDocumentPath("EXPO_PUBLIC_SECURITY_POLICY_PATH", "security-policy"),
 );
-export const TERMS_OF_SERVICE_URL = marketingSiteDocumentUrl(
+const TERMS_OF_SERVICE_URL = marketingSiteDocumentUrl(
   resolveDocumentPath("EXPO_PUBLIC_TERMS_OF_SERVICE_PATH", "terms-of-service"),
 );
 export const LEGAL_URL = marketingSiteDocumentUrl(
   resolveDocumentPath("EXPO_PUBLIC_LEGAL_PATH", "legal"),
 );
 
-export const ALLOWED_LEGAL_DOCUMENT_URLS = [
+const ALLOWED_LEGAL_DOCUMENT_URLS = [
   LEGAL_URL,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,

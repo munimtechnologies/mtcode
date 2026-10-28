@@ -33,6 +33,16 @@ leaves it, and the code cannot be turned back into the account. Devices on the s
 the same code, so they count as one user. The code changes every day, so no day can be linked to
 another. The update server keeps each code for two days, then deletes it.
 
+## Mobile app crash reports
+
+When the iOS or Android app crashes or hits an error, it sends a report to T3 Code: the error
+message, the stack trace, the app version, and the device model and OS version. Each launch also
+sends startup timings, and every report carries a random ID for the install. Reports go through
+the T3 Connect relay to Axiom. They do not include your threads, prompts, or connection details,
+but an error message can quote a value the app was handling.
+
+To stop sending them, turn off **Send crash reports** in **Settings > About T3 Code > Diagnostics**.
+
 ## Export diagnostics to your own receiver
 
 To send traces, metrics, or logs to an OpenTelemetry receiver, open

@@ -42,9 +42,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   // The hook, not the stage-label resolver: this is the header that actually
   // draws the artwork, and reading the build channel here meant a chosen scene
   // never appeared on a release build.
-  const backdropVariant = useSidebarStageBackdropVariant(
-    environmentIdentificationMode === "artwork",
-  );
+  const backdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
   const pillLabel =
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)

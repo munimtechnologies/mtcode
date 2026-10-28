@@ -4,10 +4,7 @@ import { isElectron } from "../env";
 import { usePrimarySessionState } from "../environments/primary";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentSessionState } from "../state/session";
-import {
-  resolvePrimaryOperateAccess,
-  resolveRemoteOperateAccess,
-} from "../components/settings/ProviderSettingsPanel.logic";
+import { resolveRemoteOperateAccess } from "../components/settings/ProviderSettingsPanel.logic";
 
 // Same split the provider settings use: the desktop app owns its primary
 // server outright, a browser session on the primary checks its cookie
@@ -19,9 +16,7 @@ export function useEnvironmentOperateAccess(environmentId: EnvironmentId) {
   if (isPrimary) {
     return isElectron
       ? "granted"
-      : resolvePrimaryOperateAccess({
-          isPrimary: true,
-          hasDesktopBridge: false,
+      : resolveRemoteOperateAccess({
           session: primarySession.data,
           isPending: primarySession.isPending,
           hasError: primarySession.error !== null,

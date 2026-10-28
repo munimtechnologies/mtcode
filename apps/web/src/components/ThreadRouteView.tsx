@@ -94,6 +94,7 @@ export function ThreadRouteView({
   const promotedThreadRef = draftSession === null ? draftRedirect : null;
   const promotedThreadShell = useQuietThreadShell(promotedThreadRef);
   const promotedThreadTitle = promotedThreadShell?.title;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens a workspace tab in the external tabs store once a draft is promoted to a server thread
   useEffect(() => {
     if (!promotedThreadRef || background) {
       return;
@@ -107,6 +108,7 @@ export function ThreadRouteView({
     });
   }, [background, promotedThreadRef, promotedThreadTitle]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears pending file drops and navigates the router home once a server thread is confirmed missing
   useEffect(() => {
     if (target.kind !== "server" || !bootstrapComplete) {
       return;
@@ -121,6 +123,7 @@ export function ThreadRouteView({
   }, [background, bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
   const serverThreadShellExists = serverThreadShell !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- records the visit in the persisted recent-threads store once the thread is listed
   useEffect(() => {
     if (target.kind !== "server" || !serverThreadShellExists) {
       return;

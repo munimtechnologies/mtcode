@@ -626,8 +626,10 @@ function AdaptiveWorkspaceLayoutContent(
     workspaceInspector !== null && workspaceInspector.active && panes.auxiliaryPaneVisible
       ? (panes.auxiliaryPaneWidth ?? 0)
       : 0;
+  // Android's split content is a rounded card: keep it off the screen edge like the list card.
+  const contentEndGap = Platform.OS === "android" && layout.usesSplitView ? 4 : 0;
   const contentTargetWidth = layout.usesSplitView
-    ? Math.max(0, panes.contentPaneWidth - inspectorColumnTargetWidth)
+    ? Math.max(0, panes.contentPaneWidth - inspectorColumnTargetWidth - contentEndGap)
     : null;
   const [listPaneSizing, setListPaneSizing] = useState({
     viewportWidth,
@@ -719,6 +721,7 @@ function AdaptiveWorkspaceLayoutContent(
   );
   const renderedRailWidth = useSharedValue(navigationRailWidth);
   const leavingWorkspacePage = useRef(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- animates the Reanimated rail and sidebar width shared values toward the layout's targets
   useEffect(() => {
     if (nativeWorkspace) return;
     renderedRailWidth.set(withTiming(navigationRailWidth, WORKSPACE_PANE_TIMING));
@@ -935,6 +938,7 @@ function AdaptiveWorkspaceLayoutContent(
                   flex: 1,
                   width: contentTargetWidth,
                   alignSelf: contentAnchor.end ? "flex-end" : "flex-start",
+                  marginRight: contentAnchor.end ? contentEndGap : 0,
                 }
               : { flex: 1 }
           }

@@ -12,7 +12,10 @@ describe("SidebarStageBackdrop", () => {
   it("resolves stage artwork only when enabled", () => {
     expect(resolveSidebarStageBackdropVariant("Dev")).toEqual(DEV_BACKDROP);
     expect(resolveSidebarStageBackdropVariant("Nightly")).toEqual(NIGHTLY_BACKDROP);
-    expect(resolveSidebarStageBackdropVariant("Dev", false)).toBeNull();
+    expect(resolveSidebarStageBackdropVariant("Dev", "none")).toBeNull();
+    expect(resolveSidebarStageBackdropVariant("Dev", "pill")).toBeNull();
+    expect(resolveSidebarStageBackdropVariant("", "nightly-artwork")).toEqual(NIGHTLY_BACKDROP);
+    expect(resolveSidebarStageBackdropVariant("", "dev-artwork")).toEqual(DEV_BACKDROP);
     expect(resolveSidebarStageBackdropVariant("Alpha")).toBeNull();
   });
 
@@ -63,10 +66,13 @@ describe("resolveSidebarArtwork", () => {
     expect(resolveSidebarArtwork({ selection: "art_1", stageLabel: "", custom: [] })).toBeNull();
   });
 
-  it("stays out of the way when artwork is switched off entirely", () => {
+  it("lets the environment mode drive the legacy auto value", () => {
     expect(
-      resolveSidebarArtwork({ selection: "night", stageLabel: "", custom, enabled: false }),
+      resolveSidebarArtwork({ selection: "auto", stageLabel: "Nightly", custom, mode: "none" }),
     ).toBeNull();
+    expect(
+      resolveSidebarArtwork({ selection: "auto", stageLabel: "", custom, mode: "dev-artwork" }),
+    ).toEqual(DEV_BACKDROP);
   });
 });
 
@@ -75,7 +81,7 @@ describe("named artwork defaults", () => {
     // The picker is the user's answer; the palette/mode heuristics upstream
     // uses to decide whether art suits the theme must not override it.
     expect(
-      resolveSidebarArtwork({ selection: "night", stageLabel: "", custom: [], enabled: true }),
+      resolveSidebarArtwork({ selection: "night", stageLabel: "", custom: [], mode: "none" }),
     ).toEqual(NIGHTLY_BACKDROP);
   });
 

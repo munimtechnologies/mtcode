@@ -6,7 +6,10 @@ import {
   filterFilesystemBrowseEntries,
   getFilesystemBrowsePath,
 } from "@t3tools/client-runtime/state/filesystem";
-import { ensureBrowseDirectoryPath, hasTrailingPathSeparator } from "../lib/projectPaths";
+import {
+  ensureBrowseDirectoryPath,
+  hasTrailingPathSeparator,
+} from "@t3tools/client-runtime/state/projects";
 import { filesystemEnvironment } from "../state/filesystem";
 import { useEnvironmentQuery } from "../state/query";
 import { primaryServerKeybindingsAtom } from "../state/server";

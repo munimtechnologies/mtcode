@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentIdentificationMode } from "@t3tools/contracts";
 import { useId } from "react";
 
 import { APP_HAS_UPDATE_TRACKS, APP_STAGE_LABEL } from "../branding";
@@ -55,9 +56,9 @@ export function resolveSidebarArtwork(input: {
     readonly name: string;
     readonly image: string;
   }>;
-  readonly enabled?: boolean;
+  /** Only consulted for legacy "auto"; an explicit pick ignores the mode. */
+  readonly mode?: EnvironmentIdentificationMode;
 }): SidebarStageBackdropVariant | null {
-  if (input.enabled === false) return null;
   const selection = input.selection.trim();
   if (selection === "none") return null;
   if (isLocalSky(selection)) return NIGHTLY_BACKDROP;
@@ -73,7 +74,7 @@ export function resolveSidebarArtwork(input: {
   }
   // Legacy "auto" (and an empty value) defer to the build channel, which is
   // how this setting behaved before the scenes were named.
-  return resolveSidebarStageBackdropVariant(input.stageLabel);
+  return resolveSidebarStageBackdropVariant(input.stageLabel, input.mode);
 }
 
 // A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
@@ -82,9 +83,11 @@ const STAGE_BACKDROP_VIEW_BOX = "0 0 8192 96";
 
 export function resolveSidebarStageBackdropVariant(
   stageLabel: string,
-  enabled = true,
+  mode: EnvironmentIdentificationMode = "artwork",
 ): SidebarStageBackdropVariant | null {
-  if (!enabled) return null;
+  if (mode === "nightly-artwork") return NIGHTLY_BACKDROP;
+  if (mode === "dev-artwork") return DEV_BACKDROP;
+  if (mode !== "artwork") return null;
   const normalized = stageLabel.trim().toLowerCase();
   if (normalized === "nightly") return NIGHTLY_BACKDROP;
   if (normalized === "dev") return DEV_BACKDROP;
@@ -112,7 +115,7 @@ export function useEnvironmentStageLabel(): string {
 }
 
 export function useSidebarStageBackdropVariant(
-  enabled = true,
+  mode: EnvironmentIdentificationMode,
   selectionOverride?: string,
 ): SidebarStageBackdropVariant | null {
   const stageLabel = useEnvironmentStageLabel();
@@ -135,14 +138,13 @@ export function useSidebarStageBackdropVariant(
   }
   // An explicit pick is the user telling us what to draw, so it outranks the
   // environment-identification mode and the palette heuristic that upstream
-  // uses to decide whether artwork suits the current theme. `enabled` still
+  // uses to decide whether artwork suits the current theme. `mode` still
   // governs the legacy "auto" value, which follows the build channel.
-  const explicit = artwork.selection.length > 0 && artwork.selection !== "auto";
   return resolveSidebarArtwork({
     selection: artwork.selection,
     stageLabel,
     custom: artwork.custom,
-    enabled: explicit ? true : enabled,
+    mode,
   });
 }
 

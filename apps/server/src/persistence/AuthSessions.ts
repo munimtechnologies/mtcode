@@ -11,7 +11,6 @@ import {
   AuthClientMetadataDeviceType,
   AuthEnvironmentScopes,
   AuthSessionId,
-  ClientSurface,
   ServerAuthSessionMethod,
 } from "@t3tools/contracts";
 
@@ -99,13 +98,6 @@ export const ExtendAuthSessionExpiryInput = Schema.Struct({
 });
 export type ExtendAuthSessionExpiryInput = typeof ExtendAuthSessionExpiryInput.Type;
 
-export const SetAuthSessionClientConnectionInput = Schema.Struct({
-  sessionId: AuthSessionId,
-  surface: Schema.NullOr(ClientSurface),
-  appVersion: Schema.NullOr(Schema.String),
-});
-export type SetAuthSessionClientConnectionInput = typeof SetAuthSessionClientConnectionInput.Type;
-
 export class AuthSessionRepository extends Context.Service<
   AuthSessionRepository,
   {
@@ -132,9 +124,6 @@ export class AuthSessionRepository extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<AuthSessionId>, AuthSessionRepositoryError>;
     readonly setLastConnectedAt: (
       input: SetAuthSessionLastConnectedAtInput,
-    ) => Effect.Effect<void, AuthSessionRepositoryError>;
-    readonly setClientConnection: (
-      input: SetAuthSessionClientConnectionInput,
     ) => Effect.Effect<void, AuthSessionRepositoryError>;
     readonly extendExpiry: (
       input: ExtendAuthSessionExpiryInput,
@@ -355,20 +344,6 @@ export const make = Effect.gen(function* () {
       `,
   });
 
-  // COALESCE keeps the previous value when a client reports only one field, so
-  // a partial report never nulls out data a fuller client stored earlier.
-  const setClientConnectionRow = SqlSchema.void({
-    Request: SetAuthSessionClientConnectionInput,
-    execute: ({ sessionId, surface, appVersion }) =>
-      sql`
-        UPDATE auth_sessions
-        SET client_surface = COALESCE(${surface}, client_surface),
-            client_app_version = COALESCE(${appVersion}, client_app_version)
-        WHERE session_id = ${sessionId}
-          AND revoked_at IS NULL
-      `,
-  });
-
   const revokeSessionRows = SqlSchema.findAll({
     Request: RevokeAuthSessionInput,
     Result: Schema.Struct({ sessionId: AuthSessionId }),
@@ -528,17 +503,6 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const setClientConnection: AuthSessionRepository["Service"]["setClientConnection"] = (input) =>
-    setClientConnectionRow(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "AuthSessionRepository.setClientConnection:query",
-          "AuthSessionRepository.setClientConnection:encodeRequest",
-          { sessionId: input.sessionId },
-        ),
-      ),
-    );
-
   const extendExpiry: AuthSessionRepository["Service"]["extendExpiry"] = (input) =>
     extendExpiryRow(input).pipe(
       Effect.mapError(
@@ -559,7 +523,6 @@ export const make = Effect.gen(function* () {
     revoke,
     revokeAllExcept,
     setLastConnectedAt,
-    setClientConnection,
     extendExpiry,
   } satisfies AuthSessionRepository["Service"];
 });

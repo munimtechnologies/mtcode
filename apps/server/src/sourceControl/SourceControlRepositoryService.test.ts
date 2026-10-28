@@ -620,7 +620,6 @@ it.effect("publishes by creating the repository, adding a remote, and pushing up
       remoteName: "origin",
       remoteUrl: CLONE_URLS.sshUrl,
       branch: "feature/remote-v1",
-      upstreamBranch: "origin/feature/remote-v1",
       status: "pushed",
     });
     assert.deepStrictEqual(createCalls, [

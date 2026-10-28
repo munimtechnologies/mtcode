@@ -19,6 +19,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
+import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
@@ -55,6 +56,7 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   draftId?: DraftId;
   activeThreadTitle: string;
+  activeThreadLinkOrigin?: string | null | undefined;
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
@@ -78,18 +80,9 @@ function resolveRenameCommit(input: {
 const TITLE_MENU_OPEN_DELAY_MS = 500;
 
 /**
- * The monitor button is a remote desktop into *another* machine. On the
- * computer the thread already runs on, the screen it would show is the one the
- * user is looking at, so the button (and its `computerView.toggle` shortcut)
- * stay hidden there even though the capability is advertised.
- *
- * "Another machine" is decided by where the thread's environment runs relative
- * to this client, the same answer the Open picker uses (`useRemoteOpenState`):
- * `local-exec` covers the desktop app's own backend, its WSL sibling, and a
- * browser served from loopback. Everything else is another computer: SSH
- * hosts, paired backends, T3 Connect, and the primary environment itself when
- * this is a browser pointed at a remote server. Comparing against the primary
- * environment id alone got that last case backwards.
+ * The monitor button is a remote desktop into *another* machine, so it (and `computerView.toggle`)
+ * stays hidden when the thread runs on this one. "Another machine" matches the Open picker: anything
+ * but `local-exec`, including a browser pointed at a remote primary environment.
  */
 export function shouldShowComputerView(input: {
   readonly capabilityAdvertised: boolean;
@@ -103,6 +96,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   draftId,
   activeThreadTitle,
+  activeThreadLinkOrigin,
   isServerThread,
   activeProject,
   parentThreadLink,
@@ -127,6 +121,7 @@ export const ChatHeader = memo(function ChatHeader({
     threadMachine: remoteOpenState.mode,
   });
   const [computerViewOpen, setComputerViewOpen] = useState(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the computerView.toggle shortcut bus while the button is offered
   useEffect(() => {
     if (!supportsComputerView) return undefined;
     return onToggleComputerView(() => setComputerViewOpen((open) => !open));
@@ -164,6 +159,7 @@ export const ChatHeader = memo(function ChatHeader({
       ? renaming.title
       : null;
   const isRenamingTitle = renamingTitle !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the breadcrumb list DOM via ResizeObserver, a frame and font loads to collapse the parent title
   useEffect(() => {
     const list = breadcrumbContainerRef.current?.querySelector("ol");
     if (!list || !parentThreadLink) return;
@@ -253,6 +249,7 @@ export const ChatHeader = memo(function ChatHeader({
     clearTimeout(titleMenuTimerRef.current);
     titleMenuTimerRef.current = null;
   };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears the pending title-menu timer when the thread switches or the header unmounts
   useEffect(
     () => () => {
       if (titleMenuTimerRef.current === null) return;
@@ -489,6 +486,16 @@ export const ChatHeader = memo(function ChatHeader({
                 <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
               </Tooltip>
             )}
+            {renamingTitle === null && activeThreadLinkOrigin ? (
+              <Tooltip>
+                <TooltipTrigger render={<Badge variant="info" size="sm" />}>
+                  From {activeThreadLinkOrigin}
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  Started by an agent on {activeThreadLinkOrigin} through a linked environment.
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
           </WorkspaceBreadcrumbItem>
         </WorkspaceBreadcrumb>
       )}

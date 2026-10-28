@@ -50,7 +50,6 @@ const PUBLISH_RESULT: SourceControlPublishRepositoryResult = {
   remoteName: "origin",
   remoteUrl: "git@github.com:t3tools/t3code.git",
   branch: "main",
-  upstreamBranch: "origin/main",
   status: "pushed",
 };
 

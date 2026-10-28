@@ -1,8 +1,4 @@
-import type {
-  ExecutionEnvironmentCapabilities,
-  ServerSettings,
-  ServerSettingsPatch,
-} from "@t3tools/contracts";
+import type { ServerSettings, ServerSettingsPatch } from "@t3tools/contracts";
 import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings";
 import * as Struct from "effect/Struct";
 
@@ -16,13 +12,12 @@ const SHARED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettlePinnedThreads",
   "autoResumeLimitedThreads",
   "snoozeLimitedThreads",
+  "snoozePresets",
   "newWorktreesStartFromOrigin",
   "createGitHubPullRequestsAsDraft",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
 ] as const satisfies ReadonlyArray<keyof ServerSettings & keyof ServerSettingsPatch>;
-
-export type SharedServerSettingKey = (typeof SHARED_SERVER_SETTING_KEYS)[number];
 
 const SHARED_KEY_SET = new Set<string>(SHARED_SERVER_SETTING_KEYS);
 
@@ -47,12 +42,6 @@ export function splitSharedServerPatch(patch: ServerSettingsPatch): {
 
 export function filterSharedServerPatch(
   patch: ServerSettingsPatch,
-  capabilities:
-    | Pick<
-        ExecutionEnvironmentCapabilities,
-        "threadRestartContinuation" | "threadAutoSettlementScope"
-      >
-    | undefined,
   settings?: ServerSettings,
   sourceSettings = settings,
   targetIsSource = false,
@@ -74,38 +63,15 @@ export function filterSharedServerPatch(
   ) {
     patch = Struct.omit(patch, ["textGenerationModelSelection"]);
   }
-  if (!capabilities?.threadAutoSettlementScope) {
-    patch = Struct.omit(patch, ["sidebarAutoSettleScope"]);
-  }
-  return capabilities?.threadRestartContinuation === true
+  // Hold server-dependent preferences until the target's config proves it is current.
+  return settings
     ? patch
-    : Struct.omit(patch, ["continueThreadsAfterServerUpdate"]);
-}
-
-export function pickSharedServerSettings(
-  settings: ServerSettings,
-  capabilities?: Pick<
-    ExecutionEnvironmentCapabilities,
-    "threadRestartContinuation" | "threadAutoSettlementScope"
-  >,
-): ServerSettingsPatch {
-  return filterSharedServerPatch(
-    Struct.pick(settings, SHARED_SERVER_SETTING_KEYS),
-    capabilities,
-    settings,
-  );
+    : Struct.omit(patch, ["continueThreadsAfterServerUpdate", "sidebarAutoSettleScope"]);
 }
 
 export function supportsSharedSettingsSync(environment: {
   readonly connection: { readonly phase: EnvironmentConnectionPhase };
-  readonly serverConfig: {
-    readonly environment: {
-      readonly capabilities: Pick<ExecutionEnvironmentCapabilities, "threadAutoSettlement">;
-    };
-  } | null;
+  readonly serverConfig: object | null;
 }): boolean {
-  return (
-    environment.connection.phase === "connected" &&
-    environment.serverConfig?.environment.capabilities.threadAutoSettlement === true
-  );
+  return environment.connection.phase === "connected" && environment.serverConfig !== null;
 }

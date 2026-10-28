@@ -13,7 +13,7 @@ import {
 } from "@t3tools/contracts";
 import {
   AVAILABLE_CONNECTION_STATE,
-  presentEnvironmentConnection,
+  presentConnectionState,
   type EnvironmentPresentation,
 } from "@t3tools/client-runtime/connection";
 import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
@@ -161,7 +161,7 @@ const environmentConnectionsAtom = Atom.make((get) => {
     environments.set(environmentId, {
       connection:
         entry.unsupportedReason === undefined
-          ? presentEnvironmentConnection(state)
+          ? presentConnectionState(state)
           : { phase: "unsupported", error: entry.unsupportedReason, traceId: null },
       serverConfig: get(serverEnvironment.configValueAtom(environmentId)),
     });

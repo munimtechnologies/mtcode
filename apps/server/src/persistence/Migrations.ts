@@ -104,6 +104,10 @@ import Migration0076 from "./Migrations/067_WebhookDedupe.ts";
 // Upstream 068/069; registered as the next free fork ids.
 import Migration0077 from "./Migrations/068_ShellStopRequestIndex.ts";
 import Migration0078 from "./Migrations/069_ThreadMessageSearch.ts";
+// Upstream 070-072 (peer links); registered as the next free fork ids.
+import Migration0079 from "./Migrations/070_PeerLinks.ts";
+import Migration0080 from "./Migrations/071_PeerLinkFence.ts";
+import Migration0081 from "./Migrations/072_WaitingLinkRequestIndex.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -195,6 +199,10 @@ const migrationEntries = [
   // Upstream 068/069 (shell stop request index, thread message search); next free fork ids.
   [77, "ShellStopRequestIndex", Migration0077],
   [78, "ThreadMessageSearch", Migration0078],
+  // Upstream 070-072 (peer links); next free fork ids.
+  [79, "PeerLinks", Migration0079],
+  [80, "PeerLinkFence", Migration0080],
+  [81, "WaitingLinkRequestIndex", Migration0081],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

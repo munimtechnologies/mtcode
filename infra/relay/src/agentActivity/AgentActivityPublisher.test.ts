@@ -1,3 +1,4 @@
+import { makeAggregateState } from "./agentActivityAggregate.ts";
 import type { RelayAgentActivityState, RelayDeliveryResult } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -60,8 +61,7 @@ function makeLiveActivities(
     listTargets: () => Effect.succeed([]),
     listIdleArmedTargets: () => Effect.succeed([]),
     markDelivery: () => Effect.void,
-    markStartQueued: () => Effect.void,
-    clearStartQueued: () => Effect.void,
+
     invalidateDeliveryToken: () => Effect.void,
     ...overrides,
   };
@@ -399,7 +399,7 @@ describe("makeAggregateState", () => {
       threadId: "thread-fresh" as RelayAgentActivityState["threadId"],
       updatedAt: "1970-01-01T03:00:00.000Z",
     };
-    const aggregate = AgentActivityPublisher.makeAggregateState({
+    const aggregate = makeAggregateState({
       activeStates: [state, fresh],
       terminalState: null,
       nowMs: 3 * hourMs,
@@ -411,7 +411,7 @@ describe("makeAggregateState", () => {
 
   it("returns null when every row has expired and nothing terminal remains", () => {
     expect(
-      AgentActivityPublisher.makeAggregateState({
+      makeAggregateState({
         activeStates: [state],
         terminalState: null,
         nowMs: 3 * hourMs,
@@ -425,7 +425,7 @@ describe("makeAggregateState", () => {
       phase: "completed",
       updatedAt: "1970-01-01T03:00:00.000Z",
     };
-    const aggregate = AgentActivityPublisher.makeAggregateState({
+    const aggregate = makeAggregateState({
       activeStates: [state],
       terminalState,
       nowMs: 3 * hourMs,
@@ -447,7 +447,7 @@ describe("makeAggregateState", () => {
       phase: "completed",
       updatedAt: "1970-01-01T00:59:00.000Z",
     };
-    const aggregate = AgentActivityPublisher.makeAggregateState({
+    const aggregate = makeAggregateState({
       activeStates: [active, justCompleted],
       terminalState: null,
       nowMs: hourMs,
@@ -468,7 +468,7 @@ describe("makeAggregateState", () => {
       phase: "completed",
       updatedAt: "1970-01-01T00:59:00.000Z",
     };
-    const aggregate = AgentActivityPublisher.makeAggregateState({
+    const aggregate = makeAggregateState({
       activeStates: [lingeringCompleted],
       terminalState: null,
       nowMs: hourMs,
@@ -480,7 +480,7 @@ describe("makeAggregateState", () => {
       activities: [{ phase: "completed", status: "Done" }],
     });
     expect(
-      AgentActivityPublisher.makeAggregateState({
+      makeAggregateState({
         activeStates: [{ ...lingeringCompleted, updatedAt: "1970-01-01T00:44:00.000Z" }],
         terminalState: null,
         nowMs: hourMs,
@@ -500,7 +500,7 @@ describe("makeAggregateState", () => {
       phase: "completed",
       updatedAt: "1970-01-01T00:59:00.000Z",
     };
-    const aggregate = AgentActivityPublisher.makeAggregateState({
+    const aggregate = makeAggregateState({
       activeStates: [
         mkActive("a-1"),
         mkActive("a-2"),

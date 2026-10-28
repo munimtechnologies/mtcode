@@ -38,9 +38,8 @@ export class BackgroundPolicy extends Context.Service<
       sessionId: AuthSessionId,
       rpcClientId: RpcClientId,
     ) => Effect.Effect<void>;
-    readonly reportHostPowerState: (snapshot: HostPowerSnapshot) => Effect.Effect<void>;
     readonly snapshot: Effect.Effect<BackgroundPolicySnapshot>;
-    readonly streamChanges: Stream.Stream<BackgroundPolicySnapshot>;
+    /** MT Code: desktop notifications follow the live policy (subscribeBackgroundPolicy). */
     readonly subscribe: Effect.Effect<
       {
         readonly latest: BackgroundPolicySnapshot;
@@ -49,7 +48,6 @@ export class BackgroundPolicy extends Context.Service<
       never,
       Scope.Scope
     >;
-    readonly hasDemand: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunScopeWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunOpportunisticWork: Effect.Effect<boolean>;
   }
@@ -158,8 +156,7 @@ function isClientConstrained(
   lease: ClientActivityLease,
   settings: ResolvedBackgroundActivitySettings,
 ): boolean {
-  if (settings.pauseWhenClientLowPower && lease.lowPowerMode === "true") return true;
-  return settings.pauseWhenOnBattery && lease.batteryState === "unplugged";
+  return settings.pauseWhenClientLowPower && lease.lowPowerMode === "true";
 }
 
 function leaseMayRunScopedWork(
@@ -236,39 +233,32 @@ export const make = Effect.fn("background.policy.make")(function* () {
   );
   const publishSnapshot = publishMutex.withPermits(1)(publishSnapshotUnlocked);
 
-  const reportClientActivity: BackgroundPolicy["Service"]["reportClientActivity"] = (
-    sessionId,
-    rpcClientId,
-    input,
-  ) =>
-    publishMutex.withPermits(1)(
-      Effect.gen(function* () {
-        const ttlMs = Math.min(
-          Math.max(input.ttlMs ?? DEFAULT_LEASE_TTL_MS, 1_000),
-          MAX_LEASE_TTL_MS,
-        );
-        const now = yield* DateTime.now;
-        const expiresAt = DateTime.add(now, { milliseconds: ttlMs });
-        const lease: ClientActivityLease = {
-          sessionId,
-          rpcClientId,
-          clientId: input.clientId,
-          clientKind: input.clientKind,
-          visible: input.visible,
-          focused: input.focused,
-          recentlyInteracted: input.recentlyInteracted,
-          ...(input.appState !== undefined ? { appState: input.appState } : {}),
-          ...(input.lowPowerMode !== undefined ? { lowPowerMode: input.lowPowerMode } : {}),
-          ...(input.batteryState !== undefined ? { batteryState: input.batteryState } : {}),
-          ...(input.networkType !== undefined ? { networkType: input.networkType } : {}),
-          scopes: input.scopes,
-          updatedAt: now,
-          expiresAt,
-        };
-        yield* Ref.update(leasesRef, (leases) => upsertClientActivityLease(leases, lease, now));
-        yield* publishSnapshotUnlocked;
-      }),
+  const reportClientActivity: BackgroundPolicy["Service"]["reportClientActivity"] = Effect.fn(
+    "BackgroundPolicy.reportClientActivity",
+  )(function* (sessionId, rpcClientId, input) {
+    const ttlMs = Math.min(Math.max(input.ttlMs ?? DEFAULT_LEASE_TTL_MS, 1_000), MAX_LEASE_TTL_MS);
+    const now = yield* DateTime.now;
+    const expiresAt = DateTime.add(now, { milliseconds: ttlMs });
+    const lease: ClientActivityLease = {
+      sessionId,
+      rpcClientId,
+      clientId: input.clientId,
+      clientKind: input.clientKind,
+      visible: input.visible,
+      focused: input.focused,
+      recentlyInteracted: input.recentlyInteracted,
+      ...(input.appState !== undefined ? { appState: input.appState } : {}),
+      ...(input.lowPowerMode !== undefined ? { lowPowerMode: input.lowPowerMode } : {}),
+      scopes: input.scopes,
+      updatedAt: now,
+      expiresAt,
+    };
+    yield* publishMutex.withPermits(1)(
+      Ref.update(leasesRef, (leases) => upsertClientActivityLease(leases, lease, now)).pipe(
+        Effect.andThen(publishSnapshotUnlocked),
+      ),
     );
+  });
 
   const removeRpcClient: BackgroundPolicy["Service"]["removeRpcClient"] = (
     sessionId,
@@ -285,9 +275,6 @@ export const make = Effect.fn("background.policy.make")(function* () {
         return next;
       }).pipe(Effect.andThen(publishSnapshotUnlocked), Effect.asVoid),
     );
-
-  const hasDemand: BackgroundPolicy["Service"]["hasDemand"] = (scope) =>
-    Effect.map(snapshot, (current) => current.activeScopeKeys.includes(scopeKey(scope)));
 
   const shouldRunScopeWork: BackgroundPolicy["Service"]["shouldRunScopeWork"] = Effect.fn(
     "BackgroundPolicy.shouldRunScopeWork",
@@ -338,11 +325,8 @@ export const make = Effect.fn("background.policy.make")(function* () {
   return BackgroundPolicy.of({
     reportClientActivity,
     removeRpcClient,
-    reportHostPowerState: hostPowerMonitor.report,
     snapshot,
-    streamChanges: Stream.fromPubSub(changes),
     subscribe: subscribeBeforeSnapshot(changes, snapshot, publishMutex),
-    hasDemand,
     shouldRunScopeWork,
     shouldRunOpportunisticWork,
   });

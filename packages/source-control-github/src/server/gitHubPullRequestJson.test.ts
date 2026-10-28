@@ -7,11 +7,9 @@ import {
   buildReviewerRequest,
   pullRequestLookup,
   toPullRequestWatchFingerprint,
-  decodePullRequestDetailJson,
   decodePullRequestFilesJson,
   decodePullRequestStacksJson,
   decodeRepositoryParent,
-  decodeWorkflowRunsJson,
   LenientPullRequestList,
   reviewThreadConversation,
   toLabelCandidates,
@@ -492,37 +490,14 @@ describe("pull request detail decoding", () => {
     ]);
   });
 
-  /** MT Code: a detail as a REST pull request names it, carrying its immutable diff endpoints. */
-  const diffDetailJson = JSON.stringify({
-    number: 7,
-    title: "Detail",
-    url: "https://github.com/pingdotgg/t3code/pull/7",
-    headRefName: "feat/detail",
-    baseRefName: "main",
-    createdAt: "2026-07-01T00:00:00Z",
-    updatedAt: "2026-07-05T00:00:00Z",
-    baseRefOid: "base-oid",
-    headRefOid: "head-oid",
-  });
-
+  /** MT Code: the core read carries the immutable diff endpoints. */
   it("carries the immutable diff endpoints", () => {
-    expect(expectSuccess(decodePullRequestDetailJson(diffDetailJson)).diffRevision).toEqual({
-      baseOid: "base-oid",
-      headOid: "head-oid",
-    });
+    expect(detailOf([]).diffRevision).toEqual({ baseOid: "def456", headOid: "abc123" });
   });
 
-  it("keeps usable detail when immutable diff endpoints are null or partial", () => {
-    const raw = JSON.parse(diffDetailJson) as Record<string, unknown>;
-    const withoutHead = { ...raw, headRefOid: undefined };
-
-    expect(
-      expectSuccess(decodePullRequestDetailJson(JSON.stringify({ ...raw, baseRefOid: null })))
-        .diffRevision,
-    ).toBeUndefined();
-    expect(
-      expectSuccess(decodePullRequestDetailJson(JSON.stringify(withoutHead))).diffRevision,
-    ).toBeUndefined();
+  it("keeps usable detail when an immutable diff endpoint is blank", () => {
+    expect(detailOf([], { baseRefOid: " " }).diffRevision).toBeUndefined();
+    expect(detailOf([], { headRefOid: "" }).diffRevision).toBeUndefined();
   });
 
   it("keeps what branch protection requires, and asks for it on github.com only", () => {
@@ -548,27 +523,12 @@ describe("pull request detail decoding", () => {
     expect(detail.checksState).toBe("pending");
   });
 
-  it("reads an auto-merge request and strategy, its null as off and its absence as neither", () => {
+  it("reads an auto-merge request and strategy, and its null as off", () => {
     expect(detailOf([], { autoMergeRequest: { mergeMethod: "SQUASH" } })).toMatchObject({
       autoMergeEnabled: true,
       autoMergeMethod: "squash",
     });
     expect(detailOf([], { autoMergeRequest: null }).autoMergeEnabled).toBe(false);
-    expect(
-      expectSuccess(
-        decodePullRequestDetailJson(
-          JSON.stringify({
-            number: 7,
-            title: "Detail",
-            url: "https://github.com/pingdotgg/t3code/pull/7",
-            headRefName: "feat/detail",
-            baseRefName: "main",
-            createdAt: "2026-07-01T00:00:00Z",
-            updatedAt: "2026-07-05T00:00:00Z",
-          }),
-        ),
-      ).autoMergeEnabled,
-    ).toBeUndefined();
   });
 
   it("shows a re-running check once, as the run that is happening now", () => {

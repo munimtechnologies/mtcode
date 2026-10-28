@@ -27,7 +27,7 @@ export function useAppIcon(): void {
     isLocalSky(selection) ||
     SKY_OPTIONS.some((option) => option.value === selection);
   const artwork = useSidebarStageBackdropVariant(
-    true,
+    "artwork",
     selection === "match-artwork" ? undefined : artworkMode ? selection : "none",
   );
   const sky = artwork?.kind === "sky" ? artwork.conditions : undefined;
