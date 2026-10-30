@@ -124,7 +124,7 @@ require $V2/CodexAdapterV2.ts "codexDesktopMcpAppServerArgs(desktopMcp)" "deskto
 require $V2/CodexAdapterV2.ts 'argument.includes(`mcp_servers.' "user-config-wins guard on Codex desktop MCP injection (launch args)"
 require apps/server/src/provider/ProviderHostLive.ts "makeOptionalResolveEnabledDesktopMcp()" "server hands provider packages the desktop MCP via ProviderHost"
 require packages/provider-cursor/src/server/adapter.ts "hostDesktopMcp?.resolve" "Cursor driver resolves the desktop MCP"
-require packages/provider-cursor/src/server/adapter.ts "cursorSessionMcpServers(mcpSession, sessionDesktopMcp)" "desktop MCP injected into Cursor turns"
+require packages/provider-cursor/src/server/adapter.ts "cursorSessionMcpServers(input.mcpSession, input.desktopMcp)" "desktop MCP injected into Cursor agents"
 require packages/provider-cursor/src/server/adapter.ts "desktopMcp: sessionDesktopMcp" "desktop MCP injected into Cursor agent options"
 require packages/provider-cursor/src/server/adapter.ts 'hostDesktopMcp.userDefines("cursor"' "user-config-wins guard on Cursor desktop MCP injection"
 require packages/provider-acp/src/server/adapter.ts "withAcpDesktopMcpServers(mcpContext, desktopMcpServers)" "desktop MCP injected into ACP runtimes (Grok, ACP registry agents)"
@@ -199,7 +199,7 @@ require apps/server/src/ws.ts "clientAnalyticsProps," "client analytics props pa
 # --- Update changelog on every channel (5e8467899) ---
 # Upstream gates the release-notes popover/tooltip to nightly; MT Code ships a
 # single latest track with fullChangelog on, so the gate must stay removed.
-require apps/web/src/components/sidebar/SidebarUpdatePill.tsx 'state !== null && state.releaseNotes.length > 0' "release-notes popover not gated to nightly"
+require apps/web/src/components/sidebar/SidebarUpdatePill.tsx 'showUpdateDetails && (state?.releaseNotes.length ?? 0) > 0' "release-notes popover not gated to nightly"
 require apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.tsx 'if (state.releaseNotes.length === 0) {' "release-notes body not gated to nightly"
 
 # --- Desktop auto-download / auto-install (personal fork) ---
