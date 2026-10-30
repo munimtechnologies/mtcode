@@ -1,27 +1,27 @@
 {
   "$comment": "Desktop-control MCP server MT Code ships, from github.com/munimtechnologies/munim-computer-use. The desktop build fetches these release assets and refuses to run while any value still says FILL-AT-RELEASE: publish the munim-computer-use release (with the embedding support from munim-computer-use PR #3) first, then copy its version and SHA256SUMS here.",
   "repository": "munimtechnologies/munim-computer-use",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "assets": {
     "darwin-universal": {
       "name": "munim-computer-use-macos-universal.zip",
-      "sha256": "98aeaf776d2b3dfe16fb8f633e8ea1b3dba6e89ddbed4cf1626df2b6a22a65af"
+      "sha256": "60fffc9d3c60feeed9090ef1c6a5a326d667b2ea786fbb1a6320cd6d1f87fae3"
     },
     "win32-x64": {
       "name": "munim-computer-use-windows-x64.zip",
-      "sha256": "2997b50ca97c5161780c5d8cd8821045588c88300b6786879d224adfe8956984"
+      "sha256": "0b05117263a92a3c7c9d4230e2c54da2d389a96ca7dc73a15cb683c34470aeaa"
     },
     "linux-x64": {
       "name": "munim-computer-use-linux-x64.tar.gz",
-      "sha256": "7c26c5306af683d968e61892a2b113cb20ecb446eba8153368b5a9c3f3c3d0f1"
+      "sha256": "2ced2ede813106ee1642f1c7b625713bbefc2cfb098d0812ffdc1f8eb42142ab"
     },
     "linux-arm64": {
       "name": "munim-computer-use-linux-arm64.tar.gz",
-      "sha256": "b64a60e3f73b13bf9d0160daf1e234853e50ec070c65da9f4905fcd356db5057"
+      "sha256": "bf6a677ed70e04b62cd796dcdbd64e25f9136cbcc0a4c314135be5acbf0f6f5e"
     },
     "chrome-extension": {
       "name": "munim-computer-use-chrome-extension.zip",
-      "sha256": "2e0e1edc5375ab94a0680d35c5399f7d33d0aa075403a1202da9b63c992a5ccc"
+      "sha256": "0a364bcd2b8848cd5f3b6b04f23f32350edb26845562e0bb117b25572de0c242"
     }
   }
 }
