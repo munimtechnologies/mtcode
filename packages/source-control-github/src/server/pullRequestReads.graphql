@@ -88,6 +88,7 @@ query PullRequestCore(
       baseRefOid
       headRefOid
       isCrossRepository
+      maintainerCanModify
       headRepositoryOwner {
         login
       }

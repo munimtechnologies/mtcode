@@ -8,6 +8,7 @@ import {
   selectThreadTerminalUiState,
   useTerminalUiStateStore,
 } from "./terminalUiStateStore";
+import { DEFAULT_THREAD_TERMINAL_ID } from "./types";
 
 const THREAD_ID = ThreadId.make("thread-1");
 const THREAD_REF = scopeThreadRef("environment-a" as never, THREAD_ID);
@@ -211,6 +212,27 @@ describe("terminalUiStateStore actions", () => {
         THREAD_REF,
       ),
     ).toEqual({ "drawer-term": "Shell" });
+  });
+
+  it.each([
+    ["terminal-3", "terminal-3", DEFAULT_THREAD_TERMINAL_ID],
+    [DEFAULT_THREAD_TERMINAL_ID, DEFAULT_THREAD_TERMINAL_ID, "terminal-3"],
+    ["terminal-3", DEFAULT_THREAD_TERMINAL_ID, "terminal-3"],
+  ])("keeps the split's tab when %s is active and %s closes", (activeId, closedId, nextId) => {
+    const store = useTerminalUiStateStore.getState();
+    store.setTerminalOpen(THREAD_REF, true);
+    store.newTerminal(THREAD_REF, "terminal-2");
+    store.setActiveTerminal(THREAD_REF, DEFAULT_THREAD_TERMINAL_ID);
+    store.splitTerminal(THREAD_REF, "terminal-3");
+    store.setActiveTerminal(THREAD_REF, activeId);
+    store.closeTerminal(THREAD_REF, closedId);
+
+    const terminalUiState = selectThreadTerminalUiState(
+      useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+      THREAD_REF,
+    );
+    expect(terminalUiState.activeTerminalId).toBe(nextId);
+    expect(terminalUiState.activeTerminalGroupId).toBe(`group-${DEFAULT_THREAD_TERMINAL_ID}`);
   });
 
   it("does not import a closed panel terminal from stale metadata", () => {

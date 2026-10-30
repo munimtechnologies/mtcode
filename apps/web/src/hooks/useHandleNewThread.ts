@@ -50,12 +50,16 @@ import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { shouldReadProjectFileForNewThreadDefaults } from "../session-logic";
 import { environmentServerConfigsAtom } from "../state/server";
-import { resolveDefaultProviderModelSelection } from "../providerInstances";
+import {
+  resolveDefaultProviderModelSelection,
+  resolveProjectDefaultProviderModelSelection,
+} from "../providerInstances";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { getClientSettings } from "./useSettings";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
+import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -197,7 +201,26 @@ export function createNewThreadHandler(router: AnyRouter) {
       project?.id ?? null,
       project,
     );
-    const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
+    const configuredDefaultModelSelection = projectSettings.settings.defaultModelSelection ?? null;
+    const fallbackResolution = resolveNewThreadModelSelection({
+      defaultSelection:
+        configuredDefaultModelSelection ??
+        (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null
+          ? null
+          : resolveProjectDefaultProviderModelSelection(
+              targetServerConfig?.providers ?? [],
+              targetServerSettings,
+              projectRef.projectId,
+            )),
+      fallbackSelection: targetServerSettings.fallbackModelSelection ?? null,
+      providers: targetServerConfig?.providers ?? [],
+      settings: targetServerSettings,
+      projectId: projectRef.projectId,
+      now: Date.now(),
+    });
+    const projectDefaultModelSelection = fallbackResolution.fallback
+      ? fallbackResolution.selection
+      : configuredDefaultModelSelection;
     const resolveImplicitRuntimeMode = (destinationDraftId: DraftId) => {
       const destinationDraft = getComposerDraft(destinationDraftId);
       if (destinationDraft?.runtimeMode != null) {

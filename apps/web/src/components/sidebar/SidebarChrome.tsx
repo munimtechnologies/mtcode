@@ -104,7 +104,7 @@ export function SidebarBrandWidthProbe({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
-      aria-label="Go to threads"
+      aria-label={`${APP_BASE_NAME} home`}
       className={cn(
         "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
         onBackdrop ? "text-white" : "text-foreground",
@@ -151,12 +151,10 @@ function BrandWordmark() {
   return <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />;
 }
 
-// The brand row is baseline-aligned, which rests an inline SVG's bottom edge on
-// the text baseline. The mark is 12px and the `text-sm` label's caps are 10px,
-// so left alone the whole difference piles up above the label. Dropping it 2px
-// puts the top of the mark on the cap line; the mark is also top-heavy (its ink
-// centroid sits 45% down rather than 50%), so centring the box alone still
-// reads high. Keep the height, move the mark.
+// The baseline-aligned row rests the 12px mark on the baseline, above the
+// label's 10px caps. Dropping it 2px puts its top on the cap line; the mark is
+// top-heavy, so centring the box alone still reads high. Keep the height, move
+// the mark.
 function MTWordmark() {
   return (
     <svg
@@ -265,6 +263,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
         </>
       )}
+      <SidebarThreadUndoNotice />
       {/* Footer pages show Back instead of the utility items; the update pill
           belongs with those items, not next to a lone Back. */}
       {isOnUtilityPage ? null : <SidebarUpdatePill />}
@@ -272,14 +271,9 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter({
-  showUndoNotice = false,
-}: {
-  showUndoNotice?: boolean;
-}) {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter>
-      {showUndoNotice ? <SidebarThreadUndoNotice /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

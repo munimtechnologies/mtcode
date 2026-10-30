@@ -72,6 +72,8 @@ const clientSettings: ClientSettings = {
   sidebarActiveThreadSortOrder: "updated_at",
   boringSidebarEnabled: false,
   boringSidebarMultilineRows: false,
+  threadDetailsUsageEnabled: false,
+  threadDetailsItems: {},
   legacySidebarEnabled: false,
   soundNotificationsEnabled: true,
   tabsEnabled: true,

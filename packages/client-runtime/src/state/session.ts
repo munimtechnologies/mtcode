@@ -17,6 +17,7 @@ import type { PreparedConnection } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
+import type { RpcSession } from "../rpc/session.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
 import { followStreamInEnvironment } from "./environmentStreams.ts";
@@ -42,6 +43,8 @@ function initialConfigOption<E>(
 
 const DEFAULT_SESSION_STATE_TIMEOUT_MS = 6_000;
 const MAX_SESSION_STATE_TIMEOUT_MS = 60_000;
+const SESSION_STATE_RETRY_BASE_MS = 2_000;
+const SESSION_STATE_RETRY_MAX_MS = 60_000;
 const SESSION_STATE_RETRY_SCHEDULE = Schedule.exponential("1 second").pipe(
   Schedule.modifyDelay(({ duration }) =>
     Effect.succeed(Duration.min(duration, Duration.seconds(30))),
@@ -153,12 +156,37 @@ function makeEnvironmentSessionAtoms<R, E>(
     ).pipe(Atom.withLabel(`environment-prepared-connection:${environmentId}`)),
   );
 
-  const sessionStateAtom = Atom.family((environmentId: EnvironmentId) =>
-    runtime
+  const transportSessionAtom = Atom.family((environmentId: EnvironmentId) =>
+    runtime.atom(
+      followStreamInEnvironment(
+        environmentId,
+        Stream.unwrap(
+          EnvironmentSupervisor.EnvironmentSupervisor.pipe(
+            Effect.map((supervisor) => SubscriptionRef.changes(supervisor.session)),
+          ),
+        ),
+      ),
+      { initialValue: Option.none() },
+    ),
+  );
+
+  const sessionStateAtom = Atom.family((environmentId: EnvironmentId) => {
+    let consecutiveFailures = 0;
+    let backoffConnection: RpcSession | null = null;
+    return runtime
       .atom((get) => {
         const prepared = Option.getOrNull(get(preparedConnectionValueAtom(environmentId)));
-        if (prepared === null) {
+        // Each established connection fetches anew, and a failure retries while it stays up,
+        // so a fetch that failed mid-reconnect cannot outlive the socket that recovered.
+        const connection = AsyncResult.getOrElse(get(transportSessionAtom(environmentId)), () =>
+          Option.none(),
+        );
+        if (prepared === null || Option.isNone(connection)) {
           return Effect.never;
+        }
+        if (connection.value !== backoffConnection) {
+          backoffConnection = connection.value;
+          consecutiveFailures = 0;
         }
         // Scope checks reject a Failure outright, so one slow response would
         // revoke a grant this connection already confirmed until the client
@@ -183,7 +211,7 @@ function makeEnvironmentSessionAtoms<R, E>(
             remoteAuthorization,
           }).pipe(Effect.provideService(HttpClient.HttpClient, client.value));
         });
-        return hasConfirmedGrant
+        const settledSession = hasConfirmedGrant
           ? fetchSession.pipe(
               Effect.retry({
                 while: isTransientSessionError,
@@ -191,13 +219,31 @@ function makeEnvironmentSessionAtoms<R, E>(
               }),
             )
           : fetchSession;
+        return settledSession.pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              consecutiveFailures = 0;
+            }),
+          ),
+          Effect.tapError(() => {
+            const delayMs = Math.min(
+              SESSION_STATE_RETRY_BASE_MS * 2 ** consecutiveFailures,
+              SESSION_STATE_RETRY_MAX_MS,
+            );
+            consecutiveFailures += 1;
+            return Effect.sleep(delayMs).pipe(
+              Effect.andThen(Effect.sync(() => get.refreshSelf())),
+              Effect.forkScoped,
+            );
+          }),
+        );
       })
       .pipe(
         Atom.swr({ staleTime: 30_000, revalidateOnMount: true }),
         Atom.setIdleTTL(5 * 60_000),
         Atom.withLabel(`environment-session-state:${environmentId}`),
-      ),
-  );
+      );
+  });
 
   const sessionStateValueAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make(

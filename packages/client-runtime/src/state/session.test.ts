@@ -1,21 +1,31 @@
 import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type AuthSessionState } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as TestClock from "effect/testing/TestClock";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
-import { RelayConnectionTarget, type PreparedConnection } from "../connection/model.ts";
-import { EnvironmentRegistry } from "../connection/registry.ts";
-import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import {
+  AVAILABLE_CONNECTION_STATE,
+  PrimaryConnectionTarget,
+  type PreparedConnection,
+} from "../connection/model.ts";
+import * as EnvironmentRegistry from "../connection/registry.ts";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as RpcHttp from "../rpc/http.ts";
+import type { RpcSession } from "../rpc/session.ts";
 import { createEnvironmentSessionAtoms } from "./session.ts";
 
-const TARGET = new RelayConnectionTarget({
+const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
-  label: "Environment",
+  label: "Test environment",
+  httpBaseUrl: "https://environment.example.test",
+  wsBaseUrl: "wss://environment.example.test",
 });
 const PREPARED: PreparedConnection = {
   environmentId: TARGET.environmentId,
@@ -29,76 +39,136 @@ const SESSION = {
   authenticated: true,
   auth: {
     policy: "remote-reachable",
-    bootstrapMethods: ["desktop-bootstrap"],
-    sessionMethods: ["bearer-access-token"],
+    bootstrapMethods: [],
+    sessionMethods: [],
     sessionCookieName: "t3_session",
   },
-  scopes: ["orchestration:read", "orchestration:operate"],
+  scopes: ["orchestration:read"],
 } satisfies AuthSessionState;
 
-function makeSessionAtom(reply: (requestNumber: number) => Promise<Response>) {
-  let calls = 0;
-  const fetchFn: typeof fetch = () => reply(++calls);
-  const layer = Effect.gen(function* () {
-    const supervisor = {
-      target: TARGET,
-      prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
-    } as unknown as EnvironmentSupervisor["Service"];
-    const registry = {
-      followStream: <A, E, R>(_environmentId: EnvironmentId, stream: Stream.Stream<A, E, R>) =>
-        stream.pipe(Stream.provideService(EnvironmentSupervisor, supervisor)),
-    } as unknown as EnvironmentRegistry["Service"];
-    return Layer.merge(
-      Layer.succeed(EnvironmentRegistry, registry),
-      RpcHttp.layerRemoteHttpClient(fetchFn),
-    );
-  }).pipe(Layer.unwrap);
-  const atom = createEnvironmentSessionAtoms(Atom.runtime(layer)).sessionStateAtom(
-    TARGET.environmentId,
-  );
-  return { atom, calls: () => calls };
-}
+const rpcSession = (): RpcSession => ({ closed: Effect.never }) as unknown as RpcSession;
 
-const settle = (
-  registry: AtomRegistry.AtomRegistry,
-  atom: ReturnType<typeof makeSessionAtom>["atom"],
-) => AtomRegistry.getResult(registry, atom, { suspendOnWaiting: true }).pipe(Effect.result);
+const makeHarness = Effect.fn("TestSessionState.makeHarness")(function* (
+  reply: (requestNumber: number) => Promise<Response>,
+  options?: { readonly liveClock?: boolean },
+) {
+  let requestCount = 0;
+  const transport = yield* SubscriptionRef.make(Option.some(rpcSession()));
+  const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+    target: TARGET,
+    state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+    session: transport,
+    prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+    connect: Effect.void,
+    disconnect: Effect.void,
+    retryNow: Effect.void,
+  } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+  const followStream: EnvironmentRegistry.EnvironmentRegistry["Service"]["followStream"] = (
+    _environmentId,
+    stream,
+  ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
+  const services = Layer.mergeAll(
+    Layer.succeed(
+      EnvironmentRegistry.EnvironmentRegistry,
+      EnvironmentRegistry.EnvironmentRegistry.of({
+        followStream,
+      } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]),
+    ),
+    RpcHttp.layerRemoteHttpClient(async () => reply(++requestCount)),
+  );
+  const runtime = Atom.runtime(
+    options?.liveClock
+      ? services
+      : // The test's clock, so the retry wait moves with `TestClock.adjust`.
+        Layer.merge(services, Layer.succeed(Clock.Clock, yield* Clock.Clock)),
+  );
+  const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+    Effect.sync(() => registry.dispose()),
+  );
+  const results = yield* Queue.unbounded<AsyncResult.AsyncResult<AuthSessionState, unknown>>();
+  const observed: Array<string> = [];
+  const atom = createEnvironmentSessionAtoms(runtime).sessionStateAtom(TARGET.environmentId);
+  const unsubscribe = registry.subscribe(
+    atom,
+    (result) => {
+      observed.push(result._tag);
+      Queue.offerUnsafe(results, result);
+    },
+    { immediate: true },
+  );
+  yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+  const nextSettled = Effect.fn("TestSessionState.nextSettled")(function* () {
+    for (;;) {
+      const result = yield* Queue.take(results);
+      if (!result.waiting && result._tag !== "Initial") return result;
+    }
+  });
+  return {
+    transport,
+    nextSettled,
+    refresh: () => registry.refresh(atom),
+    observed,
+    requests: () => requestCount,
+  };
+});
+
+const unreachable = () => Promise.reject(new TypeError("Network request failed"));
 
 describe("environment session state", () => {
-  it.effect("keeps a confirmed grant through a failed refresh and retries it", () =>
+  it.effect("fetches permissions again when the connection is re-established", () =>
     Effect.gen(function* () {
-      const session = makeSessionAtom(async (requestNumber) => {
-        if (requestNumber === 2) throw new TypeError("Failed to fetch");
-        return Response.json(SESSION);
-      });
-      const registry = AtomRegistry.make();
-      yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
-      const observed: Array<string> = [];
-      registry.mount(session.atom);
-      registry.subscribe(session.atom, (result) => observed.push(result._tag));
+      const harness = yield* makeHarness((requestNumber) =>
+        requestNumber === 1 ? unreachable() : Promise.resolve(Response.json(SESSION)),
+      );
+      expect((yield* harness.nextSettled())._tag).toBe("Failure");
 
-      expect(yield* settle(registry, session.atom)).toMatchObject({ success: SESSION });
-      registry.refresh(session.atom);
-      expect(yield* settle(registry, session.atom)).toMatchObject({ success: SESSION });
+      yield* SubscriptionRef.set(harness.transport, Option.some(rpcSession()));
 
-      expect(session.calls()).toBe(3);
-      expect(observed).not.toContain("Failure");
-    }).pipe(Effect.scoped),
+      expect(yield* harness.nextSettled()).toMatchObject({ _tag: "Success", value: SESSION });
+    }),
   );
 
-  it.effect("reports a failed first load without retrying", () =>
+  it.effect("retries a failed permission check with backoff that restarts per connection", () =>
     Effect.gen(function* () {
-      const session = makeSessionAtom(async () => {
-        throw new TypeError("Failed to fetch");
-      });
-      const registry = AtomRegistry.make();
-      yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
-      registry.mount(session.atom);
+      const harness = yield* makeHarness((requestNumber) =>
+        requestNumber <= 3 ? unreachable() : Promise.resolve(Response.json(SESSION)),
+      );
+      expect((yield* harness.nextSettled())._tag).toBe("Failure");
 
-      const result = yield* settle(registry, session.atom);
-      expect(result._tag).toBe("Failure");
-      expect(AsyncResult.isFailure(registry.get(session.atom))).toBe(true);
-      expect(session.calls()).toBe(1);
-    }).pipe(Effect.scoped),
+      yield* TestClock.adjust("2 seconds");
+      expect((yield* harness.nextSettled())._tag).toBe("Failure");
+
+      yield* SubscriptionRef.set(harness.transport, Option.some(rpcSession()));
+      expect((yield* harness.nextSettled())._tag).toBe("Failure");
+
+      yield* TestClock.adjust("2 seconds");
+      expect(yield* harness.nextSettled()).toMatchObject({ _tag: "Success", value: SESSION });
+    }),
+  );
+
+  it.effect("keeps a confirmed grant through a failed refresh and retries it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness(
+        (requestNumber) =>
+          requestNumber === 2 ? unreachable() : Promise.resolve(Response.json(SESSION)),
+        { liveClock: true },
+      );
+      expect(yield* harness.nextSettled()).toMatchObject({ _tag: "Success", value: SESSION });
+
+      harness.refresh();
+      expect(yield* harness.nextSettled()).toMatchObject({ _tag: "Success", value: SESSION });
+
+      expect(harness.requests()).toBe(3);
+      expect(harness.observed).not.toContain("Failure");
+    }),
+  );
+
+  it.effect("reports a failed first load instead of retrying it in place", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness(unreachable);
+
+      expect((yield* harness.nextSettled())._tag).toBe("Failure");
+      expect(harness.requests()).toBe(1);
+    }),
   );
 });

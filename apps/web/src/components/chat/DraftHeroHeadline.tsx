@@ -54,6 +54,8 @@ import { DraftProjectName } from "./DraftProjectName";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
+import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 
 const ADD_PROJECT_VALUE = "add-project";
 
@@ -227,15 +229,34 @@ export function DraftHeroHeadline({
       draftId,
       currentDraft?.runtimeMode == null ? undefined : { runtimeMode: currentDraft.runtimeMode },
     );
-    const targetServerConfig = serverConfigs.get(project.environmentId);
-    const projectSettings = targetServerConfig
-      ? resolveProjectSettings(targetServerConfig.settings, project.id, project).settings
+    const environmentSettings = serverConfigs.get(project.environmentId)?.settings;
+    const projectSettings = environmentSettings
+      ? resolveProjectSettings(environmentSettings, project.id, project).settings
       : undefined;
-    const defaultModelSelection = projectSettings
+    const defaultSelection = projectSettings
       ? projectSettings.defaultModelSelection
       : project.defaultModelSelection;
     if (!hasExplicitComposerModelSelection(currentDraft)) {
       applyStickyState(draftId);
+      const fallbackResolution = resolveNewThreadModelSelection({
+        defaultSelection:
+          defaultSelection ??
+          (useComposerDraftStore.getState().stickyActiveProvider !== null || !environmentSettings
+            ? null
+            : resolveProjectDefaultProviderModelSelection(
+                providersByEnvironment.get(project.environmentId) ?? [],
+                environmentSettings,
+                project.id,
+              )),
+        fallbackSelection: environmentSettings?.fallbackModelSelection ?? null,
+        providers: providersByEnvironment.get(project.environmentId) ?? [],
+        ...(environmentSettings ? { settings: environmentSettings } : {}),
+        projectId: project.id,
+        now: Date.now(),
+      });
+      const defaultModelSelection = fallbackResolution.fallback
+        ? fallbackResolution.selection
+        : defaultSelection;
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {
           replaceOptions: true,
@@ -247,7 +268,7 @@ export function DraftHeroHeadline({
         runtimeMode: resolveNewThreadRuntimeMode(
           projectSettings,
           getComposerDraft(draftId)?.activeProvider ??
-            defaultModelSelection?.instanceId ??
+            defaultSelection?.instanceId ??
             resolveDefaultProviderModelSelection(
               providersByEnvironment.get(project.environmentId) ?? [],
               null,

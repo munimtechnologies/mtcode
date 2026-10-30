@@ -135,7 +135,6 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
 import {
-  buildActiveShellSnapshot,
   bufferShellLiveStream,
   coalesceShellApplicationEvents,
   composeShellStreamWithEnrichment,
@@ -145,7 +144,7 @@ import {
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
-  shellSnapshotForSubscriber,
+  loadSubscriberShellSnapshot,
   shellStreamItemsFromResumeSnapshot,
   shouldPublishShellApplicationEvent,
   skipUnchangedThreadShells,
@@ -236,6 +235,7 @@ import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts
 import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
+import * as ScratchThreadPromotion from "./project/ScratchThreadPromotion.ts";
 import { projectMutationOperation } from "./project/ProjectMutation.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import { makeProjectTransfer } from "./project/ProjectTransfer.ts";
@@ -1020,21 +1020,23 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       },
     );
     const loadSnapshot = Effect.fn("ws.orchestrationV2.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
-          sql,
-          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
-          listProjects: projects.listShells(),
-          latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
-      const forSubscriber = shellSnapshotForSubscriber(base, {
-        omitIdleSubagents: input.omitIdleSubagents === true,
-        omitOlderSettled: input.omitOlderSettled === true,
-        now: yield* DateTime.now,
+      const forSubscriber = yield* loadSubscriberShellSnapshot({
+        sql,
+        listShellIndex: threadManagement.listActiveShellIndex(),
+        readThreads: (threadIds) =>
+          threadManagement.readShellSnapshot({
+            location: "active",
+            ...(threadIds === undefined ? {} : { threadIds }),
+          }),
+        listProjects: projects.listShells(),
+        latestSequence: applicationEvents.latestApplicationSequence,
+        options: {
+          omitIdleSubagents: input.omitIdleSubagents === true,
+          omitOlderSettled: input.omitOlderSettled === true,
+        },
       });
       subagentThreadIds = forSubscriber.subagentThreadIds;
-      const enriched = yield* enrichProjectShells(base.projects);
+      const enriched = yield* enrichProjectShells(forSubscriber.snapshot.projects);
       return {
         snapshot: {
           ...forSubscriber.snapshot,
@@ -1250,6 +1252,7 @@ export const layerWsRpc = (
     const projectStore = yield* ProjectStore.ProjectStoreV2;
     const projectService = yield* ProjectService.ProjectService;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+    const scratchThreadPromotion = yield* ScratchThreadPromotion.ScratchThreadPromotion;
     const eventLoopMonitor = yield* EventLoopMonitor.EventLoopMonitor;
     const threadSearch = yield* ThreadSearch.ThreadSearch;
 
@@ -1822,6 +1825,7 @@ export const layerWsRpc = (
         threadSnapshotPagination: true,
         threadFind: true,
         threadFindProgressive: true,
+        secretProviderSettings: true,
         ...Option.match(scratchWorkspaceRoot, {
           onNone: () => ({}),
           onSome: (root) => ({ scratchWorkspaceRoot: root }),
@@ -1944,6 +1948,8 @@ export const layerWsRpc = (
           ),
         ),
       [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
+      [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: (input) =>
+        threadManagement.forceStopThread(input),
       [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
         readWorkflowScript({ scriptPath: input.scriptPath }),
       [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
@@ -2998,6 +3004,14 @@ export const layerWsRpc = (
               (cause) => new OrchestrationDispatchCommandError({ message: cause.message, cause }),
             ),
           ),
+      [WS_METHODS.projectsCreateFromThread]: (input) =>
+        scratchThreadPromotion
+          .promote(input)
+          .pipe(
+            Effect.mapError(
+              (cause) => new OrchestrationDispatchCommandError({ message: cause.message, cause }),
+            ),
+          ),
       [WS_METHODS.projectCloneCancel]: (input) =>
         projectCloneTracker.cancel(input.projectId).pipe(Effect.map((applied) => ({ applied }))),
       [WS_METHODS.projectCloneRetry]: (input) =>
@@ -3462,6 +3476,7 @@ export const layerWsRpc = (
       [WS_METHODS.deviceConfigure]: (input) => deviceService.configure(input),
       [WS_METHODS.deviceTestHost]: (input) => deviceService.testHost(input),
       [WS_METHODS.deviceEasAccount]: (input) => deviceService.easAccount(input),
+      [WS_METHODS.deviceSimlockIdentity]: (input) => deviceService.simlockIdentity(input),
       [WS_METHODS.deviceList]: (input) =>
         input.inspectOnly && !input.updateTool
           ? deviceService.inspect

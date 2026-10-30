@@ -49,7 +49,7 @@ const CAPABILITIES: PullRequestCapabilities = {
     verdicts: ["comment", "approve", "request-changes"],
   },
   reviewers: { request: true, listCandidates: true },
-  edit: { changeRequest: true, comment: true },
+  edit: { changeRequest: true, comment: true, maintainerEdits: true },
   stacks: true,
   stackActions: true,
   labels: true,
@@ -471,10 +471,13 @@ export const make = Effect.gen(function* () {
             ...pullRequest.reviewRequestTeams,
           ],
           mergeCapabilities: pullRequest.viewerAccess.mergeCapabilities,
-          viewerPermissions: gitHubViewerPermissions({
-            ...pullRequest.viewerAccess,
-            canUpdateBranch: pullRequest.comparison?.viewerCanUpdate === true,
-          }),
+          viewerPermissions: {
+            ...gitHubViewerPermissions({
+              ...pullRequest.viewerAccess,
+              canUpdateBranch: pullRequest.comparison?.viewerCanUpdate === true,
+            }),
+            maintainerEdits: pullRequest.canEditMaintainerEdits,
+          },
           baseComparison:
             pullRequest.comparison === null || pullRequest.comparison.behindBy === null
               ? "unknown"
@@ -684,6 +687,9 @@ export const make = Effect.gen(function* () {
     updateChangeRequest: (input) =>
       cli
         .updatePullRequest({
+          ...(input.maintainerCanModify === undefined
+            ? {}
+            : { maintainerCanModify: input.maintainerCanModify }),
           cwd: input.cwd,
           repository: input.repository,
           host: input.host,

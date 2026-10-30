@@ -1,5 +1,4 @@
 import { type TurnDiffFileChange } from "../../types";
-import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 
 export const CHANGED_FILES_AUTO_EXPAND_FILE_LIMIT = 5;
 export const CHANGED_FILES_AUTO_EXPAND_LINE_LIMIT = 200;
@@ -34,8 +33,13 @@ export function shouldAutoExpandChangedFiles(
   if (!isLatestTurn || files.length > CHANGED_FILES_AUTO_EXPAND_FILE_LIMIT) {
     return false;
   }
-  const stat = summarizeTurnDiffStats(files);
-  return stat.additions + stat.deletions <= CHANGED_FILES_AUTO_EXPAND_LINE_LIMIT;
+  let changedLines = 0;
+  for (const file of files) {
+    if (typeof file.additions === "number" && typeof file.deletions === "number") {
+      changedLines += file.additions + file.deletions;
+    }
+  }
+  return changedLines <= CHANGED_FILES_AUTO_EXPAND_LINE_LIMIT;
 }
 
 export function summarizeChangedFileScopes(
