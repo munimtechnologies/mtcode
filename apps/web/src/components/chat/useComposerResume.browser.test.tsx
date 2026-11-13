@@ -53,6 +53,7 @@ function ResumeButton(props: {
     resumableRunId: RunId.make("run:interrupted"),
     resumableRunInterrupted: false,
     hasHeldQueuedRuns: false,
+    canResume: true,
     isSendBusy: false,
     isRevertingCheckpoint: false,
     threadDetailLoading: false,

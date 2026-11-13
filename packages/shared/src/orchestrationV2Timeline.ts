@@ -39,7 +39,7 @@ export function isOrchestrationV2HiddenContinuationMessage(item: TimelineTurnIte
   );
 }
 
-export function isOrchestrationV2SupersededInterrupt(input: {
+function isOrchestrationV2SupersededInterrupt(input: {
   readonly item: TimelineTurnItem;
   readonly attempts: ReadonlyArray<TimelineRunAttempt>;
   readonly items: ReadonlyArray<TimelineTurnItem>;
@@ -80,12 +80,15 @@ export function isOrchestrationV2TurnItemVisible(input: {
     return false;
   }
 
-  // Cancelled queued input never reached the provider and must stay out of the transcript.
+  // A steer can return to the queue before delivery. Keep its retained item out
+  // of conversation history until its run starts; cancelled queued inputs stay hidden.
   if (
     item.type === "user_message" &&
     item.inputIntent === "queued_turn" &&
     item.runId !== null &&
-    input.runs.some((run) => run.id === item.runId && run.status === "cancelled")
+    input.runs.some(
+      (run) => run.id === item.runId && (run.status === "queued" || run.status === "cancelled"),
+    )
   ) {
     return false;
   }
@@ -106,7 +109,7 @@ export function createOrchestrationV2TurnItemVisibility(input: {
 }): (item: TimelineTurnItem) => boolean {
   const statuses = new Map<TimelineRun["id"], TimelineRun["status"]>();
   for (const run of input.runs) {
-    if (run.status === "rolled_back" || run.status === "cancelled")
+    if (run.status === "rolled_back" || run.status === "cancelled" || run.status === "queued")
       statuses.set(run.id, run.status);
     else statuses.delete(run.id);
   }
@@ -120,7 +123,9 @@ export function createOrchestrationV2TurnItemVisibility(input: {
     if (roots === undefined) supersededRoots.set(attempt.runId, (roots = new Set()));
     roots.add(attempt.rootNodeId);
   }
-  if (statuses.size === 0 && supersededRoots.size === 0) return () => true;
+  if (statuses.size === 0 && supersededRoots.size === 0) {
+    return (item) => !isOrchestrationV2HiddenContinuationMessage(item);
+  }
   const interruptRuns = new Set<TimelineTurnItem["runId"]>();
   if (supersededRoots.size > 0) {
     for (const item of input.items) {
@@ -131,7 +136,7 @@ export function createOrchestrationV2TurnItemVisibility(input: {
     const status = item.runId === null ? undefined : statuses.get(item.runId);
     if (status === "rolled_back") return false;
     if (
-      status === "cancelled" &&
+      (status === "queued" || status === "cancelled") &&
       item.type === "user_message" &&
       item.inputIntent === "queued_turn"
     )

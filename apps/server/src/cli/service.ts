@@ -11,6 +11,7 @@ import { FetchHttpClient } from "effect/http";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
+import { retireLegacyWindowsStartupService } from "../cloud/legacyWindowsStartupService.ts";
 import * as ServiceProtection from "../cloud/serviceProtection.ts";
 import { compareExactServiceVersions, SERVICE_ENV_FILE } from "../cloud/serviceProtocol.ts";
 import * as ServerConfig from "../config.ts";
@@ -19,27 +20,12 @@ import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { resolveAppDisplayName } from "../appDisplayName.ts";
 import { resolveEntryPath } from "./invocation.ts";
 
-export const layer = (config: ServerConfig.ServerConfig["Service"]) => {
-  const input = {
+export const layer = (config: ServerConfig.ServerConfig["Service"]) =>
+  BootService.layer({
     baseDir: config.baseDir,
     logsDir: config.logsDir,
     cliVersion: packageJson.version,
-  };
-  // Windows has no systemd, so it gets its own backend. Loading it lazily keeps
-  // the Linux path free of any Windows import.
-  return Layer.unwrap(
-    Effect.gen(function* () {
-      const platform = yield* HostProcess.Platform;
-      if (platform !== "win32") return BootService.layer(input);
-      const windows = yield* Effect.promise(() => import("../cloud/bootServiceWindows.ts"));
-      return windows.layer(input);
-    }),
-  ).pipe(
-    Layer.provide(ProcessRunner.layer),
-    // Archive-distributed versions download the release archive here.
-    Layer.provide(FetchHttpClient.layer),
-  );
-};
+  }).pipe(Layer.provide(ProcessRunner.layer), Layer.provide(FetchHttpClient.layer));
 
 export type ServiceReconcileResult =
   | {
@@ -135,6 +121,8 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
       targetVersion: packageJson.version,
     });
   }
+  // Fork: the Task Scheduler service replaces MT Code's earlier Startup-folder one.
+  yield* retireLegacyWindowsStartupService(baseDir);
   const plan = yield* service.install(options);
   return {
     changed: true,
@@ -164,13 +152,17 @@ function formatProtection(
   ];
 }
 
+// Fork: name the definition the way each platform's tools do.
+const serviceDefinitionLabel = (unitPath: string) =>
+  unitPath.endsWith(".plist") ? "LaunchAgent" : unitPath.endsWith(".xml") ? "Task" : "Unit";
+
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
   protection?: ServiceProtection.ServiceProtectionState,
 ): string {
   if (!status.supported) {
-    return `${resolveAppDisplayName()} service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, or Windows`;
+    return `${resolveAppDisplayName()} service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, Windows with Task Scheduler`;
   }
   if (!status.installed) {
     return `${resolveAppDisplayName()} service\n  Status: not installed\n  Next: Run \`t3 service install\`.`;
@@ -183,8 +175,6 @@ export function formatServiceStatus(
       `  Next: Pass \`${BootService.formatBootServiceBaseDirOption(status.otherBaseDir)}\` to manage it.`,
     ].join("\n");
   }
-  const locationLabel =
-    status.kind === "systemd" ? "Unit" : status.kind === "launchd" ? "LaunchAgent" : "Shortcut";
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
     (problem) => `  [${problem}] ${BootService.formatBootServiceProblem(problem)}`,
@@ -197,7 +187,7 @@ export function formatServiceStatus(
     return [
       `${resolveAppDisplayName()} service`,
       `  Status: installed · t3@${installedVersion} (newer than this t3@${cliVersion} CLI)`,
-      `  ${locationLabel}: ${status.unitPath}`,
+      `  ${serviceDefinitionLabel(status.unitPath)}: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...formatProtection(protection),
       ...problems,
@@ -207,7 +197,7 @@ export function formatServiceStatus(
   return [
     `${resolveAppDisplayName()} service`,
     `  Status: ${status.current ? `installed · t3@${installedVersion}` : "needs an update or repair"}`,
-    `  ${locationLabel}: ${status.unitPath}`,
+    `  ${serviceDefinitionLabel(status.unitPath)}: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...formatProtection(protection),
     ...problems,
@@ -222,23 +212,6 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E, R>(
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
   return yield* run.pipe(Effect.provide(Layer.merge(layer(config), ServerConfig.layer(config))));
-});
-
-/** Windows only. The blink at sign-in looks alarming until you know what it is. */
-const WINDOWS_SERVICE_NOTICE = [
-  `A small window named \`${resolveAppDisplayName()} Server\` blinks once when you sign in. That is expected.`,
-  "It appears under Startup apps in Windows Settings, where you can switch it off.",
-  "It starts at sign-in, not at boot, and it stops when you sign out.",
-].join("\n");
-
-/** Shared by install, update and `t3 up`. The Linux output is unchanged. */
-export const reportServiceChange = Effect.fn("cli.service.report")(function* (
-  result: Extract<ServiceReconcileResult, { readonly changed: true }>,
-) {
-  yield* Console.log(formatServiceChange(result));
-  if ((yield* HostProcess.Platform) === "win32") {
-    yield* Console.log(WINDOWS_SERVICE_NOTICE);
-  }
 });
 
 const serviceReconcileFlags = {
@@ -264,7 +237,7 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
           );
           return;
         }
-        yield* reportServiceChange(result);
+        yield* Console.log(formatServiceChange(result));
         if (!result.previouslyInstalled) {
           yield* Console.log("Run `t3 up` to choose how your other devices reach it.");
         }
@@ -290,7 +263,7 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
           );
           return;
         }
-        yield* reportServiceChange(result);
+        yield* Console.log(formatServiceChange(result));
       }),
     ),
   ),
@@ -342,11 +315,12 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
           path.resolve(installedBaseDir) !== path.resolve(baseDir)
         ) {
           yield* Console.log(
-            `The T3 Code service serves ${installedBaseDir}, so it was not removed. Pass \`${BootService.formatBootServiceBaseDirOption(installedBaseDir)}\` to remove it.`,
+            `The ${resolveAppDisplayName()} service serves ${installedBaseDir}, so it was not removed. Pass \`${BootService.formatBootServiceBaseDirOption(installedBaseDir)}\` to remove it.`,
           );
           return;
         }
-        const removed = yield* service.uninstall;
+        const removedLegacy = yield* retireLegacyWindowsStartupService(baseDir);
+        const removed = (yield* service.uninstall) || removedLegacy;
         yield* Console.log(
           removed
             ? `Removed the ${resolveAppDisplayName()} service.`

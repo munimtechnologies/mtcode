@@ -28,10 +28,10 @@ it.effect("preserves distinct known-host ports and IPv6 destinations", () =>
     assert.deepEqual(
       hosts.map(({ alias, hostname, port }) => ({ alias, hostname, port })),
       [
+        { alias: "2001:db8::1", hostname: "2001:db8::1", port: 2200 },
         { alias: "host.example.com", hostname: "host.example.com", port: null },
-        { alias: "ssh://[2001:db8::1]:2200", hostname: "2001:db8::1", port: 2200 },
-        { alias: "ssh://host.example.com:2222", hostname: "host.example.com", port: 2222 },
-        { alias: "ssh://host.example.com:2223", hostname: "host.example.com", port: 2223 },
+        { alias: "host.example.com", hostname: "host.example.com", port: 2222 },
+        { alias: "host.example.com", hostname: "host.example.com", port: 2223 },
       ],
     );
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

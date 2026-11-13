@@ -9,7 +9,8 @@ import { providerHasRelay } from "./cloud/connectProviders";
 import { hasClerkPublicConfig } from "./cloud/publicConfig";
 import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
-import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { whenLocaleReady } from "./i18n/runtime";
+import { reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
 const router = startAppServices();
 
@@ -44,10 +45,8 @@ function ClerkGate({ children }: { readonly children: React.ReactNode }) {
   );
 }
 
-let chunkLoadFailed = false;
 let reloadScheduled = false;
 window.addEventListener("vite:preloadError", (event) => {
-  chunkLoadFailed = true;
   if (reloadOnceForChunkLoadError()) {
     reloadScheduled = true;
     event.preventDefault();
@@ -67,12 +66,15 @@ const clerkGateModule =
 
 // React's first commit clears the #root boot splash, so resolve the Clerk gate and the
 // initial route chunks first; the splash then holds until real UI paints.
-export const startup = Promise.all([clerkGateModule, router.load()])
+export const startup = Promise.all([
+  clerkGateModule,
+  // Chained so settings have usually hydrated; English resolves without a chunk load.
+  router.load().then(whenLocaleReady),
+])
   .then(() => {
     // A route chunk failure still resolves router.load(): the error is parked in
     // the lazy component and surfaces through the route error boundary.
     if (reloadScheduled) return;
-    if (!chunkLoadFailed) clearChunkReloadGuard();
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
         <ConnectProvidersRoot>

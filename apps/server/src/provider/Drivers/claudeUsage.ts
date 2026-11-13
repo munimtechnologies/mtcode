@@ -16,9 +16,9 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 export const CLAUDE_SYNTHETIC_MODEL = "<synthetic>";
 
 /**
- * T3 Code writes one record per assistant *content block*, and every one of those records repeats
- * the same complete `usage` object for the parent message. Summing them overcounts by roughly
- * 2.4x on a real workload, so the caller must drop repeats by `dedupeKey` and keep the first.
+ * Claude Code repeats a message's `dedupeKey` for each assistant content block.
+ * Subagent blocks can progress from stream-start to final usage, so callers
+ * must count each key once using the maximum of each token channel.
  */
 export function parseClaudeLine(line: string): readonly UsageRecord[] {
   let parsed: unknown;
@@ -28,6 +28,13 @@ export function parseClaudeLine(line: string): readonly UsageRecord[] {
     return [];
   }
   return parseClaudeRecord(parsed);
+}
+
+function cacheCreation1h(usage: Record<string, unknown>): { cacheCreation1hTokens?: number } {
+  const split = usage["cache_creation"];
+  if (typeof split !== "object" || split === null) return {};
+  const tokens = tokenCount((split as Record<string, unknown>)["ephemeral_1h_input_tokens"]);
+  return tokens > 0 ? { cacheCreation1hTokens: tokens } : {};
 }
 
 function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
@@ -71,6 +78,7 @@ function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
       reasoningTokens: 0,
     },
     recordCount: 1,
+    ...cacheCreation1h(usageRecord),
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
     speed: usageRecord["speed"] === "fast" ? "fast" : "standard",
     dedupeKey,
@@ -103,6 +111,7 @@ function parseClaudeRecord(parsed: unknown): readonly UsageRecord[] {
         reasoningTokens: 0,
       },
       recordCount: 1,
+      ...cacheCreation1h(advisor),
       reportedCostUsd: null,
       speed: executor.speed,
       dedupeKey: dedupeKey === null ? null : `${dedupeKey}:advisor:${index}`,

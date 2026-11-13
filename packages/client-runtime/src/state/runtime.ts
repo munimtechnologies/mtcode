@@ -12,6 +12,7 @@ import * as Cause from "effect/Cause";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import { identity } from "effect/Function";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -97,6 +98,13 @@ interface EnvironmentQueryAtomOptions<Input, A, E, R> extends Omit<
   readonly persistence?: QueryPersistence<A>;
   readonly staleTimeMs?: number;
   readonly idleTtlMs?: number;
+  /**
+   * Check staleness each time the query is mounted again. By default the idle
+   * TTL keeps the stale-while-revalidate node warm, so a remount within it
+   * reads the cached value without checking. The cached value still shows
+   * while the query revalidates.
+   */
+  readonly revalidateOnRemount?: boolean;
   readonly refreshIntervalMs?: number;
   readonly timeout?: Duration.Input;
   readonly refreshTrigger?: (target: {
@@ -613,6 +621,13 @@ function environmentConnectionAtoms<R, ER>(
   return family;
 }
 
+export function environmentConnectionAtom<R, ER>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  environmentId: EnvironmentIdType,
+) {
+  return environmentConnectionAtoms(runtime)(environmentId);
+}
+
 const sessionGenerationAtomsByRuntime = new WeakMap<
   object,
   (environmentId: EnvironmentIdType) => Atom.Atom<number>
@@ -675,6 +690,12 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
   const family = Atom.family((key: string) => {
     const target = parseEnvironmentRpcKey<Input>(key);
     const idleTtlMs = options.idleTtlMs ?? 5 * 60_000;
+    // `Atom.swr` checks staleness only when its node builds. To revalidate on
+    // remount, the wrappers drop on unmount and the source alone keeps the
+    // cached value warm.
+    const keepWarm = Atom.setIdleTTL(idleTtlMs);
+    const keepSourceWarm = options.revalidateOnRemount ? keepWarm : identity;
+    const keepWrapperWarm = options.revalidateOnRemount ? identity : keepWarm;
     const queryAtom = runtime
       .atom<
         A,
@@ -807,11 +828,12 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         });
       })
       .pipe(
+        keepSourceWarm,
         Atom.swr({
           staleTime: options.staleTimeMs ?? 30_000,
           revalidateOnMount: true,
         }),
-        Atom.setIdleTTL(idleTtlMs),
+        keepWrapperWarm,
       );
     const isFinal = (result: AsyncResult.AsyncResult<A, unknown>) =>
       options.isFinal !== undefined && Option.exists(AsyncResult.value(result), options.isFinal);
@@ -824,7 +846,7 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
       refreshTrigger === undefined
         ? intervalQuery
         : intervalQuery.pipe(refreshOnSignalWhileRead(refreshTrigger, isFinal))
-    ).pipe(Atom.setIdleTTL(idleTtlMs), Atom.withLabel(`${options.label}:${key}`));
+    ).pipe(keepWrapperWarm, Atom.withLabel(`${options.label}:${key}`));
   });
   return (target) => family(environmentRpcKey(target));
 }
@@ -922,6 +944,7 @@ export function createEnvironmentRpcQueryAtomFamily<
     readonly persistence?: QueryPersistence<EnvironmentRpcSuccess<TTag>>;
     readonly staleTimeMs?: number;
     readonly idleTtlMs?: number;
+    readonly revalidateOnRemount?: boolean;
     readonly refreshIntervalMs?: number;
     readonly timeout?: Duration.Input;
     readonly refreshTrigger?: (target: {
@@ -937,6 +960,9 @@ export function createEnvironmentRpcQueryAtomFamily<
     ...(options.persistence === undefined ? {} : { persistence: options.persistence }),
     ...(options.staleTimeMs === undefined ? {} : { staleTimeMs: options.staleTimeMs }),
     ...(options.idleTtlMs === undefined ? {} : { idleTtlMs: options.idleTtlMs }),
+    ...(options.revalidateOnRemount === undefined
+      ? {}
+      : { revalidateOnRemount: options.revalidateOnRemount }),
     ...(options.refreshIntervalMs === undefined
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),
@@ -1017,6 +1043,8 @@ export function createEnvironmentRpcCommand<
     ) => Started;
     readonly execute?: (
       input: Input,
+      registry: AtomRegistry.AtomRegistry,
+      environmentId: EnvironmentIdType,
     ) => Effect.Effect<
       EnvironmentRpcSuccess<TTag>,
       EnvironmentRpcFailure<TTag> | EnvironmentRpcUnavailableError,
@@ -1061,7 +1089,9 @@ export function createEnvironmentRpcCommand<
       return permissions.authorize(registry, environmentId, input).pipe(
         Effect.andThen(() => {
           started = options.onStart?.(target, registry);
-          return options.execute?.(input) ?? requestGuarded(options.tag, input);
+          return (
+            options.execute?.(input, registry, environmentId) ?? requestGuarded(options.tag, input)
+          );
         }),
         Effect.provideService(RpcPermissionGuard, {
           authorize: (id, method, payload) =>

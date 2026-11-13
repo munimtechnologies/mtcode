@@ -47,6 +47,7 @@ describe("Computer View machine resolution", () => {
           options.sshAlias === undefined ? null : { alias: options.sshAlias, username: null },
         remoteOpenTargets: undefined,
         isDesktopRenderer: options.isDesktopRenderer ?? true,
+        hostEnvironmentId: null,
       }).mode,
     });
 

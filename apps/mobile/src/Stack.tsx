@@ -98,6 +98,7 @@ import { SettingsEnvironmentDetailRouteScreen } from "./features/settings/Settin
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsEnvironmentRenameRouteScreen } from "./features/settings/SettingsEnvironmentRenameRouteScreen";
 import { SettingsFollowUpRouteScreen } from "./features/settings/SettingsFollowUpRouteScreen";
+import { SettingsLanguageRouteScreen } from "./features/settings/SettingsLanguageRouteScreen";
 import {
   SettingsEnvironmentMaintenanceRouteScreen,
   SettingsThreadsRouteScreen,
@@ -258,6 +259,11 @@ const SETTINGS_SCREENS = {
     screen: SettingsProjectGroupingRouteScreen,
     linking: "settings/organization",
     options: settingsPage("General"),
+  }),
+  SettingsLanguage: createNativeStackScreen({
+    screen: SettingsLanguageRouteScreen,
+    linking: "settings/language",
+    options: settingsPage("Language"),
   }),
   SettingsProjectOverview: createNativeStackScreen({
     screen: SettingsProjectOverviewRouteScreen,
@@ -492,11 +498,11 @@ const RootStackConfig = createWorkspaceStackNavigator({
     Home: createNativeStackScreen({
       screen: WorkspaceRootScreen,
       linking: "",
-      listeners: {
+      listeners: ({ navigation }) => ({
         transitionStart: ({ data }) => recordHomeTransitionStart(data.closing),
-        transitionEnd: ({ data }) => recordHomeTransitionEnd(data.closing),
+        transitionEnd: ({ data }) => recordHomeTransitionEnd(data.closing, navigation.isFocused()),
         focus: recordHomeFocus,
-      },
+      }),
       options: {
         ...pageRoute({ duoMinimize: "never", root: true }),
         contentStyle: { backgroundColor: "transparent" },

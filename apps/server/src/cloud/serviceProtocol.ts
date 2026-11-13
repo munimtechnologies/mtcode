@@ -1,81 +1,87 @@
 import type { ServerSelfUpdateOutcome } from "@t3tools/contracts";
 
-// Bump for incompatible runtime layout changes; launchers survive self-updates. Protocol 3 requires standalone executables.
-export const SERVICE_LAUNCHER_PROTOCOL = 3 as const;
+// Protocol 4 launchers coordinate selection writes and reconcile the unit. A remote update
+// replaces only the child, so an installed protocol-3 launcher stays until a local update or
+// service install restarts the service.
+export const SERVICE_LAUNCHER_PROTOCOL = 4 as const;
+/** Launchers this runtime runs under. Protocol 3 has the same IPC and durable format, and
+    refusing it stops every remote update until someone opens a shell on the host. */
+export type SupportedLauncherProtocol = 3 | typeof SERVICE_LAUNCHER_PROTOCOL;
+export const isSupportedLauncherProtocol = (
+  protocol: unknown,
+): protocol is SupportedLauncherProtocol =>
+  protocol === 3 || protocol === SERVICE_LAUNCHER_PROTOCOL;
 export const SERVICE_LAUNCHER_CONTEXT_ENV = "T3_SERVICE_LAUNCHER_CONTEXT";
 export const SERVICE_ENV_FILE = "service.env";
 export const SERVICE_STATE_FILE = "service-state.json";
+/** Set by the unit or launch agent to its own file name, so the launcher can
+    find the definition that started it. */
+export const SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
 /** Written before explicit stop to distinguish shutdown from update handoff. */
 export const SERVICE_STOP_MARKER_FILE = ".service-stopping";
-/** Windows only. Set by the generated logon script because a Startup folder
-    shortcut has no supervisor. systemd never sets it, so the Linux launcher
-    keeps failing fast and letting `Restart=always` bring the whole unit back. */
-export const SERVICE_SELF_SUPERVISE_ENV = "T3_SERVICE_SELF_SUPERVISE";
-/** Windows only. Written by the CLI to ask a self-supervising launcher to stop,
-    because Windows has no SIGTERM. The launcher deletes it once it has stopped,
-    which is how the CLI learns the stop finished. */
-export const SERVICE_STOP_REQUEST_FILE = ".service-stop-request";
-/** Windows only. Holds a self-supervising launcher's process id while it runs.
-    It is what lets the CLI tell "the service stopped" apart from "no service was
-    running" and from "it is still running and did not answer". Without it, an
-    install could rewrite the runtime under a live launcher and end up with two
-    servers on one database. */
-export const SERVICE_PID_FILE = ".service-pid";
-
-/**
- * Windows only. What the pid file records.
- *
- * A process id alone is not enough. The file survives a crash or a hard reboot,
- * and the operating system reuses process ids freely, so an old file can name a
- * live process that has nothing to do with T3 Code. Believing it would leave the
- * launcher refusing to start for as long as that stranger runs. Recording when
- * the machine booted makes any file written before this boot obviously stale.
- */
-export interface ServiceLauncherPresence {
-  readonly pid: number;
-  readonly bootTimeMs: number;
-  /**
-   * The server the launcher is currently running, when it has one.
-   *
-   * Windows has no equivalent of `KillMode=mixed`, so a launcher killed
-   * outright leaves its server behind. Recording the child means whoever takes
-   * the record over can put that orphan down before starting its own, instead
-   * of quietly ending up with two servers on one database.
-   */
-  readonly childPid?: number;
-}
-
-/** Boot time is derived from uptime, which drifts by a little between reads. */
-export const SAME_BOOT_TOLERANCE_MS = 60_000;
-
-export function encodeServiceLauncherPresence(presence: ServiceLauncherPresence): string {
-  const child = presence.childPid === undefined ? "" : ` ${presence.childPid}`;
-  return `${presence.pid} ${presence.bootTimeMs}${child}\n`;
-}
-
-export function decodeServiceLauncherPresence(text: string): ServiceLauncherPresence | undefined {
-  const [rawPid, rawBoot, rawChild] = text.trim().split(/\s+/);
-  const pid = Number(rawPid);
-  const bootTimeMs = Number(rawBoot);
-  if (!Number.isInteger(pid) || pid <= 0 || !Number.isFinite(bootTimeMs)) return undefined;
-  const childPid = rawChild === undefined ? Number.NaN : Number(rawChild);
-  return Number.isInteger(childPid) && childPid > 0
-    ? { pid, bootTimeMs, childPid }
-    : { pid, bootTimeMs };
-}
-
-/** False when the file predates this boot, whatever process now holds that id. */
-export function serviceLauncherPresenceIsFromThisBoot(
-  presence: ServiceLauncherPresence,
-  currentBootTimeMs: number,
-): boolean {
-  return Math.abs(presence.bootTimeMs - currentBootTimeMs) <= SAME_BOOT_TOLERANCE_MS;
-}
-/** Written by `t3 update` when the unit was repointed at a new version but the
-    running service was deliberately left on the old one. The launcher removes
-    it when it starts (whoever restarted the service), so while it exists the
-    service is known to be behind its unit and status reports it that way. */
+/** Marks a repointed unit whose service still runs the old version; launcher startup clears it. */
 export const SERVICE_RESTART_PENDING_FILE = ".restart-pending";
+/** Held by a Windows launcher while it runs: Task Scheduler tracks only the task's console host. */
+export const SERVICE_LAUNCHER_LOCK_FILE = "service-launcher.lock";
+
+const unquoteSystemdValue = (raw: string) =>
+  (raw.startsWith('"') && raw.endsWith('"')
+    ? raw.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\\\", "\\")
+    : raw
+  ).replaceAll("%%", "%");
+
+const unescapeXmlText = (value: string) =>
+  value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+
+const unquoteWindowsArgument = (raw: string) =>
+  unescapeXmlText(raw).replace(/(\\+)$/, (slashes) => slashes.slice(slashes.length / 2));
+
+/** Whether Task Scheduler's copy of a task is disabled as a whole, not one of its triggers. */
+export const serviceTaskIsDisabled = (taskXml: string): boolean =>
+  /<Settings>[\s\S]*?<\/Settings>/.exec(taskXml)?.[0].includes("<Enabled>false</Enabled>") === true;
+
+/** A task as Task Scheduler should hold it while its service must stay stopped. */
+export const disabledServiceTask = (taskXml: string): string =>
+  serviceTaskIsDisabled(taskXml)
+    ? taskXml
+    : taskXml.replace("  </Settings>", "    <Enabled>false</Enabled>\n  </Settings>");
+
+export function serviceUnitEnvironmentValueOf(
+  contents: string,
+  name: "T3CODE_HOME" | "T3CODE_INSTALL_BIN_DIR",
+): string | undefined {
+  const systemd = new RegExp(`^Environment=${name}=(.*)$`, "m").exec(contents)?.[1];
+  if (systemd !== undefined) return unquoteSystemdValue(systemd.trim());
+  const plist = new RegExp(`<key>${name}</key>\\s*<string>([^<]*)</string>`).exec(contents)?.[1];
+  return plist === undefined ? undefined : unescapeXmlText(plist);
+}
+
+export function serviceUnitBaseDirOf(contents: string): string | undefined {
+  const unix = serviceUnitEnvironmentValueOf(contents, "T3CODE_HOME");
+  if (unix !== undefined) return unix;
+  const task = /<Arguments>[^<]* "--base-dir" "([^"]*)"/.exec(contents)?.[1];
+  return task === undefined ? undefined : unquoteWindowsArgument(task);
+}
+
+/** The file systemd or launchd appends the service's output to. */
+export function serviceUnitLogPathOf(contents: string): string | undefined {
+  const systemd = /^StandardOutput=append:(.*)$/m.exec(contents)?.[1];
+  if (systemd !== undefined) return unquoteSystemdValue(systemd.trim());
+  const plist = /<key>StandardOutPath<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
+  return plist === undefined ? undefined : unescapeXmlText(plist);
+}
+
+/** The executable an installed unit, plist, or task starts: the launcher's runtime. */
+export function serviceUnitProgramOf(contents: string): string | undefined {
+  const systemd = /^ExecStart=("(?:\\.|[^"\\])*"|\S+)/m.exec(contents)?.[1];
+  if (systemd !== undefined) return unquoteSystemdValue(systemd);
+  const plist = /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/.exec(
+    contents,
+  )?.[1];
+  if (plist !== undefined) return unescapeXmlText(plist);
+  const task = /<Arguments>--headless "([^"]*)"/.exec(contents)?.[1];
+  return task === undefined ? undefined : unquoteWindowsArgument(task);
+}
 
 export interface PendingServiceUpdate {
   readonly id: string;
@@ -94,7 +100,7 @@ export interface ServiceState {
 }
 
 export interface ServiceLauncherContext {
-  readonly protocol: typeof SERVICE_LAUNCHER_PROTOCOL;
+  readonly protocol: SupportedLauncherProtocol;
   readonly childVersion: string;
   readonly update?: ServiceUpdateRecord;
 }
@@ -122,6 +128,10 @@ export type ServiceLauncherParentMessage =
   | {
       readonly type: "committed";
       readonly updateId: string;
+    }
+  | {
+      /** Shut down as on SIGTERM, which Windows cannot deliver. */
+      readonly type: "stop";
     };
 
 const SEMVER_NUMBER = "(?:0|[1-9]\\d*)";
@@ -210,7 +220,8 @@ export function decodeServiceState(value: unknown): ServiceState | undefined {
   if (!isRecord(value)) return undefined;
   const update = value.update === undefined ? undefined : decodeServiceUpdate(value.update);
   if (
-    value.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
+    // A protocol-3 installer can select a protocol-4 runtime.
+    !isSupportedLauncherProtocol(value.protocol) ||
     typeof value.activeVersion !== "string" ||
     !isExactServiceVersion(value.activeVersion) ||
     (value.update !== undefined && update === undefined) ||
@@ -233,6 +244,24 @@ export function decodeServiceState(value: unknown): ServiceState | undefined {
 export function parseServiceState(value: string): ServiceState | undefined {
   try {
     return decodeServiceState(JSON.parse(value) as unknown);
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseLegacyServiceState(value: string) {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      !isRecord(parsed) ||
+      Object.keys(parsed).length !== 2 ||
+      parsed.protocol !== 2 ||
+      typeof parsed.activeVersion !== "string" ||
+      !isExactServiceVersion(parsed.activeVersion)
+    ) {
+      return undefined;
+    }
+    return { protocol: 2, activeVersion: parsed.activeVersion } as const;
   } catch {
     return undefined;
   }
@@ -269,7 +298,7 @@ export function decodeServiceLauncherContext(value: string): ServiceLauncherCont
   }
   if (
     !isRecord(parsed) ||
-    parsed.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
+    !isSupportedLauncherProtocol(parsed.protocol) ||
     typeof parsed.childVersion !== "string" ||
     !isExactServiceVersion(parsed.childVersion)
   ) {
@@ -287,7 +316,7 @@ export function decodeServiceLauncherContext(value: string): ServiceLauncherCont
     return undefined;
   }
   return {
-    protocol: SERVICE_LAUNCHER_PROTOCOL,
+    protocol: parsed.protocol,
     childVersion: parsed.childVersion,
     ...(update === undefined ? {} : { update }),
   };
@@ -319,6 +348,7 @@ export function decodeServiceLauncherParentMessage(
   if (value.type === "update-accepted" && typeof value.updateId === "string") {
     return { type: value.type, updateId: value.updateId };
   }
+  if (value.type === "stop") return { type: value.type };
   return value.type === "committed" && typeof value.updateId === "string"
     ? { type: value.type, updateId: value.updateId }
     : undefined;

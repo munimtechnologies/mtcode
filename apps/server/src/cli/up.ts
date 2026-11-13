@@ -43,7 +43,7 @@ interface Setup {
   /** T3 Connect revoked the link; `t3 connect` links again. */
   readonly connectRevoked: boolean;
   readonly lan: boolean;
-  /** An installed service with no T3CODE_LAN keeps the old default: on. */
+  /** An installed service with no T3CODE_LAN or T3CODE_HOST keeps the old default: on. */
   readonly lanFromOldDefault: boolean;
   readonly host: string | undefined;
 }
@@ -87,7 +87,7 @@ const readSetup = Effect.fn("cli.up.read_setup")(function* () {
     connect,
     connectRevoked,
     lan: Option.getOrElse(lan, () => servesThisHome),
-    lanFromOldDefault: Option.isNone(lan) && servesThisHome,
+    lanFromOldDefault: Option.isNone(lan) && servesThisHome && entries.T3CODE_HOST === undefined,
     host: entries.T3CODE_HOST,
   } satisfies Setup;
 });
@@ -379,9 +379,6 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
           Effect.catchTags({
             BootServicePrerequisiteError: (error) => Effect.succeed({ failed: error.message }),
             BootServiceUnsupportedError: (error) => Effect.succeed({ failed: error.message }),
-            BootServicePathHasPercentError: (error) => Effect.succeed({ failed: error.message }),
-            BootServiceStartupEntryDisabledError: (error) =>
-              Effect.succeed({ failed: error.message }),
           }),
           Effect.tapError(() => rollBack),
         );
@@ -395,7 +392,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
     } else if ("failed" in result) {
       yield* printServeCommand(`Service setup failed: ${result.failed}`);
     } else if (result.changed) {
-      yield* CliService.reportServiceChange(result);
+      yield* Console.log(CliService.formatServiceChange(result));
       started = true;
     } else if (restart || (unlinkFailed && before.service.installed)) {
       const confirmed =

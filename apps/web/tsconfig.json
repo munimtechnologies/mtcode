@@ -30,6 +30,7 @@
     "vite",
     "vite.config.ts",
     "vercel.ts",
+    "gt.config.json",
     "test",
     "e2e",
     "scripts/verify-built-boot.ts",

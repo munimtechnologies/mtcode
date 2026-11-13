@@ -16,7 +16,6 @@ type VisibilityInput = Parameters<typeof createOrchestrationV2TurnItemVisibility
 
 const ordinaryStatuses = [
   "preparing",
-  "queued",
   "starting",
   "running",
   "waiting",
@@ -76,28 +75,6 @@ describe.each([
     ).toBe(true);
   });
 
-  it("hides queued user messages once their run is cancelled", () => {
-    expect(
-      isVisible({
-        item: { type: "user_message", inputIntent: "queued_turn", runId, nodeId },
-        runs: [{ id: runId, status: "cancelled" }],
-        attempts: [],
-        items: [{ type: "user_message", inputIntent: "queued_turn", runId, nodeId }],
-      }),
-    ).toBe(false);
-  });
-
-  it("keeps non-queued user messages on cancelled runs", () => {
-    expect(
-      isVisible({
-        item: { type: "user_message", inputIntent: "turn_start", runId, nodeId },
-        runs: [{ id: runId, status: "cancelled" }],
-        attempts: [],
-        items: [{ type: "user_message", inputIntent: "turn_start", runId, nodeId }],
-      }),
-    ).toBe(true);
-  });
-
   it("hides the one-tap Continue message but not the user's own messages", () => {
     const continuation = {
       type: "user_message" as const,
@@ -136,6 +113,7 @@ describe.each([
 
   it.each([
     ...ordinaryStatuses.map((status) => ({ status, hidden: [] })),
+    { status: "queued", hidden: ["queued"] },
     { status: "cancelled", hidden: ["queued"] },
     {
       status: "rolled_back",
@@ -259,11 +237,15 @@ describe.each([
 
 describe("indexed timeline visibility", () => {
   it.each([
-    ...ordinaryStatuses.flatMap(
+    ...[...ordinaryStatuses, "queued" as const].flatMap(
       (status) =>
         [
-          { statuses: ["rolled_back", status], visible: true, ordinaryVisible: true },
-          { statuses: ["cancelled", status], visible: true, ordinaryVisible: true },
+          {
+            statuses: ["rolled_back", status],
+            visible: status !== "queued",
+            ordinaryVisible: true,
+          },
+          { statuses: ["cancelled", status], visible: status !== "queued", ordinaryVisible: true },
           { statuses: [status, "rolled_back"], visible: false, ordinaryVisible: false },
           { statuses: [status, "cancelled"], visible: false, ordinaryVisible: true },
         ] as const,

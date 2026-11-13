@@ -131,7 +131,10 @@ const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
+// macOS stays capped and falls back to launchctl's PATH instead of waiting longer.
 const MACOS_LOGIN_SHELL_TIMEOUT = Duration.millis(750);
+// A profile can be slow only while the machine boots; one longer wait covers it.
+const SLOW_LOGIN_SHELL_TIMEOUT = Duration.seconds(20);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
 const MACOS_LOGIN_SHELL_TERMINATE_GRACE = Duration.millis(100);
@@ -348,7 +351,11 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
   readonly timeout: Duration.Duration;
   readonly forceKillAfter?: Duration.Duration;
   readonly shell?: boolean;
-}): Effect.fn.Return<string, never, ChildProcessSpawner.ChildProcessSpawner> {
+}): Effect.fn.Return<
+  string,
+  DesktopShellEnvironmentCommandTimeoutError,
+  ChildProcessSpawner.ChildProcessSpawner
+> {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fiber = yield* Effect.scoped(
     Effect.gen(function* () {
@@ -404,15 +411,23 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
     return output.value;
   }
 
-  const error = new DesktopShellEnvironmentCommandTimeoutError({
+  return yield* new DesktopShellEnvironmentCommandTimeoutError({
     probe: input.probe,
     executable: executableName(input.command),
     argumentCount: input.args.length,
     timeoutMs: Duration.toMillis(input.timeout),
   });
-  yield* logShellEnvironmentCommandError(error);
-  return "";
 });
+
+const orEmptyOnTimeout = <R>(
+  effect: Effect.Effect<string, DesktopShellEnvironmentCommandTimeoutError, R>,
+): Effect.Effect<string, never, R> =>
+  effect.pipe(
+    Effect.catchTags({
+      DesktopShellEnvironmentCommandTimeoutError: (error) =>
+        logShellEnvironmentCommandError(error).pipe(Effect.as("")),
+    }),
+  );
 
 const readLoginShellEnvironment = (
   shell: string,
@@ -420,7 +435,12 @@ const readLoginShellEnvironment = (
   platform: NodeJS.Platform,
   mode: ShellEnvironmentMode,
   env: NodeJS.ProcessEnv,
-): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  timeout: Duration.Duration,
+): Effect.Effect<
+  EnvironmentPatch,
+  DesktopShellEnvironmentCommandTimeoutError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
   names.length === 0
     ? Effect.succeed({})
     : runCommandOutput({
@@ -431,7 +451,7 @@ const readLoginShellEnvironment = (
           capturePosixEnvironmentCommand(shell, names, mode),
         ],
         env,
-        timeout: platform === "darwin" ? MACOS_LOGIN_SHELL_TIMEOUT : LOGIN_SHELL_TIMEOUT,
+        timeout,
         ...(platform === "darwin" ? { forceKillAfter: MACOS_LOGIN_SHELL_TERMINATE_GRACE } : {}),
       }).pipe(Effect.map((output) => extractEnvironment(output, names, mode)));
 
@@ -442,7 +462,7 @@ const readLaunchctlPath = (env: NodeJS.ProcessEnv) =>
     command: "/bin/launchctl",
     args: ["getenv", "PATH"],
     timeout: LAUNCHCTL_TIMEOUT,
-  }).pipe(Effect.map(trimNonEmpty));
+  }).pipe(orEmptyOnTimeout, Effect.map(trimNonEmpty));
 
 const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEnvironment")(
   function* (
@@ -467,7 +487,7 @@ const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEn
         args,
         env,
         timeout: LOGIN_SHELL_TIMEOUT,
-      });
+      }).pipe(orEmptyOnTimeout);
       const environment = extractEnvironment(output, names, options.mode);
       if (Object.keys(environment).length > 0) {
         return environment;
@@ -560,15 +580,36 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
 
     const probeNames = [...LOGIN_SHELL_ENV_NAMES, ...config.harvest.names];
     let answeredBy: string | undefined;
+    // macOS never takes the slow retry: its capped probe falls back to launchctl's PATH.
+    let waitedForSlowShell = config.platform === "darwin";
+    const firstTimeout =
+      config.platform === "darwin" ? MACOS_LOGIN_SHELL_TIMEOUT : LOGIN_SHELL_TIMEOUT;
     for (const shell of listLoginShellCandidates(config.platform, config.env.SHELL)) {
-      Object.assign(
-        shellEnvironment,
-        yield* readLoginShellEnvironment(
+      const read = (timeout: Duration.Duration) =>
+        readLoginShellEnvironment(
           shell,
           probeNames,
           config.platform,
           config.harvest.mode,
           config.env,
+          timeout,
+        );
+      Object.assign(
+        shellEnvironment,
+        yield* read(firstTimeout).pipe(
+          Effect.catchTags({
+            DesktopShellEnvironmentCommandTimeoutError: (error) => {
+              const retry = !waitedForSlowShell;
+              waitedForSlowShell = true;
+              return logShellEnvironmentCommandError(error).pipe(
+                Effect.andThen(retry ? read(SLOW_LOGIN_SHELL_TIMEOUT) : Effect.succeed({})),
+              );
+            },
+          }),
+          Effect.catchTags({
+            DesktopShellEnvironmentCommandTimeoutError: (error) =>
+              logShellEnvironmentCommandError(error).pipe(Effect.as({})),
+          }),
         ),
       );
       if (shellEnvironment.PATH) {

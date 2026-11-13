@@ -23,6 +23,7 @@ import {
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import {
+  generatedThreadTitle,
   investigationUnsupported,
   TranscriptionPostProcessingOutput,
 } from "@t3tools/provider-core/server/textGenerationOperations";
@@ -37,7 +38,6 @@ import {
   clampPullRequestRankings,
   sanitizeCommitSubject,
   sanitizePrTitle,
-  sanitizeThreadTitle,
   toJsonSchemaObject,
 } from "@t3tools/provider-core/server/textGenerationUtils";
 
@@ -350,7 +350,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
       ...buildThreadTitlePrompt(input),
       modelSelection: input.modelSelection,
     });
-    return { title: sanitizeThreadTitle(generated.title) };
+    return { title: yield* generatedThreadTitle(generated.title) };
   });
   // Fork: AI ranking of upstream pull requests for the PR picker.
   const rankPullRequests: ProviderTextGeneration["rankPullRequests"] = Effect.fn(

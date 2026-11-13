@@ -20,6 +20,8 @@ export interface UsageRecord {
   readonly totals: UsageTokenTotals;
   /** Distinct model responses represented by this aggregate record. */
   readonly recordCount: number;
+  /** The part of `totals.cacheCreationTokens` written with a 1-hour TTL. */
+  readonly cacheCreation1hTokens?: number;
   readonly reportedCostUsd: number | null;
   readonly speed: UsageSpeed;
   readonly unresolvedServiceTierTurnId?: string;
@@ -113,10 +115,16 @@ export type ProviderUsageReader<Config, R> =
       readonly resolveServiceTiers?: (
         records: readonly UsageRecord[],
       ) => Effect.Effect<ReadonlyMap<UsageRecord, UsageSpeed>, never, R>;
+      /** A `refreshing` entry is not scanned; it reports its source as still being located. */
       readonly directories: (
         instance: ProviderUsageInstance<Config>,
+        options: { readonly awaitRefresh: boolean },
       ) => Effect.Effect<
-        ReadonlyArray<{ readonly dir: string; readonly fileName?: string }>,
+        ReadonlyArray<{
+          readonly dir: string;
+          readonly fileName?: string;
+          readonly refreshing?: true;
+        }>,
         never,
         R
       >;

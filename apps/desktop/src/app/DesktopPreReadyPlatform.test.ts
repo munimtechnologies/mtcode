@@ -220,14 +220,18 @@ describe("DesktopPreReadyPlatform", () => {
     let desktopName = "t3code.desktop";
     let desktopEntry = previousEntry;
     let iconInstalled = false;
-    copyFileSyncMock.mockImplementation((_source: string, destination: string) => {
-      iconInstalled = destination === iconPath;
+    const iconSource = "/tmp/.mount_T3/resources/app.asar/apps/desktop/prod-resources/icon.png";
+    const iconBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    readFileSyncMock.mockImplementation((path: string) => {
+      if (path === iconSource) return iconBytes;
+      return "{}";
     });
     setDesktopNameMock.mockImplementation((name: string) => {
       desktopName = name;
     });
-    writeFileSyncMock.mockImplementation((path: string, contents: string) => {
-      if (path === desktopEntryPath) desktopEntry = contents;
+    writeFileSyncMock.mockImplementation((path: string, contents: string | Buffer) => {
+      if (path === desktopEntryPath) desktopEntry = String(contents);
+      if (path === iconPath) iconInstalled = Buffer.compare(Buffer.from(contents), iconBytes) === 0;
     });
 
     return Effect.scoped(
@@ -255,8 +259,13 @@ describe("DesktopPreReadyPlatform", () => {
         assert.include(identity.desktopEntry ?? "", "Exec=/Applications/current.AppImage %U");
         assert.include(identity.desktopEntry ?? "", "Name=T3 Code\n");
         assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
-        assert.include(identity.desktopEntry ?? "", "Icon=/xdg/icons/t3code.desktop.png");
-        assert.isTrue(identity.iconInstalled);
+        assert.include(identity.desktopEntry ?? "", `Icon=${iconPath}`);
+        assert.equal(
+          copyFileSyncMock.mock.calls.length,
+          0,
+          "icon must not be copied out of the app bundle",
+        );
+        assert.isTrue(identity.iconInstalled, "icon must be written from the bundled bytes");
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
@@ -298,14 +307,17 @@ describe("DesktopPreReadyPlatform", () => {
     );
   });
 
-  it.effect("still prepares the portal entry when the bundled icon cannot be copied", () => {
+  it.effect("still prepares the portal entry when the bundled icon cannot be read", () => {
     getSwitchValueMock.mockReturnValue("");
-    copyFileSyncMock.mockImplementation(() => {
-      throw new Error("missing bundled icon");
+    readFileSyncMock.mockImplementation((path: string) => {
+      if (path.endsWith("/icon.png")) throw new Error("missing bundled icon");
+      return "{}";
     });
     return Effect.gen(function* () {
       yield* DesktopPreReadyPlatform.make;
-      const contents = writeFileSyncMock.mock.calls[0]?.[1];
+      const contents = writeFileSyncMock.mock.calls.find(([path]) =>
+        String(path).endsWith(".desktop"),
+      )?.[1];
       assert.include(contents, "MimeType=x-scheme-handler/t3code;");
       assert.include(contents, "Icon=");
       assert.equal(setDesktopNameMock.mock.calls.length, 1);

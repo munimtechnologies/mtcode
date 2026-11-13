@@ -30,6 +30,7 @@ import {
   isCommandMissingCause,
   parseCliVersionResult,
   providerModelsFromSettings,
+  resolveProviderProbeTimeoutMs,
   spawnAndCollect,
   type ServerProviderDraft,
   ProviderProbeTimeoutError,
@@ -133,7 +134,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const GROK_EFFORT_RANK = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-function grokReasoningOptionsFromModel(model: EffectAcpSchema.ModelInfo): {
+export function grokReasoningOptionsFromModel(model: EffectAcpSchema.ModelInfo): {
   readonly options: ReadonlyArray<{
     value: string;
     label: string;
@@ -321,7 +322,7 @@ const probeGrokModels = Effect.fn("GrokProviderStatus.probeGrokModels")(function
 ) {
   const authProbeTimeoutMs = yield* providerAuthProbeTimeoutMs;
   const modelsResult = yield* runGrokCliCommand(grokSettings, ["models"], environment).pipe(
-    Effect.timeoutOption(authProbeTimeoutMs),
+    Effect.timeoutOption(resolveProviderProbeTimeoutMs("grok", authProbeTimeoutMs, environment)),
     Effect.result,
   );
   // Only a clean exit is parsed. Failed invocations print help or error text that
@@ -434,9 +435,10 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
   const probeEnvironment = grokProbeEnvironment(environment);
   const apiKey = environment[GROK_API_KEY_ENV]?.trim();
 
-  const versionTimeoutMs = Math.max(
-    yield* providerVersionProbeTimeoutMs,
-    GROK_VERSION_PROBE_MIN_TIMEOUT_MS,
+  const versionTimeoutMs = resolveProviderProbeTimeoutMs(
+    "grok",
+    Math.max(yield* providerVersionProbeTimeoutMs, GROK_VERSION_PROBE_MIN_TIMEOUT_MS),
+    environment,
   );
   const versionResult = yield* runGrokCliCommand(
     grokSettings,
@@ -524,7 +526,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
 
   const acpDiscoveryTimeoutMs = yield* grokAcpModelDiscoveryTimeoutMs;
   const acpExit = yield* discoverGrokMetadataViaAcpInitialize(grokSettings, probeEnvironment).pipe(
-    Effect.timeoutOption(acpDiscoveryTimeoutMs),
+    Effect.timeoutOption(resolveProviderProbeTimeoutMs("grok", acpDiscoveryTimeoutMs, environment)),
     Effect.exit,
   );
   const acpMetadata = Exit.isSuccess(acpExit) ? Option.getOrUndefined(acpExit.value) : undefined;

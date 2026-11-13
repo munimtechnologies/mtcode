@@ -32,6 +32,7 @@ interface ComposerResumeInput {
   /** Whether the resumable run was stopped by the user (rather than held by a usage limit). */
   readonly resumableRunInterrupted: boolean;
   readonly hasHeldQueuedRuns: boolean;
+  readonly canResume: boolean;
   readonly isSendBusy: boolean;
   readonly isRevertingCheckpoint: boolean;
   readonly threadDetailLoading: boolean;
@@ -64,6 +65,7 @@ export function useComposerResume(input: ComposerResumeInput) {
     resumableRunId,
     resumableRunInterrupted,
     hasHeldQueuedRuns,
+    canResume,
     isSendBusy,
     isRevertingCheckpoint,
     threadDetailLoading,
@@ -91,7 +93,7 @@ export function useComposerResume(input: ComposerResumeInput) {
   const onResume = async () => {
     if (
       !activeThread ||
-      (resumableRunId === null && !hasHeldQueuedRuns) ||
+      !canResume ||
       isSendBusy ||
       isResuming ||
       isRevertingCheckpoint ||

@@ -44,6 +44,7 @@ const source: OrchestrationV2ThreadShell = {
 const project: ProjectStore.ProjectRow = {
   projectId,
   title: "t3code",
+  hasCustomTitle: false,
   workspaceRoot: "/Users/me/dev/t3code",
   defaultModelSelection: null,
   defaultThreadEnvMode: null,

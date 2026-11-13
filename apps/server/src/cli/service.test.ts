@@ -20,21 +20,18 @@ const status = {
   supported: true,
   installed: true,
   current: true,
-  kind: "systemd",
   unitPath: "/home/me/.config/systemd/user/t3code.service",
   logPath: "/home/me/.t3/userdata/logs/boot-service.log",
 } as const;
 
 const windowsStatus = {
   ...status,
-  kind: "win32-startup-shortcut",
-  unitPath:
-    "C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\T3 Code Server.lnk",
+  unitPath: "C:\\Users\\me\\AppData\\Local\\t3code\\t3code-task.xml",
 } as const;
 
-it("calls the Windows definition a shortcut, not a unit", () => {
+it("calls the Windows definition a task, not a unit", () => {
   const output = formatServiceStatus(windowsStatus, "0.0.29");
-  assert.include(output, `  Shortcut: ${windowsStatus.unitPath}`);
+  assert.include(output, `  Task: ${windowsStatus.unitPath}`);
   assert.notInclude(output, "Unit:");
 });
 
@@ -42,14 +39,13 @@ it("calls the macOS definition a LaunchAgent, not a unit", () => {
   const output = formatServiceStatus(
     {
       ...status,
-      kind: "launchd",
       unitPath: "/Users/me/Library/LaunchAgents/com.t3tools.t3code.service.plist",
     },
     "0.0.29",
   );
   assert.include(output, "  LaunchAgent:");
   assert.notInclude(output, "Unit:");
-  assert.notInclude(output, "Shortcut:");
+  assert.notInclude(output, "Task:");
 });
 
 const newerServiceStatus = { ...status, current: false, installedVersion: "999.0.0" };
