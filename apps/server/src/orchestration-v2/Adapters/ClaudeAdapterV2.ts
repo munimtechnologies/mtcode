@@ -178,6 +178,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ComputerHistoryService from "../../computerHistory/service.ts";
 import {
+  claudeDesktopMcpServerConfig,
   type DesktopMcpLaunch,
   makeResolveEnabledDesktopMcp,
 } from "../../desktopControl/desktopMcpLaunch.ts";
@@ -4988,15 +4989,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       ...overrides,
       mcpServers: {
         ...overrides.mcpServers,
-        [DESKTOP_MCP_SERVER_NAME]: {
-          type: "stdio" as const,
-          command: desktopMcp.path,
-          ...(desktopMcp.env.length > 0
-            ? {
-                env: Object.fromEntries(desktopMcp.env.map((entry) => [entry.name, entry.value])),
-              }
-            : {}),
-        },
+        [DESKTOP_MCP_SERVER_NAME]: claudeDesktopMcpServerConfig(desktopMcp),
       },
     };
   });

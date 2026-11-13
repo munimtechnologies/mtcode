@@ -19,6 +19,20 @@ import type { DesktopMcpLaunch } from "@t3tools/provider-core/server/ProviderHos
 
 export type { DesktopMcpLaunch };
 
+/**
+ * The stdio entry Claude gets for `mt-desktop`. `args` must be present: Claude
+ * Code's dynamic `setMcpServers` spreads it, and a missing array fails the
+ * server with "Spread syntax requires ...iterable not be null or undefined".
+ */
+export const claudeDesktopMcpServerConfig = (launch: DesktopMcpLaunch) => ({
+  type: "stdio" as const,
+  command: launch.path,
+  args: [] as Array<string>,
+  ...(launch.env.length > 0
+    ? { env: Object.fromEntries(launch.env.map((entry) => [entry.name, entry.value])) }
+    : {}),
+});
+
 type DesktopControlFlags = {
   readonly enabled: boolean;
   readonly agentCursorEnabled: boolean;

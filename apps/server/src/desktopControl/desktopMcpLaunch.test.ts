@@ -8,7 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Stream from "effect/Stream";
 
 import * as ServerSettings from "../serverSettings.ts";
-import { resolveEnabledDesktopMcp } from "./desktopMcpLaunch.ts";
+import { claudeDesktopMcpServerConfig, resolveEnabledDesktopMcp } from "./desktopMcpLaunch.ts";
 
 describe("resolveEnabledDesktopMcp", () => {
   it.effect("omits the MCP when Computer Use is disabled", () =>
@@ -107,4 +107,29 @@ describe("resolveEnabledDesktopMcp", () => {
       assert.equal(resolved, undefined);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+});
+
+describe("claudeDesktopMcpServerConfig", () => {
+  it("always sends an args array so Claude's setMcpServers can connect it", () => {
+    assert.deepStrictEqual(
+      claudeDesktopMcpServerConfig({ path: "/opt/mt/munim-computer-use", env: [] }),
+      {
+        type: "stdio",
+        command: "/opt/mt/munim-computer-use",
+        args: [],
+      },
+    );
+    assert.deepStrictEqual(
+      claudeDesktopMcpServerConfig({
+        path: "/opt/mt/munim-computer-use",
+        env: [{ name: "MTCODE_DESKTOP_BROWSER", value: "0" }],
+      }),
+      {
+        type: "stdio",
+        command: "/opt/mt/munim-computer-use",
+        args: [],
+        env: { MTCODE_DESKTOP_BROWSER: "0" },
+      },
+    );
+  });
 });
