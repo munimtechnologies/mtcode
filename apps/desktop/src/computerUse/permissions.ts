@@ -109,42 +109,76 @@ function profileDirectories(root: string): string[] {
   }
 }
 
-function chromeExtensionInstalledInPreferences(preferencesPath: string): boolean {
+export interface ChromeExtensionSettingsEntry {
+  readonly state?: number;
+  readonly location?: number;
+  readonly path?: string;
+  readonly disable_reasons?: unknown;
+}
+
+const CHROME_UNPACKED_LOCATION = 4;
+
+/** `version` from an unpacked extension folder's manifest.json. */
+function readManifestVersion(directory: string): string | undefined {
   try {
-    const raw = NodeFS.readFileSync(preferencesPath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      extensions?: {
-        settings?: Record<
-          string,
-          {
-            state?: number;
-            location?: number;
-            path?: string;
-            disable_reasons?: unknown;
-            was_installed_by_default?: boolean;
-          }
-        >;
-      };
+    const manifest = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(directory, "manifest.json"), "utf8"),
+    ) as { version?: unknown };
+    return typeof manifest.version === "string" ? manifest.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether one profile's settings entry for the extension is a live install.
+ * Chrome keeps entries like `{ has_started_service_worker: true }` after an
+ * extension is removed, and an unpacked load from another folder can be an old
+ * copy that no longer talks to MT Code; neither counts.
+ */
+export function chromeExtensionEntryInstalled(
+  entry: ChromeExtensionSettingsEntry | undefined,
+  options: {
+    readonly bundledVersion: string | undefined;
+    readonly manifestVersion: (directory: string) => string | undefined;
+  },
+): boolean {
+  if (!entry) return false;
+  const reasons = entry.disable_reasons;
+  if (typeof reasons === "number" && reasons !== 0) return false;
+  if (reasons && typeof reasons === "object" && Object.keys(reasons).length > 0) return false;
+  // Chromium: 0 = disabled, 1 = enabled. Unpacked installs often omit `state`.
+  if (entry.state !== undefined && entry.state !== 1) return false;
+
+  const path = typeof entry.path === "string" && entry.path.length > 0 ? entry.path : undefined;
+  const unpacked = entry.location === CHROME_UNPACKED_LOCATION;
+  if (!unpacked) return entry.state === 1 || path !== undefined;
+  if (path === undefined) return true;
+  const version = options.manifestVersion(path);
+  if (version === undefined) return false;
+  return options.bundledVersion === undefined || version === options.bundledVersion;
+}
+
+function chromeExtensionInstalledInPreferences(
+  preferencesPath: string,
+  bundledVersion: string | undefined,
+): boolean {
+  try {
+    const parsed = JSON.parse(NodeFS.readFileSync(preferencesPath, "utf8")) as {
+      extensions?: { settings?: Record<string, ChromeExtensionSettingsEntry> };
     };
-    const entry = parsed.extensions?.settings?.[CHROME_EXTENSION_ID];
-    if (!entry) return false;
-
-    // Explicit disable reasons mean it is present but turned off.
-    if (entry.disable_reasons !== undefined && entry.disable_reasons !== null) {
-      const reasons = entry.disable_reasons;
-      if (typeof reasons === "number" && reasons !== 0) return false;
-      if (typeof reasons === "object" && Object.keys(reasons as object).length > 0) return false;
-    }
-
-    // Chromium: 0 = disabled, 1 = enabled. Unpacked installs often omit `state`
-    // in Secure Preferences while still being active (location 4 = UNPACKED).
-    if (typeof entry.state === "number") return entry.state === 1;
-    if (typeof entry.path === "string" && entry.path.length > 0) return true;
-    if (entry.location === 4) return true;
-    return true;
+    return chromeExtensionEntryInstalled(parsed.extensions?.settings?.[CHROME_EXTENSION_ID], {
+      bundledVersion,
+      manifestVersion: readManifestVersion,
+    });
   } catch {
     return false;
   }
+}
+
+function bundledChromeExtensionVersion(): string | undefined {
+  const directory = resolveChromeExtensionDirSync();
+  return directory ? readManifestVersion(directory) : undefined;
 }
 
 /**
@@ -177,10 +211,12 @@ function nativeHostRegisteredWindows(): boolean {
 
 /** Whether any Chrome/Chromium profile on this machine has MT Code's extension enabled. */
 export function isChromeExtensionInstalled(): boolean {
+  const bundledVersion = bundledChromeExtensionVersion();
   for (const root of chromeProfileRoots()) {
     for (const profile of profileDirectories(root)) {
       for (const name of ["Secure Preferences", "Preferences"]) {
-        if (chromeExtensionInstalledInPreferences(NodePath.join(profile, name))) return true;
+        if (chromeExtensionInstalledInPreferences(NodePath.join(profile, name), bundledVersion))
+          return true;
       }
     }
   }
@@ -193,6 +229,7 @@ function resolveChromeExtensionStatus(): {
 } {
   let sawChrome = false;
   let hostRegistered = process.platform === "win32" && nativeHostRegisteredWindows();
+  const bundledVersion = bundledChromeExtensionVersion();
 
   for (const root of chromeProfileRoots()) {
     try {
@@ -209,7 +246,7 @@ function resolveChromeExtensionStatus(): {
         NodePath.join(profile, "Preferences"),
       ];
       for (const preferencesPath of preferenceFiles) {
-        if (chromeExtensionInstalledInPreferences(preferencesPath)) {
+        if (chromeExtensionInstalledInPreferences(preferencesPath, bundledVersion)) {
           return {
             status: "installed",
             detail: "Browser extension installed",

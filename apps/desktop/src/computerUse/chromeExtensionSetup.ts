@@ -258,6 +258,8 @@ export function scheduleChromeExtensionAutoInstall(options: {
   readonly stateDir: string;
   readonly isDevelopment: boolean;
 }): void {
+  // Refresh the copy Chrome loads before anything compares its version with this build.
+  syncChromeExtensionCopySync(options.stateDir);
   setTimeout(() => {
     void (async () => {
       try {
@@ -268,8 +270,6 @@ export function scheduleChromeExtensionAutoInstall(options: {
           if (installed && !state.seenInstalled) {
             writeState(options.stateDir, { ...state, seenInstalled: true });
           }
-          // Keep the copy Chrome loads current with this MT Code build.
-          if (installed) syncChromeExtensionCopySync(options.stateDir);
           return;
         }
         if (!findChromeExecutable() || !chromeHasBeenUsed()) return;

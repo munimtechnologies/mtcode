@@ -25,7 +25,11 @@ vi.mock("./nativeHost.ts", () => ({ ensureChromeNativeHostRegistered: registerNa
 
 import * as Electron from "electron";
 
-import { openComputerUsePrivacySettings, readComputerUsePermissions } from "./permissions.ts";
+import {
+  chromeExtensionEntryInstalled,
+  openComputerUsePrivacySettings,
+  readComputerUsePermissions,
+} from "./permissions.ts";
 
 describe("computerUse permissions", () => {
   it("reports accessibility and screen recording on darwin", () => {
@@ -105,5 +109,28 @@ describe("computerUse permissions", () => {
     } finally {
       Object.defineProperty(process, "platform", { value: previous });
     }
+  });
+});
+
+describe("chromeExtensionEntryInstalled", () => {
+  const copies: Record<string, string> = { "/mt/chrome-extension": "0.13.0", "/old/ext": "0.2.1" };
+  const options = {
+    bundledVersion: "0.13.0",
+    manifestVersion: (directory: string) => copies[directory],
+  };
+  const cases: ReadonlyArray<
+    [string, Parameters<typeof chromeExtensionEntryInstalled>[0], boolean]
+  > = [
+    ["no entry", undefined, false],
+    ["leftover after removal", { has_started_service_worker: true } as never, false],
+    ["unpacked from the current copy", { location: 4, path: "/mt/chrome-extension" }, true],
+    ["unpacked from an old copy", { location: 4, path: "/old/ext", state: 1 }, false],
+    ["unpacked from a folder that is gone", { location: 4, path: "/gone" }, false],
+    ["disabled", { location: 4, path: "/mt/chrome-extension", state: 0 }, false],
+    ["disable reasons", { location: 4, path: "/mt/chrome-extension", disable_reasons: [1] }, false],
+    ["store install", { location: 1, path: "kgdol/1.0_0", state: 1 }, true],
+  ];
+  it.each(cases)("%s", (_name, entry, expected) => {
+    assert.equal(chromeExtensionEntryInstalled(entry, options), expected);
   });
 });
