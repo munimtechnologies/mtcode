@@ -228,6 +228,10 @@ export interface DriveOptions {
 
 export class ChromeDriveError extends Error {}
 
+/** munim-computer-use refuses to click an element whose centre is on no display. */
+export const isOffScreenClickError = (text: string) =>
+  /no on-screen point|off every display/i.test(text);
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -246,6 +250,13 @@ export async function driveLoadUnpacked(options: DriveOptions): Promise<void> {
       `${tool} ${JSON.stringify(args)} -> ${result.isError ? "error: " : ""}${result.text.split("\n")[0]}`,
     );
     return result;
+  };
+
+  /** Windows delivers our keys to the foreground window only. A refusal is logged, not fatal. */
+  const bringForward = async (app: string, windowId: string) => {
+    if (platform !== "win32") return;
+    const id = Number.parseInt(windowId, 10);
+    await call("activate_app", Number.isFinite(id) ? { app, window_id: id } : { app });
   };
 
   const isSetupOmnibox = (element: OutlineElement) =>
@@ -302,6 +313,7 @@ export async function driveLoadUnpacked(options: DriveOptions): Promise<void> {
   };
 
   /** Re-read and click until the click lands: pages re-render while loading. */
+  let maximized = false;
   const clickFresh = async (
     app: string,
     query: string,
@@ -314,6 +326,12 @@ export async function driveLoadUnpacked(options: DriveOptions): Promise<void> {
       const result = await call("click", { element_id: element.id });
       if (!result.isError) return;
       lastError = result.text;
+      // Chrome reopens where it last closed, which can hang off a display that is gone.
+      if (platform === "win32" && !maximized && isOffScreenClickError(result.text)) {
+        maximized = true;
+        await bringForward(app, element.windowId);
+        await call("press_key", { key: "up", modifiers: ["cmd"] });
+      }
       await sleep(700);
     }
     throw new ChromeDriveError(`could not click ${what}: ${lastError}`);
@@ -326,6 +344,8 @@ export async function driveLoadUnpacked(options: DriveOptions): Promise<void> {
   // Navigating renames the window, so follow it by id where there is one.
   const windowId = omnibox.windowId;
   const inOurWindow = (element: OutlineElement) => !windowId || element.windowId === windowId;
+  // Keys go to the foreground window, which another app may hold by now.
+  await bringForward(app, windowId);
   // Focus it first: set_value does not move focus, and Return goes to the focus.
   await call("click", { element_id: omnibox.id });
   const setUrl = await call("set_value", { element_id: omnibox.id, value: "chrome://extensions/" });

@@ -4,6 +4,7 @@ import {
   chromeSetupPageUrl,
   findBrowserPids,
   findDialogPid,
+  isOffScreenClickError,
   parseAppList,
   parseOutline,
   SETUP_PAGE_TOKEN,
@@ -108,6 +109,16 @@ filter: "Address and search bar" — 1 matching element
     const elements = parseOutline(EXTENSIONS_PAGE);
     assert.ok(elements.some((e) => e.role === "Button" && e.label === "Load unpacked"));
     assert.ok(elements.some((e) => e.label.includes("kgdolgnijopbghhomnblabjkmjhnoage")));
+  });
+
+  it("recognizes a click refused because the element is off every display", () => {
+    // Captured from munim-computer-use 0.13.0 with Chrome's window past the screen edge.
+    assert.isTrue(
+      isOffScreenClickError(
+        "error: e16 has no on-screen point to click: its centre (2467, 234) lies outside its window and off every display, so nothing was clicked",
+      ),
+    );
+    assert.isFalse(isOffScreenClickError("error: e16 is gone; call get_app_state again"));
   });
 
   it("builds a setup page whose address starts with the token", () => {
