@@ -283,6 +283,10 @@
       "types": "./src/turnContinuation.ts",
       "import": "./src/turnContinuation.ts"
     },
+    "./triagePrompt": {
+      "types": "./src/triagePrompt.ts",
+      "import": "./src/triagePrompt.ts"
+    },
     "./pullRequestComposerTrigger": {
       "types": "./src/pullRequestComposerTrigger.ts",
       "import": "./src/pullRequestComposerTrigger.ts"

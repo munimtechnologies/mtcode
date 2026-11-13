@@ -15,7 +15,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationManifest.map(([id]) => id),
-        Array.from({ length: 85 }, (_, index) => index + 1),
+        Array.from({ length: 96 }, (_, index) => index + 1),
       );
     }),
   );
@@ -51,6 +51,17 @@ layer("055_OrchestrationV2", (it) => {
         [83, "ExcludeAttachmentPlaceholdersFromSearch"],
         [84, "SubagentDeliveryState"],
         [85, "ProjectionProjectsPinArchive"],
+        [86, "RepairBooleanSettledOverride"],
+        [87, "DropOrchestrationEventCorrelationIndex"],
+        [88, "DelegatedRecoveryIndexes"],
+        [89, "ScheduledTaskThreadMode"],
+        [90, "ProjectionMessageSearchText"],
+        [91, "TurnItemConversationIndex"],
+        [92, "CommandReadIndexes"],
+        [93, "LastExecutedRunIndex"],
+        [94, "TurnItemCounts"],
+        [95, "QueuedTurnInputIndex"],
+        [96, "ProjectionProjectsCustomTitle"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -88,6 +99,17 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 83, name: "ExcludeAttachmentPlaceholdersFromSearch" },
         { migration_id: 84, name: "SubagentDeliveryState" },
         { migration_id: 85, name: "ProjectionProjectsPinArchive" },
+        { migration_id: 86, name: "RepairBooleanSettledOverride" },
+        { migration_id: 87, name: "DropOrchestrationEventCorrelationIndex" },
+        { migration_id: 88, name: "DelegatedRecoveryIndexes" },
+        { migration_id: 89, name: "ScheduledTaskThreadMode" },
+        { migration_id: 90, name: "ProjectionMessageSearchText" },
+        { migration_id: 91, name: "TurnItemConversationIndex" },
+        { migration_id: 92, name: "CommandReadIndexes" },
+        { migration_id: 93, name: "LastExecutedRunIndex" },
+        { migration_id: 94, name: "TurnItemCounts" },
+        { migration_id: 95, name: "QueuedTurnInputIndex" },
+        { migration_id: 96, name: "ProjectionProjectsCustomTitle" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`
