@@ -860,14 +860,17 @@ describe("DesktopUpdates", () => {
   });
   it.effect("marks the backend stop for an install as an update restart", () => {
     let markersAtStop: ReadonlyArray<string> = [];
+    let inProgressAtStop: string | undefined;
     const harness = makeHarness({
       stopBackend: Effect.sync(() => {
         markersAtStop = [...harness.updateRestartMarkers];
+        inProgressAtStop = harness.updateInProgressMarker();
       }),
     });
 
     return Effect.scoped(
       Effect.gen(function* () {
+        yield* TestClock.setTime(1_000);
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
@@ -878,6 +881,12 @@ describe("DesktopUpdates", () => {
         assert.deepEqual(markersAtStop, [
           environment.path.join(environment.baseDir, "runtime", DESKTOP_UPDATE_RESTART_MARKER_FILE),
         ]);
+        // SSH launchers wait on this until the replacement backend publishes its runtime.
+        assert.deepEqual(JSON.parse(inProgressAtStop ?? "null"), {
+          startedAt: 1_000,
+          expiresAt: 61_000,
+        });
+        assert.isDefined(harness.updateInProgressMarker());
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -1004,6 +1013,7 @@ describe("DesktopUpdates", () => {
           "startBackend",
         ]);
         assert.equal(harness.updateRestartMarkers.size, 0);
+        assert.isUndefined(harness.updateInProgressMarker());
         assert.equal(harness.installRecords.size, 0);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
