@@ -1,5 +1,5 @@
 import { UserButton, useAuth } from "@clerk/react";
-import { ExternalLinkIcon, LogInIcon } from "lucide-react";
+import { ExternalLinkIcon, LogInIcon, RotateCwIcon } from "lucide-react";
 
 import {
   canEmbedClerkProviderInThisClient,
@@ -8,6 +8,7 @@ import {
 import { providerHasRelay, type ConnectProviderPublicConfig } from "../../cloud/connectProviders";
 import { hasClerkPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
+import { retryClerkLoad, useClerkLoadFailed } from "./clerkLoadFailure";
 import { T3_CONNECT_ACCOUNT_PAGES } from "./T3ConnectAccountPages";
 import { useT3ConnectAuthPrompt } from "./useT3ConnectAuthPrompt";
 
@@ -94,8 +95,19 @@ function EmbeddedConnectSignInRow({
   readonly provider: Pick<ConnectProviderPublicConfig, "id" | "label">;
 }) {
   const { isLoaded, isSignedIn } = useAuth();
+  const loadFailed = useClerkLoadFailed();
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
 
+  if (loadFailed) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton onClick={retryClerkLoad}>
+          <RotateCwIcon />
+          <span>Retry {provider.label}</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
   if (!isLoaded || isSignedIn) return null;
 
   return (

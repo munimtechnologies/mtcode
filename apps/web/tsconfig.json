@@ -37,6 +37,7 @@
     "scripts/warm-dep-cache.ts",
     "../../scripts/lib/public-config.ts",
     "../../scripts/lib/connect-public-providers.ts",
+    "../../scripts/lib/tagged-source-version.ts",
     "../../scripts/lib/third-party-licenses.ts"
   ]
 }

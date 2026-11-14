@@ -90,7 +90,19 @@ describe("ssh command", () => {
           },
           { batchMode: "no" },
         ),
-        ["-a", "-o", "BatchMode=no", "-o", "ConnectTimeout=10", "-p", "2222"],
+        [
+          "-a",
+          "-o",
+          "BatchMode=no",
+          "-o",
+          "ConnectTimeout=10",
+          "-o",
+          "RemoteCommand=none",
+          "-o",
+          "RequestTTY=no",
+          "-p",
+          "2222",
+        ],
       );
     }),
   );
@@ -146,6 +158,30 @@ describe("ssh command", () => {
       ),
     );
   });
+
+  it.effect("overrides an alias's RemoteCommand and RequestTTY", () =>
+    Effect.sync(() => {
+      assert.deepEqual(
+        baseSshArgs(
+          { alias: "devbox", hostname: "devbox", username: null, port: 2222 },
+          { batchMode: "yes" },
+        ),
+        [
+          "-a",
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "ConnectTimeout=10",
+          "-o",
+          "RemoteCommand=none",
+          "-o",
+          "RequestTTY=no",
+          "-p",
+          "2222",
+        ],
+      );
+    }),
+  );
 
   // Remote servers store state under this key, so it must not change across releases.
   it.effect("derives a stable remote state key", () =>

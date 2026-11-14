@@ -350,7 +350,7 @@ export function useProjectPathSearch(
 }
 
 export function useComposerPathSearch(target: ComposerPathSearchTarget) {
-  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT);
+  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT, { allowEmptyQuery: true });
 }
 
 export function useProviderWorkspaceCapabilities(target: {

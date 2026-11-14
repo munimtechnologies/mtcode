@@ -247,6 +247,7 @@ export const make = Effect.gen(function* () {
       fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
       pullRequests: true,
       pullRequestChecks: true,
+      linkedThreadRefreshes: true,
       sideChats: true,
       vcsBranchStatus: true,
       inlineMessageContext: true,
@@ -295,6 +296,7 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       projectOrganization: true,
       ignoredFileListing: true,
+      ignoredFileSearch: true,
       triage: true,
       oneTimeSchedules: true,
       freshContext: true,
@@ -307,6 +309,7 @@ export const make = Effect.gen(function* () {
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? { serverSelfUpdateProgress: true }
         : {}),
+      ...(serverSelfUpdate === "boot-service" ? { serverUpdateStaging: true } : {}),
       ...(desktopAppUpdate ? { desktopAppUpdate: true, desktopAppChannelSwitch: true } : {}),
       ...(desktopMcpPath === undefined ? {} : { computerView: true }),
       serverBrowser: true,

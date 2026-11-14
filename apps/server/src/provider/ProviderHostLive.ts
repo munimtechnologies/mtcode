@@ -16,6 +16,7 @@ import {
   cursorUserDefinesDesktopMcp,
   grokUserDefinesDesktopMcp,
 } from "../desktopControl/desktopMcpUserConfig.ts";
+import * as ServerLifecycleEvents from "../serverLifecycleEvents.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as DocumentText from "./DocumentText.ts";
 import * as ProviderCredentialStore from "./ProviderCredentialStore.ts";
@@ -50,6 +51,10 @@ export const layer = Layer.effect(
                 Effect.provideService(Path.Path, path.value),
               ),
           };
+    // Optional so standalone provider layers in tests probe at once.
+    const lifecycleEvents = yield* Effect.serviceOption(
+      ServerLifecycleEvents.ServerLifecycleEvents,
+    );
     return ProviderHost.ProviderHost.of({
       ...(desktopMcp === undefined ? {} : { desktopMcp }),
       paths: {
@@ -66,6 +71,10 @@ export const layer = Layer.effect(
         subscribe: serverSettings.subscribeChanges,
       },
       shouldRunBackgroundWork: backgroundPolicy.shouldRunScopeWork,
+      ...Option.match(lifecycleEvents, {
+        onNone: () => ({}),
+        onSome: (events) => ({ awaitServerReady: events.awaitReady }),
+      }),
       resolveAttachmentPath: (attachment) =>
         resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment }),
       // DocumentText owns the path-resolution span.

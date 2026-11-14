@@ -12,6 +12,7 @@ import {
   type EnvironmentId,
   type ProjectId,
   type PullRequestChecksState,
+  type PullRequestFilesViewedResult,
   type PullRequestListInput,
   type PullRequestFilterOptionsInput,
   type PullRequestListStatsInput,
@@ -370,8 +371,44 @@ export function restoredPullRequestList(
   return restorePullRequestList(snapshotStorage(), targets);
 }
 
+const filesViewedAnswerListeners = new Map<
+  string,
+  Set<(answer: PullRequestFilesViewedResult) => void>
+>();
+
+function filesViewedAnswerKey({ environmentId, input }: EnvironmentQueryTarget<PullRequestRef>) {
+  return JSON.stringify([
+    environmentId,
+    input.projectId,
+    input.host,
+    input.expectedAccountId,
+    input.allowStale,
+    input.repository,
+    input.number,
+  ]);
+}
+
+export function subscribePullRequestFilesViewedAnswers(
+  target: EnvironmentQueryTarget<PullRequestRef>,
+  onAnswer: (answer: PullRequestFilesViewedResult) => void,
+) {
+  const key = filesViewedAnswerKey(target);
+  let listeners = filesViewedAnswerListeners.get(key);
+  if (listeners === undefined) filesViewedAnswerListeners.set(key, (listeners = new Set()));
+  listeners.add(onAnswer);
+  return () => {
+    listeners.delete(onAnswer);
+    if (listeners.size === 0) filesViewedAnswerListeners.delete(key);
+  };
+}
+
 // Answers are stamped on arrival: older servers leave no other ordering for same-dated reads.
 export const pullRequestEnvironment = createPullRequestEnvironmentAtoms(connectionAtomRuntime, {
+  filesViewed: (target, answer) =>
+    Effect.sync(() => {
+      for (const listener of filesViewedAnswerListeners.get(filesViewedAnswerKey(target)) ?? [])
+        listener(answer);
+    }),
   list: ({ environmentId, input }, answer, registry) =>
     Effect.map(Clock.currentTimeMillis, (observedAt) => {
       rememberPullRequestListAnswer(snapshotStorage(), { environmentId, input }, answer);
@@ -526,12 +563,17 @@ export interface EnvironmentQueryTarget<Input> {
   readonly input: Input;
 }
 
+interface EnvironmentQueryError {
+  readonly environmentId: EnvironmentId;
+  readonly message: string;
+}
+
 interface MergedEnvironmentQueryView<Input, A> {
   readonly observations: ReadonlyArray<readonly [EnvironmentId, A, number]>;
   /** One entry per query target that has answered, in the order the targets were given. */
   readonly values: ReadonlyArray<readonly [EnvironmentQueryTarget<Input>, A]>;
   /** The first environment that failed. Others may still have answered — this is not fatal. */
-  readonly error: string | null;
+  readonly error: EnvironmentQueryError | null;
   readonly isPending: boolean;
 }
 
@@ -571,14 +613,17 @@ function createMergedEnvironmentQuery<Input, A>(
       const values: Array<readonly [EnvironmentQueryTarget<Input>, A]> = [];
       const observations: Array<readonly [EnvironmentId, A, number]> = [];
       const pendingEnvironments = new Set<EnvironmentId>();
-      let error: string | null = null;
+      let error: EnvironmentQueryError | null = null;
       let isPending = false;
       for (const target of targets) {
         const result = get(atomFor(target));
         isPending ||= result.waiting;
         if (result.waiting) pendingEnvironments.add(target.environmentId);
         if (result._tag === "Failure" && error === null) {
-          error = formatEnvironmentQueryError(result.cause);
+          error = {
+            environmentId: target.environmentId,
+            message: formatEnvironmentQueryError(result.cause),
+          };
         }
         const value = AsyncResult.getOrElse(result, () => null);
         if (value !== null) values.push([target, value]);
@@ -659,7 +704,7 @@ export function usePullRequestTurnRefresh(environmentId: EnvironmentId): number 
 
 export interface MergedPullRequestListView {
   readonly data: MergedPullRequestList | null;
-  readonly error: string | null;
+  readonly error: EnvironmentQueryError | null;
   readonly isPending: boolean;
   readonly observations: ReadonlyArray<readonly [EnvironmentId, PullRequestListResult, number]>;
   readonly refresh: (targets?: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>>) => void;
@@ -713,7 +758,12 @@ export function usePullRequestUsefulness(
       if (ranking.reason !== undefined) reasons.set(key, ranking.reason);
     }
   }
-  return { usefulness, reasons, isPending: query.isPending, error: query.error };
+  return {
+    usefulness,
+    reasons,
+    isPending: query.isPending,
+    error: query.error?.message ?? null,
+  };
 }
 
 /** The line counts for the rows on screen, asked of each environment for its own rows. */

@@ -580,7 +580,7 @@ describe("GitHubSourceControlProvider writes", () => {
         body: "Body",
         maintainer_can_modify: true,
       });
-    }).pipe(Effect.provide(Layer.merge(layer, NodeServices.layer)), Effect.scoped);
+    }).pipe(Effect.provide(Layer.merge(layer, NodeServices.layer)));
   });
 
   // MT Code: the "create pull requests as draft" setting rides on the REST body.
@@ -1185,7 +1185,7 @@ it.live.each([
       remoteName: "enterprise",
       remoteBranch: "feature",
     });
-  }).pipe(Effect.provide(layer), Effect.provideService(HostProcess.Environment, {}), Effect.scoped);
+  }).pipe(Effect.provide(layer), Effect.provideService(HostProcess.Environment, {}));
 });
 
 it.effect.each([
@@ -1267,7 +1267,6 @@ it.effect.each([
     }).pipe(
       Effect.provide(layer),
       Effect.provideService(HostProcess.Environment, { GH_REPO: envRepository }),
-      Effect.scoped,
     );
   },
 );

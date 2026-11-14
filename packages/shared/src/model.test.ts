@@ -19,6 +19,7 @@ import {
   normalizeModelSlug,
   resolveReasoningTransition,
   modelSelectionsEqual,
+  pickModelSelection,
   withImplicitFastModeDefault,
 } from "./model.ts";
 
@@ -133,6 +134,27 @@ describe("descriptor helpers", () => {
       }),
     ).toBe(false);
     expect(modelSelectionsEqual(left, { ...reordered, model: "gpt-5.5" })).toBe(false);
+  });
+
+  it("keeps the options when the current model is picked again", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const current = createModelSelection(codex, "gpt-5.4", [
+      { id: "reasoningEffort", value: "high" },
+    ]);
+
+    expect(pickModelSelection(current, codex, "gpt-5.4")).toBe(current);
+    expect(pickModelSelection(current, codex, "gpt-5.5")).toEqual({
+      instanceId: "codex",
+      model: "gpt-5.5",
+    });
+    expect(pickModelSelection(current, ProviderInstanceId.make("codex_work"), "gpt-5.4")).toEqual({
+      instanceId: "codex_work",
+      model: "gpt-5.4",
+    });
+    expect(pickModelSelection(null, codex, "gpt-5.4")).toEqual({
+      instanceId: "codex",
+      model: "gpt-5.4",
+    });
   });
 });
 

@@ -19,7 +19,7 @@ import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as RpcHttp from "../rpc/http.ts";
 import type { RpcSession } from "../rpc/session.ts";
-import { createEnvironmentSessionAtoms } from "./session.ts";
+import { createEnvironmentSessionAtoms, sessionDeniesScope } from "./session.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -169,6 +169,31 @@ describe("environment session state", () => {
 
       expect((yield* harness.nextSettled())._tag).toBe("Failure");
       expect(harness.requests()).toBe(1);
+    }),
+  );
+
+  // "Cannot control" must reflect the host's answer, not a lookup still pending or lost on the network.
+  // MT Code: a network failure is only reported before a grant is confirmed (later ones retry).
+  it.effect("denies a scope only once the host has answered without it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness((requestNumber) => {
+        if (requestNumber === 1) return unreachable();
+        if (requestNumber === 2) return Promise.resolve(Response.json(SESSION));
+        return Promise.resolve(new Response(null, { status: 401 }));
+      });
+      expect(sessionDeniesScope(AsyncResult.initial(), "orchestration:read")).toBe(false);
+
+      const networkFailure = yield* harness.nextSettled();
+      expect(networkFailure._tag).toBe("Failure");
+      expect(sessionDeniesScope(networkFailure, "orchestration:operate")).toBe(false);
+
+      yield* SubscriptionRef.set(harness.transport, Option.some(rpcSession()));
+      const answered = yield* harness.nextSettled();
+      expect(sessionDeniesScope(answered, "orchestration:read")).toBe(false);
+      expect(sessionDeniesScope(answered, "orchestration:operate")).toBe(true);
+
+      yield* SubscriptionRef.set(harness.transport, Option.some(rpcSession()));
+      expect(sessionDeniesScope(yield* harness.nextSettled(), "orchestration:read")).toBe(true);
     }),
   );
 });

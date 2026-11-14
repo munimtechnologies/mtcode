@@ -18,7 +18,11 @@ import { type SetStateAction } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { toastManager } from "../ui/toast";
 import { resolveAppModelSelectionForInstance } from "../../modelSelection";
-import { resolveNewDraftStartFromOrigin } from "../../lib/chatThreadActions";
+import {
+  draftModelSelectionApplies,
+  resolveNewDraftStartFromOrigin,
+  threadHasStarted,
+} from "../../lib/chatThreadActions";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import { type DraftThreadEnvMode, useComposerDraftStore } from "../../composerDraftStore";
@@ -166,7 +170,10 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       { preserveUnavailableSelection: true },
     );
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
-    const draft = useComposerDraftStore.getState().getComposerDraft(threadRef);
+    const storedDraft = useComposerDraftStore.getState().getComposerDraft(threadRef);
+    const draft = draftModelSelectionApplies(storedDraft, threadHasStarted(activeThread))
+      ? storedDraft
+      : null;
     const shownInstanceId =
       draft?.activeProvider ??
       activeRuntime?.providerInstanceId ??

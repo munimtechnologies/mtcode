@@ -1,6 +1,7 @@
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { type RunId, type TurnItemId } from "@t3tools/contracts";
+import { MessageId, type RunId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
+import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { memo, use, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
@@ -18,7 +19,7 @@ import {
   readResponseSubagents,
   useAssistantMessageText,
   useProject,
-  useThreadShell,
+  useQuietThreadShell,
 } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
@@ -29,6 +30,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
+import { readThreadTurnItems } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
@@ -47,6 +49,10 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const hasInlineVisualization = visualizationParts.some((part) => part.kind === "visualization");
   const lineBreaks = shouldPreserveAssistantLineBreaks(messageText);
   const threadRef = ctx.threadRef;
+  const agentDirectories = () =>
+    ctx.threadRef && row.projectedItem
+      ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
+      : [];
 
   return (
     <>
@@ -79,6 +85,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                       text={part.text}
                       renderInsights
                       cwd={ctx.markdownCwd}
+                      agentDirectories={agentDirectories}
                       threadRef={threadRef}
                       isStreaming={Boolean(row.message.streaming)}
                       lineBreaks={lineBreaks}
@@ -96,6 +103,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                 text={messageText}
                 renderInsights
                 cwd={ctx.markdownCwd}
+                agentDirectories={agentDirectories}
                 threadRef={ctx.threadRef ?? undefined}
                 isStreaming={Boolean(row.message.streaming)}
                 lineBreaks={lineBreaks}
@@ -132,6 +140,41 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
         ) : null}
       </div>
     </>
+  );
+}
+
+/** Text an agent sent with `send_to_user`, shown as its own words. */
+export function SentMessageTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "sent-message" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+      {/* Sent messages have no message id; citations name their turn item instead. */}
+      <AssistantCitationSource
+        messageId={MessageId.make(row.id)}
+        {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
+        itemKey={row.id}
+        request={ctx.citationRequest}
+        listRef={ctx.listRef}
+      >
+        <ChatMarkdown
+          text={row.text}
+          cwd={ctx.markdownCwd}
+          threadRef={ctx.threadRef ?? undefined}
+          lineBreaks={shouldPreserveAssistantLineBreaks(row.text)}
+          skills={ctx.skills}
+          headingLevelOffset={MESSAGE_HEADING_LEVEL}
+          onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+          onRunShellCommand={ctx.onRunShellCommand}
+          onImageExpand={ctx.onImageExpand}
+        />
+      </AssistantCitationSource>
+    </div>
   );
 }
 
@@ -450,7 +493,7 @@ function AssistantChangedFilesSectionInner({
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const allDirectoriesExpanded = persistedExpanded ?? false;
 
-  const thread = useThreadShell(ctx.threadRef);
+  const thread = useQuietThreadShell(ctx.threadRef);
   const activeProject = useProject(
     thread && thread.projectId
       ? { environmentId: thread.environmentId, projectId: thread.projectId }

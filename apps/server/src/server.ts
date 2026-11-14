@@ -34,6 +34,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ComputerHistoryService from "./computerHistory/service.ts";
+import * as NonBlockingSpawner from "./process/NonBlockingSpawner.ts";
 import * as KeepAwake from "./background/KeepAwake.ts";
 import * as ServerConfig from "./config.ts";
 import { withUntracedRequests } from "./http.ts";
@@ -49,6 +50,7 @@ import * as Ws from "./ws.ts";
 import { skillsHttpApiLayer } from "./skills/http.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
+import * as SpawnWorker from "./process/SpawnWorker.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
 import * as SpeechModelStore from "./speech/SpeechModelStore.ts";
@@ -141,6 +143,7 @@ import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+import * as VcsAutomaticFetchInterval from "./vcs/VcsAutomaticFetchInterval.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
@@ -189,12 +192,14 @@ import * as ConnectReachability from "./cloud/ConnectReachability.ts";
 import { pendingServiceUpdateExists } from "./cloud/updateHandoff.ts";
 import * as RelayTracing from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
+import * as RelayClientLedger from "./cloud/RelayClientLedger.ts";
 import {
   MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER,
   makeManagedTunnelRecovery,
   managedTunnelStartupAction,
   retryDesiredLinkReconcile,
   retryManagedTunnelRegistration,
+  watchManagedTunnelOrigin,
 } from "./cloud/managedTunnelStartup.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
@@ -362,6 +367,9 @@ const layerRelayClient = Layer.unwrap(
   }),
 ).pipe(Layer.provide(ManagedPolicy.layer));
 
+// NodeServices and NodeHttpServer each output Node's own spawner, so each is followed by this one.
+const layerSpawner = SpawnWorker.layerServer.pipe(Layer.provide(NodeServices.layer));
+
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
@@ -398,12 +406,18 @@ const layerHttpServer = Layer.unwrap(
         // `threshold` when context takeover is disabled).
         websocket: { perMessageDeflate: true },
       },
-    );
+    ).pipe(Layer.merge(layerSpawner));
   }),
-).pipe(Layer.provide(ManagedPolicy.layer), Layer.provide(NetService.layer));
+).pipe(
+  Layer.provide(ManagedPolicy.layer),
+  Layer.provide(NetService.layer),
+  // NodeHttpServer.layer also outputs NodeServices, whose spawner would shadow the wrapped one.
+  (layer) => NonBlockingSpawner.layer.pipe(Layer.provideMerge(layer)),
+);
 
 const layerPlatformServices = DocumentText.layer.pipe(
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  Layer.provideMerge(NonBlockingSpawner.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerSpawner)),
 );
 
 const layerPersistence = Layer.empty.pipe(Layer.provideMerge(SqlitePersistence.layerConfig));
@@ -518,7 +532,6 @@ const layerVcs = Layer.empty.pipe(
   Layer.provideMerge(
     VcsStatusBroadcaster.layer.pipe(
       Layer.provide(layerGitWorkflow),
-      Layer.provide(VcsStatusBroadcaster.layerAutomaticFetchInterval),
       // The orchestration runtime also consumes the broadcaster (run
       // finalization), so the policy cannot read the store from the runtime's
       // output.
@@ -584,6 +597,14 @@ const layerCloudManagedEndpointRuntime = Layer.mergeAll(
   CloudManagedEndpointRuntime.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(layerRelayClient),
+    Layer.provide(
+      Layer.unwrap(
+        Effect.gen(function* () {
+          const config = yield* ServerConfig.ServerConfig;
+          return RelayClientLedger.layer({ stateDir: config.stateDir });
+        }),
+      ),
+    ),
   ),
 );
 
@@ -611,6 +632,7 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 );
 
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
+  Layer.provide(UsageLimitSources.layerResetFallback),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
   Layer.provide(layerCheckpointStore),
@@ -739,6 +761,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(SecretCheck.layer),
   Layer.provideMerge(SecretResolver.layer),
+  // Above the settings it writes when a theme is applied.
+  Layer.provideMerge(EnvironmentTheme.layer),
   Layer.provideMerge(layerServerSettings),
   Layer.provideMerge(layerSourceControlProviderRegistry),
   // Merged with Git rather than added beside it: both want text generation.
@@ -748,9 +772,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(layerVcs),
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
   Layer.provideMerge(layerPersistence),
-  Layer.provideMerge(
-    Layer.mergeAll(Keybindings.layer, EnvironmentTheme.layer, UsageLimitSources.layer),
-  ),
+  Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
   // Account sign-in RPCs resolve instances through both registries below.
   Layer.provideMerge(ProviderAccountLoginRunner.layer),
   Layer.provideMerge(ProviderRegistry.layer),
@@ -831,6 +853,9 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(RemoteOpenTargets.layer),
   Layer.provideMerge(DirectEndpoints.layer.pipe(Layer.provide(layerServerEnvironment))),
   Layer.provideMerge(ServerLifecycleEvents.layer),
+  // GitVcsDriver.layer is memoized and some of its build sites live outside this file, so the
+  // fetch interval goes in context here, before the first build captures it.
+  Layer.provideMerge(VcsAutomaticFetchInterval.layer.pipe(Layer.provide(layerServerSettings))),
   Layer.provide(NetService.layer),
 );
 
@@ -945,6 +970,17 @@ const layerMakeServer = Layer.unwrap(
         yield* HttpServer.HttpServer;
         const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
         yield* startup.markHttpListening;
+      }),
+    );
+    const layerDesktopReadySignal = Layer.effectDiscard(
+      Effect.gen(function* () {
+        const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+        const receiver = yield* DesktopTelemetryReceiver.DesktopTelemetryReceiver;
+        yield* startup.awaitCommandReady.pipe(
+          Effect.andThen(receiver.announceServerReady),
+          Effect.ignore,
+          Effect.forkScoped,
+        );
       }),
     );
     const layerRuntimeState = Layer.effectDiscard(
@@ -1180,6 +1216,28 @@ const layerMakeServer = Layer.unwrap(
               Stream.runForEach(recoverManagedTunnel),
               Effect.forkScoped,
             );
+            yield* watchManagedTunnelOrigin({
+              localOrigin,
+              readIngressOrigin: endpointRuntime.inspectConnector.pipe(
+                Effect.map((connector) => connector?.origin ?? null),
+              ),
+              // Like startup, a publish-only link never routes the tunnel to this host.
+              register: CloudCliState.readCliDesiredLinkMode.pipe(
+                Effect.flatMap((mode) =>
+                  mode === "publish_only"
+                    ? Effect.void
+                    : cloudLink
+                        .registerManagedTunnelRecovery(localOrigin)
+                        .pipe(
+                          Effect.flatMap((registration) =>
+                            registration.status === "recovery_required"
+                              ? endpointRuntime.requestRecovery(registration.config)
+                              : Effect.void,
+                          ),
+                        ),
+                ),
+              ),
+            }).pipe(Effect.forkScoped);
             const wantsCliLink = hasCloudPublicConfig
               ? yield* CloudCliState.readCliDesiredCloudLink.pipe(
                   Effect.catch((cause) =>
@@ -1327,6 +1385,7 @@ const layerMakeServer = Layer.unwrap(
     const layerServerApplication = Layer.mergeAll(
       layerRoutes,
       layerHttpListening,
+      layerDesktopReadySignal,
       layerRuntimeState.pipe(Layer.provide(layerLauncher)),
       layerTailscaleServe,
       layerCloudDesiredLinkReconcile,
@@ -1367,4 +1426,7 @@ export const runServer: Effect.Effect<
   | FileSystem.FileSystem
   | Path.Path
   | ServerConfig.ServerConfig
-> = Layer.launch(layerMakeServer);
+> = Layer.launch(
+  // For the layers above whose spawner requirement is not met by one of them.
+  layerMakeServer.pipe(Layer.provide(NonBlockingSpawner.layer.pipe(Layer.provide(layerSpawner)))),
+);

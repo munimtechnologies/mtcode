@@ -10,7 +10,6 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import { buildInterruptedTurnContinuationPrompt } from "@t3tools/shared/turnContinuation";
 import { interruptedRunContinuationMessageId } from "@t3tools/shared/orchestrationV2Timeline";
 import { useState } from "react";
 import { newMessageId } from "~/lib/utils";
@@ -53,7 +52,7 @@ interface ComposerResumeInput {
 }
 
 /**
- * Resumes an interrupted run ("Continue where you left off.") and/or releases the turns held
+ * Resumes an interrupted run and/or releases the turns held
  * in its queue. Shares the per-route send lock with the composer's send paths.
  */
 export function useComposerResume(input: ComposerResumeInput) {
@@ -126,9 +125,8 @@ export function useComposerResume(input: ComposerResumeInput) {
         interactionMode: DEFAULT_INTERACTION_MODE,
       });
       if (settingsResult._tag === "Failure") return settingsResult;
-      // Continue after Stop is a Continuation with no user message (ADR 0005):
-      // the provider gets the T3-authored prompt and the timeline hides the
-      // message. A usage-limit resume keeps upstream's visible prompt.
+      // The server resumes the provider natively (empty text). Continue after Stop keeps a
+      // run-derived message id so the timeline hides the continuation message (ADR 0005).
       const continuesStoppedRun = resumableRunInterrupted;
       const turnResult = await startThreadTurn({
         environmentId,
@@ -141,9 +139,7 @@ export function useComposerResume(input: ComposerResumeInput) {
               ? interruptedRunContinuationMessageId(resumableRunId)
               : newMessageId(),
             role: "user",
-            text: continuesStoppedRun
-              ? buildInterruptedTurnContinuationPrompt()
-              : "Continue where you left off.",
+            text: "",
             attachments: [],
           },
           runtimeMode,

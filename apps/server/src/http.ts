@@ -576,6 +576,12 @@ const streamStaticFile = (file: FileSystem.File, size: bigint) =>
     }),
   );
 
+// The app can approve agents and start threads in one click, so no other site may frame it.
+const SPA_FRAME_HEADERS = {
+  "Content-Security-Policy": "frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+};
+
 const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
   function* (immutableBuildAssets: ReadonlySet<string>) {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -676,6 +682,7 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
     };
     const headers: Record<string, string> = {
       "Cache-Control": cacheControl,
+      ...(isHtml ? SPA_FRAME_HEADERS : {}),
       ...validators(fileInfo),
     };
     const etag = headers.ETag;
@@ -712,6 +719,7 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
       return HttpServerResponse.uint8Array(bytes, {
         headers: {
           "Cache-Control": cacheControl,
+          ...(isHtml ? SPA_FRAME_HEADERS : {}),
           ...validators({ ...info, size: ByteSize.bytes(bytes.byteLength) }),
         },
         contentType,

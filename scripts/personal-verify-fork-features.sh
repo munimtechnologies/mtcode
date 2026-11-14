@@ -69,12 +69,11 @@ require apps/server/src/usage/UsageService.ts "retentionCutoffMs" "All-window sc
 # --- One-tap Continue as a Continuation Turn (upstream #11716, taken 2026-09-16) ---
 # Upstream's Resume after Stop sends a visible "Continue where you left off."
 # message. The fork's Continuation has no user message (docs/adr/0005): on
-# orchestration-v2 (ported 2026-10-02) onResume sends the authored prompt under
-# a per-run hidden message id, and the shared timeline visibility rule hides
+# orchestration-v2 (ported 2026-10-02) onResume sends an empty continuation
+# (upstream #36526 resumes the provider natively) under a per-run hidden message id, and the shared timeline visibility rule hides
 # it on every client. A merge that re-takes upstream's onResume or visibility
 # code would quietly bring the message back.
 require apps/web/src/components/chat/useComposerResume.ts "interruptedRunContinuationMessageId(resumableRunId)" "composer Continue sends the hidden continuation message"
-require apps/web/src/components/chat/useComposerResume.ts "buildInterruptedTurnContinuationPrompt()" "composer Continue sends the authored interrupted-turn prompt"
 require packages/shared/src/orchestrationV2Timeline.ts "if (isOrchestrationV2HiddenContinuationMessage(item)) return false;" "timeline visibility hides the continuation message"
 require apps/server/src/orchestration-v2/ProjectionStore.ts "messageId: MessageId.make(row.message_id)" "SQL timeline index carries message ids for the hidden continuation"
 
