@@ -583,6 +583,10 @@
       "types": "./src/PtyAdapter.ts",
       "import": "./src/PtyAdapter.ts"
     },
+    "./url": {
+      "types": "./src/url.ts",
+      "import": "./src/url.ts"
+    },
     "./cloneUrl": {
       "types": "./src/cloneUrl.ts",
       "import": "./src/cloneUrl.ts"
