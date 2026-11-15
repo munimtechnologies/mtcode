@@ -116,6 +116,7 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
   const usageRecord = usage as Record<string, unknown>;
 
   const sessionId = typeof paramsRecord["sessionId"] === "string" ? paramsRecord["sessionId"] : "";
+  // T3's prompt ids restart with each Grok process, so a resumed session reuses them.
   const promptId = typeof updateRecord["prompt_id"] === "string" ? updateRecord["prompt_id"] : null;
 
   const meta = paramsRecord["_meta"];
@@ -142,10 +143,10 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
   if (timestampMs === null) return [];
 
   // A turn identity beats hashing the payload: two identical turns are real
-  // usage twice, not a duplicate.
+  // usage twice, not a duplicate. The timestamp keeps a reused prompt id apart.
   const turnId = promptId ?? eventId;
   const dedupeKeyFor = (model: string): string | null =>
-    turnId === null ? null : `${sessionId}:${turnId}:${model}`;
+    turnId === null ? null : `${sessionId}:${turnId}:${timestampMs}:${model}`;
 
   const topLevel = readGrokUsageTotals(usageRecord);
   if (topLevel === null) return [];

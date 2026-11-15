@@ -27,6 +27,7 @@ describe("isSshRemoteUrl", () => {
     "ssh://git@github.com/owner/repo.git",
     "github.com:owner/repo.git",
     "github-work:owner/repo.git",
+    "gitserver:repo.git",
   ])("reads %s as SSH", (remoteUrl) => {
     expect(isSshRemoteUrl(remoteUrl)).toBe(true);
   });
@@ -38,6 +39,7 @@ describe("isSshRemoteUrl", () => {
     "./team:group/repo",
     "file:///srv/git/repo.git",
     "hg::owner/repo",
+    "C:repo.git",
   ])("does not read %s as SSH", (remoteUrl) => {
     expect(isSshRemoteUrl(remoteUrl)).toBe(false);
   });

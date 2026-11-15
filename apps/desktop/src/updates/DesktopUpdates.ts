@@ -64,7 +64,7 @@ const CHANNEL_CHANGE_RETRY_DELAY = Duration.seconds(1);
 const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
-const PREPARED_INSTALL_CHECK_WAIT = Duration.seconds(90);
+const UPDATE_CHECK_WAIT = Duration.seconds(90);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
 
@@ -332,6 +332,10 @@ function getCanRetryFromState(state: DesktopUpdateState): boolean {
   return state.availableVersion !== null || state.downloadedVersion !== null;
 }
 
+function isOffered(state: DesktopUpdateState): boolean {
+  return state.status === "available" || state.status === "downloaded";
+}
+
 function shouldBroadcastDownloadProgress(
   currentState: DesktopUpdateState,
   nextPercent: number,
@@ -533,6 +537,23 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  // Re-runs admit after each finished action, so a caller waiting on a check decides on its result.
+  const admitAfterCheck = Effect.fn("desktop.updates.admitAfterCheck")(function* (
+    admit: Effect.Effect<"admitted" | "refused" | "wait-for-check">,
+  ) {
+    const actionCompletions = yield* PubSub.subscribe(finishedUpdateActions);
+    let admission = yield* stateMutex.withPermits(1)(admit);
+    while (admission === "wait-for-check") {
+      const finishedAction = yield* PubSub.take(actionCompletions).pipe(
+        Effect.timeoutOption(UPDATE_CHECK_WAIT),
+      );
+      admission = Option.isNone(finishedAction)
+        ? "refused"
+        : yield* stateMutex.withPermits(1)(admit);
+    }
+    return admission;
+  });
+
   const applyAutoUpdaterChannel = Effect.fn("desktop.updates.applyAutoUpdaterChannel")(function* (
     channel: DesktopUpdateChannel,
   ) {
@@ -578,7 +599,10 @@ export const make = Effect.gen(function* () {
 
     const check = Effect.gen(function* () {
       const checkedAt = yield* currentIsoTimestamp;
-      yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt));
+      // An offer stays on screen while re-checking, so finding it again changes nothing.
+      if (!isOffered(state)) {
+        yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt));
+      }
       yield* logUpdaterInfo("checking for updates", { reason });
       // Today's anonymous active-user codes ride along so the update feed can
       // count people rather than installs; see activeUser.ts for what is sent.
@@ -625,15 +649,30 @@ export const make = Effect.gen(function* () {
   });
 
   const downloadAvailableUpdate = Effect.gen(function* () {
+    const admission = yield* Effect.scoped(
+      admitAfterCheck(
+        Effect.gen(function* () {
+          const state = yield* Ref.get(updateStateRef);
+          if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
+            return "refused" as const;
+          }
+          const activeAction = yield* Ref.get(activeUpdateActionRef);
+          if (Option.isSome(activeAction)) {
+            return activeAction.value === "check"
+              ? ("wait-for-check" as const)
+              : ("refused" as const);
+          }
+          return (yield* tryStartUpdateAction("download"))
+            ? ("admitted" as const)
+            : ("refused" as const);
+        }),
+      ),
+    );
+    if (admission === "refused") {
+      return { accepted: false, completed: false };
+    }
+
     const state = yield* Ref.get(updateStateRef);
-    if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
-      return { accepted: false, completed: false };
-    }
-
-    if (!(yield* tryStartUpdateAction("download"))) {
-      return { accepted: false, completed: false };
-    }
-
     return yield* Effect.gen(function* () {
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
       yield* electronUpdater.setDisableDifferentialDownload(
@@ -826,51 +865,39 @@ export const make = Effect.gen(function* () {
   const installDownloadedUpdate = (expectedVersion?: string) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const actionCompletions = yield* PubSub.subscribe(finishedUpdateActions);
-        let admission: "admitted" | "refused" | "wait-for-check" = "wait-for-check";
-        while (admission === "wait-for-check") {
-          admission = yield* stateMutex.withPermits(1)(
-            Effect.gen(function* () {
-              const state = yield* Ref.get(updateStateRef);
-              const activeAction = yield* Ref.get(activeUpdateActionRef);
-              const hasExpectedDownload =
-                state.downloadedVersion !== null &&
-                (expectedVersion === undefined || state.downloadedVersion === expectedVersion);
-              if (
-                (yield* Ref.get(desktopState.quitting)) ||
-                !(yield* Ref.get(updaterConfiguredRef)) ||
-                !hasExpectedDownload
-              ) {
-                return "refused" as const;
-              }
-              if (Option.isSome(activeAction)) {
-                // Personal fork: also wait out a download. update-downloaded fires
-                // from inside downloadUpdate, so the auto-install it triggers would
-                // otherwise be refused for the reservation the download still holds.
-                return (activeAction.value === "check" || activeAction.value === "download") &&
-                  expectedVersion !== undefined
-                  ? ("wait-for-check" as const)
-                  : ("refused" as const);
-              }
-              const hasInstallableDownload =
-                state.status === "downloaded" ||
-                (state.status === "error" &&
-                  (state.errorContext === null || state.errorContext === "install"));
-              if (!hasInstallableDownload) return "refused" as const;
-              return (yield* tryStartUpdateAction("install"))
-                ? ("admitted" as const)
-                : ("refused" as const);
-            }),
-          );
-          if (admission === "wait-for-check") {
-            const finishedAction = yield* PubSub.take(actionCompletions).pipe(
-              Effect.timeoutOption(PREPARED_INSTALL_CHECK_WAIT),
-            );
-            if (Option.isNone(finishedAction)) {
-              admission = "refused";
+        const admission = yield* admitAfterCheck(
+          Effect.gen(function* () {
+            const state = yield* Ref.get(updateStateRef);
+            const activeAction = yield* Ref.get(activeUpdateActionRef);
+            const hasExpectedDownload =
+              state.downloadedVersion !== null &&
+              (expectedVersion === undefined || state.downloadedVersion === expectedVersion);
+            if (
+              (yield* Ref.get(desktopState.quitting)) ||
+              !(yield* Ref.get(updaterConfiguredRef)) ||
+              !hasExpectedDownload
+            ) {
+              return "refused" as const;
             }
-          }
-        }
+            if (Option.isSome(activeAction)) {
+              // Personal fork: a pinned install also waits out a download. update-downloaded fires
+              // from inside downloadUpdate, so the auto-install it triggers would otherwise be
+              // refused for the reservation the download still holds.
+              return activeAction.value === "check" ||
+                (activeAction.value === "download" && expectedVersion !== undefined)
+                ? ("wait-for-check" as const)
+                : ("refused" as const);
+            }
+            const hasInstallableDownload =
+              state.status === "downloaded" ||
+              (state.status === "error" &&
+                (state.errorContext === null || state.errorContext === "install"));
+            if (!hasInstallableDownload) return "refused" as const;
+            return (yield* tryStartUpdateAction("install"))
+              ? ("admitted" as const)
+              : ("refused" as const);
+          }),
+        );
         if (admission === "refused") {
           return { accepted: false, completed: false, failed: false };
         }
@@ -1007,7 +1034,7 @@ export const make = Effect.gen(function* () {
         const activeAction = yield* Ref.get(activeUpdateActionRef);
         if (Option.isNone(activeAction) || activeAction.value !== "check") return;
         const finished = yield* PubSub.take(actionCompletions).pipe(
-          Effect.timeoutOption(PREPARED_INSTALL_CHECK_WAIT),
+          Effect.timeoutOption(UPDATE_CHECK_WAIT),
         );
         if (Option.isNone(finished)) return;
       }
@@ -1047,6 +1074,11 @@ export const make = Effect.gen(function* () {
             const checkedAt = yield* currentIsoTimestamp;
             yield* setState(reduceDesktopUpdateStateOnNoUpdate(state, checkedAt));
             yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
+            return;
+          }
+          if (isOffered(state) && state.availableVersion === info.version) {
+            // Personal fork: a re-found offer whose auto-download failed tries it again.
+            if (state.status === "available") yield* autoDownloadUpdate(info.version);
             return;
           }
 
@@ -1239,6 +1271,8 @@ export const make = Effect.gen(function* () {
     ),
     configure: Effect.gen(function* () {
       const context = yield* Effect.context<never>();
+      // Runs synchronously up to the first await, so a check's outcome is applied before the
+      // check's promise resolves and wakes the actions waiting on it.
       const runEffect = (effect: Effect.Effect<void>) => {
         void Effect.runPromiseWith(context)(effect);
       };

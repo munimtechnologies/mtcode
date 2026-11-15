@@ -97,6 +97,7 @@ export interface ProviderChangeRequest {
   readonly state: PullRequestState;
   readonly isDraft: boolean;
   readonly mergeability: PullRequestMergeability;
+  readonly rebaseRequired?: boolean | undefined;
   readonly additions: number;
   readonly deletions: number;
   readonly createdAt: string;
@@ -127,6 +128,7 @@ export interface ProviderChangeRequestSummary {
   readonly reviewDecision?: PullRequestReviewDecision | null | undefined;
   readonly checksState?: PullRequestChecksState | null | undefined;
   readonly mergeability?: PullRequestMergeability | undefined;
+  readonly rebaseRequired?: boolean | undefined;
   /** Null means no stack; absent means not requested. */
   readonly stack?: PullRequestStackMembership | null | undefined;
   readonly headSha?: string | undefined;
@@ -250,6 +252,7 @@ export interface ProviderDiffSlice {
   readonly truncated: boolean;
   readonly nextCursor: string | null;
   readonly omittedFileStats?: ReadonlyArray<PullRequestOmittedFileStat>;
+  readonly withheldFilesReadable?: boolean;
 }
 
 export interface ProviderDiffFileContents {
@@ -487,6 +490,7 @@ export interface PullRequestProviderApi {
       readonly number: number;
       readonly cursor?: string | undefined;
       readonly commit?: string | undefined;
+      readonly path?: string | undefined;
     },
   ) => Effect.Effect<ProviderDiffSlice, PullRequestProviderError>;
 

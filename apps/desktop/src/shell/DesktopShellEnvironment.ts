@@ -7,6 +7,7 @@ import * as Deferred from "effect/Deferred";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -39,10 +40,18 @@ import {
 
 type EnvironmentPatch = Record<string, string>;
 
+interface ProbeBudget {
+  readonly timeout: Duration.Duration;
+  // One longer wait for the first login shell that times out.
+  readonly slowTimeout?: Duration.Duration;
+  readonly terminateGrace: Duration.Duration;
+}
+
 interface ShellEnvironmentConfig {
   readonly env: NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
   readonly harvest: ShellEnvironmentHarvest;
+  readonly budget: ProbeBudget;
 }
 
 interface WindowsProbeOptions {
@@ -135,13 +144,30 @@ const ANDROID_SDK_ENV_NAMES = ["ANDROID_HOME", "ANDROID_SDK_ROOT"] as const;
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
-// macOS stays capped and falls back to launchctl's PATH instead of waiting longer.
-const MACOS_LOGIN_SHELL_TIMEOUT = Duration.millis(750);
 // A profile can be slow only while the machine boots; one longer wait covers it.
 const SLOW_LOGIN_SHELL_TIMEOUT = Duration.seconds(20);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
-const MACOS_LOGIN_SHELL_TERMINATE_GRACE = Duration.millis(100);
+const STARTUP_PROBE: ProbeBudget = {
+  timeout: LOGIN_SHELL_TIMEOUT,
+  slowTimeout: SLOW_LOGIN_SHELL_TIMEOUT,
+  terminateGrace: PROCESS_TERMINATE_GRACE,
+};
+// macOS startup stays capped and falls back to launchctl's PATH instead of waiting longer;
+// the background retries below still give the user's shell its full budget.
+const MACOS_STARTUP_PROBE: ProbeBudget = {
+  timeout: Duration.millis(750),
+  terminateGrace: Duration.millis(100),
+};
+// Retries block nothing, so they outlast pyenv's 60 s wait on its rehash lock, and SIGTERM gets
+// time to run the exit trap that releases it. A SIGKILL leaves the lock for two minutes.
+const RETRY_PROBE: ProbeBudget = {
+  timeout: Duration.minutes(2),
+  terminateGrace: Duration.seconds(10),
+};
+// A Mac asleep at launch fails the first probe on wake, and nothing else would probe again.
+const DISCOVERY_RETRY_DELAY = Duration.seconds(30);
+const DISCOVERY_RETRIES = 10;
 
 const trimNonEmpty = (value: string | null | undefined): Option.Option<string> =>
   Option.fromNullishOr(value).pipe(
@@ -332,7 +358,7 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
   readonly args: ReadonlyArray<string>;
   readonly env: NodeJS.ProcessEnv;
   readonly timeout: Duration.Duration;
-  readonly forceKillAfter?: Duration.Duration;
+  readonly terminateGrace?: Duration.Duration;
   readonly shell?: boolean;
 }): Effect.fn.Return<
   string,
@@ -351,7 +377,7 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
           stdout: "pipe",
           stderr: "ignore",
           killSignal: "SIGTERM",
-          forceKillAfter: input.forceKillAfter ?? PROCESS_TERMINATE_GRACE,
+          forceKillAfter: input.terminateGrace ?? PROCESS_TERMINATE_GRACE,
         }),
       );
       return yield* Effect.all([Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode], {
@@ -419,6 +445,7 @@ const readLoginShellEnvironment = (
   mode: ShellEnvironmentMode,
   env: NodeJS.ProcessEnv,
   timeout: Duration.Duration,
+  terminateGrace: Duration.Duration,
 ): Effect.Effect<
   EnvironmentPatch,
   DesktopShellEnvironmentCommandTimeoutError,
@@ -435,7 +462,7 @@ const readLoginShellEnvironment = (
         ],
         env,
         timeout,
-        ...(platform === "darwin" ? { forceKillAfter: MACOS_LOGIN_SHELL_TERMINATE_GRACE } : {}),
+        terminateGrace,
       }).pipe(Effect.map((output) => extractEnvironment(output, names, mode)));
 
 const readLaunchctlPath = (env: NodeJS.ProcessEnv) =>
@@ -452,6 +479,7 @@ const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEn
     names: ReadonlyArray<string>,
     options: WindowsProbeOptions,
     env: NodeJS.ProcessEnv,
+    budget: ProbeBudget,
   ): Effect.fn.Return<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> {
     if (names.length === 0) return {};
 
@@ -469,7 +497,8 @@ const readWindowsEnvironment = Effect.fn("desktop.shellEnvironment.readWindowsEn
         command,
         args,
         env,
-        timeout: LOGIN_SHELL_TIMEOUT,
+        timeout: budget.timeout,
+        terminateGrace: budget.terminateGrace,
       }).pipe(orEmptyOnTimeout);
       const environment = extractEnvironment(output, names, options.mode);
       if (Object.keys(environment).length > 0) {
@@ -505,7 +534,12 @@ const installWindowsEnvironment = Effect.fn("desktop.shellEnvironment.installWin
   ): Effect.fn.Return<boolean, never, ChildProcessSpawner.ChildProcessSpawner> {
     const [noProfile, profile] = yield* Effect.all(
       [
-        readWindowsEnvironment(["PATH"], { loadProfile: false, mode: "allowlist" }, config.env),
+        readWindowsEnvironment(
+          ["PATH"],
+          { loadProfile: false, mode: "allowlist" },
+          config.env,
+          config.budget,
+        ),
         readWindowsEnvironment(
           [
             ...WINDOWS_PROFILE_ENV_NAMES,
@@ -516,6 +550,7 @@ const installWindowsEnvironment = Effect.fn("desktop.shellEnvironment.installWin
             mode: config.harvest.mode,
           },
           config.env,
+          config.budget,
         ),
       ],
       { concurrency: 2 },
@@ -549,6 +584,9 @@ const installWindowsEnvironment = Effect.fn("desktop.shellEnvironment.installWin
   },
 );
 
+const listUserShells = (env: NodeJS.ProcessEnv): ReadonlyArray<string> =>
+  [env.SHELL?.trim(), readUserLoginShell()].filter((shell): shell is string => Boolean(shell));
+
 const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosixEnvironment")(
   function* (
     config: ShellEnvironmentConfig,
@@ -559,14 +597,11 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
   > {
     const fileSystem = yield* FileSystem.FileSystem;
     const shellEnvironment: EnvironmentPatch = {};
-    const userShells = [config.env.SHELL?.trim(), readUserLoginShell()];
+    const userShells = listUserShells(config.env);
 
     const probeNames = [...LOGIN_SHELL_ENV_NAMES, ...config.harvest.names];
     let answeredBy: string | undefined;
-    // macOS never takes the slow retry: its capped probe falls back to launchctl's PATH.
-    let waitedForSlowShell = config.platform === "darwin";
-    const firstTimeout =
-      config.platform === "darwin" ? MACOS_LOGIN_SHELL_TIMEOUT : LOGIN_SHELL_TIMEOUT;
+    let waitedForSlowShell = false;
     for (const shell of listLoginShellCandidates(config.platform, config.env.SHELL)) {
       const read = (timeout: Duration.Duration) =>
         readLoginShellEnvironment(
@@ -576,16 +611,17 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
           config.harvest.mode,
           config.env,
           timeout,
+          config.budget.terminateGrace,
         );
       Object.assign(
         shellEnvironment,
-        yield* read(firstTimeout).pipe(
+        yield* read(config.budget.timeout).pipe(
           Effect.catchTags({
             DesktopShellEnvironmentCommandTimeoutError: (error) => {
-              const retry = !waitedForSlowShell;
+              const slowTimeout = waitedForSlowShell ? undefined : config.budget.slowTimeout;
               waitedForSlowShell = true;
               return logShellEnvironmentCommandError(error).pipe(
-                Effect.andThen(retry ? read(SLOW_LOGIN_SHELL_TIMEOUT) : Effect.succeed({})),
+                Effect.andThen(slowTimeout ? read(slowTimeout) : Effect.succeed({})),
               );
             },
           }),
@@ -706,7 +742,10 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
     });
 
     const prepared = Option.isSome(trimNonEmpty(shellEnvironment.PATH));
-    return { prepared, fromUserShell: prepared && userShells.includes(answeredBy) };
+    return {
+      prepared,
+      fromUserShell: prepared && answeredBy !== undefined && userShells.includes(answeredBy),
+    };
   },
 );
 
@@ -812,46 +851,70 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(latest, Option.some(message));
     yield* PubSub.publish(changes, message);
   });
-  const refresh = Effect.gen(function* () {
-    const harvest = requestedHarvest ?? DEFAULT_SHELL_ENVIRONMENT_HARVEST;
-    yield* Effect.annotateCurrentSpan({
-      mode: harvest.mode,
-      extraNameCount: harvest.names.length,
-    });
-    // Refresh from the inherited baseline so removed cached paths and values do not survive.
-    const fresh = { ...inherited };
-    const discovery = yield* installShellEnvironment({
-      env: fresh,
-      platform: environment.platform,
-      harvest,
-    });
-    const { prepared } = discovery;
-    const patch = Object.fromEntries(
-      Object.keys(ShellEnvironmentPatch.fields).map((name) => [name, fresh[name] ?? null]),
-    );
-    if (prepared || Option.isNone(yield* Ref.get(latest)))
-      yield* publish(patch, prepared, harvestedChanges(fresh, inherited, environment.platform));
-    if (prepared) {
-      // Harvested extras are not persisted; they can hold credentials and arrive with discovery.
-      const cached = Object.fromEntries(
-        CACHED_ENV_NAMES.flatMap((name) => (fresh[name] ? [[name, fresh[name]]] : [])),
-      );
-      const persist = Effect.gen(function* () {
-        const encoded = yield* encodeCache({ version: 1, key, environment: cached });
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
-        yield* fileSystem.writeFileString(cachePath + ".tmp", encoded, { mode: 0o600 });
-        yield* fileSystem.rename(cachePath + ".tmp", cachePath);
+  const probe = Effect.fn("desktop.shellEnvironment.refresh")(
+    function* (budget: ProbeBudget) {
+      const harvest = requestedHarvest ?? DEFAULT_SHELL_ENVIRONMENT_HARVEST;
+      yield* Effect.annotateCurrentSpan({
+        mode: harvest.mode,
+        extraNameCount: harvest.names.length,
       });
-      yield* persist.pipe(
-        Effect.catch(() => Effect.logWarning("Could not cache shell environment")),
+      // Refresh from the inherited baseline so removed cached paths and values do not survive.
+      const fresh = { ...inherited };
+      const discovery = yield* installShellEnvironment({
+        env: fresh,
+        platform: environment.platform,
+        harvest,
+        budget,
+      });
+      const { prepared } = discovery;
+      const patch = Object.fromEntries(
+        Object.keys(ShellEnvironmentPatch.fields).map((name) => [name, fresh[name] ?? null]),
       );
-    }
-    return discovery;
-  }).pipe(
+      if (prepared || Option.isNone(yield* Ref.get(latest)))
+        yield* publish(patch, prepared, harvestedChanges(fresh, inherited, environment.platform));
+      if (prepared) {
+        // Harvested extras are not persisted; they can hold credentials and arrive with discovery.
+        const cached = Object.fromEntries(
+          CACHED_ENV_NAMES.flatMap((name) => (fresh[name] ? [[name, fresh[name]]] : [])),
+        );
+        const persist = Effect.gen(function* () {
+          const encoded = yield* encodeCache({ version: 1, key, environment: cached });
+          yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+          yield* fileSystem.writeFileString(cachePath + ".tmp", encoded, { mode: 0o600 });
+          yield* fileSystem.rename(cachePath + ".tmp", cachePath);
+        });
+        yield* persist.pipe(
+          Effect.catch(() => Effect.logWarning("Could not cache shell environment")),
+        );
+      }
+      return discovery;
+    },
     Effect.provideService(FileSystem.FileSystem, fileSystem),
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    Effect.withSpan("desktop.shellEnvironment.refresh"),
+  );
+  // A fallback shell's PATH can miss folders the user's own shell adds, so keep asking that shell.
+  const awaitsUserShell = listUserShells(inherited).length > 0;
+  const settled = ({ prepared, fromUserShell }: ShellDiscovery) =>
+    fromUserShell || (prepared && !awaitsUserShell);
+  const refresh = probe(
+    environment.platform === "darwin" ? MACOS_STARTUP_PROBE : STARTUP_PROBE,
+  ).pipe(
     Effect.onExit((exit) => Deferred.done(discovered, exit)),
+    Effect.flatMap((discovery) =>
+      settled(discovery)
+        ? Effect.void
+        : Effect.sleep(DISCOVERY_RETRY_DELAY).pipe(
+            Effect.andThen(
+              probe(RETRY_PROBE).pipe(
+                Effect.repeat({
+                  until: settled,
+                  schedule: Schedule.spaced(DISCOVERY_RETRY_DELAY),
+                  times: DISCOVERY_RETRIES - 1,
+                }),
+              ),
+            ),
+          ),
+    ),
   );
   const installation = yield* Effect.cached(
     Effect.gen(function* () {
