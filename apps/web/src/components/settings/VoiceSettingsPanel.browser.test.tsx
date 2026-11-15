@@ -27,8 +27,6 @@ import { SpeechLanguageSelect } from "./SpeechLanguageSelect";
 import { VoiceSettingsPanel } from "./VoiceSettingsPanel";
 
 vi.mock(import("../../speech/useEnvironmentSpeechInput"), { spy: true });
-// MT Code's realtime voice section talks to the primary environment; these tests cover dictation.
-vi.mock(import("./RealtimeVoiceSettings"), () => ({ RealtimeVoiceSettings: () => <></> }));
 vi.mock(import("../../state/session"), { spy: true });
 
 // The real connection runtime authorizes relay requests with a signed-in cloud session.

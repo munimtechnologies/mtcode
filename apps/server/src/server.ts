@@ -224,7 +224,6 @@ import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsag
 import * as UsageService from "./usage/UsageService.ts";
 import * as CodexPluginMarketplace from "./plugins/CodexPluginMarketplace.ts";
 import { pluginMarketplaceHttpApiLayer } from "./plugins/http.ts";
-import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -832,7 +831,6 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerAuth),
   Layer.provideMerge(Layer.mergeAll(AssetSigner.layer, EnvironmentKeys.layer)),
   Layer.provideMerge(ServerSecretStore.layer),
-  Layer.provideMerge(VoiceSessionService.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(
     Layer.mergeAll(
       CloudCliTokenManager.layer.pipe(

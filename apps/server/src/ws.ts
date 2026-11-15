@@ -36,7 +36,6 @@ import {
   ClientOs,
   ClientSurface,
   ClientWebDeployment,
-  VoiceApiError,
   type DiscoveredLocalServerList,
   type EditorId,
   type FileManagerRevealKind,
@@ -200,10 +199,6 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as ServerSettings from "./serverSettings.ts";
 import { invalidateSettingsSecrets } from "./sourceControl/sourceControlHostSecrets.ts";
-import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
-import { CodexVoiceSession } from "./voice/CodexVoiceSession.ts";
-import { resolveCodexVoiceCommand } from "./voice/codexVoiceCommand.ts";
-import { delegateVoiceRequest } from "./voice/voiceDelegation.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -1555,14 +1550,6 @@ export const layerWsRpc = (
     const secretResolver = yield* SecretResolver.SecretResolver;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
-    const voiceSessionService = yield* VoiceSessionService.VoiceSessionService;
-    const codexVoiceSessions = new Map<string, CodexVoiceSession>();
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        for (const session of codexVoiceSessions.values()) session.close();
-        codexVoiceSessions.clear();
-      }),
-    );
     const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2752,96 +2739,6 @@ export const layerWsRpc = (
             : serverSettings.updateProviderInstance(providerInstanceMutation, nextPatch);
           return ServerSettings.redactServerSettingsForClient(settings, settingsClient);
         }),
-      [WS_METHODS.voiceGetCredentialStatus]: (_input) => voiceSessionService.getCredentialStatus,
-      [WS_METHODS.voiceSetCredential]: ({ apiKey }) => voiceSessionService.setCredential(apiKey),
-      [WS_METHODS.voiceRemoveCredential]: (_input) => voiceSessionService.removeCredential,
-      [WS_METHODS.voiceCodexSession]: (input) =>
-        Effect.gen(function* () {
-          if (input.action !== "start") {
-            const session = codexVoiceSessions.get(input.sessionId);
-            if (input.action === "stop") {
-              session?.close();
-              codexVoiceSessions.delete(input.sessionId);
-              return { sessionId: input.sessionId };
-            }
-            const error = session ? session.renew() : "Voice session ended. Start voice again.";
-            if (error) codexVoiceSessions.delete(input.sessionId);
-            const notices = session?.takeNotices() ?? [];
-            return {
-              sessionId: input.sessionId,
-              ...(error ? { error } : {}),
-              ...(notices.length > 0 ? { notices } : {}),
-            };
-          }
-          const thread = yield* threadManagement.getThreadShell(input.threadId);
-          if (thread === null) {
-            return yield* new VoiceApiError({
-              reason: "upstream_unavailable",
-              message: "Open an existing task before starting Codex account voice.",
-            });
-          }
-          const settings = yield* serverSettings.getSettings;
-          const codex = yield* resolveCodexVoiceCommand(settings);
-          if (Option.isNone(codex)) {
-            return yield* new VoiceApiError({
-              reason: "upstream_unavailable",
-              message:
-                "Enable the Codex provider and sign in with your ChatGPT account to use account voice.",
-            });
-          }
-          const spawnCommand = yield* resolveSpawnCommand(codex.value.command, codex.value.args, {
-            env: codex.value.env,
-          });
-          // One voice session per server: the microphone and GPT-Live call are singular.
-          for (const session of codexVoiceSessions.values()) session.close();
-          codexVoiceSessions.clear();
-          const runAgentPromise = Effect.runPromiseWith(yield* Effect.context<never>());
-          const session = new CodexVoiceSession({
-            command: spawnCommand.command,
-            args: spawnCommand.args,
-            shell: spawnCommand.shell,
-            env: codex.value.env,
-            cwd: config.cwd,
-            askAgent: (prompt, signal) =>
-              runAgentPromise(delegateVoiceRequest(threadManagement, input.threadId, prompt), {
-                signal,
-              }),
-          });
-          codexVoiceSessions.set(session.id, session);
-          const sdp = yield* Effect.tryPromise({
-            try: () => session.start(input.sdp, input.voice),
-            catch: (error) =>
-              new VoiceApiError({
-                reason: "upstream_unavailable",
-                message: error instanceof Error ? error.message : "Codex voice failed.",
-              }),
-          }).pipe(
-            Effect.onError(() =>
-              Effect.sync(() => {
-                session.close();
-                codexVoiceSessions.delete(session.id);
-              }),
-            ),
-          );
-          return { sessionId: session.id, sdp };
-        }).pipe(
-          Effect.mapError(
-            (error) =>
-              new VoiceApiError({
-                reason: "upstream_unavailable",
-                message: error instanceof Error ? error.message : "Codex voice could not connect.",
-              }),
-          ),
-        ),
-      [WS_METHODS.voiceCreateSession]: ({ model }) => voiceSessionService.createSession(model),
-      [WS_METHODS.voiceGetParallelCredentialStatus]: (_input) =>
-        voiceSessionService.getParallelCredentialStatus,
-      [WS_METHODS.voiceSetParallelCredential]: ({ apiKey }) =>
-        voiceSessionService.setParallelCredential(apiKey),
-      [WS_METHODS.voiceRemoveParallelCredential]: (_input) =>
-        voiceSessionService.removeParallelCredential,
-      [WS_METHODS.voiceSearchWeb]: (input) => voiceSessionService.searchWeb(input),
-      [WS_METHODS.voiceExtractWeb]: (input) => voiceSessionService.extractWeb(input),
       [WS_METHODS.serverDiscoverSourceControl]: (_input) => sourceControlDiscovery.discover,
       [WS_METHODS.serverCheckSecretSource]: (input) => secretCheck.check(input.source),
       [WS_METHODS.serverGetTraceDiagnostics]: (_input) =>

@@ -93,7 +93,6 @@ require apps/web/src/components/chat/TimelineUserMessageRow.tsx "<InlineUserMess
 
 # --- Voice dictation, web composer (5fe86fbb6, c239c12e0) ---
 # retired 2026-11-06 (upstream #30623/#30625 environment dictation owns this now): require apps/web/src/components/chat/ChatComposer.tsx "VoiceTranscriptionPanel" "dictation panel rendered by web composer"
-require apps/web/src/components/chat/ChatComposer.tsx "useVoiceSession" "realtime voice session button in web composer"
 
 # --- Computer-use permission/tool approvals (b671c08ef lineage) ---
 # retired 2026-10-02 (upstream orchestrator #2829 owns this now): require apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts 'case "permissions_approval"' "permissions approval request kind mapping"

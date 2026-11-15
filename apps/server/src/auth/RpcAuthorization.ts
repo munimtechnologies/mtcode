@@ -125,17 +125,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverRefreshUsageRates]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverSignalProcess]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
-  [WS_METHODS.voiceGetCredentialStatus]: AuthOrchestrationReadScope,
-  // MT Code: voice credentials are provider credentials like any other.
-  [WS_METHODS.voiceSetCredential]: AuthProvidersManageScope,
-  [WS_METHODS.voiceRemoveCredential]: AuthProvidersManageScope,
-  [WS_METHODS.voiceCreateSession]: AuthOrchestrationOperateScope,
-  [WS_METHODS.voiceCodexSession]: AuthOrchestrationOperateScope,
-  [WS_METHODS.voiceGetParallelCredentialStatus]: AuthOrchestrationReadScope,
-  [WS_METHODS.voiceSetParallelCredential]: AuthProvidersManageScope,
-  [WS_METHODS.voiceRemoveParallelCredential]: AuthProvidersManageScope,
-  [WS_METHODS.voiceSearchWeb]: AuthOrchestrationOperateScope,
-  [WS_METHODS.voiceExtractWeb]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,
   // Delivery logs hold request bodies, so they need the same scope as the URL.

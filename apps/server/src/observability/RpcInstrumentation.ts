@@ -259,16 +259,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.computersRespond]: "computers",
   [WS_METHODS.computerViewStream]: "computer-view",
   [WS_METHODS.computerViewInput]: "computer-view",
-  [WS_METHODS.voiceGetCredentialStatus]: "voice",
-  [WS_METHODS.voiceSetCredential]: "voice",
-  [WS_METHODS.voiceRemoveCredential]: "voice",
-  [WS_METHODS.voiceCreateSession]: "voice",
-  [WS_METHODS.voiceCodexSession]: "voice",
-  [WS_METHODS.voiceGetParallelCredentialStatus]: "voice",
-  [WS_METHODS.voiceSetParallelCredential]: "voice",
-  [WS_METHODS.voiceRemoveParallelCredential]: "voice",
-  [WS_METHODS.voiceSearchWeb]: "voice",
-  [WS_METHODS.voiceExtractWeb]: "voice",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

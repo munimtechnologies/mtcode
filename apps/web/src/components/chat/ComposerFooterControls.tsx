@@ -259,44 +259,6 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   );
 });
 
-/** MT Code: realtime voice-session button beside the composer's send action. */
-export const ComposerVoiceActions = memo(function ComposerVoiceActions(props: {
-  voiceSessionActive: boolean;
-  preserveComposerFocusOnPointerDown: boolean;
-  onStartVoiceSession: () => void;
-}) {
-  const preventFocusLoss = props.preserveComposerFocusOnPointerDown
-    ? (event: React.PointerEvent) => event.preventDefault()
-    : undefined;
-  const voiceSessionLabel = props.voiceSessionActive
-    ? "Open active voice session"
-    : "Start voice session";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost-muted"
-            className={cn(
-              "rounded-full",
-              props.voiceSessionActive &&
-                "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
-            )}
-            onPointerDown={preventFocusLoss}
-            onClick={props.onStartVoiceSession}
-            aria-label={voiceSessionLabel}
-          >
-            <AudioLinesIcon className="size-4" />
-          </Button>
-        }
-      />
-      <TooltipPopup side="top">{voiceSessionLabel}</TooltipPopup>
-    </Tooltip>
-  );
-});
-
 /**
  * The composer's model picker. It owns the single- and multi-model selection
  * handlers so they are cached against the selection state, not rebuilt on

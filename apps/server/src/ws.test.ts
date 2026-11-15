@@ -63,7 +63,6 @@ import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { ProviderAccountLoginRunner } from "./provider/ProviderAccountLoginRunner.ts";
 import * as PullRequestRanking from "./pullRequest/PullRequestRanking.ts";
 import * as UpstreamTake from "./pullRequest/UpstreamTake.ts";
-import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as AcpRegistryRuntimeCoordinator from "@t3tools/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
@@ -885,7 +884,6 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ProviderAccountLoginRunner)({}),
   Layer.mock(PullRequestRanking.PullRequestRankingService)({}),
   Layer.mock(UpstreamTake.UpstreamTakeService)({}),
-  Layer.mock(VoiceSessionService.VoiceSessionService)({}),
 );
 
 const layerConfigSources = Layer.mergeAll(

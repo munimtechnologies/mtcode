@@ -213,7 +213,7 @@ import {
   ComposerRestingImagePreviews,
 } from "./ComposerAttachmentStrip";
 import { CollapsedComposerStopAction, ComposerPrimaryActions } from "./ComposerPrimaryActions";
-import { ComposerFooterPrimaryActions, ComposerVoiceActions } from "./ComposerFooterControls";
+import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
@@ -261,7 +261,6 @@ import {
   resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { useVoiceSession } from "../voice/VoiceSession";
 import { Kbd } from "../ui/kbd";
 import { useSoftwareKeyboardOpen } from "../../hooks/useSoftwareKeyboardOpen";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -302,12 +301,6 @@ export interface ChatComposerHandle {
     text: string,
     options?: { ensureLeadingBoundary?: boolean; clipboardData?: DataTransfer },
   ) => boolean;
-  replaceTextRange: (input: {
-    rangeStart: number;
-    rangeEnd: number;
-    replacement: string;
-    expectedText?: string;
-  }) => boolean;
   /** Apply large-paste folding for text redirected from a blurred composer. */
   pasteTextAtEnd: (text: string, options?: { bypassAutoAttachment?: boolean }) => boolean;
   citeAssistantText: (
@@ -576,28 +569,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
-  const voiceSession = useVoiceSession();
-  const { registerComposer } = voiceSession;
-
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this composer with the app-wide voice session and unregisters on cleanup
-  useEffect(
-    () =>
-      registerComposer({
-        environmentId,
-        threadRef: routeThreadRef,
-        composerDraftTarget,
-        composerRef,
-        title: activeThread?.title ?? "New task",
-      }),
-    [
-      activeThread?.title,
-      composerDraftTarget,
-      composerRef,
-      environmentId,
-      routeThreadRef,
-      registerComposer,
-    ],
-  );
 
   const {
     activePendingProgress: incomingPendingProgress,
@@ -3045,13 +3016,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         countPreparingComposerImages(attachmentTargetKey) > 0 ||
         pendingDraftWork.has(attachmentTargetKey),
       insertTextAtEnd: insertComposerTextAtEndStable,
-      replaceTextRange: ({ rangeStart, rangeEnd, replacement, expectedText }) =>
-        applyPromptReplacementStable(
-          rangeStart,
-          rangeEnd,
-          replacement,
-          expectedText === undefined ? {} : { expectedText },
-        ),
       pasteTextAtEnd: (text: string, options) => {
         const shortcutArmed = consumePasteAsTextShortcut(pasteAsTextShortcutUntilRef);
         const bypassAutoAttachment = options?.bypassAutoAttachment === true || shortcutArmed;
@@ -3357,14 +3321,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       focusComposer={focusComposer}
     />
   ) : null;
-  const composerVoiceActions =
-    pendingUserInputs.length === 0 ? (
-      <ComposerVoiceActions
-        voiceSessionActive={voiceSession.active}
-        preserveComposerFocusOnPointerDown={isMobileViewport}
-        onStartVoiceSession={voiceSession.start}
-      />
-    ) : null;
   return (
     <form
       ref={composerFormRef}
@@ -3767,7 +3723,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   >
                     {composerControls}
                   </div>
-                  {speechInput.state.phase === "idle" ? composerVoiceActions : null}
                   <ComposerFooterPrimaryActions
                     // Stop state belongs to one thread; the composer stays mounted across threads.
                     key={`${environmentId}:${activeThreadId ?? "new"}`}

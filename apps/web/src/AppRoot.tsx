@@ -5,7 +5,6 @@ import { ComputerTaskHosts } from "./components/computers/ComputerTaskHosts";
 import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
 import { I18nProvider } from "./i18n/I18nProvider";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
-import { VoiceSessionProvider } from "./components/voice/VoiceSession";
 import { useAppIcon } from "./hooks/useAppIcon";
 import type { AppRouter } from "./router";
 
@@ -15,12 +14,10 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
     <I18nProvider>
       <AppAtomRegistryProvider>
         <AppIconSync />
-        <VoiceSessionProvider>
-          <RouterProvider router={router} />
-          <ComputerTaskHosts />
-          <ElectronBrowserHost />
-          <QuitHoldOverlay />
-        </VoiceSessionProvider>
+        <RouterProvider router={router} />
+        <ComputerTaskHosts />
+        <ElectronBrowserHost />
+        <QuitHoldOverlay />
       </AppAtomRegistryProvider>
     </I18nProvider>
   );

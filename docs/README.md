@@ -14,7 +14,6 @@
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Messaging between threads](./user/thread-messaging.md)
 - [Voice input](./user/voice-input.md)
-- [Voice conversations](./user/voice.md)
 - [Text generation models](./user/text-generation.md)
 - [SnapShots](./user/snap-shot.md)
 - [Visual replies](./user/html-renders.md)

@@ -289,8 +289,6 @@ function resolveMacBundleInfoPlistStrings(executableName) {
     // other MCP server we spawn silently fail to drive other apps.
     NSAppleEventsUsageDescription:
       "This app needs to control other apps to open project directories in your terminal and run Computer Use automations you approve.",
-    NSMicrophoneUsageDescription:
-      "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
   };
 }
 

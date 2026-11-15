@@ -1374,14 +1374,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "computer-history-timeline",
   },
   {
-    id: "voice-conversations",
-    title: "Voice conversations",
-    to: "/settings/voice",
-    searchTerms: [
-      "realtime voice session talk gpt-live codex account openai api key parallel web search trace history",
-    ],
-  },
-  {
     id: "external-terminal",
     title: "Terminal app",
     to: "/settings/general",

@@ -77,7 +77,6 @@ export * from "./worktreeMcp.ts";
 export * from "./pluginMarketplace.ts";
 export * from "./skillInventory.ts";
 export * from "./threadReference.ts";
-export * from "./voice.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./projectTransfer.ts";

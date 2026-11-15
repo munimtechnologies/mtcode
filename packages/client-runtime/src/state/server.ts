@@ -1594,14 +1594,6 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:provider-workspace-capabilities",
       tag: WS_METHODS.serverListProviderWorkspaceCapabilities,
     }),
-    voiceCredentialStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:voice:credential-status",
-      tag: WS_METHODS.voiceGetCredentialStatus,
-    }),
-    parallelCredentialStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:voice:parallel-credential-status",
-      tag: WS_METHODS.voiceGetParallelCredentialStatus,
-    }),
     configProjection,
     welcome,
     legacyThreadMigration: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
@@ -1854,46 +1846,6 @@ export function createServerEnvironmentAtoms<R, E>(
       },
     }),
     updateEnvironmentLabel,
-    setVoiceCredential: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:set-credential",
-      tag: WS_METHODS.voiceSetCredential,
-      concurrency: configConcurrency,
-    }),
-    removeVoiceCredential: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:remove-credential",
-      tag: WS_METHODS.voiceRemoveCredential,
-      concurrency: configConcurrency,
-    }),
-    codexVoiceSession: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:codex-session",
-      tag: WS_METHODS.voiceCodexSession,
-    }),
-    createVoiceSession: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:create-session",
-      tag: WS_METHODS.voiceCreateSession,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId }) => environmentId,
-      },
-    }),
-    setParallelCredential: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:set-parallel-credential",
-      tag: WS_METHODS.voiceSetParallelCredential,
-      concurrency: configConcurrency,
-    }),
-    removeParallelCredential: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:remove-parallel-credential",
-      tag: WS_METHODS.voiceRemoveParallelCredential,
-      concurrency: configConcurrency,
-    }),
-    searchVoiceWeb: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:search-web",
-      tag: WS_METHODS.voiceSearchWeb,
-    }),
-    extractVoiceWeb: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:voice:extract-web",
-      tag: WS_METHODS.voiceExtractWeb,
-    }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
