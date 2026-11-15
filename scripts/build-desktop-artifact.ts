@@ -3184,7 +3184,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
     };
     // electron-updater replaces an installed AppImage in place only when its name has no x.y.z version.
-    if (buildConfig.publish) {
+    // MT Code's fleet publishes and installs MT-Code-<version>-x86_64.AppImage, so it keeps its name.
+    if (buildConfig.publish && distro.id === "default") {
       buildConfig.appImage = {
         artifactName:
           updateChannel === "nightly" ? "T3-Code-Nightly-${arch}.${ext}" : "T3-Code-${arch}.${ext}",
