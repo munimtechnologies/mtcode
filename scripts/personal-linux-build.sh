@@ -103,6 +103,10 @@ export T3CODE_DESKTOP_UPDATE_REPOSITORY="$UPDATE_REPOSITORY"
 export T3CODE_DESKTOP_UPDATE_URL="$UPDATE_URL"
 export GITHUB_REPOSITORY="$UPDATE_REPOSITORY"
 unset T3CODE_DESKTOP_SIGNED || true
+# Upstream's glibc ceiling (2.39) matches its Ubuntu 24.04 CI. This host's native
+# modules link against its own glibc, so the ceiling is the host's version.
+T3CODE_LINUX_GLIBC_BUILD_CEILING="$(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
+export T3CODE_LINUX_GLIBC_BUILD_CEILING
 
 log "building desktop artifacts"
 node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version "$VERSION" --verbose
