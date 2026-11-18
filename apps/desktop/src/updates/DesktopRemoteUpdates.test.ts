@@ -776,17 +776,16 @@ describe("DesktopRemoteUpdates", () => {
   it.effect("waits for a background check before installing a prepared update", () => {
     const backgroundCheckStarted = Deferred.makeUnsafe<void>();
     const releaseBackgroundCheck = Deferred.makeUnsafe<void>();
-    let checks = 0;
+    let blockCheck = false;
     let installAttempts = 0;
     const harness = makeHarness({
-      checkForUpdates: Effect.suspend(() => {
-        checks += 1;
-        return checks === 2
+      checkForUpdates: Effect.suspend(() =>
+        blockCheck
           ? Deferred.succeed(backgroundCheckStarted, undefined).pipe(
               Effect.andThen(Deferred.await(releaseBackgroundCheck)),
             )
-          : Effect.void;
-      }),
+          : Effect.void,
+      ),
       // Personal fork: fail the auto-install that update-downloaded triggers so
       // the app is still running when the background check starts.
       quitAndInstall: Effect.suspend(() => {
@@ -817,6 +816,7 @@ describe("DesktopRemoteUpdates", () => {
         yield* settle;
         assert.equal(harness.quitAndInstalls(), 1);
 
+        blockCheck = true;
         const backgroundCheck = yield* updates.check("poll").pipe(Effect.forkChild);
         yield* Deferred.await(backgroundCheckStarted);
         assert.isTrue(yield* updates.isActionActive);

@@ -53,6 +53,11 @@ export interface ProviderInstance {
   readonly snapshotForCwd?: (
     cwd: string,
   ) => Effect.Effect<ProviderWorkspaceSnapshot, ProviderDriverError>;
+  /**
+   * Cwds whose workspace skills may have changed. The registry rescans only cwds already
+   * requested. The stream must end when the instance is torn down.
+   */
+  readonly workspaceRescans?: Stream.Stream<string>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   readonly invalidateCaches?: Effect.Effect<void>;
   /** Moves a long-lived service onto a newly updated binary before its version is read back. */

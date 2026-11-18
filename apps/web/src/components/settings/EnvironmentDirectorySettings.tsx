@@ -51,7 +51,7 @@ export function EnvironmentDirectoryRows({
         resetAction={
           !disabled && settings.addProjectBaseDirectory !== "" ? (
             <SettingResetButton
-              label="repositories directory"
+              ariaLabel="Reset repositories directory to default"
               onClick={() => updateSettings({ addProjectBaseDirectory: "" })}
             />
           ) : null
@@ -78,7 +78,7 @@ export function EnvironmentDirectoryRows({
         resetAction={
           !disabled && settings.ghqCloneLayout ? (
             <SettingResetButton
-              label="clone into host folders"
+              ariaLabel="Reset clone into host folders to default"
               onClick={() => updateSettings({ ghqCloneLayout: false })}
             />
           ) : null

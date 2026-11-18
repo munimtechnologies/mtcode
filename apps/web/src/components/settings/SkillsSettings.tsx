@@ -16,7 +16,7 @@ import {
 } from "@t3tools/client-runtime/state/skills";
 import { cn } from "../../lib/utils";
 import { runtime } from "../../lib/runtime";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { namedClipboardTarget, useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { type EnvironmentPresentation, useEnvironments } from "../../state/environments";
 import { usePreparedConnection } from "../../state/session";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
@@ -27,7 +27,7 @@ import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
 import { toastManager } from "../ui/toast";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 type InventoryState =
   | { readonly status: "loading" }
@@ -73,6 +73,7 @@ function StatusLine({ children, tone }: { children: string; tone?: "error" }) {
 }
 
 export function SkillsSettings() {
+  const searchableSetting = useSearchableSetting();
   const { environments } = useEnvironments();
   const [query, setQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -369,7 +370,7 @@ function SkillDetail({ skill }: { skill: SkillInventoryInstallation }) {
 export function SkillFileDetail({ skill }: { skill: SkillInventoryInstallation }) {
   const content = skillContentForDisplay(skill.content);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
-    target: "skill path",
+    target: namedClipboardTarget("skill path"),
     timeout: 1_500,
     onError: () => toastManager.add({ type: "error", title: "Could not copy skill path" }),
   });

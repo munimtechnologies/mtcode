@@ -70,12 +70,18 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("upgrades a database at exactly 63", () =>
+  it.effect("upgrades a database at exactly 63, then rechecks it without a write lock", () =>
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 63 });
       assert.deepStrictEqual(yield* runMigrations(), v2Migrations);
       assert.deepStrictEqual(yield* history, migrationManifest);
       assert.isAbove(yield* v2TableCount, 0);
+
+      // query_only rejects BEGIN IMMEDIATE, which CLI startup would otherwise take on the live database.
+      yield* sql`PRAGMA query_only = ON`;
+      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
@@ -184,14 +190,14 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("upgrades an MT Code database at fork id 101 to 103", () =>
+  it.effect("upgrades an MT Code database at fork id 103 to 107", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 101 });
+      yield* runMigrations({ toMigrationInclusive: 103 });
       assert.deepStrictEqual(
         yield* runMigrations(),
-        migrationManifest.filter(([id]) => id > 101),
+        migrationManifest.filter(([id]) => id > 103),
       );
-      assert.strictEqual(migrationManifest.at(-1)?.[0], 103);
+      assert.strictEqual(migrationManifest.at(-1)?.[0], 107);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

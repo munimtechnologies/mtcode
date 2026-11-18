@@ -38,7 +38,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { APP_DISPLAY_NAME } from "~/branding";
 
 function isDesktopHost(): boolean {
@@ -232,6 +232,7 @@ function ComputerHistoryPrivacyDialog({
 }
 
 export function ComputerHistorySettings() {
+  const searchableSetting = useSearchableSetting();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const history = settings.computerHistory;
@@ -341,7 +342,7 @@ export function ComputerHistorySettings() {
           resetAction={
             history.enabled !== defaults.enabled ? (
               <SettingResetButton
-                label="computer history"
+                ariaLabel="Reset computer history to default"
                 onClick={() => patch({ enabled: defaults.enabled })}
               />
             ) : null
@@ -407,7 +408,7 @@ export function ComputerHistorySettings() {
           resetAction={
             hasPrivacyOverrides ? (
               <SettingResetButton
-                label="exclusions"
+                ariaLabel="Reset exclusions to default"
                 onClick={() =>
                   patch({
                     apps: [...defaults.apps],

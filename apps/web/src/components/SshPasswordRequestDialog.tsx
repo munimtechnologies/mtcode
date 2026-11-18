@@ -1,3 +1,4 @@
+import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import type { SourceControlSshPasswordPromptRequest } from "@t3tools/contracts";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -15,6 +16,7 @@ import { Input } from "./ui/input";
 import { canSubmitSshPassword } from "./sshPasswordRequestForm";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { useStableCallback } from "~/hooks/useStableCallback";
+import { m } from "~/i18n/messages";
 
 export interface SshPasswordPromptRequestPresentation {
   readonly requestId: string;
@@ -92,7 +94,7 @@ const PURPOSE_COPY = {
 
 function getPromptErrorMessage(error: unknown, purpose: SshPasswordRequestPurpose): string {
   const copy = PURPOSE_COPY[purpose];
-  const message = error instanceof Error ? error.message : copy.failed;
+  const message = thrownErrorMessage(error, m) ?? copy.failed;
   return message.includes("expired") || message.includes("no longer pending")
     ? copy.expired
     : message;

@@ -358,6 +358,11 @@ export const ServerProvider = Schema.Struct({
   /** Live plan rate-limit data returned by Claude Code's Agent SDK. */
   claudeStatus: Schema.optionalKey(ServerProviderClaudeStatus),
   workspaceSnapshots: Schema.optionalKey(Schema.Array(ServerProviderWorkspaceSnapshot)),
+  /**
+   * Set when the server rescanned a workspace after a session start and its skills or commands
+   * changed. Clients holding fetched workspace snapshots for this provider fetch them again.
+   */
+  workspaceRescannedAt: Schema.optionalKey(IsoDateTime),
   usageLimits: Schema.optional(ServerProviderUsageLimits),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   compatibilityAdvisory: Schema.optionalKey(ServerProviderCompatibilityAdvisory),
@@ -743,7 +748,7 @@ const EnvironmentThemeColors = Schema.Record(
   TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
 );
 
-export const THEME_CSS_MAX_LENGTH = 50_000;
+export const THEME_CSS_MAX_LENGTH = 100_000;
 
 const environmentThemeFields = {
   version: Schema.optional(Schema.Literal(1)),
@@ -769,6 +774,8 @@ export type EnvironmentThemeFile = typeof EnvironmentThemeFile.Type;
 export const EnvironmentTheme = Schema.Struct({
   id: EnvironmentThemeId,
   ...environmentThemeFields,
+  /** Revision of the image file published beside the theme; absent without one. */
+  background: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
 export type EnvironmentTheme = typeof EnvironmentTheme.Type;
 
@@ -806,6 +813,8 @@ export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
   cwd: TrimmedNonEmptyString,
+  /** The machine's own name, which file URIs from its shells may carry. Older servers omit it. */
+  hostname: Schema.optionalKey(Schema.String),
   keybindingsConfigPath: TrimmedNonEmptyString,
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,

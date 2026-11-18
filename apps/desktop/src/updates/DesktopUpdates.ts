@@ -575,6 +575,17 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  // The flag is shared updater state, so callers flip it only while holding a reservation.
+  const runUpdaterCheck = Effect.fn("desktop.updates.runUpdaterCheck")(function* (
+    allowDowngrade: boolean,
+  ) {
+    const restoreDowngrade = yield* electronUpdater.allowDowngrade;
+    if (allowDowngrade) yield* electronUpdater.setAllowDowngrade(true);
+    return yield* electronUpdater.checkForUpdates.pipe(
+      Effect.ensuring(electronUpdater.setAllowDowngrade(restoreDowngrade).pipe(Effect.ignore)),
+    );
+  });
+
   const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (
     reason: string,
     actionReservation: "acquire" | "held" = "acquire",
@@ -615,11 +626,7 @@ export const make = Effect.gen(function* () {
       );
       yield* electronUpdater.setRequestHeaders(headers);
 
-      // The flag is shared updater state, so it flips only while this check holds the reservation.
-      const restoreDowngrade = yield* electronUpdater.allowDowngrade;
-      if (allowDowngrade) yield* electronUpdater.setAllowDowngrade(true);
-      return yield* electronUpdater.checkForUpdates.pipe(
-        Effect.ensuring(electronUpdater.setAllowDowngrade(restoreDowngrade).pipe(Effect.ignore)),
+      return yield* runUpdaterCheck(allowDowngrade).pipe(
         Effect.as(true),
         Effect.catchTags({
           ElectronUpdaterCheckForUpdatesError: Effect.fn(
@@ -648,7 +655,10 @@ export const make = Effect.gen(function* () {
         );
   });
 
-  const downloadAvailableUpdate = Effect.gen(function* () {
+  // Install refreshes before downloading, and a second check could pick a stale, older release.
+  const downloadAvailableUpdate = Effect.fn("desktop.updates.downloadAvailableUpdate")(function* (
+    refresh: boolean,
+  ) {
     const admission = yield* Effect.scoped(
       admitAfterCheck(
         Effect.gen(function* () {
@@ -672,8 +682,29 @@ export const make = Effect.gen(function* () {
       return { accepted: false, completed: false };
     }
 
-    const state = yield* Ref.get(updateStateRef);
+    const offered = yield* Ref.get(updateStateRef);
+    let state = offered;
     return yield* Effect.gen(function* () {
+      if (refresh) {
+        // electron-updater downloads what its last check found, which can be hours old.
+        yield* logUpdaterInfo("checking for updates", { reason: "download" });
+        yield* runUpdaterCheck(
+          offered.channel !== desktopUpdateChannelOf(environment.appVersion),
+        ).pipe(
+          // A failed check keeps electron-updater's earlier result, so the known offer still downloads.
+          Effect.catchTags({
+            ElectronUpdaterCheckForUpdatesError: (error) =>
+              logUpdaterWarning(error.message, {
+                errorTag: error._tag,
+                cause: describeUpdateErrorCause(error.cause),
+              }),
+          }),
+        );
+      }
+      state = yield* Ref.get(updateStateRef);
+      if (state.status !== "available") {
+        return { accepted: true, completed: false };
+      }
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
@@ -722,7 +753,7 @@ export const make = Effect.gen(function* () {
       }),
       Effect.ensuring(finishUpdateAction("download")),
     );
-  }).pipe(Effect.withSpan("desktop.updates.downloadAvailableUpdate"));
+  });
 
   const updateRestartMarkerDir = environment.path.join(environment.baseDir, "runtime");
   const updateRestartMarkerPath = environment.path.join(
@@ -981,7 +1012,42 @@ export const make = Effect.gen(function* () {
         state: yield* Ref.get(updateStateRef),
       };
     }
-    const result = yield* installDownloadedUpdate(expectedVersion);
+    let installVersion = expectedVersion;
+    // A download can be hours old: a release published since replaces it before restarting.
+    const retained = yield* Ref.get(updateStateRef);
+    if (
+      retained.downloadedVersion !== null &&
+      (expectedVersion === undefined || retained.downloadedVersion === expectedVersion) &&
+      (yield* checkForUpdates(
+        "install",
+        "acquire",
+        retained.channel !== desktopUpdateChannelOf(environment.appVersion),
+      )) &&
+      (yield* Ref.get(updateStateRef)).status === "available"
+    ) {
+      const refreshed = yield* Ref.get(updateStateRef);
+      // electron-updater compares a stale feed with the running build, not the retained download.
+      if (
+        refreshed.availableVersion === null ||
+        compareSemverVersions(refreshed.availableVersion, retained.downloadedVersion) <= 0
+      ) {
+        yield* setState(retained);
+      } else {
+        const download = yield* downloadAvailableUpdate(false);
+        if (!download.completed) {
+          return {
+            accepted: download.accepted,
+            completed: false,
+            failed: download.accepted,
+            state: yield* Ref.get(updateStateRef),
+          };
+        }
+        if (expectedVersion !== undefined) {
+          installVersion = (yield* Ref.get(updateStateRef)).downloadedVersion ?? expectedVersion;
+        }
+      }
+    }
+    const result = yield* installDownloadedUpdate(installVersion);
     return {
       accepted: result.accepted,
       completed: result.completed,
@@ -1051,7 +1117,8 @@ export const make = Effect.gen(function* () {
     if (yield* Ref.get(desktopState.quitting)) return;
     const state = yield* Ref.get(updateStateRef);
     if (state.status !== "available" || state.availableVersion !== version) return;
-    const downloadResult = yield* downloadAvailableUpdate;
+    // The update-available event came from a check that just ran; no second check is needed.
+    const downloadResult = yield* downloadAvailableUpdate(false);
     yield* logUpdaterInfo("auto-download finished", {
       version,
       accepted: downloadResult.accepted,
@@ -1104,6 +1171,14 @@ export const make = Effect.gen(function* () {
             releaseNoteGroups: releaseNotes.length,
             omittedReleaseCount,
           });
+          // Personal fork: a stale feed's older offer (seen by the check before an install)
+          // must not auto-download over a newer retained download.
+          if (
+            state.downloadedVersion !== null &&
+            compareSemverVersions(info.version, state.downloadedVersion) <= 0
+          ) {
+            return;
+          }
           yield* autoDownloadUpdate(info.version);
         }),
       ),
@@ -1453,7 +1528,7 @@ export const make = Effect.gen(function* () {
       };
     }),
     download: Effect.gen(function* () {
-      const result = yield* downloadAvailableUpdate;
+      const result = yield* downloadAvailableUpdate(true);
       return {
         accepted: result.accepted,
         completed: result.completed,

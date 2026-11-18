@@ -21,8 +21,10 @@ import { refreshUsage, usageSummaryInput } from "@t3tools/client-runtime/state/u
 import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { msg, useMessages } from "gt-react-native";
 import { useCallback, useMemo } from "react";
 
+import { keepMarked } from "../i18n/messages";
 import { appAtomRegistry } from "./atom-registry";
 import { environmentCatalog } from "../connection/catalog";
 import { environmentPresentations } from "./presentation";
@@ -76,11 +78,14 @@ const usageByWindowAtom = Atom.family((key: string) =>
       const connectionResult = get(environmentCatalog.stateAtom(environmentId));
       const sessionResult = get(environmentSession.sessionStateAtom(environmentId));
       const session = AsyncResult.getOrElse(sessionResult, () => null);
-      const access = resolveUsageAccess({
-        connectionPhase: option.phase,
-        session,
-        hasSessionError: sessionResult._tag === "Failure",
-      });
+      const access = resolveUsageAccess(
+        {
+          connectionPhase: option.phase,
+          session,
+          hasSessionError: sessionResult._tag === "Failure",
+        },
+        keepMarked,
+      );
       if (!access.canReadDiagnostics) {
         // A session that has not arrived yet waits only through the first
         // connection attempt, like the usage query below, so a down machine
@@ -123,7 +128,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
           (option.phase === "connected" && result.waiting),
         isConnected: option.phase === "connected",
         canReadDiagnostics: true,
-        error: failed ? "This environment could not report usage." : null,
+        error: failed ? msg("This environment could not report usage.") : null,
         summary,
       });
     }
@@ -135,6 +140,31 @@ const usageByWindowAtom = Atom.family((key: string) =>
     };
   }).pipe(Atom.withLabel(`mobile-usage:${key}`)),
 );
+
+/** Every environment usage can come from, without asking any of them for usage. */
+const usageEnvironmentsAtom = Atom.make((get): UsageAtomValue => {
+  const catalog = get(environmentCatalog.catalogValueAtom);
+  const options = Array.from(
+    get(environmentPresentations.presentationsAtom),
+    ([environmentId, presentation]) => ({
+      environmentId,
+      label: presentation.entry.target.label,
+      phase: presentation.connection.phase,
+    }),
+  );
+  return {
+    isCatalogReady: catalog.isReady,
+    options,
+    environments: options.map((option) => ({
+      ...option,
+      isPending: true,
+      isConnected: option.phase === "connected",
+      canReadDiagnostics: false,
+      error: null,
+      summary: null,
+    })),
+  };
+}).pipe(Atom.withLabel("mobile-usage:environments"));
 
 export interface UsageView {
   readonly merged: MergedUsage;
@@ -158,6 +188,8 @@ export interface UsageView {
 export function useUsage(
   input: UsageSummaryInput,
   selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null = null,
+  /** Off, it lists the environments without loading their usage. */
+  load = true,
 ): UsageView {
   const windowKey = useMemo(
     () =>
@@ -182,9 +214,18 @@ export function useUsage(
       input.clientContractVersion,
     ],
   );
-  const atom = usageByWindowAtom(windowKey);
-  const value = useAtomValue(atom);
-  const environments = value.environments;
+  const messages = useMessages();
+  const value = useAtomValue(load ? usageByWindowAtom(windowKey) : usageEnvironmentsAtom);
+  // Errors stay marked in the shared atoms; resolve them in the viewer's language here.
+  const environments = useMemo(
+    () =>
+      value.environments.map((environment) =>
+        environment.error === null
+          ? environment
+          : { ...environment, error: messages(environment.error) },
+      ),
+    [value.environments, messages],
+  );
   const selectedEnvironments = useMemo(
     () =>
       selectedEnvironmentIds === null

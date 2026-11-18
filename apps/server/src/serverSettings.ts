@@ -84,6 +84,7 @@ import {
   mapSettingsSecrets,
   mapSettingsSecretValues,
   withoutRemovedSecretProviderReferences,
+  withoutRedirectedSimlockTokens,
   SECRET_REDACTED,
   type SettingsSecret,
 } from "./settingsSecrets.ts";
@@ -911,7 +912,11 @@ const make = Effect.gen(function* () {
       if (decoded._tag === "Failure" || legacySettings._tag === "Failure") {
         const failure = decoded._tag === "Failure" ? decoded : legacySettings;
         // The file may hold an opt-out we can no longer read; never resume threads on a guess.
-        settings = { ...managed.defaults, continueThreadsAfterServerUpdate: false };
+        settings = {
+          ...managed.defaults,
+          continueThreadsAfterServerUpdate: false,
+          usageHistoryRetentionDays: "unlimited",
+        };
         if (failure._tag === "Failure") {
           parseFailure = Option.some(Cause.squash(failure.cause));
           yield* Effect.logWarning("failed to parse settings.json, using defaults", {
@@ -1321,7 +1326,10 @@ const make = Effect.gen(function* () {
         }
         // An older client echoes a reference as the redacted marker; restore it before vetting so
         // a removed provider's reference is cleared below rather than restored by persistence.
-        const updated = withEchoedSecretReferences(current, yield* update(current));
+        const updated = withoutRedirectedSimlockTokens(
+          current,
+          withEchoedSecretReferences(current, yield* update(current)),
+        );
         // Vet before secrets: a variable the policy hides from clients is not one they removed.
         // Normalizing also enforces the fork's worktreesDirectory home-containment rule.
         const vetted = managed.vetWrite(

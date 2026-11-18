@@ -1,3 +1,5 @@
+import { vcsActionLabelText } from "@t3tools/client-runtime/state/vcs";
+import { useMessages } from "gt-react-native";
 import { useMemo } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
@@ -12,6 +14,7 @@ import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 import { serverEnvironment } from "./server";
 
 export function useSelectedThreadGitState() {
+  const messages = useMessages();
   const { selectedThread } = useThreadSelection();
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const serverConfig = useAtomValue(
@@ -47,7 +50,7 @@ export function useSelectedThreadGitState() {
   );
 
   return {
-    gitOperationLabel: gitActionState.currentLabel,
+    gitOperationLabel: vcsActionLabelText(gitActionState, messages),
     sourceControlDiscovery,
     selectedThreadBranches,
     selectedThreadBranchesLoading: selectedThreadBranchState.isPending,

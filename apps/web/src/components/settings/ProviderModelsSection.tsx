@@ -22,6 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS as DndCSS } from "@dnd-kit/utilities";
 import { GripVerticalIcon, PencilIcon, PlusIcon, StarIcon, XIcon } from "lucide-react";
+import { msg, T, useGT, useMessages } from "gt-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ProviderDriverKind,
@@ -32,6 +33,7 @@ import { isReasoningControl } from "@t3tools/client-runtime/model-traits";
 import { type CustomModelDefinition, normalizeCustomModelSlug } from "@t3tools/shared/model";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
+import type { MessageResolver } from "../../i18n/messages";
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";
 import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
@@ -63,6 +65,7 @@ function hasReasoningControl(model: ServerProviderModel): boolean {
 function describeModelCapabilities(
   model: ServerProviderModel,
   flagMissingReasoning: boolean,
+  resolve: MessageResolver,
 ): string[] {
   const descriptors = model.capabilities?.optionDescriptors ?? [];
   const labels: string[] = [];
@@ -73,7 +76,7 @@ function describeModelCapabilities(
         descriptor.type === "select" &&
         descriptor.options.some((option) => option.id === "fast" || option.label === "Fast")),
   );
-  if (hasFastMode) labels.push("Fast mode");
+  if (hasFastMode) labels.push(resolve(msg("Fast mode")));
   if (
     flagMissingReasoning &&
     !model.isCustom &&
@@ -81,7 +84,7 @@ function describeModelCapabilities(
     !PROVIDER_ALIAS_SLUGS.has(model.slug) &&
     !hasReasoningControl(model)
   ) {
-    labels.push("No reasoning");
+    labels.push(resolve(msg("No reasoning")));
   }
   return labels;
 }
@@ -325,6 +328,7 @@ export function ProviderModelsSection({
   onFavoriteModelsChange,
   onToggleFavorite,
 }: ProviderModelsSectionProps) {
+  const gt = useGT();
   const [input, setInput] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -461,19 +465,21 @@ export function ProviderModelsSection({
     if (!canManageCustomModels || driverKind === "antigravity" || isSaving) return;
     const normalized = normalizeCustomModelSlug(input);
     if (!normalized) {
-      setError("Enter a model slug.");
+      setError(gt("Enter a model slug."));
       return;
     }
     if (models.some((model) => !model.isCustom && model.slug === normalized)) {
-      setError("That model is already built in.");
+      setError(gt("That model is already built in."));
       return;
     }
     if (normalized.length > MAX_CUSTOM_MODEL_LENGTH) {
-      setError(`Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`);
+      setError(
+        gt("Model slugs must be {max} characters or less.", { max: MAX_CUSTOM_MODEL_LENGTH }),
+      );
       return;
     }
     if (customModels.some((entry) => entry.slug === normalized)) {
-      setError("That custom model is already saved.");
+      setError(gt("That custom model is already saved."));
       return;
     }
 
@@ -621,11 +627,11 @@ export function ProviderModelsSection({
           <Input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter models"
+            placeholder={gt("Filter models")}
             size="sm"
             className="w-56 max-w-full"
             spellCheck={false}
-            aria-label="Filter models"
+            aria-label={gt("Filter models")}
           />
         ) : null}
         <div className="flex items-center gap-2">
@@ -641,15 +647,21 @@ export function ProviderModelsSection({
                 })
               }
             >
-              {allBuiltInModelsHidden ? "Enable all" : "Disable all"}
+              {allBuiltInModelsHidden ? gt("Enable all") : gt("Disable all")}
             </Button>
           ) : null}
           <span className="text-xs text-muted-foreground">
-            {models.length} model{models.length === 1 ? "" : "s"}
+            {gt("{count, plural, one {{count} model} other {{count} models}}", {
+              count: models.length,
+            })}
             {favorites.length > 0
-              ? ` · ${favorites.length} favorite${favorites.length === 1 ? "" : "s"}`
+              ? ` · ${gt("{count, plural, one {{count} favorite} other {{count} favorites}}", {
+                  count: favorites.length,
+                })}`
               : ""}
-            {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
+            {hiddenCount > 0
+              ? ` · ${gt("{count, plural, other {{count} hidden}}", { count: hiddenCount })}`
+              : ""}
           </span>
         </div>
         {driverKind !== "antigravity" && !isAdding ? (
@@ -662,7 +674,7 @@ export function ProviderModelsSection({
             onClick={() => setIsAdding(true)}
           >
             <PlusIcon className="size-3" />
-            Add custom model
+            <T>Add custom model</T>
           </Button>
         ) : null}
       </div>
@@ -671,12 +683,12 @@ export function ProviderModelsSection({
         className="mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
       >
         {models.length === 0 ? (
-          placeholder("No models reported for this provider yet.")
+          placeholder(gt("No models reported for this provider yet."))
         ) : isFiltering ? (
           // Reordering a filtered view would be ambiguous, so it is a plain
           // list without drag handles.
           filteredModels.length === 0 ? (
-            placeholder("No models match.")
+            placeholder(gt("No models match."))
           ) : (
             filteredModels.map((model) => (
               <div key={model.slug}>
@@ -704,14 +716,14 @@ export function ProviderModelsSection({
                       dropTarget === "favorites" && "text-primary",
                     )}
                   >
-                    Favorites
+                    <T>Favorites</T>
                   </div>
                   {renderSortableRows(favorites)}
                   <SortableMarker
                     id={ALL_LABEL_ID}
                     className={groupLabelClassName(dropTarget === "enabled")}
                   >
-                    All
+                    {gt("All", { $context: "group of all visible models" })}
                   </SortableMarker>
                 </>
               ) : null}
@@ -721,14 +733,14 @@ export function ProviderModelsSection({
                   id={ENABLED_SLOT_ID}
                   className={emptySlotClassName(dropTarget === "enabled")}
                 >
-                  Drop models here to show them in the picker
+                  <T>Drop models here to show them in the picker</T>
                 </SortableMarker>
               ) : null}
               <SortableMarker
                 id={HIDDEN_LABEL_ID}
                 className={groupLabelClassName(dropTarget === "hidden")}
               >
-                Hidden from picker
+                <T>Hidden from picker</T>
               </SortableMarker>
               {renderSortableRows(hidden)}
               {sortableIds.includes(HIDDEN_SLOT_ID) ? (
@@ -736,7 +748,7 @@ export function ProviderModelsSection({
                   id={HIDDEN_SLOT_ID}
                   className={emptySlotClassName(dropTarget === "hidden")}
                 >
-                  Drop models here to hide them from the picker
+                  <T>Drop models here to hide them from the picker</T>
                 </SortableMarker>
               ) : null}
             </SortableContext>
@@ -778,10 +790,10 @@ export function ProviderModelsSection({
           />
           <div className="flex shrink-0 gap-2">
             <Button size="sm" variant="outline" disabled={isSaving} onClick={handleAdd}>
-              Add
+              {gt("Add", { $context: "verb, adds a custom model" })}
             </Button>
             <Button size="sm" variant="ghost" onClick={cancelAdd}>
-              Cancel
+              <T>Cancel</T>
             </Button>
           </div>
         </div>
@@ -823,7 +835,9 @@ function ProviderModelRow({
   readonly onToggleEdit: (slug: string) => void;
   readonly onRemove: (slug: string) => void;
 }) {
-  const capLabels = describeModelCapabilities(model, flagMissingReasoning);
+  const gt = useGT();
+  const m = useMessages();
+  const capLabels = describeModelCapabilities(model, flagMissingReasoning, m);
   return (
     <div
       data-model-slug={model.slug}
@@ -844,7 +858,7 @@ function ProviderModelRow({
           {...dragHandle.attributes}
           {...dragHandle.listeners}
           disabled={!canWritePreferences}
-          aria-label={`Drag to reorder ${model.name}`}
+          aria-label={gt("Drag to reorder {name}", { name: model.name })}
           className="cursor-grab touch-none active:cursor-grabbing"
         >
           <GripVerticalIcon className="size-3" />
@@ -867,16 +881,18 @@ function ProviderModelRow({
               )}
               disabled={!canWritePreferences}
               onClick={() => onToggleFavorite(model.slug)}
-              aria-label={`${isFavorite ? "Remove" : "Add"} ${model.name} ${
-                isFavorite ? "from" : "to"
-              } favorites`}
+              aria-label={
+                isFavorite
+                  ? gt("Remove {name} from favorites", { name: model.name })
+                  : gt("Add {name} to favorites", { name: model.name })
+              }
             />
           }
         >
           <StarIcon className={cn("size-3", isFavorite && "fill-current")} />
         </TooltipTrigger>
         <TooltipPopup side="top">
-          {isFavorite ? "Remove from favorites" : "Add to favorites"}
+          {isFavorite ? gt("Remove from favorites") : gt("Add to favorites")}
         </TooltipPopup>
       </Tooltip>
       <span className="flex min-w-0 items-baseline gap-2">
@@ -908,7 +924,9 @@ function ProviderModelRow({
           </TooltipPopup>
         </Tooltip>
         {model.isCustom ? (
-          <span className="shrink-0 text-2xs text-muted-foreground/70">custom</span>
+          <span className="shrink-0 text-2xs text-muted-foreground/70">
+            {gt("custom", { $context: "badge, user-added model" })}
+          </span>
         ) : null}
       </span>
       {/* Always a grid item so the columns line up across rows; the text
@@ -930,14 +948,16 @@ function ProviderModelRow({
                     size="icon-micro"
                     variant="ghost-muted"
                     disabled={!canManageCustomModels}
-                    aria-label={`Edit ${model.slug}`}
+                    aria-label={gt("Edit {name}", { name: model.slug })}
                     onClick={() => onToggleEdit(model.slug)}
                   />
                 }
               >
                 <PencilIcon className="size-3" />
               </TooltipTrigger>
-              <TooltipPopup side="top">Edit name and options</TooltipPopup>
+              <TooltipPopup side="top">
+                <T>Edit name and options</T>
+              </TooltipPopup>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -946,14 +966,16 @@ function ProviderModelRow({
                     size="icon-micro"
                     variant="ghost-muted"
                     disabled={!canManageCustomModels}
-                    aria-label={`Remove ${model.slug}`}
+                    aria-label={gt("Remove {name}", { name: model.slug })}
                     onClick={() => onRemove(model.slug)}
                   />
                 }
               >
                 <XIcon className="size-3" />
               </TooltipTrigger>
-              <TooltipPopup side="top">Remove custom model</TooltipPopup>
+              <TooltipPopup side="top">
+                <T>Remove custom model</T>
+              </TooltipPopup>
             </Tooltip>
           </>
         ) : null}
@@ -966,15 +988,15 @@ function ProviderModelRow({
               checked={!isHidden}
               disabled={!canWritePreferences || model.isCustom}
               onCheckedChange={(checked) => onSetHidden(model.slug, !checked)}
-              aria-label={`Show ${model.name} in the model picker`}
+              aria-label={gt("Show {name} in the model picker", { name: model.name })}
             />
           </TooltipTrigger>
           <TooltipPopup side="top">
             {model.isCustom
-              ? "Custom models are always shown in the picker"
+              ? gt("Custom models are always shown in the picker")
               : isHidden
-                ? "Hidden from picker"
-                : "Shown in picker"}
+                ? gt("Hidden from picker")
+                : gt("Shown in picker")}
           </TooltipPopup>
         </Tooltip>
       </span>

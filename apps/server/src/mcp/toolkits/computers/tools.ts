@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { EmptyToolInput } from "../emptyToolInput.ts";
@@ -77,6 +77,7 @@ export const ComputerSendTool = Tool.make("computer_send", {
   .annotate(Tool.Title, "Send task to computer")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, false);
+  .annotate(Tool.Idempotent, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const ComputerToolkit = Toolkit.make(ComputerListTool, ComputerSendTool);

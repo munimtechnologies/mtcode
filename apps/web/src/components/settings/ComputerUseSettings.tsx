@@ -30,7 +30,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { APP_BASE_NAME } from "../../branding";
 
@@ -92,6 +92,7 @@ function permissionLabel(status: DesktopComputerUsePermission["status"]): string
 }
 
 export function ComputerUseSettings() {
+  const searchableSetting = useSearchableSetting();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const desktop = settings.desktopControl;
@@ -205,7 +206,7 @@ export function ComputerUseSettings() {
           resetAction={
             desktop.enabled !== defaults.enabled ? (
               <SettingResetButton
-                label="computer use"
+                ariaLabel="Reset computer use to default"
                 onClick={() =>
                   updateSettings({
                     desktopControl: { ...desktop, enabled: defaults.enabled },
@@ -238,7 +239,7 @@ export function ComputerUseSettings() {
           resetAction={
             desktop.agentCursorEnabled !== defaults.agentCursorEnabled ? (
               <SettingResetButton
-                label="agent cursor"
+                ariaLabel="Reset agent cursor to default"
                 onClick={() =>
                   updateSettings({
                     desktopControl: {
@@ -297,7 +298,7 @@ export function ComputerUseSettings() {
           resetAction={
             desktop.browserControlEnabled !== defaults.browserControlEnabled ? (
               <SettingResetButton
-                label="browser control"
+                ariaLabel="Reset browser control to default"
                 onClick={() =>
                   updateSettings({
                     desktopControl: {

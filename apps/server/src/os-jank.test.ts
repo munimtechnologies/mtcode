@@ -8,7 +8,12 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
 import { assert, it, vi } from "vite-plus/test";
 
-import { fixPath, hydratePosixEnvironment, hydratePosixHome } from "./os-jank.ts";
+import {
+  fixPath,
+  hydratePosixEnvironment,
+  hydratePosixHome,
+  refreshWindowsPath,
+} from "./os-jank.ts";
 
 vi.mock("node:child_process", { spy: true });
 
@@ -309,5 +314,22 @@ effectIt.effect("replaces a Path-spelled Windows PATH instead of adding a second
     );
 
     assert.deepEqual(env, { PATH: "C:\\Tools;C:\\Windows" });
+  }),
+);
+
+effectIt.effect("adds a directory an installer wrote to the registry after launch", () =>
+  Effect.gen(function* () {
+    const env: NodeJS.ProcessEnv = { Path: "C:\\Tools;C:\\Windows" };
+    const installed = "C:\\Users\\me\\AppData\\Local\\cursor-agent";
+
+    yield* refreshWindowsPath().pipe(
+      Effect.provideService(HostProcess.Platform, "win32"),
+      Effect.provideService(HostProcess.Environment, env),
+      Effect.provideService(WindowsShellEnvironment, () =>
+        Effect.succeed({ PATH: `C:\\Windows;${installed}` }),
+      ),
+    );
+
+    assert.deepEqual(env, { PATH: `C:\\Tools;C:\\Windows;${installed}` });
   }),
 );

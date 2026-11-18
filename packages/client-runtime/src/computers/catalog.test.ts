@@ -89,6 +89,7 @@ describe("computerPeerFromPresentation", () => {
         ),
       },
       connection: { phase: "connected", error: null, traceId: null },
+      refusedRouteIds: [],
       serverConfig: {
         environment: {
           environmentId,
@@ -123,6 +124,7 @@ describe("computerPeerFromPresentation", () => {
         profile: Option.none(),
       },
       connection: { phase: "connecting", error: null, traceId: null },
+      refusedRouteIds: [],
       serverConfig: null,
     });
     expect(peer).toMatchObject({

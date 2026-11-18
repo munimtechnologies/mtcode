@@ -1,4 +1,7 @@
 import type { EnvironmentThreadStatus } from "@t3tools/client-runtime/state/threads";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "./i18n/messages";
 
 export type ThreadSyncPhase = "loading" | "syncing" | "reconnecting";
 
@@ -7,11 +10,9 @@ export function resolveThreadSyncPhase(input: {
   readonly shellExists: boolean;
   readonly status: EnvironmentThreadStatus;
   /**
-   * The thread subscription's last failure, if it is still unresolved. A failed
-   * subscription leaves the status on "cached"/"empty" and retries a few times a
-   * second, which is indistinguishable from a slow first sync — so without this
-   * a thread whose stream keeps erroring shows "Syncing messages..." forever and
-   * never says why.
+   * The thread subscription's unresolved failure. A failed subscription stays on
+   * "cached"/"empty" while it retries, so without this a broken stream would show
+   * "Syncing messages..." forever.
    */
   readonly hasError?: boolean;
 }): ThreadSyncPhase | null {
@@ -30,13 +31,13 @@ export function resolveThreadSyncPhase(input: {
   }
 }
 
-export function threadSyncLabel(phase: ThreadSyncPhase): string {
+export function threadSyncLabel(phase: ThreadSyncPhase, resolve: MessageResolver = m): string {
   switch (phase) {
     case "loading":
-      return "Loading messages...";
+      return resolve(msg("Loading messages..."));
     case "syncing":
-      return "Syncing messages...";
+      return resolve(msg("Syncing messages..."));
     case "reconnecting":
-      return "Reconnecting...";
+      return resolve(msg("Reconnecting..."));
   }
 }

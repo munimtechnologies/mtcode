@@ -43,6 +43,8 @@ import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as PullRequestReviewGuideService from "../pullRequest/PullRequestReviewGuideService.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
+import * as IssueService from "../issue/IssueService.ts";
+import * as ThreadIssueService from "../orchestration-v2/ThreadIssueService.ts";
 import * as ServerConfig from "../config.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as ComputerTaskBroker from "./ComputerTaskBroker.ts";
@@ -623,13 +625,11 @@ it.effect("refuses preview tools to a client outside a thread before they run", 
     const click = yield* server
       .callTool({ name: "preview_act", arguments: { action: "click", locator: "text=Send" } })
       .pipe(
+        Effect.flip,
         Effect.provideService(McpInvocationContext.McpInvocationContext, readOnly),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
-    expect(click.isError).toBe(true);
-    expect(click.content).toEqual([
-      { type: "text", text: expect.stringContaining("needs an agent running inside T3 Code") },
-    ]);
+    expect(click.message).toContain("Tool 'preview_act' not found");
   }).pipe(Effect.provide(layerTest)),
 );
 
@@ -698,6 +698,34 @@ it.effect("decodes null optional arguments the way it decodes omitted ones", () 
     expect(calls[1]).toEqual(calls[0]);
     expect(calls[3]).toEqual(calls[2]);
     expect(calls[4]).toStrictEqual({ projectId: "project-1", projectIcon: null });
+  }).pipe(Effect.provide(layerRecordingTools(calls)));
+});
+
+it.effect("decodes a JSON-stringified delegate target as the same object", () => {
+  const calls: Array<unknown> = [];
+  return Effect.gen(function* () {
+    const task = "Inspect";
+    const target = {
+      providerInstanceId: "codex",
+      model: "gpt-6.2-sol",
+      options: { reasoningEffort: "medium" },
+    };
+    yield* callTool("delegate_task", { task, target });
+    yield* callTool("delegate_task", { task, target: JSON.stringify(target) });
+
+    for (const invalidTarget of ["{model:", '{"model":42}']) {
+      const error = yield* Effect.flip(callTool("delegate_task", { task, target: invalidTarget }));
+      expect(error).toBeInstanceOf(McpSchema.InvalidParams);
+    }
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({
+      task,
+      target: {
+        ...target,
+        options: [{ id: "reasoningEffort", value: "medium" }],
+      },
+    });
+    expect(calls[1]).toEqual(calls[0]);
   }).pipe(Effect.provide(layerRecordingTools(calls)));
 });
 
@@ -1167,6 +1195,8 @@ it.effect("HTTP tool discovery only advertises monitors to monitoring credential
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
         Layer.mock(PullRequestService.PullRequestService)({}),
+        Layer.mock(IssueService.IssueService)({}),
+        Layer.mock(ThreadIssueService.ThreadIssueService)({}),
         Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
         Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
         Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({}),
@@ -1310,6 +1340,38 @@ it.effect("answers 2026-07-28 discovery and keeps 2025-06-18 as the initialize f
       expect(tools.error).toBeUndefined();
       expect(tools.result.tools).toEqual(
         expect.arrayContaining([expect.objectContaining({ name: "probe" })]),
+      );
+
+      // The Go MCP SDK sends this without request metadata, though 2026-07-28 does not define it.
+      const rootsChanged = (
+        client: HttpClient.HttpClient,
+        message: object = {},
+        headers: Record<string, string> = {},
+      ) =>
+        client.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            "mcp-method": "notifications/roots/list_changed",
+            "mcp-protocol-version": "2026-07-28",
+            ...headers,
+          },
+          body: HttpBody.text(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "notifications/roots/list_changed",
+              params: {},
+              ...message,
+            }),
+            "application/json",
+          ),
+        });
+      const acknowledged = yield* rootsChanged(httpClient);
+      expect(acknowledged.status).toBe(202);
+      expect(yield* acknowledged.text).toBe("");
+      expect((yield* rootsChanged(yield* HttpClient.HttpClient)).status).toBe(401);
+      expect((yield* rootsChanged(httpClient, { id: 7 })).status).toBe(400);
+      expect((yield* rootsChanged(httpClient, {}, { origin: "https://example.com" })).status).toBe(
+        403,
       );
 
       const initializeResponse = yield* httpClient.post("/mcp", {

@@ -64,7 +64,7 @@ import {
   pluginMarketplaceErrorMessage,
   usePluginMarketplaceStore,
 } from "~/pluginMarketplace/store";
-import { searchableSetting } from "../settingsSearch";
+import { useSearchableSetting } from "../settingsSearch";
 import { SettingsPageContainer, SettingsSection } from "../settingsLayout";
 import { HarnessIcon, HarnessSupportBadges, PluginLogo } from "./PluginMarketplacePresentation";
 import {
@@ -590,6 +590,7 @@ export function PluginMarketplace({
   readonly onSectionChange: (section: MarketplaceSection) => void;
   readonly onHarnessChange: (harness: MarketplaceHarnessFilter) => void;
 }) {
+  const searchableSetting = useSearchableSetting();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<MarketplaceStatusFilter>("all");
   const [category, setCategory] = useState<MarketplaceCategoryFilter>("all");

@@ -820,6 +820,50 @@ const launchWorkspaceStrategy = (input: {
       }),
   });
 
+const optionalTrimmed = (value: Option.Option<string>) => {
+  const trimmed = Option.getOrUndefined(value)?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
+
+/**
+ * Options are model specific, so they need an explicit model. `true` and
+ * `false` become booleans because boolean options such as fastMode only match
+ * a boolean. MT Code: either of --provider/--model may come alone; the result
+ * is completed against the provider cache by `resolveModelSelection`.
+ */
+export const launchModelSelection = Effect.fn("cli.thread.launchModelSelection")(function* (input: {
+  readonly provider: Option.Option<string>;
+  readonly model: Option.Option<string>;
+  readonly option: ReadonlyArray<string>;
+}) {
+  const provider = optionalTrimmed(input.provider);
+  const model = optionalTrimmed(input.model);
+  if (model === undefined) {
+    if (input.option.length > 0) {
+      return yield* new ThreadUsageError({ detail: "--option needs --model." });
+    }
+    if (provider === undefined) return undefined;
+  }
+  const options: Array<{ readonly id: string; readonly value: string | boolean }> = [];
+  for (const entry of input.option) {
+    const separator = entry.indexOf("=");
+    const id = separator < 0 ? "" : entry.slice(0, separator).trim();
+    const value = separator < 0 ? "" : entry.slice(separator + 1).trim();
+    if (id.length === 0 || value.length === 0) {
+      return yield* new ThreadUsageError({ detail: `--option '${entry}' is not id=value.` });
+    }
+    if (options.some((option) => option.id === id)) {
+      return yield* new ThreadUsageError({ detail: `--option ${id} is given more than once.` });
+    }
+    options.push({ id, value: value === "true" ? true : value === "false" ? false : value });
+  }
+  return {
+    ...(provider === undefined ? {} : { instanceId: provider }),
+    ...(model === undefined ? {} : { model }),
+    ...(options.length === 0 ? {} : { options }),
+  };
+});
+
 const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print JSON instead of text."),
   Flag.withDefault(false),
@@ -841,11 +885,6 @@ const decodeThreadId = (value: string) =>
   decodeThreadIdValue(value.trim()).pipe(
     Effect.mapError(() => new ThreadUsageError({ detail: `'${value}' is not a thread id.` })),
   );
-
-const optionalTrimmed = (value: Option.Option<string>) => {
-  const trimmed = Option.getOrUndefined(value)?.trim();
-  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
-};
 
 const threadListCommand = Command.make("list", {
   ...projectLocationFlags,
@@ -905,6 +944,12 @@ const threadStartCommand = Command.make("start", {
     ),
     Flag.optional,
   ),
+  option: Flag.String("option").pipe(
+    Flag.withDescription(
+      "Model option as id=value, such as effort=high. Repeat for more. Needs --model.",
+    ),
+    Flag.atLeast(0),
+  ),
   worktree: Flag.String("worktree").pipe(
     Flag.withDescription(
       "Run in a new git worktree based on this branch, tag, or commit, instead of the project folder.",
@@ -923,16 +968,21 @@ const threadStartCommand = Command.make("start", {
     Effect.gen(function* () {
       const message = yield* readMessageArgument(flags.message);
       const workspaceStrategy = yield* launchWorkspaceStrategy(flags);
+      const requestedModel = yield* launchModelSelection(flags);
       const title = yield* decodeTitle(
         Option.getOrElse(flags.title, () => titleFromMessage(message)),
       ).pipe(Effect.mapError(() => new ThreadUsageError({ detail: "The title is empty." })));
       yield* withThreadTools(
         flags,
         Effect.fn("cli.thread.start")(function* (tools, config) {
-          const modelSelection = yield* resolveModelSelection(config, {
-            model: optionalTrimmed(flags.model),
-            provider: optionalTrimmed(flags.provider),
+          const resolved = yield* resolveModelSelection(config, {
+            model: requestedModel?.model,
+            provider: requestedModel?.instanceId,
           });
+          const modelSelection =
+            resolved === undefined || requestedModel?.options === undefined
+              ? resolved
+              : { ...resolved, options: requestedModel.options };
           const project = yield* resolveProject(tools, flags.project);
           const launched = yield* tools.call(
             "t3_thread_launch",

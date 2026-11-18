@@ -1,3 +1,4 @@
+import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { heldPullRequestListEntriesAtom } from "@t3tools/client-runtime/state/pull-requests";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -31,8 +32,11 @@ import {
   GitForkIcon,
   LayersIcon,
   Plug2Icon,
-  SparklesIcon,
+  ListOrderedIcon,
 } from "lucide-react";
+import { msg, T, useGT, useMessages } from "gt-react";
+
+import { m } from "~/i18n/messages";
 import { useEffect, useEffectEvent, useRef, useState, type ComponentProps } from "react";
 
 import {
@@ -67,6 +71,8 @@ import {
   type PullRequestListPreferencePatch,
   writePullRequestListPreferences,
 } from "./pullRequestListPreferences";
+import { SavedViewsMenu } from "../SavedViewsMenu";
+import { PULL_REQUEST_SAVED_VIEWS, pullRequestSavedViewPatch } from "./pullRequestSavedViews";
 import { PullRequestUpstreamCard } from "./PullRequestUpstreamCard";
 import { PullRequestUpstreamReleaseBanner } from "./PullRequestUpstreamReleaseBanner";
 import { useComposerDraftStore } from "~/composerDraftStore";
@@ -100,7 +106,12 @@ import {
   type PullRequestFilterOption,
 } from "./PullRequestListFilters";
 import { PullRequestCompactFilterMenu } from "./PullRequestCompactFilterMenu";
-import { INVOLVEMENT_TABS, SORT_OPTIONS, STATE_TABS } from "./pullRequestListOptions";
+import {
+  INVOLVEMENT_TABS,
+  resolveFilterOptions,
+  SORT_OPTIONS,
+  STATE_TABS,
+} from "./pullRequestListOptions";
 import { PullRequestsColumn } from "./PullRequestsColumn";
 import { PullRequestListGroups } from "./PullRequestListGroups";
 import { pullRequestPanelReference } from "./usePullRequestDetail";
@@ -160,6 +171,8 @@ import {
   resetPullRequestHosts,
   type PullRequestHostRead,
 } from "./pullRequestProjectAssignment.logic";
+
+import { changeRequestTermKind } from "./changeRequestTerm";
 
 function getShortcutContext() {
   return {
@@ -222,6 +235,8 @@ function usePendingListEntries(
 }
 
 export function PullRequestsPage() {
+  const gt = useGT();
+  const resolve = useMessages();
   const search = useSearch({ from: "/_chat/pull-requests" });
   const sort = search.sort ?? "ready";
   const statsPolicy: PullRequestStatsPolicy =
@@ -927,8 +942,8 @@ export function PullRequestsPage() {
     if (session === null) {
       toastManager.add({
         type: "error",
-        title: "Could not open a thread",
-        description: "Try again from the project, or open a thread first.",
+        title: gt("Could not open a thread"),
+        description: gt("Try again from the project, or open a thread first."),
       });
       return;
     }
@@ -937,8 +952,8 @@ export function PullRequestsPage() {
     store.setReviewComments(session.draftId, task.reviewComments);
     toastManager.add({
       type: "success",
-      title: "Ready to implement",
-      description: "The task is in the composer. Read it over, then send.",
+      title: gt("Ready to implement"),
+      description: gt("The task is in the composer. Read it over, then send."),
     });
   };
   const implementUpstream = async (entry: EnvironmentPullRequestEntry) => {
@@ -960,7 +975,7 @@ export function PullRequestsPage() {
     // toast that expires halfway through reads as a pick that finished.
     const toastId = toastManager.add({
       type: "loading",
-      title: `Cherry-picking #${entry.number}...`,
+      title: gt("Cherry-picking #{number}...", { number: entry.number }),
     });
     const opened = await newThread(projectRef).then(
       (result) => result,
@@ -969,8 +984,8 @@ export function PullRequestsPage() {
     if (opened === null) {
       toastManager.update(toastId, {
         type: "error",
-        title: "Could not open a thread for the pick",
-        description: "Try again from the project, or open a thread first.",
+        title: gt("Could not open a thread for the pick"),
+        description: gt("Try again from the project, or open a thread first."),
       });
       return;
     }
@@ -986,12 +1001,14 @@ export function PullRequestsPage() {
     if (picked._tag === "Failure") {
       toastManager.update(toastId, {
         type: "error",
-        title: `Could not cherry-pick #${entry.number}`,
+        title: gt("Could not cherry-pick #{number}", { number: entry.number }),
         // The server's own sentence — which base branch went missing, which host publishes no
         // commits to fetch — is the only thing that says what to do about it.
         description: readableFailure(
           squashAtomCommandFailure(picked),
-          "The commits could not be fetched or applied. Open the pull request to see what it touches.",
+          gt(
+            "The commits could not be fetched or applied. Open the pull request to see what it touches.",
+          ),
         ),
       });
       return;
@@ -1002,8 +1019,8 @@ export function PullRequestsPage() {
     if (result.status === "empty" || result.branch === null || result.worktreePath === null) {
       toastManager.update(toastId, {
         type: "success",
-        title: `Nothing to pick from #${entry.number}`,
-        description: "Every commit on it is already in this project.",
+        title: gt("Nothing to pick from #{number}", { number: entry.number }),
+        description: gt("Every commit on it is already in this project."),
       });
       return;
     }
@@ -1034,8 +1051,13 @@ export function PullRequestsPage() {
       // beats a success message that sends somebody to a composer pointed somewhere else.
       toastManager.update(toastId, {
         type: "warning",
-        title: "Picked, but the thread stayed where it was",
-        description: `The commits are on \`${result.branch}\`. Point a thread at it from the branch picker.`,
+        title: gt("Picked, but the thread stayed where it was"),
+        description: gt(
+          "The commits are on `{branch}`. Point a thread at it from the branch picker.",
+          {
+            branch: result.branch,
+          },
+        ),
       });
       return;
     }
@@ -1047,14 +1069,18 @@ export function PullRequestsPage() {
       result.status === "applied"
         ? {
             type: "success",
-            title: `Picked onto ${result.branch}`,
-            description:
+            title: gt("Picked onto {branch}", { branch: result.branch }),
+            description: gt(
               "It applied cleanly. The task is in the composer. Read it over, then send.",
+            ),
           }
         : {
             type: "warning",
-            title: `Picked onto ${result.branch}, with conflicts`,
-            description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer. Read it over, then send.`,
+            title: gt("Picked onto {branch}, with conflicts", { branch: result.branch }),
+            description: gt(
+              "{count, plural, one {# file conflicts} other {# files conflict}}. The task is in the composer. Read it over, then send.",
+              { count: result.conflictedPathCount },
+            ),
           },
     );
   };
@@ -1095,7 +1121,7 @@ export function PullRequestsPage() {
     const projectRef = scopeProjectRef(target.environmentId, target.projectId);
     const toastId = toastManager.add({
       type: "loading",
-      title: `Taking ${release.tagName}...`,
+      title: gt("Taking {tag}...", { tag: release.tagName }),
     });
     const opened = await newThread(projectRef).then(
       (result) => result,
@@ -1104,8 +1130,8 @@ export function PullRequestsPage() {
     if (opened === null) {
       toastManager.update(toastId, {
         type: "error",
-        title: "Could not open a thread for the merge",
-        description: "Try again from the project, or open a thread first.",
+        title: gt("Could not open a thread for the merge"),
+        description: gt("Try again from the project, or open a thread first."),
       });
       return;
     }
@@ -1120,10 +1146,10 @@ export function PullRequestsPage() {
     if (taken._tag === "Failure") {
       toastManager.update(toastId, {
         type: "error",
-        title: `Could not take ${release.tagName}`,
+        title: gt("Could not take {tag}", { tag: release.tagName }),
         description: readableFailure(
           squashAtomCommandFailure(taken),
-          "The release could not be fetched or merged.",
+          gt("The release could not be fetched or merged."),
         ),
       });
       return;
@@ -1132,8 +1158,8 @@ export function PullRequestsPage() {
     if (result.status === "up-to-date" || result.branch === null || result.worktreePath === null) {
       toastManager.update(toastId, {
         type: "success",
-        title: `Already on ${result.tagName}`,
-        description: "This project's history already contains the release.",
+        title: gt("Already on {tag}", { tag: result.tagName }),
+        description: gt("This project's history already contains the release."),
       });
       return;
     }
@@ -1158,8 +1184,13 @@ export function PullRequestsPage() {
     if (pointed === null) {
       toastManager.update(toastId, {
         type: "warning",
-        title: "Merged, but the thread stayed where it was",
-        description: `The release is on \`${result.branch}\`. Point a thread at it from the branch picker.`,
+        title: gt("Merged, but the thread stayed where it was"),
+        description: gt(
+          "The release is on `{branch}`. Point a thread at it from the branch picker.",
+          {
+            branch: result.branch,
+          },
+        ),
       });
       return;
     }
@@ -1171,13 +1202,18 @@ export function PullRequestsPage() {
       result.status === "merged"
         ? {
             type: "success",
-            title: `Merged onto ${result.branch}`,
-            description: "It merged cleanly. The task is in the composer. Read it over, then send.",
+            title: gt("Merged onto {branch}", { branch: result.branch }),
+            description: gt(
+              "It merged cleanly. The task is in the composer. Read it over, then send.",
+            ),
           }
         : {
             type: "warning",
-            title: `Merged onto ${result.branch}, with conflicts`,
-            description: `${result.conflictedPathCount === 1 ? "1 file conflicts" : `${result.conflictedPathCount.toLocaleString()} files conflict`}. The task is in the composer. Read it over, then send.`,
+            title: gt("Merged onto {branch}, with conflicts", { branch: result.branch }),
+            description: gt(
+              "{count, plural, one {# file conflicts} other {# files conflict}}. The task is in the composer. Read it over, then send.",
+              { count: result.conflictedPathCount },
+            ),
           },
     );
   };
@@ -1641,6 +1677,8 @@ export function PullRequestsPage() {
   const searchInput = (
     <PullRequestSearchInput
       value={search.q ?? ""}
+      label={gt("Search pull requests")}
+      placeholder={gt("Search pull requests, or label:bug")}
       busy={typedQuery.length > 0 && (!querySettled || showingCarried)}
       onChange={(query) => updateListScope({ q: query || undefined })}
       onSubmit={submitQuery}
@@ -1660,7 +1698,7 @@ export function PullRequestsPage() {
       rightPanelAvailable={rightPanelAvailable}
       rightPanelOpen={rightPanelState.isOpen}
       rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
-      rightPanelUnavailableLabel="Select a pull request first"
+      rightPanelUnavailableLabel={gt("Select a pull request first")}
       onToggleTerminal={() => undefined}
       onToggleRightPanel={toggleRightPanel}
     />
@@ -1683,7 +1721,7 @@ export function PullRequestsPage() {
     </div>
   );
   const listError = listQuery.error
-    ? `${environmentLabels.get(listQuery.error.environmentId) || "Environment"}: ${listQuery.error.message}`
+    ? `${environmentLabels.get(listQuery.error.environmentId) || gt("Environment")}: ${listQuery.error.message}`
     : null;
   const carriedToNothing =
     shownCount === 0 &&
@@ -1692,14 +1730,16 @@ export function PullRequestsPage() {
   const listBody = (
     <>
       {!capabilityKnown ? (
-        <PullRequestListGhost rows={7} caption="Loading pull requests…" />
+        <PullRequestListGhost rows={7} caption={gt("Loading pull requests…")} />
       ) : !pullRequestsSupported ? (
         <PullRequestsUnavailableState
-          title="Pull requests unavailable"
-          error={`Update your ${APP_BASE_NAME} servers to browse pull requests.`}
+          title={gt("Pull requests unavailable")}
+          error={gt("Update your {appName} servers to browse pull requests.", {
+            appName: APP_BASE_NAME,
+          })}
         />
       ) : firstLoad ? (
-        <PullRequestListGhost rows={7} caption="Loading pull requests…" />
+        <PullRequestListGhost rows={7} caption={gt("Loading pull requests…")} />
       ) : listError && shownCount === 0 ? (
         <PullRequestsUnavailableState
           error={listError}
@@ -1775,8 +1815,8 @@ export function PullRequestsPage() {
 
           <div className="space-y-2">
             <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">
-              <SparklesIcon className="size-3.5" />
-              Most useful
+              <ListOrderedIcon className="size-3.5" />
+              <T>Most useful</T>
               {rankingPending ? <Spinner aria-hidden className="size-3" /> : null}
               {/* Beside what it produces rather than buried in Settings: which agent did the
                   judging is part of reading the answer, and the reader changes it exactly when
@@ -1791,7 +1831,7 @@ export function PullRequestsPage() {
                   modelOptionsByInstance={rankingModelOptions}
                   size="xs"
                   triggerClassName="h-6 min-w-0 max-w-none shrink-0 text-xs font-normal"
-                  triggerAriaLabel="Model that ranks upstream pull requests"
+                  triggerAriaLabel={gt("Model that ranks upstream pull requests")}
                   onInstanceModelChange={(instanceId, model) => {
                     updateRankingSettings({
                       pullRequestRankingModelSelection: createModelSelection(instanceId, model),
@@ -1830,7 +1870,7 @@ export function PullRequestsPage() {
           <div className="space-y-2">
             <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground/70">
               <ClockIcon className="size-3.5" />
-              Latest
+              <T>Latest</T>
             </h2>
             {/* The same rows the rest of the page uses: this is the whole upstream in order, so
                 it reads as a list to scan rather than a shortlist to consider. */}
@@ -1861,14 +1901,14 @@ export function PullRequestsPage() {
           {/* Named rather than swallowed: ranking is a model call, and the usual reason it does
               not answer is a limit on the model doing the judging — which the reader can only act
               on if they are told. The rows are still shown, in the order they came in. */}
-          <span>Could not rank these pull requests. {rankingError}</span>
+          <span>{gt("Could not rank these pull requests. {error}", { error: rankingError })}</span>
         </div>
       ) : null}
       {listError && shownCount > 0 ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-surface px-3 py-2 text-xs">
-          <span>{listError} Showing the last pull requests loaded.</span>
+          <span>{gt("{error} Showing the last pull requests loaded.", { error: listError })}</span>
           <Button size="xs" variant="outline" onClick={() => listQuery.refresh()}>
-            Retry
+            <T>Retry</T>
           </Button>
         </div>
       ) : null}
@@ -1877,7 +1917,7 @@ export function PullRequestsPage() {
           {loadingMore ? (
             <span className="flex items-center gap-2">
               <Spinner aria-hidden size="sm" />
-              {sentCursors === null ? "Updating pull requests" : "Loading more"}
+              {sentCursors === null ? gt("Updating pull requests") : gt("Loading more")}
             </span>
           ) : canContinue || pageSize < MAX_PAGE_SIZE ? (
             <Button
@@ -1886,10 +1926,12 @@ export function PullRequestsPage() {
               onClick={loadMore}
               disabled={listQuery.isPending || showingCarried}
             >
-              Load more pull requests
+              <T>Load more pull requests</T>
             </Button>
           ) : (
-            <span>Narrow your search to find more pull requests.</span>
+            <span>
+              <T>Narrow your search to find more pull requests.</T>
+            </span>
           )}
         </div>
       ) : null}
@@ -1897,7 +1939,7 @@ export function PullRequestsPage() {
   );
   const hostEntries = hosts.length > 0 ? hosts : expectedHosts;
   const hostMenuOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
-    { value: "", label: "All", Icon: Plug2Icon },
+    { value: "", label: gt("All", { $context: "all hosts" }), Icon: Plug2Icon },
     ...hostEntries.map((entry) => {
       const summary = hosts.find((host) => host.host === entry.host);
       return {
@@ -1906,12 +1948,12 @@ export function PullRequestsPage() {
         Icon: getSourceControlPresentationForKind(entry.kind).Icon,
         ...(summary === undefined || summary.configured
           ? {}
-          : { unavailable: summary.detail ?? "This host could not be read." }),
+          : { unavailable: summary.detail ?? gt("This host could not be read.") }),
       };
     }),
   ];
   const serverMenuOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
-    { value: "", label: "All servers", Icon: LayersIcon },
+    { value: "", label: gt("All servers"), Icon: LayersIcon },
     ...capableEnvironments.map((environment) => ({
       value: environment.environmentId,
       label: environment.label,
@@ -1920,12 +1962,12 @@ export function PullRequestsPage() {
   ];
   const sortMenu = (
     <PullRequestCompactFilterMenu
-      label="Sort pull requests"
+      label={gt("Sort pull requests")}
       triggerIcon={<ArrowDownUpIcon aria-hidden className="size-4" />}
-      triggerLabel="Sort"
+      triggerLabel={gt("Sort", { $context: "verb, sort a list" })}
       outlined
       value={sort}
-      options={SORT_OPTIONS}
+      options={resolveFilterOptions(SORT_OPTIONS, resolve)}
       onChange={(next) => updateListScope({ sort: next })}
     />
   );
@@ -1933,10 +1975,10 @@ export function PullRequestsPage() {
     <PullRequestFiltersMenuInSidebarOrder
       onOpenChange={setFiltersOpen}
       state={search.state}
-      stateOptions={STATE_TABS}
+      stateOptions={resolveFilterOptions(STATE_TABS, resolve)}
       onState={(state) => updateListScope({ state })}
       involvement={search.involvement}
-      involvementOptions={INVOLVEMENT_TABS}
+      involvementOptions={resolveFilterOptions(INVOLVEMENT_TABS, resolve)}
       onInvolvement={(involvement) => {
         if (involvement === "all" || involvement === "authored" || involvement === "reviewing") {
           updateListScope({ involvement });
@@ -1994,6 +2036,13 @@ export function PullRequestsPage() {
     searchInput,
     sortMenu,
     filtersMenu,
+    savedViewsMenu: (
+      <SavedViewsMenu
+        kind={PULL_REQUEST_SAVED_VIEWS}
+        preferences={search}
+        onApply={(preferences) => updateListScope(pullRequestSavedViewPatch(preferences))}
+      />
+    ),
     rightPanelControl: !pullRequestsSupported ? null : (
       <span
         aria-hidden
@@ -2069,14 +2118,28 @@ export function PullRequestsPage() {
     event.stopPropagation();
     if (event.repeat) return;
     const url = openPanelPullRequestUrl;
-    const { shortLabel, singular } = (
+    const terminology = (
       sourceControlClients.findByChangeRequestUrl(url) ?? sourceControlClients.get(undefined)
     ).changeRequest;
-    void writeTextToClipboard(url, `${singular} link`).then(undefined, (error) => {
+    void writeTextToClipboard(url, {
+      target: `${terminology.singular} link`,
+      unavailableMessage: msg(
+        "Clipboard API is unavailable while copying {term, select, mr {merge request} cr {change request} other {pull request}} link.",
+        { term: changeRequestTermKind(terminology) },
+      ),
+      failureMessage: msg(
+        "Failed to copy {term, select, mr {merge request} cr {change request} other {pull request}} link to the clipboard.",
+        { term: changeRequestTermKind(terminology) },
+      ),
+    }).then(undefined, (error) => {
       toastManager.add({
         type: "error",
-        title: `Failed to copy ${shortLabel} link`,
-        description: error instanceof Error ? error.message : "An error occurred.",
+        title: m(
+          msg("Failed to copy {term, select, mr {MR} cr {change request} other {PR}} link", {
+            term: changeRequestTermKind(terminology),
+          }),
+        ),
+        description: thrownErrorMessage(error, m) ?? m(msg("An error occurred.")),
       });
     });
   });

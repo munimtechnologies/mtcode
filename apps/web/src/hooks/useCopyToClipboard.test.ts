@@ -42,7 +42,11 @@ const hooks = vi.hoisted(() => {
         slots[index] = { effectCleanup: effect() };
       }
     },
-    // Layout effects without deps run on every render (useStableCallback relies on this).
+    // Insertion/layout effects without deps run on every render (useStableCallback relies on this).
+    useInsertionEffect(effect: () => void | (() => void)): void {
+      nextIndex();
+      effect();
+    },
     useLayoutEffect(effect: () => void | (() => void)): void {
       nextIndex();
       effect();
@@ -76,13 +80,18 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useCallback: hooks.useCallback,
     useEffect: hooks.useEffect,
+    useInsertionEffect: hooks.useInsertionEffect,
     useLayoutEffect: hooks.useLayoutEffect,
     useRef: hooks.useRef,
     useState: hooks.useState,
   };
 });
 
-import { useCopyToClipboard, writeTextToClipboard } from "./useCopyToClipboard";
+import {
+  namedClipboardTarget,
+  useCopyToClipboard,
+  writeTextToClipboard,
+} from "./useCopyToClipboard";
 
 async function flushClipboardWrite(): Promise<void> {
   await Promise.resolve();
@@ -109,7 +118,7 @@ describe("writeTextToClipboard", () => {
       },
     );
     await expect(
-      writeTextToClipboard("original", "message", {
+      writeTextToClipboard("original", undefined, {
         "text/plain": "replacement",
         "text/html": "<b>original</b>",
       }),
@@ -132,7 +141,7 @@ describe("writeTextToClipboard", () => {
     const rich = "<p><strong>Message</strong></p>";
 
     await expect(
-      writeTextToClipboard("Message", "message", {
+      writeTextToClipboard("Message", undefined, {
         [COMPOSER_CONTEXT_CLIPBOARD_MIME]: fragment,
         "text/html": rich,
       }),
@@ -153,7 +162,7 @@ describe("writeTextToClipboard", () => {
       vi.stubGlobal("navigator", available ? { clipboard: { writeText } } : {});
       vi.stubGlobal("document", { execCommand });
 
-      await expect(writeTextToClipboard("", "plan")).resolves.toBe(false);
+      await expect(writeTextToClipboard("", namedClipboardTarget("plan"))).resolves.toBe(false);
       expect(writeText).not.toHaveBeenCalled();
       expect(execCommand).not.toHaveBeenCalled();
     },
@@ -165,7 +174,9 @@ describe("writeTextToClipboard", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     const diagnostic = "Provider failed\ncaused by: socket closed\nrequest id: abc-123";
 
-    await expect(writeTextToClipboard(diagnostic, "error-message")).resolves.toBe(true);
+    await expect(
+      writeTextToClipboard(diagnostic, namedClipboardTarget("error-message")),
+    ).resolves.toBe(true);
 
     expect(writeText).toHaveBeenCalledWith(diagnostic);
   });
@@ -202,7 +213,7 @@ describe("useCopyToClipboard", () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal("window", {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
-    const options = { timeout: 1000, target: "error-message", onError };
+    const options = { timeout: 1000, target: namedClipboardTarget("error-message"), onError };
 
     hooks.beginRender();
     let current = useCopyToClipboard<string>(options);

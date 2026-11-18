@@ -1,3 +1,5 @@
+import { msg } from "gt-i18n";
+import { translatableMessage } from "../errors/translatable.ts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import {
@@ -63,15 +65,9 @@ export const withEnvironmentCredentials = <A, E, R>(
 ): Effect.Effect<A, E, R> => withEnvironmentRequestInit(authorization, undefined, request);
 
 /**
- * Build request-bound headers from the current environment credential:
- * - primary/local connections carry no credential,
- * - bearer connections send a static `Bearer` token,
- * - relay connections send a `DPoP` access token with a freshly signed proof
- *   bound to this request's method and URL.
- *
- * The DPoP signer is passed in (not resolved from context) and is only required
- * for relay/DPoP connections, so bearer/primary connections work even when no
- * signer is available.
+ * Request-bound headers: none for primary connections, `Bearer` for bearer
+ * connections, and `DPoP` plus a freshly signed proof for relay connections.
+ * The signer is only required for DPoP, so bearer/primary work without one.
  */
 export const buildEnvironmentAuthHeaders = Effect.fn(
   "environmentHttpAuth.buildEnvironmentAuthHeaders",
@@ -89,7 +85,9 @@ export const buildEnvironmentAuthHeaders = Effect.fn(
   }
   if (Option.isNone(signer)) {
     return yield* new RemoteEnvironmentAuthFetchError({
-      message: "No DPoP signer is available to authorize the environment request.",
+      ...translatableMessage(
+        msg("No DPoP signer is available to authorize the environment request."),
+      ),
       cause: authorization._tag,
     });
   }
@@ -99,7 +97,9 @@ export const buildEnvironmentAuthHeaders = Effect.fn(
       Effect.mapError(
         (cause) =>
           new RemoteEnvironmentAuthFetchError({
-            message: "Could not create the environment request authorization proof.",
+            ...translatableMessage(
+              msg("Could not create the environment request authorization proof."),
+            ),
             cause,
           }),
       ),
@@ -140,7 +140,7 @@ export const executeConnectedEnvironmentHttpRequest = Effect.fn(
   const prepared = yield* SubscriptionRef.get(supervisor.prepared);
   if (Option.isNone(prepared)) {
     return yield* new RemoteEnvironmentAuthFetchError({
-      message: "The environment is not connected.",
+      ...translatableMessage(msg("The environment is not connected.")),
       cause: supervisor.target._tag,
     });
   }
@@ -203,7 +203,9 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
         const remote = input.remoteAuthorization;
         if (remote === undefined || Option.isNone(remote)) {
           return yield* new RemoteEnvironmentAuthFetchError({
-            message: "No relay authorization service is available for the environment request.",
+            ...translatableMessage(
+              msg("No relay authorization service is available for the environment request."),
+            ),
             cause: input.prepared.target._tag,
           });
         }
@@ -216,7 +218,7 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
             Effect.mapError(
               (cause) =>
                 new RemoteEnvironmentAuthFetchError({
-                  message: "Could not authorize the environment request.",
+                  ...translatableMessage(msg("Could not authorize the environment request.")),
                   cause,
                 }),
             ),
@@ -268,7 +270,9 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
           continue;
         }
         return yield* new RemoteEnvironmentAuthFetchError({
-          message: "The environment rejected the renewed session authorization.",
+          ...translatableMessage(
+            msg("The environment rejected the renewed session authorization."),
+          ),
           cause: result.success,
         });
       }

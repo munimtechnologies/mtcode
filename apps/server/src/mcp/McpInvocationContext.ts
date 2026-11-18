@@ -23,6 +23,7 @@ const ALL_MCP_CAPABILITIES = [
   "pull-requests",
   // MT Code: Codex monitor tools.
   "monitor",
+  "issues",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
@@ -181,6 +182,30 @@ export const hiddenFromSubagents = (): boolean => {
   const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
   return scope?.thread?.subagent !== true;
 };
+
+/**
+ * `McpSchema.EnabledWhen` for tools that act as the calling thread: a client
+ * from outside has none. Discovery only; `McpToolAccess` still refuses the
+ * call, and `toLayer` requires this on every thread-bound declaration.
+ */
+export const hiddenFromOutsideClients = (): boolean => {
+  const fiber = Fiber.getCurrent();
+  const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
+  return scope === undefined || scope.thread !== undefined;
+};
+
+const outsideClientGuards = new WeakSet<object>([hiddenFromOutsideClients]);
+
+/** MT Code: `hiddenFromOutsideClients` narrowed further, e.g. to a capability. */
+export const hiddenFromOutsideClientsAnd = (predicate: () => boolean): (() => boolean) => {
+  const guard = () => hiddenFromOutsideClients() && predicate();
+  outsideClientGuards.add(guard);
+  return guard;
+};
+
+/** Whether an `EnabledWhen` keeps a tool from outside clients, as thread-bound tools need. */
+export const isHiddenFromOutsideClients = (enabledWhen: unknown): boolean =>
+  typeof enabledWhen === "function" && outsideClientGuards.has(enabledWhen);
 
 /** `McpSchema.EnabledWhen` for tools that only serve links, hidden while the beta is off. */
 export const hiddenWhileLinksOff = (): boolean => {

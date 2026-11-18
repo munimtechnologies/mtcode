@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import { Image } from "expo-image";
+import { T } from "gt-react-native";
 import { View } from "react-native";
 
 import { getProductName } from "../lib/branding";
@@ -39,7 +40,7 @@ export function BrandMark(props: { readonly compact?: boolean; readonly stageLab
         </View>
         {!compact ? (
           <Text className="text-xs font-medium text-foreground-muted">
-            Mobile control surface for your live coding environments
+            <T>Mobile control surface for your live coding environments</T>
           </Text>
         ) : null}
       </View>

@@ -2,9 +2,10 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { Switch } from "../ui/switch";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 export function SourceControlPullRequestSettingsSection() {
+  const searchableSetting = useSearchableSetting();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const defaultValue = DEFAULT_UNIFIED_SETTINGS.createGitHubPullRequestsAsDraft;
@@ -18,7 +19,7 @@ export function SourceControlPullRequestSettingsSection() {
         resetAction={
           settings.createGitHubPullRequestsAsDraft !== defaultValue ? (
             <SettingResetButton
-              label="draft pull requests"
+              ariaLabel="Reset draft pull requests to default"
               onClick={() => updateSettings({ createGitHubPullRequestsAsDraft: defaultValue })}
             />
           ) : null

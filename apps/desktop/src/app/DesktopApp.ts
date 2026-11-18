@@ -20,6 +20,7 @@ import { scheduleChromeExtensionAutoInstall } from "../computerUse/chromeExtensi
 import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
+import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopDeepLink from "./DesktopDeepLink.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
@@ -46,9 +47,10 @@ import * as DesktopTray from "./DesktopTray.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
-import { desktopAppDisplayName } from "./desktopDistro.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { msg } from "gt-i18n";
+import { m } from "../i18n/messages.ts";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
@@ -154,7 +156,7 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
   const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
   if (!wasQuitting) {
     yield* electronDialog.showErrorBox(
-      `${desktopAppDisplayName()} failed to start`,
+      m(msg("T3 Code failed to start")),
       `Stage: ${stage}\n${message}${detail}`,
     );
   }
@@ -223,7 +225,7 @@ const startLocalBackend = Effect.gen(function* () {
       owner: Option.getOrNull(owner),
     });
     yield* (yield* ElectronDialog.ElectronDialog).showErrorBox(
-      "This T3 home is unavailable",
+      m(msg("This T3 home is unavailable")),
       DesktopHomeOwner.homeOwnedMessage(owner),
     );
     yield* (yield* ElectronApp.ElectronApp).quit;
@@ -309,6 +311,8 @@ const bootstrap = Effect.fn("desktop.bootstrap")(function* (backendStarted: bool
   );
 
   if (!settings.localEnvironmentEnabled) {
+    // The backend config refreshes the launcher when the local environment runs; an update may move the app.
+    yield* DesktopCliShim.install;
     if (!(yield* Ref.get(state.quitting))) {
       yield* desktopWindow.createMainIfBackendReady;
     }
@@ -316,11 +320,9 @@ const bootstrap = Effect.fn("desktop.bootstrap")(function* (backendStarted: bool
   }
 
   const primaryBackend = yield* (yield* DesktopBackendPool.DesktopBackendPool).primary;
-  // WSL-only fallback can change the primary endpoint before readiness.
   const config = yield* primaryBackend.currentConfig;
   if (
     !environment.isDevelopment &&
-    !settings.wslOnly &&
     Option.isSome(config) &&
     Option.isNone(config.value.preflightFailure)
   ) {

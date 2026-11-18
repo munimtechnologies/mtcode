@@ -1,8 +1,10 @@
 import { AuthPreviewOperateScope, type EnvironmentId } from "@t3tools/contracts";
 import type { AnyRouter } from "@tanstack/react-router";
+import { msg } from "gt-react";
 
 import { APP_DISPLAY_NAME } from "~/branding";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { m } from "~/i18n/messages";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -176,8 +178,10 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
           toastManager.add(
             stackedThreadToast({
               type: "info",
-              title: "Preview is desktop-only",
-              description: `Open ${APP_DISPLAY_NAME} in the desktop app to use the in-app preview.`,
+              title: m(msg("Preview is desktop-only")),
+              description: m(
+                msg("Open T3 Code in the desktop app to use the in-app preview."),
+              ).replaceAll("T3 Code", APP_DISPLAY_NAME),
             }),
           );
           return;

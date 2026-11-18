@@ -14,7 +14,7 @@ import { Button } from "../ui/button.tsx";
 import { Switch } from "../ui/switch.tsx";
 import { toastManager } from "../ui/toast.tsx";
 import { SettingsRow, SettingsSection } from "./settingsLayout.tsx";
-import { searchableSetting } from "./settingsSearch.ts";
+import { useSearchableSetting } from "./settingsSearch.ts";
 import { APP_DISPLAY_NAME } from "~/branding";
 
 const EVENT_OPTIONS: ReadonlyArray<{
@@ -281,6 +281,7 @@ function SoftGroupedPanel({ model }: { readonly model: NotificationSettingsModel
 }
 
 export function DesktopNotificationsSettings() {
+  const searchableSetting = useSearchableSetting();
   const model = useDesktopNotificationSettingsModel();
 
   return (

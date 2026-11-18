@@ -7,9 +7,10 @@ import {
 } from "~/hooks/useSettings";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingsRow, SettingsSection, SettingResetButton } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 export function ExternalTerminalSetting() {
+  const searchableSetting = useSearchableSetting();
   const terminal = useClientSettings((settings) => settings.externalTerminal);
   const hydrated = useClientSettingsHydrated();
   const updateSettings = useUpdatePrimarySettings();
@@ -69,7 +70,7 @@ export function ExternalTerminalSetting() {
               </SelectPopup>
             </Select>
             <SettingResetButton
-              label="terminal app"
+              ariaLabel="Reset terminal app to default"
               disabled={!hydrated || pending || terminal === "system"}
               onClick={() => void selectTerminal("system")}
             />

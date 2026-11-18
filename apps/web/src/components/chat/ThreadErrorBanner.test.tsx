@@ -1,5 +1,15 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+vi.mock("gt-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("gt-react")>()),
+  useGT:
+    () =>
+    (text: string, values: Record<string, unknown> = {}) =>
+      text.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key])),
+  T: ({ children }: { children: ReactNode }) => children,
+}));
 
 import {
   dismissThreadErrorBannerForSession,

@@ -1,4 +1,5 @@
 import { UserButton, useAuth } from "@clerk/react";
+import { useMessages } from "gt-react";
 import { ExternalLinkIcon, LogInIcon, RotateCwIcon } from "lucide-react";
 
 import {
@@ -30,6 +31,7 @@ function ConfiguredConnectSidebarAvatar() {
   const connect = useOptionalConnectProviders();
   const embedded = connect?.embedded ?? null;
   const showRelayProfile = providerHasRelay(embedded);
+  const m = useMessages();
 
   if (!isLoaded || !isSignedIn) return null;
 
@@ -48,7 +50,7 @@ function ConfiguredConnectSidebarAvatar() {
           ? T3_CONNECT_ACCOUNT_PAGES.map((page) => (
               <UserButton.UserProfilePage
                 key={page.url}
-                label={page.url === "t3-connect" ? (embedded?.label ?? "Connect") : page.label}
+                label={page.url === "t3-connect" ? (embedded?.label ?? "Connect") : m(page.label)}
                 labelIcon={page.icon}
                 url={page.url}
               >

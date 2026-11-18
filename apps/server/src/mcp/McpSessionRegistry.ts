@@ -139,6 +139,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           "orchestration",
           "worktree",
           "pull-requests",
+          "issues",
           // MT Code: the `#` chip that cites another thread is always available,
           // so its read-only thread_read tool always is too.
           ...(request.capabilities ?? (browserToolsAvailable ? (["preview"] as const) : [])),

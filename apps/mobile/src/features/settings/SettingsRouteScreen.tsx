@@ -41,9 +41,7 @@ import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilt
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { filterSettingsSections } from "./settings-search";
 import { usePaneRole } from "../../components/ui/Pane";
-import { I18nProvider, useGT, useLanguagePreference } from "../../i18n/I18nProvider";
-import { nativeLanguageName } from "@t3tools/client-runtime/locales";
-import { SUPPORTED_LOCALES } from "../../i18n/locales";
+import { useGT, useMessages } from "gt-react-native";
 
 export function SettingsRouteScreen() {
   const list = useSettingsListPlacement();
@@ -56,9 +54,7 @@ export function WorkspaceSettingsList() {
   return (
     <SettingsSidebarContext value={list.sidebar ? { selected: list.selected } : null}>
       <View className="flex-1 bg-screen">
-        <I18nProvider>
-          <SettingsListContent />
-        </I18nProvider>
+        <SettingsListContent />
       </View>
     </SettingsSidebarContext>
   );
@@ -83,17 +79,6 @@ function SettingsListContent() {
 }
 
 export function SettingsListScreen(props: {
-  readonly sidebar: boolean;
-  readonly selected: string | null;
-}) {
-  return (
-    <I18nProvider>
-      <TranslatedSettingsListScreen {...props} />
-    </I18nProvider>
-  );
-}
-
-function TranslatedSettingsListScreen(props: {
   readonly sidebar: boolean;
   readonly selected: string | null;
 }) {
@@ -161,7 +146,7 @@ function ConfiguredSettingsRouteScreen() {
         {
           id: "account",
           icon: "person.crop.circle",
-          label: `${getBrandMark()} Account`,
+          label: gt("{brand} Account", { brand: getBrandMark() }),
           value: accountLabel,
           disabled: !isLoaded,
           onPress: () => navigation.navigate("SettingsAuth"),
@@ -191,18 +176,20 @@ function LocalSettingsRouteScreen() {
     if (enabled) {
       void requestSelfHostedNotificationPermission().catch((error: unknown) => {
         Dialog.alert(
-          "Notifications unavailable",
-          error instanceof Error ? error.message : "Could not enable notifications.",
+          gt("Notifications unavailable"),
+          error instanceof Error ? error.message : gt("Could not enable notifications."),
         );
       });
       return;
     }
     Dialog.alert(
-      "Disable notifications",
-      `Open Android settings to disable notifications for ${getProductName()}.`,
+      gt("Disable notifications"),
+      gt("Open Android settings to disable notifications for {product}.", {
+        product: getProductName(),
+      }),
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        { text: gt("Cancel"), style: "cancel" },
+        { text: gt("Open Settings"), onPress: () => void Linking.openSettings() },
       ],
     );
   };
@@ -215,10 +202,10 @@ function LocalSettingsRouteScreen() {
           ? [
               {
                 id: "device-notifications",
-                label: "Device Notifications",
+                label: gt("Device Notifications"),
                 toggle: {
                   icon: "bell.badge",
-                  label: "Device Notifications",
+                  label: gt("Device Notifications"),
                   disabled:
                     notificationStatus === "checking" || notificationStatus === "unsupported",
                   value: notificationStatus === "enabled",
@@ -245,6 +232,7 @@ function environmentsRow(label: string, count: number): SettingsPageRow {
 
 function SettingsList(props: { readonly connections: readonly SettingsListRow[] }) {
   const gt = useGT();
+  const m = useMessages();
   // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
   // the sidebar's surface so the bar doesn't darken over content at rest.
   // Grouped cards only lift off the screen surface; the drawer is as dark as they are.
@@ -263,6 +251,7 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
       ...indexSections,
     ],
     query,
+    m,
   );
 
   return (
@@ -306,7 +295,6 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
 
 function useSettingsIndexSections(): SettingsListSection[] {
   const gt = useGT();
-  const language = useLanguagePreference();
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
   const noServerTargets = selectedTargets.length === 0;
   const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
@@ -338,11 +326,6 @@ function useSettingsIndexSections(): SettingsListSection[] {
       rows: [
         page("SettingsOrganization", "gearshape", gt("General")),
         page("SettingsAppearance", "paintbrush", gt("Appearance")),
-        page("SettingsLanguage", "globe", gt("Language"), {
-          value: SUPPORTED_LOCALES.includes(language)
-            ? nativeLanguageName(language)
-            : gt("System default"),
-        }),
         page("SettingsFollowUp", "bubble.left.and.bubble.right", gt("Chat")),
         ...(navigationCustomizationAvailable()
           ? [page("SettingsNavigation", "line.3.horizontal", gt("Navigation tabs"))]
@@ -371,7 +354,7 @@ function useSettingsIndexSections(): SettingsListSection[] {
         serverPage(
           "SettingsEnvironmentSourceControl",
           "arrow.triangle.branch",
-          gt("Source control"),
+          gt("Source control & issues"),
         ),
         serverPage("SettingsWorktrees", "square.on.square", gt("Worktrees")),
       ],
@@ -388,6 +371,7 @@ function useSettingsIndexSections(): SettingsListSection[] {
 }
 
 function useOverflowRows(): SettingsPageRow[] {
+  const m = useMessages();
   const order = useNavigationTabOrder();
   const hidden = useHiddenNavigationTabs();
   const { layout } = useAdaptiveWorkspaceLayout();
@@ -397,7 +381,7 @@ function useOverflowRows(): SettingsPageRow[] {
   return tabs.map((tab) => ({
     id: tab,
     icon: NAVIGATION_TAB_ICONS[tab],
-    label: WORKSPACE_TAB_LABELS[tab],
+    label: m(WORKSPACE_TAB_LABELS[tab]),
     onPress: () => selectTab(tab),
   }));
 }

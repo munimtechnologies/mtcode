@@ -1,5 +1,6 @@
 import type { UsageProviderKind } from "@t3tools/contracts";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { providerColors } from "./providerColors";
 
 export const PROVIDER_ORDER: readonly UsageProviderKind[] = [
   "codex",
@@ -28,23 +29,8 @@ export const PROVIDER_LABEL: Record<UsageProviderKind, string> = {
   muse: "Muse Code",
 };
 
-/**
- * Claude's brand orange holds in both themes; Codex, Cursor, Grok, and OpenCode
- * are neutral and must flip with the theme or their bars vanish against the
- * matching background.
- */
 export function useProviderColors(): Record<UsageProviderKind, string> {
-  const { themeAppearance: scheme } = useAppearancePreferences();
-  return {
-    claude: "#d97757",
-    codex: scheme === "dark" ? "#e6e6e6" : "#3c3c43",
-    cursor: scheme === "dark" ? "#a3a3a3" : "#52525b",
-    grok: scheme === "dark" ? "#8b8b8b" : "#636366",
-    opencode: scheme === "dark" ? "#8f8b8b" : "#8a8585",
-    antigravity: "#8c7bd1",
-    pi: "#4d9f8a",
-    muse: "#0866ff",
-  };
+  return providerColors(useAppearancePreferences().themeAppearance);
 }
 
 export function useUsageMixColors() {

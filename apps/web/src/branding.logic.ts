@@ -28,6 +28,7 @@ export function formatDisplayedAppVersion(input: {
 
 export function resolveHostedAppChannelLabel(channel: string | null | undefined): string | null {
   const normalized = channel?.trim().toLowerCase();
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- release channel name, part of the product name
   return normalized === "nightly" ? "Nightly" : normalized === "latest" ? "Latest" : null;
 }
 
@@ -37,6 +38,7 @@ export function resolveWebAppStageLabel(input: {
   readonly development: boolean;
 }): string {
   return (
+    // oxlint-disable-next-line t3code/no-untranslated-copy -- release channel name, part of the product name
     resolveHostedAppChannelLabel(input.hostedAppChannel) ?? (input.development ? "Dev" : "Beta")
   );
 }
@@ -49,7 +51,8 @@ export function resolveServerBackedAppStageLabel(input: {
   return input.allowNightlyStage !== false &&
     input.primaryServerVersion &&
     NIGHTLY_SERVER_VERSION_PATTERN.test(input.primaryServerVersion)
-    ? "Nightly"
+    ? // oxlint-disable-next-line t3code/no-untranslated-copy -- release channel name, part of the product name
+      "Nightly"
     : input.fallbackStageLabel;
 }
 

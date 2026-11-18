@@ -1,3 +1,6 @@
+import { m } from "../i18n/messages";
+import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
+import { T, useGT, useMessages } from "gt-react";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -138,7 +141,7 @@ import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/project
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { orchestrationV2WorktreePending } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/client-runtime/thread-reference";
-import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
+import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabelsCopy";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type MouseEvent as ReactMouseEvent,
@@ -226,7 +229,11 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId, randomUUID } from "~/lib/utils";
-import { isInSideChatPane, type SideChatParentPanel } from "~/lib/sideChatPane";
+import {
+  isInSideChatPane,
+  resolveThreadOpenRoute,
+  type SideChatParentPanel,
+} from "~/lib/sideChatPane";
 import {
   NO_PROVIDER_MODEL_SELECTION,
   providerInstanceEntriesFor,
@@ -461,7 +468,12 @@ const DismissedFallbackWindowSchema = Schema.NullOr(Schema.String);
 
 const ignoreComposerFocus = () => {};
 
+// Read when an edit is saved, never during render.
+const messageEditTimestamp = () => new Date().toISOString();
+
 export default function ChatView(props: ChatViewProps) {
+  const gt = useGT();
+  const messages = useMessages();
   const {
     environmentId,
     threadId,
@@ -683,8 +695,10 @@ export default function ChatView(props: ChatViewProps) {
     if (!inserted) {
       toastManager.add({
         type: "warning",
-        title: "The composer is not ready",
-        description: "Try citing the selection after the connection or pending input is resolved.",
+        title: gt("The composer is not ready"),
+        description: gt(
+          "Try citing the selection after the connection or pending input is resolved.",
+        ),
       });
     }
     return inserted;
@@ -723,8 +737,8 @@ export default function ChatView(props: ChatViewProps) {
     if (!accepted) {
       toastManager.add({
         type: "warning",
-        title: "The composer is not ready",
-        description: "Try replying after the connection or pending input is resolved.",
+        title: gt("The composer is not ready"),
+        description: gt("Try replying after the connection or pending input is resolved."),
       });
     }
     return accepted;
@@ -819,7 +833,7 @@ export default function ChatView(props: ChatViewProps) {
     setPendingServerThreadStartFromOriginByThreadId,
   ] = useState<Record<string, boolean>>({});
   const legendListRef = useRef<LegendListRef | null>(null);
-  const conversationArea = workspaceAreaProps("conversation", 1, "Conversation");
+  const conversationArea = workspaceAreaProps("conversation", 1, gt("Conversation"));
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerTimelineInset, setComposerTimelineInset] = useState(0);
   const composerTimelineInsetRef = useRef(0);
@@ -901,6 +915,7 @@ export default function ChatView(props: ChatViewProps) {
         draftThread,
         (draftFallback ? draftFallback.selection : draftDefaultModelSelection) ??
           NO_PROVIDER_MODEL_SELECTION,
+        messages,
       )
     : undefined;
   const isServerThread = serverThread !== null;
@@ -960,11 +975,14 @@ export default function ChatView(props: ChatViewProps) {
   const workflowOpening =
     serverProjection === null || workflowOpeningParentId === null
       ? null
-      : resolveWorkflowOpening({
-          thread: serverProjection.thread,
-          messages: serverProjection.messages,
-          parentSubagents: workflowOpeningParentProjection?.projection.subagents ?? null,
-        });
+      : resolveWorkflowOpening(
+          {
+            thread: serverProjection.thread,
+            messages: serverProjection.messages,
+            parentSubagents: workflowOpeningParentProjection?.projection.subagents ?? null,
+          },
+          messages,
+        );
   // A linked environment's agent may have delegated this thread from there.
   const delegatedFrom = activeThread?.delegatedFrom ?? null;
   const delegatedFromEnvironment = useEnvironment(delegatedFrom?.environmentId ?? null);
@@ -981,7 +999,7 @@ export default function ChatView(props: ChatViewProps) {
   const sideChatParent = useQuietThreadShell(sideChatParentRef);
   const parentThreadLink = (() => {
     if (sideChatParentRef !== null) {
-      const title = sideChatParent?.title ?? "Parent thread";
+      const title = sideChatParent?.title ?? gt("Parent thread");
       // Embedded, the parent is the view around it.
       if (embedded) return { title, sideChat: true };
       return {
@@ -997,11 +1015,13 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (parentSubagentThreadRef !== null) {
       return {
-        title: parentSubagentThread?.title ?? "Parent thread",
+        title: parentSubagentThread?.title ?? gt("Parent thread"),
         open: (): void => {
           void navigate({
             to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(parentSubagentThreadRef),
+            params: buildThreadRouteParams(
+              resolveThreadOpenRoute(parentSubagentThreadRef, parentSubagentThread),
+            ),
           });
         },
       };
@@ -1030,7 +1050,7 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : {
           threadId: parentSubagentThreadRef.threadId,
-          title: parentSubagentThread?.title ?? "Parent thread",
+          title: parentSubagentThread?.title ?? gt("Parent thread"),
         };
   const threadError = isServerThread
     ? (localServerError ?? serverRuntime?.lastError ?? null)
@@ -1087,7 +1107,7 @@ export default function ChatView(props: ChatViewProps) {
     for (const session of activeThreadKnownSessions) {
       labels.set(
         session.target.terminalId,
-        resolveTerminalSessionLabel(session.target.terminalId, session.state.summary),
+        resolveTerminalSessionLabel(session.target.terminalId, session.state.summary, messages),
       );
     }
     return labels;
@@ -1599,7 +1619,7 @@ export default function ChatView(props: ChatViewProps) {
   const downloadFileAttachment = async (attachment: ChatFileAttachment) => {
     const connection = readPreparedConnection(environmentId);
     if (!connection) {
-      toastManager.add({ type: "error", title: "The environment is not connected." });
+      toastManager.add({ type: "error", title: gt("The environment is not connected.") });
       return;
     }
 
@@ -1617,8 +1637,8 @@ export default function ChatView(props: ChatViewProps) {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Could not download " + attachment.name,
-        description: error instanceof Error ? error.message : "The attachment is unavailable.",
+        title: gt("Could not download {name}", { name: attachment.name }),
+        description: thrownErrorMessage(error, m) ?? gt("The attachment is unavailable."),
       });
     }
   };
@@ -1642,8 +1662,8 @@ export default function ChatView(props: ChatViewProps) {
     submission.status === "interrupted"
       ? []
       : [
-          { ...codexFeedbackMessage(submission), runId: null },
-          { ...codexFeedbackMessage(submission, "assistant"), runId: null },
+          { ...codexFeedbackMessage(submission, "user", messages), runId: null },
+          { ...codexFeedbackMessage(submission, "assistant", messages), runId: null },
         ],
   );
   const timelineEntriesInput = {
@@ -1961,7 +1981,7 @@ export default function ChatView(props: ChatViewProps) {
       const error = squashAtomCommandFailure(result);
       setThreadError(
         activeThread.id,
-        error instanceof Error ? error.message : "Failed to interrupt the current turn.",
+        thrownErrorMessage(error, m) ?? gt("Failed to interrupt the current turn."),
       );
     }
   };
@@ -1980,8 +2000,8 @@ export default function ChatView(props: ChatViewProps) {
     if (prompt !== null && !composer.insertTextAtEnd(prompt, { ensureLeadingBoundary: true })) {
       toastManager.add({
         type: "error",
-        title: "Unable to add to chat",
-        description: "The composer is busy; try again once it is ready.",
+        title: gt("Unable to add to chat"),
+        description: gt("The composer is busy; try again once it is ready."),
       });
       return;
     }
@@ -1990,7 +2010,7 @@ export default function ChatView(props: ChatViewProps) {
   const insertArtifactTemplateStable = useStableCallback(insertArtifactTemplate);
   const sendAppMessage = async (text: string) => {
     if (!isServerThread || activeThreadId === null) {
-      throw new Error("Messages from apps need a started thread.");
+      throw new Error(gt("Messages from apps need a started thread."));
     }
     const result = await startThreadTurn({
       environmentId,
@@ -2004,7 +2024,7 @@ export default function ChatView(props: ChatViewProps) {
     });
     if (result._tag === "Failure") {
       const error = squashAtomCommandFailure(result);
-      throw error instanceof Error ? error : new Error("Could not send the app's message.");
+      throw error instanceof Error ? error : new Error(gt("Could not send the app's message."));
     }
   };
   const sendAppMessageStable = useStableCallback(sendAppMessage);
@@ -2281,7 +2301,7 @@ export default function ChatView(props: ChatViewProps) {
           if (document.querySelector("[data-mcp-app-fullscreen]") !== null) return;
           if (
             !isInSideChatPane(document.activeElement) &&
-            shouldRefocusComposerOnWindowFocus(document.activeElement)
+            shouldRefocusComposerOnWindowFocus(document.activeElement, document.getSelection())
           ) {
             focusComposerStable();
           }
@@ -2456,14 +2476,17 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadReferenceCopyTarget =
     activeThreadRef === null || !isServerThread
       ? null
-      : resolveThreadReferenceCopyTarget({
-          threadRef: activeThreadRef,
-          title: activeThread?.title ?? "",
-          openPanelPullRequestUrl,
-          pullRequests: activeThread?.pullRequests,
-          linkedPullRequestUrl: linkedThreadPullRequest?.url ?? null,
-          hostedAppUrl: configuredHostedAppUrl(),
-        });
+      : resolveThreadReferenceCopyTarget(
+          {
+            threadRef: activeThreadRef,
+            title: activeThread?.title ?? "",
+            openPanelPullRequestUrl,
+            pullRequests: activeThread?.pullRequests,
+            linkedPullRequestUrl: linkedThreadPullRequest?.url ?? null,
+            hostedAppUrl: configuredHostedAppUrl(),
+          },
+          messages,
+        );
   const copyActiveThreadReference = () => {
     if (activeThreadReferenceCopyTarget === null) return;
     void copyThreadReference(activeThreadReferenceCopyTarget);
@@ -2666,36 +2689,43 @@ export default function ChatView(props: ChatViewProps) {
   };
   const handleRestoreThreadBranchStable = useStableCallback(handleRestoreThreadBranch);
   const feedbackBannerItems = feedbackSubmissions.flatMap((submission) => {
-    const item = feedbackBannerItem(submission, () => {
-      setFeedbackSubmissionsByThreadKey((current) => ({
-        ...current,
-        [routeThreadKey]: (current[routeThreadKey] ?? []).filter(
-          (entry) => entry.id !== submission.id,
-        ),
-      }));
-    });
+    const item = feedbackBannerItem(
+      submission,
+      () => {
+        setFeedbackSubmissionsByThreadKey((current) => ({
+          ...current,
+          [routeThreadKey]: (current[routeThreadKey] ?? []).filter(
+            (entry) => entry.id !== submission.id,
+          ),
+        }));
+      },
+      messages,
+    );
     return item ? [item] : [];
   });
   const limitRecoveryBanner =
     limitRecoveryRun !== null && activeThreadShell !== null
-      ? usageLimitRecoveryBannerItem({
-          runId: limitRecoveryRun.runId,
-          errorCode: serverRuntime?.lastErrorCode ?? null,
-          resetAt: serverRuntime?.usageLimitResetAt ?? null,
-          stoppedAt: limitRecoveryRun.completedAt ?? activeThreadShell.updatedAt,
-          settled: activeThreadShell.settledOverride === "settled",
-          requestPending: pendingApprovals.length > 0 || pendingUserInputs.length > 0,
-          recovery: activeThreadShell.limitRecovery ?? null,
-          snoozedUntil: activeThreadShell.snoozedUntil,
-          timestampFormat,
-          onChange: async (limitRecovery) => {
-            const result = await updateThreadMetadata({
-              environmentId,
-              input: { threadId: activeThreadShell.id, limitRecovery },
-            });
-            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      ? usageLimitRecoveryBannerItem(
+          {
+            runId: limitRecoveryRun.runId,
+            errorCode: serverRuntime?.lastErrorCode ?? null,
+            resetAt: serverRuntime?.usageLimitResetAt ?? null,
+            stoppedAt: limitRecoveryRun.completedAt ?? activeThreadShell.updatedAt,
+            settled: activeThreadShell.settledOverride === "settled",
+            requestPending: pendingApprovals.length > 0 || pendingUserInputs.length > 0,
+            recovery: activeThreadShell.limitRecovery ?? null,
+            snoozedUntil: activeThreadShell.snoozedUntil,
+            timestampFormat,
+            onChange: async (limitRecovery) => {
+              const result = await updateThreadMetadata({
+                environmentId,
+                input: { threadId: activeThreadShell.id, limitRecovery },
+              });
+              if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+            },
           },
-        })
+          messages,
+        )
       : null;
   const computerUsePermissionBannerItem = ((): ComposerBannerStackItem | null => {
     if (
@@ -2707,23 +2737,29 @@ export default function ChatView(props: ChatViewProps) {
       return null;
     }
     const missing = computerUsePermissions.missing;
-    const labels = missing.map((permission) =>
-      permission.kind === "accessibility" ? "Accessibility" : "Screen Recording",
-    );
     const first = missing[0];
     if (!first) return null;
+    const permissions =
+      missing.length > 1
+        ? gt("Accessibility and Screen Recording")
+        : first.kind === "accessibility"
+          ? gt("Accessibility")
+          : gt("Screen Recording");
     return {
       id: "computer-use-permissions",
       variant: "warning",
       icon: <MonitorIcon />,
-      title: "Computer Use needs permission to use the pointer",
+      title: gt("Computer Use needs permission to use the pointer"),
       // The button also repairs a grant that macOS still lists as enabled but
       // refuses (the stored code requirement no longer matches the app after a
       // re-sign), so "Open Settings" undersells what pressing it does.
-      description: `Grant ${labels.join(" and ")} so the agent can click, type, and take screenshots without moving your mouse. If macOS already shows this app as allowed, pressing Fix re-asks (the old approval no longer matches this build).`,
+      description: gt(
+        "Grant {permissions} so the agent can click, type, and take screenshots without moving your mouse. If macOS already shows this app as allowed, pressing Fix re-asks (the old approval no longer matches this build).",
+        { permissions },
+      ),
       actions: (
         <Button size="xs" onClick={() => void computerUsePermissions.openPermission(first)}>
-          Fix permissions
+          <T>Fix permissions</T>
         </Button>
       ),
       onDismiss: () => setComputerUsePermissionBannerDismissed(true),
@@ -2759,22 +2795,25 @@ export default function ChatView(props: ChatViewProps) {
       defaultSelection &&
       fallbackWindow !== dismissedFallbackWindow
         ? [
-            modelFallbackBannerItem({
-              fallbackModelName:
-                providerStatuses
-                  .find((provider) => provider.instanceId === fallbackSelection.instanceId)
-                  ?.models.find((model) => model.slug === fallbackSelection.model)?.name ??
-                fallbackSelection.model,
-              defaultProviderName: fallback.provider.displayName ?? fallback.provider.driver,
-              defaultModelName:
-                fallback.provider.models.find((model) => model.slug === defaultSelection.model)
-                  ?.name ?? defaultSelection.model,
-              resetsAt: fallback.resetsAt,
-              timestampFormat,
-              onUseDefault: () =>
-                onProviderModelSelectStable(defaultSelection.instanceId, defaultSelection.model),
-              onDismiss: () => setDismissedFallbackWindow(fallbackWindow),
-            }),
+            modelFallbackBannerItem(
+              {
+                fallbackModelName:
+                  providerStatuses
+                    .find((provider) => provider.instanceId === fallbackSelection.instanceId)
+                    ?.models.find((model) => model.slug === fallbackSelection.model)?.name ??
+                  fallbackSelection.model,
+                defaultProviderName: fallback.provider.displayName ?? fallback.provider.driver,
+                defaultModelName:
+                  fallback.provider.models.find((model) => model.slug === defaultSelection.model)
+                    ?.name ?? defaultSelection.model,
+                resetsAt: fallback.resetsAt,
+                timestampFormat,
+                onUseDefault: () =>
+                  onProviderModelSelectStable(defaultSelection.instanceId, defaultSelection.model),
+                onDismiss: () => setDismissedFallbackWindow(fallbackWindow),
+              },
+              messages,
+            ),
           ]
         : [];
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
@@ -2787,7 +2826,7 @@ export default function ChatView(props: ChatViewProps) {
     // An approval's feedback goes to that approval; the armed session waits for the next message.
     const freshSessionItems =
       freshSessionAvailable && freshSessionArmed && activePendingApproval === null
-        ? [freshSessionBannerItem(() => disarmFreshSession(routeThreadKey))]
+        ? [freshSessionBannerItem(() => disarmFreshSession(routeThreadKey), messages)]
         : [];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
@@ -2812,17 +2851,20 @@ export default function ChatView(props: ChatViewProps) {
       ...freshSessionItems,
       ...systemComposerBannerItems,
       ...computerUsePermissionItems,
-      branchMismatchBannerItem({
-        mismatchKey: activeBranchMismatchKey,
-        mismatch: localCheckoutBranchMismatch,
-        restoreDisabled: !canWriteSourceControl || isRestoringThreadBranch,
-        restoring: isRestoringThreadBranch,
-        onRestore: handleRestoreThreadBranchStable,
-        onDismiss: () => {
-          dismissBranchMismatchForSession(activeBranchMismatchKey);
-          setBranchMismatchDismissTick((tick) => tick + 1);
+      branchMismatchBannerItem(
+        {
+          mismatchKey: activeBranchMismatchKey,
+          mismatch: localCheckoutBranchMismatch,
+          restoreDisabled: !canWriteSourceControl || isRestoringThreadBranch,
+          restoring: isRestoringThreadBranch,
+          onRestore: handleRestoreThreadBranchStable,
+          onDismiss: () => {
+            dismissBranchMismatchForSession(activeBranchMismatchKey);
+            setBranchMismatchDismissTick((tick) => tick + 1);
+          },
         },
-      }),
+        messages,
+      ),
     ];
   })() as ComposerBannerStackItem[];
 
@@ -2968,21 +3010,21 @@ export default function ChatView(props: ChatViewProps) {
   // Main-thread surfaces show this reason; `/side` sent anyway gets it as a toast.
   const sideChatDisabledReason =
     activeThread?.lineage.sideChat === true
-      ? "Side chats cannot start side chats."
+      ? gt("Side chats cannot start side chats.")
       : isSubagentThread
-        ? "Subagent threads cannot start side chats."
+        ? gt("Subagent threads cannot start side chats.")
         : serverConfig === null
-          ? "Side chats are not ready yet. Try again in a moment."
+          ? gt("Side chats are not ready yet. Try again in a moment.")
           : serverConfig.environment.capabilities.sideChats !== true
-            ? "Update this environment's T3 Code server to use side chats."
+            ? gt("Update this environment's T3 Code server to use side chats.")
             : sideChatsOffered && !isServerThread
-              ? "Side chats start after the first message."
+              ? gt("Side chats start after the first message.")
               : sideChat.available &&
                   orchestrationV2WorktreePending(
                     activeThread?.worktreePath ?? null,
                     serverProjection?.runs ?? [],
                   )
-                ? "Available once the thread's worktree is set up."
+                ? gt("Available once the thread's worktree is set up.")
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
@@ -3008,7 +3050,7 @@ export default function ChatView(props: ChatViewProps) {
     });
   const onCompactContext = () => {
     if (compactDisabled) return;
-    void sendStandaloneCommand("/compact", "Failed to compact context.");
+    void sendStandaloneCommand("/compact", gt("Failed to compact context."));
   };
 
   const {
@@ -3071,6 +3113,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadKey,
     activeThreadBranch,
     activeProject,
+    activeProjectIsScratch,
     activeProjectDefaultModelSelection,
     activeMessageCount,
     isServerThread,
@@ -3161,11 +3204,16 @@ export default function ChatView(props: ChatViewProps) {
     }
     const threadId = activeThread.id;
     if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
-      setThreadError(threadId, `Reconnect ${activeEnvironmentUnavailableLabel} before editing.`);
+      setThreadError(
+        threadId,
+        gt("Reconnect {environment} before editing.", {
+          environment: activeEnvironmentUnavailableLabel,
+        }),
+      );
       return;
     }
     if (phase === "running" || isSendBusy) {
-      setThreadError(threadId, "Interrupt the current turn before editing a message.");
+      setThreadError(threadId, gt("Interrupt the current turn before editing a message."));
       return;
     }
     sendInFlightRef.current = true;
@@ -3189,7 +3237,7 @@ export default function ChatView(props: ChatViewProps) {
     const rolledBack = revertResult._tag === "Success";
     let result: AtomCommandResult<unknown, unknown> = revertResult;
     if (rolledBack) {
-      const createdAt = new Date().toISOString();
+      const createdAt = messageEditTimestamp();
       beginLocalDispatch();
       setOptimisticUserMessages((messages) => [
         ...messages,
@@ -3254,7 +3302,7 @@ export default function ChatView(props: ChatViewProps) {
       const error = squashAtomCommandFailure(result);
       setThreadError(
         threadId,
-        error instanceof Error ? error.message : "Failed to edit the message.",
+        error instanceof Error ? error.message : gt("Failed to edit the message."),
       );
     }
     sendInFlightRef.current = false;
@@ -3357,9 +3405,10 @@ export default function ChatView(props: ChatViewProps) {
           threadId={activeThread.id}
           optimisticMessages={optimisticUserMessages}
           editingRunId={queuedRunEdit.editingRunId}
-          editBlockedReason={queuedRunEditBlockedReason({
-            openQuestionCount: pendingUserInputs.length,
-          })}
+          editBlockedReason={queuedRunEditBlockedReason(
+            { openQuestionCount: pendingUserInputs.length },
+            messages,
+          )}
           onEditQueuedRun={queuedRunEdit.beginEdit}
           onCancelEdit={queuedRunEdit.cancelEdit}
           timestampFormat={timestampFormat}
@@ -3424,7 +3473,14 @@ export default function ChatView(props: ChatViewProps) {
         !serverProjection?.messages.some((committed) => committed.id === message.id),
     );
   const scrollToEndSummary =
-    [childInputNow?.waitingLabel ?? null, queuedRunCount === 0 ? null : `${queuedRunCount} queued`]
+    [
+      childInputNow?.waitingLabel ?? null,
+      queuedRunCount === 0
+        ? null
+        : gt("{count, plural, one {{count} queued} other {{count} queued}}", {
+            count: queuedRunCount,
+          }),
+    ]
       .filter((part) => part !== null)
       .join(" · ") || null;
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
@@ -3558,6 +3614,7 @@ export default function ChatView(props: ChatViewProps) {
             ? addPullRequestsSurfaceStable
             : undefined,
       }}
+      issuesSupported={serverConfig?.environment.capabilities.issues === true}
       files={{
         projectId: activeProject?.id,
         projectName: activeProject?.title ?? null,
@@ -3768,7 +3825,11 @@ export default function ChatView(props: ChatViewProps) {
                     activePendingApproval?.requestId ?? activePendingUserInput?.requestId ?? null
                   }
                   activeTurnStartedAt={activeWorkStartedAt}
-                  providerStartingLabel={activeActivityRun?.providerStartingLabel ?? null}
+                  providerStartingLabel={
+                    activeActivityRun?.providerStartingLabelMsg
+                      ? messages(activeActivityRun.providerStartingLabelMsg)
+                      : null
+                  }
                   worktreeSetup={worktreeSetup}
                   onCancelWorktreeSetup={onCancelWorktreeSetupStable}
                   retryableWorkspacePreparationRunIds={retryableWorkspacePreparationRunIds}
@@ -3971,17 +4032,17 @@ export default function ChatView(props: ChatViewProps) {
                                 isRevertingCheckpoint={isRevertingCheckpoint}
                                 sendDisabledReason={
                                   !canOperateThread
-                                    ? "This connection cannot change threads."
+                                    ? gt("This connection cannot change threads.")
                                     : isEnvironmentChanging
-                                      ? "Preparing machine"
+                                      ? gt("Preparing machine")
                                       : isRevertingCheckpoint
-                                        ? "Rewinding conversation"
+                                        ? gt("Rewinding conversation")
                                         : feedbackUploading
-                                          ? "Sending feedback"
+                                          ? gt("Sending feedback")
                                           : threadDetailLoading
-                                            ? "Messages loading"
+                                            ? gt("Messages loading")
                                             : worktreeSetupBlocksSend
-                                              ? "Preparing worktree"
+                                              ? gt("Preparing worktree")
                                               : projectCloneSendBlockReason
                                 }
                                 isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
@@ -4028,6 +4089,7 @@ export default function ChatView(props: ChatViewProps) {
                                 resolvedTheme={resolvedTheme}
                                 settings={settings}
                                 keybindings={keybindings}
+                                getShortcutContext={getShortcutContextStable}
                                 terminalOpen={Boolean(terminalUiState.terminalOpen)}
                                 gitCwd={gitCwd}
                                 pullRequestProjectId={

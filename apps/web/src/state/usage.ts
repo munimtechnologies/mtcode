@@ -1,11 +1,7 @@
 /**
- * Multi-environment usage state.
- *
- * Connected environments answer the typed usage query. Connection state
- * determines whether a waiting query contributes to loading coverage, so one
- * unreachable machine can never hold the dashboard open.
- *
- * @module state/usage
+ * Multi-environment usage state. Connection state decides whether a waiting query
+ * counts toward loading coverage, so one unreachable machine never holds the
+ * dashboard open.
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -20,6 +16,7 @@ import {
 import { refreshUsage, usageSummaryInput } from "@t3tools/client-runtime/state/usage";
 import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { msg } from "gt-react";
 import { useState } from "react";
 
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
@@ -32,6 +29,7 @@ import {
   getEnvironmentUsageLoadingState,
   type EnvironmentUsageOption,
 } from "./usageEnvironmentScope";
+import { m } from "../i18n/messages";
 
 export type { EnvironmentUsageOption } from "./usageEnvironmentScope";
 
@@ -124,7 +122,7 @@ const usageByWindowAtom = Atom.family((key: string) =>
           (option.phase === "connected" && result.waiting),
         canReadDiagnostics: true,
         isConnected,
-        error: failed ? "This environment could not report usage." : null,
+        error: failed ? m(msg("This environment could not report usage.")) : null,
         summary,
       });
     }

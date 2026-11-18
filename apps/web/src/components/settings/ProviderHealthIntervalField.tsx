@@ -15,8 +15,11 @@ import {
 
 interface ProviderHealthIntervalFieldProps {
   readonly valueSeconds: number;
-  /** Field name for the accessible labels, e.g. "Provider health interval". */
-  readonly label: string;
+  readonly labels: {
+    readonly decrease: string;
+    readonly input: string;
+    readonly increase: string;
+  };
   readonly onCommit: (interval: Duration.Duration) => void;
 }
 
@@ -29,7 +32,7 @@ interface ProviderHealthIntervalFieldProps {
  */
 export function ProviderHealthIntervalField({
   valueSeconds,
-  label,
+  labels,
   onCommit,
 }: ProviderHealthIntervalFieldProps) {
   const [draft, setDraft] = useState<number | null>(valueSeconds);
@@ -38,7 +41,6 @@ export function ProviderHealthIntervalField({
     setSavedSeconds(valueSeconds);
     setDraft(valueSeconds);
   }
-  const stepperLabel = label.charAt(0).toLowerCase() + label.slice(1);
 
   return (
     <NumberField
@@ -59,9 +61,9 @@ export function ProviderHealthIntervalField({
       }}
     >
       <NumberFieldGroup>
-        <NumberFieldDecrement aria-label={`Decrease ${stepperLabel}`} />
-        <NumberFieldInput aria-label={`${label} in seconds`} />
-        <NumberFieldIncrement aria-label={`Increase ${stepperLabel}`} />
+        <NumberFieldDecrement aria-label={labels.decrease} />
+        <NumberFieldInput aria-label={labels.input} />
+        <NumberFieldIncrement aria-label={labels.increase} />
       </NumberFieldGroup>
     </NumberField>
   );

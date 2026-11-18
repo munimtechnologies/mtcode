@@ -53,7 +53,7 @@ require() {
 # --- Usage "All" window (a7e8c621b) ---
 require packages/shared/src/usageFormat.ts "ALL_USAGE_WINDOW_DAYS" "All-window sentinel in shared usage format"
 require apps/web/src/components/usage/UsagePage.tsx 'label: "All"' "All option in web usage window picker"
-require apps/mobile/src/features/usage/UsageRouteScreen.tsx 'label: "All"' "All option in mobile usage window picker"
+require apps/mobile/src/features/usage/UsageRouteScreen.tsx 'label: msg("All"' "All option in mobile usage window picker"
 require apps/server/src/usage/UsageService.ts "retentionCutoffMs" "All-window scan-cache retention in UsageService"
 
 # --- Goals (86e27ef70, 579221de3, 07d149458) ---
@@ -156,7 +156,7 @@ require apps/web/src/components/sidebar/SidebarThreadRow.tsx "useLinkedThreadPul
 # Upstream #10101 (223ff4490) moved PR linking to the server, deleting the
 # client-side ThreadChangeRequestSnapshot atom this used to check. The badge
 # itself is the fork feature, so the check now follows it to its new source.
-require apps/web/src/components/sidebar/SidebarThreadRow.tsx "prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider)" "sidebar renders the linked-PR badge"
+require apps/web/src/components/sidebar/SidebarThreadRow.tsx "prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider" "sidebar renders the linked-PR badge"
 
 # --- Artwork + app icon pickers (44cf90dc0, 0efc0e293) ---
 require apps/web/src/components/settings/AppearanceSettingsPanel.tsx "SidebarArtworkRow" "artwork picker in settings"
@@ -207,7 +207,7 @@ require apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.tsx 'if (state
 # The 2026-09-01 sync silently broke auto-install when upstream turned
 # installDownloadedUpdate into a function (the fork line yielded the function).
 require apps/desktop/src/updates/DesktopUpdates.ts 'const fullChangelog = true;' "release notes fetched on every update channel"
-require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* downloadAvailableUpdate;' "auto-download when an update becomes available"
+require apps/desktop/src/updates/DesktopUpdates.ts 'const downloadResult = yield\* downloadAvailableUpdate(false);' "auto-download when an update becomes available"
 require apps/desktop/src/updates/DesktopUpdates.ts 'yield\* installDownloadedUpdate(info.version);' "auto-install pinned to the downloaded version"
 # Remote-update flow must treat the fork's in-flight auto-install as prepared.
 require apps/desktop/src/updates/DesktopRemoteUpdates.ts 'ready-to-install' "remote update publishes ready-to-install"

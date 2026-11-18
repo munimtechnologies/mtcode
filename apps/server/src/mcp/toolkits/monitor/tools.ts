@@ -9,7 +9,8 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 
 // MCP's discovery predicate is synchronous; read the authenticated request
 // context from its current fiber rather than trusting client-supplied metadata.
-const monitoringEnabled = () => {
+// Monitors act as the calling thread, so outside clients never see them.
+const monitoringEnabled = McpInvocationContext.hiddenFromOutsideClientsAnd(() => {
   const fiber = Fiber.getCurrent();
   return (
     fiber !== undefined &&
@@ -19,7 +20,7 @@ const monitoringEnabled = () => {
     )?.capabilities.has("monitor") ??
       false)
   );
-};
+});
 
 /** What a monitor tool fails with, including the access gate's refusal. */
 const failure = Schema.Union([MonitorSession.MonitorError, OrchestratorMcpFailure]);
