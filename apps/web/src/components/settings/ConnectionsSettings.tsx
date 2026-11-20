@@ -14,6 +14,8 @@ import {
   AuthOrchestrationOperateScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  allowsPreviewTunnel,
+  isManagedSettingPath,
   type AuthClientSession,
   type AuthPairingLink,
   type AuthPairingCredentialResult,
@@ -1277,6 +1279,12 @@ function ConnectionsSettingsContent({
   ) : null;
 
   const accessServerConfig = accessEnvironment?.serverConfig ?? null;
+  const accessPolicy = accessServerConfig?.managedPolicy;
+  const previewTunnelDenial =
+    managedCapabilityDenial(accessPolicy, "previewTunnel", m) ??
+    (accessPolicy !== undefined && isManagedSettingPath(accessPolicy, "enablePreviewTunnel")
+      ? gt("Managed by {organization}.", { organization: accessPolicy.organization })
+      : undefined);
   const primarySettings = (
     <>
       {accessEnvironmentPicker}
@@ -1413,6 +1421,25 @@ function ConnectionsSettingsContent({
                         required: accessServerConfig.settings.requireConnectDeviceApproval,
                         canManage: canWriteAccess,
                       }
+                }
+              />
+            ) : null}
+            {accessServerConfig?.environment.capabilities.previewTunnelSetting ? (
+              <SettingsRow
+                title={searchableSetting("preview-tunnel").title}
+                description={gt(
+                  "Lets other devices open this machine's local servers: browser tabs loaded on the device, Open on this device, and port forwarding. Off: browser tabs stream from this machine.",
+                )}
+                managed={previewTunnelDenial}
+                control={
+                  <Switch
+                    checked={allowsPreviewTunnel(accessServerConfig)}
+                    disabled={!canWriteAccess}
+                    aria-label={gt("Allow the preview tunnel")}
+                    onCheckedChange={(enabled) =>
+                      void updateAccessSettings({ enablePreviewTunnel: enabled })
+                    }
+                  />
                 }
               />
             ) : null}

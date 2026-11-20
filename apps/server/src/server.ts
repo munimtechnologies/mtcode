@@ -110,6 +110,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import * as DeviceHubProxy from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
+import * as PreviewTunnel from "./preview/PreviewTunnel.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as PreviewAgentActivity from "./preview/PreviewAgentActivity.ts";
 import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
@@ -230,6 +231,7 @@ import * as CodexPluginMarketplace from "./plugins/CodexPluginMarketplace.ts";
 import { pluginMarketplaceHttpApiLayer } from "./plugins/http.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
+import * as ThreadViewers from "./orchestration-v2/ThreadViewers.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
@@ -472,6 +474,7 @@ const layerThreadIssueService = ThreadIssueService.layer;
 
 const layerGitManager = GitManager.layer.pipe(
   Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
+  Layer.provide(layerPullRequestService.pipe(Layer.provide(RuntimeLayer.layerProjectService))),
   Layer.provideMerge(RuntimeLayer.layerProjectSetupScriptRunner),
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
@@ -568,6 +571,7 @@ const layerTerminal = TerminalManager.layer(
 );
 
 const layerPreview = Layer.empty.pipe(
+  Layer.provideMerge(PreviewTunnel.layer),
   Layer.provideMerge(PreviewManager.layer),
   Layer.provideMerge(layerPortScanner),
 );
@@ -856,6 +860,8 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(layerUsage),
   Layer.provideMerge(layerBackground),
+  // The same layer the event sink uses; memoized, subscriptions and batch ranking share it.
+  Layer.provideMerge(ThreadViewers.layer),
   Layer.provideMerge(layerResourceDiagnostics),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(TriageService.layer.pipe(Layer.provide(GitVcsDriver.layer))),
@@ -902,6 +908,7 @@ const layerMakeRoutes = Layer.mergeAll(
     GuestHttp.layer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
+    PreviewTunnel.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
     speechStreamRouteLayer,
@@ -909,57 +916,62 @@ const layerMakeRoutes = Layer.mergeAll(
   McpHttpServer.layer.pipe(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
+    Layer.provide(ProjectionStoreV2.layer),
   ),
   // Follows delegated tasks running in linked environments, including after a restart.
   Layer.effectDiscard(
     RemoteDelegation.RemoteDelegation.pipe(Effect.flatMap((remote) => remote.start())),
   ),
-).pipe(
-  Layer.provide(
-    PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
-  ),
-  // delegate_task to a linked environment, from /mcp and the follower above.
-  Layer.provide(RemoteDelegation.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
-  // Links agents ask for: shown in a thread from /mcp, answered over WebSocket.
-  Layer.provide(PeerLinkRequests.layer),
-  // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
-  Layer.provide(layerPullRequestService),
-  Layer.provide(layerThreadIssueService),
-  Layer.provide(layerIssueService),
-  Layer.provide(CodexPluginMarketplace.layer),
-  // The stream route and the WebSocket RPCs share one browser.
-  // The same activity instance RunExecutionService reports to, by layer memoization.
-  Layer.provide(
-    ServerBrowser.layer.pipe(
-      Layer.provide(Layer.merge(DesktopBrowserChannel.layer, PreviewAgentActivity.layer)),
+)
+  .pipe(
+    Layer.provide(
+      PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
     ),
-  ),
-  Layer.provide(PreviewBrowser.layer),
-  // Links to other environments, shared by Settings (WebSocket) and agents (/mcp).
-  Layer.provide(
-    PeerForwarding.layer.pipe(
-      Layer.provideMerge(PeerMcpClient.layer),
-      Layer.provideMerge(PeerLinks.layer),
+    // delegate_task to a linked environment, from /mcp and the follower above.
+    Layer.provide(RemoteDelegation.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
+    // Links agents ask for: shown in a thread from /mcp, answered over WebSocket.
+    Layer.provide(PeerLinkRequests.layer),
+    // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
+    Layer.provide(layerPullRequestService),
+    Layer.provide(layerThreadIssueService),
+    Layer.provide(layerIssueService),
+    Layer.provide(CodexPluginMarketplace.layer),
+    // The stream route and the WebSocket RPCs share one browser.
+    // The same activity instance RunExecutionService reports to, by layer memoization.
+    Layer.provide(
+      ServerBrowser.layer.pipe(
+        Layer.provide(Layer.merge(DesktopBrowserChannel.layer, PreviewAgentActivity.layer)),
+      ),
     ),
-  ),
-  Layer.provide(
-    SpeechService.layer.pipe(
-      Layer.provide(layerServerSettings),
-      Layer.provide(SpeechModelStore.layer),
+    Layer.provide(PreviewBrowser.layer),
+    // Links to other environments, shared by Settings (WebSocket) and agents (/mcp).
+    Layer.provide(
+      PeerForwarding.layer.pipe(
+        Layer.provideMerge(PeerMcpClient.layer),
+        Layer.provideMerge(PeerLinks.layer),
+      ),
     ),
-  ),
-  Layer.provide(CloudSpeech.layer.pipe(Layer.provide(SecretResolver.layer))),
-  Layer.provide(layerServerSettings),
-  Layer.provide(PreviewAutomationBroker.layer),
-  Layer.provide(ComputerTaskBroker.layer),
-  // Settings intentionally stay an open requirement so the broker reads the
-  // same ServerSettings instance the rest of the runtime (and tests) provide.
-  Layer.provide(ComputerViewBroker.layer),
-  Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
-  Layer.provide(layerCommandReadiness),
-  Layer.provide(ServerHttp.layerBrowserApiCors),
-  Layer.provide(ServerHttp.layerHttpCompression),
-);
+    Layer.provide(
+      SpeechService.layer.pipe(
+        Layer.provide(layerServerSettings),
+        Layer.provide(SpeechModelStore.layer),
+      ),
+    ),
+    Layer.provide(CloudSpeech.layer.pipe(Layer.provide(SecretResolver.layer))),
+    Layer.provide(layerServerSettings),
+    Layer.provide(PreviewAutomationBroker.layer),
+    Layer.provide(ComputerTaskBroker.layer),
+    // Settings intentionally stay an open requirement so the broker reads the
+    // same ServerSettings instance the rest of the runtime (and tests) provide.
+    Layer.provide(ComputerViewBroker.layer),
+  )
+  .pipe(
+    Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
+    Layer.provide(layerCommandReadiness),
+    Layer.provide(ServerHttp.layerBrowserApiCors),
+    Layer.provide(ServerHttp.layerHttpCompression),
+    Layer.provide(ServerHttp.layerUnloggedSignedRequests),
+  );
 
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {

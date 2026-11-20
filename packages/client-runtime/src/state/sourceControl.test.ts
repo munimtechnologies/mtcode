@@ -12,6 +12,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -169,7 +170,7 @@ describe("source control environment atoms", () => {
         } as unknown as WsRpcProtocolClient;
         const harness = yield* makeCommandHarness(client, true);
 
-        const result = yield* Effect.promise(() =>
+        const result = yield* Effect.exit(
           harness.atoms.cloneRepository.run(harness.registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -183,7 +184,7 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isSuccess(result)).toBe(true);
+        expect(Exit.isSuccess(result)).toBe(true);
         expect(promptRequests).toEqual(["clone-prompt-1"]);
       }),
     ),
@@ -230,7 +231,7 @@ describe("source control environment atoms", () => {
         } as unknown as WsRpcProtocolClient;
         const harness = yield* makeCommandHarness(client, true);
 
-        const result = yield* Effect.promise(() =>
+        const result = yield* Effect.exit(
           harness.atoms.publishRepository.run(harness.registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -247,8 +248,8 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isSuccess(result)).toBe(true);
-        if (AsyncResult.isSuccess(result)) {
+        expect(Exit.isSuccess(result)).toBe(true);
+        if (Exit.isSuccess(result)) {
           expect(result.value).toEqual(PUBLISH_RESULT);
         }
         expect(unaryCalls).toBe(0);
@@ -284,7 +285,7 @@ describe("source control environment atoms", () => {
         } as unknown as WsRpcProtocolClient;
         const harness = yield* makeCommandHarness(client, true);
 
-        const result = yield* Effect.promise(() =>
+        const result = yield* Effect.exit(
           harness.atoms.publishRepository.run(harness.registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -298,7 +299,7 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isFailure(result)).toBe(true);
+        expect(Exit.isFailure(result)).toBe(true);
       }),
     ),
   );
@@ -316,7 +317,7 @@ describe("source control environment atoms", () => {
         } as unknown as WsRpcProtocolClient;
         const harness = yield* makeCommandHarness(client, false);
 
-        const result = yield* Effect.promise(() =>
+        const result = yield* Effect.exit(
           harness.atoms.publishRepository.run(harness.registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -333,7 +334,7 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isSuccess(result)).toBe(true);
+        expect(Exit.isSuccess(result)).toBe(true);
         expect(unaryCalls).toBe(1);
         expect(promptCalls).toBe(0);
       }),
@@ -370,7 +371,7 @@ describe("source control environment atoms", () => {
         } as unknown as WsRpcProtocolClient;
         const harness = yield* makeCommandHarness(client, true);
 
-        const result = yield* Effect.promise(() =>
+        const result = yield* Effect.exit(
           harness.atoms.publishRepository.run(harness.registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -387,7 +388,7 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isFailure(result)).toBe(true);
+        expect(Exit.isFailure(result)).toBe(true);
         expect(promptCalls).toBe(1);
       }),
     ),
@@ -468,7 +469,7 @@ describe("source control environment atoms", () => {
         const state = vcsRefsCacheStateAtom({ environmentId: TARGET.environmentId });
 
         expect(registry.get(state).revision).toBe(0);
-        const publishResult = yield* Effect.promise(() =>
+        const publishResult = yield* Effect.exit(
           atoms.publishRepository.run(registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -480,11 +481,11 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isSuccess(publishResult)).toBe(true);
+        expect(Exit.isSuccess(publishResult)).toBe(true);
         expect(registry.get(state).revision).toBe(1);
         expect(removed).toEqual([`${TARGET.environmentId}:*`]);
 
-        const failedPublish = yield* Effect.promise(() =>
+        const failedPublish = yield* Effect.exit(
           atoms.publishRepository.run(registry, {
             environmentId: TARGET.environmentId,
             input: {
@@ -496,7 +497,7 @@ describe("source control environment atoms", () => {
           }),
         );
 
-        expect(AsyncResult.isFailure(failedPublish)).toBe(true);
+        expect(Exit.isFailure(failedPublish)).toBe(true);
         expect(registry.get(state).revision).toBe(2);
         expect(removed).toEqual([`${TARGET.environmentId}:*`, `${TARGET.environmentId}:*`]);
       }),

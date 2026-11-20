@@ -149,6 +149,11 @@ import Migration0104 from "./Migrations/095_TurnItemInlineWorkOutput.ts";
 import Migration0105 from "./Migrations/096_RepairStaleTitleRegeneration.ts";
 import Migration0106 from "./Migrations/097_IssueTrackerBindings.ts";
 import Migration0107 from "./Migrations/098_ActiveShellIndexIndexes.ts";
+// Upstream 099-102; registered as the next free fork ids.
+import Migration0108 from "./Migrations/099_BackgroundRecoveryIndexes.ts";
+import Migration0109 from "./Migrations/100_TurnStartReadIndexes.ts";
+import Migration0110 from "./Migrations/101_DelegatedTaskReadIndexes.ts";
+import Migration0111 from "./Migrations/102_ThreadItemCounts.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -279,6 +284,11 @@ const migrationEntries = [
   [105, "RepairStaleTitleRegeneration", Migration0105],
   [106, "IssueTrackerBindings", Migration0106],
   [107, "ActiveShellIndexIndexes", Migration0107],
+  // Upstream 099-102 (recovery/turn-start/delegated-task indexes, thread item counts).
+  [108, "BackgroundRecoveryIndexes", Migration0108],
+  [109, "TurnStartReadIndexes", Migration0109],
+  [110, "DelegatedTaskReadIndexes", Migration0110],
+  [111, "ThreadItemCounts", Migration0111],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

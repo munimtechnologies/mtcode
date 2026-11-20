@@ -191,9 +191,11 @@ function RootRouteBranch() {
     <>
       <TurnCompletionSoundSync />
       <DesktopDeepLinkNavigation />
-      {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
       {primaryEnvironmentAuthenticated || localEnvironmentDisabled ? (
-        <DesktopWebLinkCoordinator />
+        <>
+          <DesktopAppActivationCoordinator />
+          <DesktopWebLinkCoordinator />
+        </>
       ) : null}
       {isElectron ? <RunningThreadKeepAlive /> : null}
       <RelayClientInstallDialog />

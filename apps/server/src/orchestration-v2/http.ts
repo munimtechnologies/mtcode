@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthProvidersManageScope,
   EnvironmentHttpApi,
   type EnvironmentInternalError,
   type EnvironmentResourceNotFoundError,
@@ -240,7 +241,7 @@ export const layer = HttpApiBuilder.group(
         "dispatch",
         Effect.fn("environment.orchestration.dispatch")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
-          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          const session = yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
           // HttpApi narrows a union payload's static type; the decoded value is any command.
           const command = args.payload as OrchestrationV2Command;
           const result = yield* ThreadMessageIntake.dispatchCommand(
@@ -248,6 +249,7 @@ export const layer = HttpApiBuilder.group(
               createdBy: "user",
               creationSource: "creationSource" in command ? command.creationSource : "server",
             }),
+            { managesProviders: session.scopes.has(AuthProvidersManageScope) },
           ).pipe(
             withIntake,
             Effect.catch(

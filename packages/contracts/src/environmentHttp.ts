@@ -63,6 +63,7 @@ import {
   EnvironmentSpeechAccelerationRequest,
   EnvironmentSpeechModelLinkRequest,
   EnvironmentSpeechModelRequest,
+  EnvironmentSpeechModelDownload,
   EnvironmentSpeechModels,
   EnvironmentSpeechModelUnloadTimeoutRequest,
   EnvironmentSpeechPostProcessingRequest,
@@ -1071,7 +1072,7 @@ export class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
     HttpApiEndpoint.post("downloadModel", "/api/voice/models/download", {
       headers: OptionalBearerHeaders,
       payload: EnvironmentSpeechModelRequest,
-      success: EnvironmentSpeechModels,
+      success: EnvironmentSpeechModelDownload,
       error: [...EnvironmentScopedOperationErrors, EnvironmentRequestInvalidError],
     }).middleware(EnvironmentAuthenticatedAuth),
   )
@@ -1185,6 +1186,14 @@ class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
       headers: OptionalBearerHeaders,
       payload: EnvironmentCloudPreferencesRequest,
       success: EnvironmentCloudLinkStateResult,
+      error: EnvironmentHttpCloudErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("liveActivityPreference", "/api/connect/live-activity-preference", {
+      headers: OptionalBearerHeaders,
+      payload: Schema.Struct({ liveActivitiesEnabled: Schema.Boolean }),
+      success: Schema.Struct({ ok: Schema.Boolean }),
       error: EnvironmentHttpCloudErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
