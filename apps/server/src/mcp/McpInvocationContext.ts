@@ -25,6 +25,7 @@ const ALL_MCP_CAPABILITIES = [
   // MT Code: Codex monitor tools.
   "monitor",
   "issues",
+  "background-wait",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
@@ -205,7 +206,19 @@ export const hiddenFromOutsideClients = (): boolean => {
   return scope === undefined || scope.thread !== undefined;
 };
 
-const outsideClientGuards = new WeakSet<object>([hiddenFromOutsideClients]);
+/** `hiddenFromOutsideClients`, and hidden from a thread whose provider cannot hold for background work. */
+export const hiddenWithoutBackgroundWait = (): boolean => {
+  const fiber = Fiber.getCurrent();
+  const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
+  return (
+    scope === undefined || (scope.thread !== undefined && scope.capabilities.has("background-wait"))
+  );
+};
+
+const outsideClientGuards = new WeakSet<object>([
+  hiddenFromOutsideClients,
+  hiddenWithoutBackgroundWait,
+]);
 
 /** MT Code: `hiddenFromOutsideClients` narrowed further, e.g. to a capability. */
 export const hiddenFromOutsideClientsAnd = (predicate: () => boolean): (() => boolean) => {
