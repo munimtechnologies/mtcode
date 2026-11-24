@@ -1,7 +1,6 @@
 import { vcsActionLabelText } from "@t3tools/client-runtime/state/vcs";
 import { useMessages } from "gt-react-native";
 import { useMemo } from "react";
-import { useAtomValue } from "@effect/atom-react";
 
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 
@@ -9,17 +8,16 @@ import { useBranches } from "./queries";
 import { useEnvironmentQuery } from "./query";
 import { sourceControlEnvironment } from "./sourceControl";
 import { useVcsActionState } from "./use-vcs-action-state";
+import type { GitRepositoryTarget } from "./thread-git-target";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
-import { serverEnvironment } from "./server";
 
-export function useSelectedThreadGitState() {
+/** Git state for the selected thread's own folder, or for `repository` when given. */
+export function useSelectedThreadGitState(repository?: GitRepositoryTarget) {
   const messages = useMessages();
   const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
-  const serverConfig = useAtomValue(
-    serverEnvironment.configValueAtom(selectedThread?.environmentId ?? null),
-  );
+  const threadWorktree = useSelectedThreadWorktree();
+  const selectedThreadCwd = repository?.cwd ?? threadWorktree.selectedThreadCwd;
 
   const selectedThreadGitTarget = {
     environmentId: selectedThread?.environmentId ?? null,

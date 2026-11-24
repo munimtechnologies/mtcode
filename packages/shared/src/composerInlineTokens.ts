@@ -1,5 +1,10 @@
-import { parseComposerThreadLink } from "./composerTrigger.ts";
-import { markdownMathRanges } from "./markdownMath.ts";
+import { composerFileLinkPath, parseComposerThreadLink } from "./composerTrigger.ts";
+import { fileBasename } from "./path.ts";
+
+/** The formulas a Markdown parser finds in text, as source offsets. */
+export type FindMathRanges = (
+  text: string,
+) => ReadonlyArray<{ readonly start: number; readonly end: number }>;
 
 export type ComposerInlineToken =
   | {
@@ -29,16 +34,16 @@ export type ComposerInlineToken =
 
 export interface CollectComposerInlineTokensOptions {
   readonly preserveTrailingFrom?: ReadonlyArray<ComposerInlineToken>;
+  /** Formulas keep their literal tokens; without it, nothing is read as math. */
+  readonly findMath?: FindMathRanges;
 }
 
 type ComposerThreadInlineToken = Extract<ComposerInlineToken, { type: "thread" }>;
 
 /**
- * A skill name may start with a digit, but compact monetary amounts and
- * numeric expressions like "$20", "$20k", "$100M", and "$1e6" must stay prose:
- * the composer chips any matched `$name` token, known or not. Tokens beginning
- * with digits must not match numbers with currency/exponent suffixes, and must
- * contain at least one letter. Any currency symbol is accepted as the sigil.
+ * Amounts like "$20", "$20k", "$100M" and "$1e6" stay prose, since the composer chips any
+ * matched token: a name may start with a digit but needs a letter and no currency/exponent
+ * suffix. Any currency symbol works as the sigil.
  */
 const SKILL_MENTION_SOURCE =
   /(^|\s)\p{Sc}(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)/u
@@ -107,6 +112,7 @@ function collectMentionTokens(text: string): ComposerInlineToken[] {
     try {
       path = decodeURIComponent(encodedPath);
     } catch {}
+    path = composerFileLinkPath(encodedPath, path);
     const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
     const basename = separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
     const hasExternalScheme = URI_SCHEME_REGEX.test(path) && !WINDOWS_DRIVE_PATH_REGEX.test(path);
@@ -157,6 +163,7 @@ function collectMentionTokens(text: string): ComposerInlineToken[] {
  */
 export function composerMathRanges(
   text: string,
+  findMath: FindMathRanges,
   mentions: ReadonlyArray<ComposerInlineToken> = collectMentionTokens(text),
 ) {
   let masked = text;
@@ -167,7 +174,7 @@ export function composerMathRanges(
       "x".repeat(mention.end - mention.start) +
       masked.slice(mention.end);
   }
-  return markdownMathRanges(masked).map(({ start, end }) => ({
+  return findMath(masked).map(({ start, end }) => ({
     start,
     end,
     source: text.slice(start, end),
@@ -214,10 +221,26 @@ export function collectComposerInlineTokens(
   // TeX can contain literal skill and file tokens, especially inside \text{}.
   // They remain formula source rather than becoming composer context chips.
   // Confirmed trailing file links are masked too, so a kept chip is not read as TeX.
-  const math = matches.length > 0 ? composerMathRanges(text, matches) : [];
+  const math =
+    matches.length > 0 && options.findMath
+      ? composerMathRanges(text, options.findMath, matches)
+      : [];
   return matches
     .filter(
       (match) => !math.some((formula) => match.start < formula.end && match.end > formula.start),
     )
     .sort((left, right) => left.start - right.start);
+}
+
+/** Shows each `@`-file link by its file name, as its composer chip does, for one-line previews. */
+export function composerFileLinksToPlainText(text: string): string {
+  let result = "";
+  let cursor = 0;
+  // The composer reads a link as a mention only before whitespace, so one may end the text.
+  for (const token of collectMentionTokens(`${text} `)) {
+    if (!token.source.startsWith("[")) continue;
+    result += text.slice(cursor, token.start) + fileBasename(token.value);
+    cursor = token.end;
+  }
+  return result + text.slice(cursor);
 }

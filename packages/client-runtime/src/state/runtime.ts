@@ -104,10 +104,14 @@ interface EnvironmentQueryAtomOptions<Input, A, E, R> extends Omit<
   readonly idleTtlMs?: number;
   readonly refreshIntervalMs?: number;
   readonly timeout?: Duration.Input;
-  readonly refreshTrigger?: (target: {
-    readonly environmentId: EnvironmentIdType;
-    readonly input: Input;
-  }) => Atom.Atom<unknown> | undefined;
+  /** Each change of the returned signal refreshes the query; `query` is the data it refreshes. */
+  readonly refreshTrigger?: (
+    target: {
+      readonly environmentId: EnvironmentIdType;
+      readonly input: Input;
+    },
+    query: Atom.Atom<AsyncResult.AsyncResult<A, unknown>>,
+  ) => Atom.Atom<unknown> | undefined;
   readonly isFinal?: (value: A) => boolean;
   /**
    * Runs where each server answer lands, before readers see it, so derived records (summaries,
@@ -402,7 +406,9 @@ export function isAtomCommandInterrupted(result: AtomCommandResult<unknown, unkn
 export function squashAtomCommandFailure(result: {
   readonly cause: Cause.Cause<unknown>;
 }): unknown {
-  return Cause.squash(result.cause);
+  const squashed = Cause.squash(result.cause);
+  // A server `Effect.die("text")` decodes over RPC as a bare string; callers read `Error`s.
+  return typeof squashed === "string" ? new Error(squashed) : squashed;
 }
 
 export async function settleAsyncResult<A, E>(
@@ -915,7 +921,7 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
       options.refreshIntervalMs === undefined
         ? queryAtom
         : queryAtom.pipe(refreshEveryUntilFinal(options.refreshIntervalMs, isFinal));
-    const refreshTrigger = options.refreshTrigger?.(target);
+    const refreshTrigger = options.refreshTrigger?.(target, intervalQuery);
     return (
       refreshTrigger === undefined
         ? intervalQuery
@@ -1158,6 +1164,7 @@ export function createEnvironmentRpcCommand<
         readonly input: NoInfer<Input>;
       },
       registry: AtomRegistry.AtomRegistry,
+      exit: Exit.Exit<EnvironmentRpcSuccess<TTag>, unknown>,
     ) => Effect.Effect<void, never, R>;
   },
 ) {
@@ -1188,7 +1195,7 @@ export function createEnvironmentRpcCommand<
         Effect.tap(
           (result) => options.onSuccess?.(target, registry, result, started) ?? Effect.void,
         ),
-        Effect.ensuring(options.onSettled?.(target, registry) ?? Effect.void),
+        Effect.onExit((exit) => options.onSettled?.(target, registry, exit) ?? Effect.void),
       );
     },
   });

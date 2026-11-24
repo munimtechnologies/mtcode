@@ -350,6 +350,8 @@ export function ProviderModelsSection({
   const unreportedFavoriteModels = favoriteModels.flatMap((slug): ServerProviderModel[] =>
     reportedSlugs.has(slug) ? [] : [{ slug, name: slug, isCustom: false, capabilities: null }],
   );
+  // Segments are the hidden state itself (a drop rewrites it from them), so a toggled row
+  // moves to its new segment at once instead of holding its old placement.
   const displayModels = groupModelsForDisplay([...models, ...unreportedFavoriteModels], {
     favoriteModels: favoriteModelSet,
     hiddenModels: hiddenModelSet,
@@ -776,8 +778,10 @@ export function ProviderModelsSection({
               if (error) setError(null);
             }}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
               if (event.key === "Escape") {
                 event.preventDefault();
+                event.stopPropagation();
                 cancelAdd();
                 return;
               }

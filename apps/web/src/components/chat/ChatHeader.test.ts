@@ -1,9 +1,11 @@
 import {
   BearerConnectionTarget,
   PrimaryConnectionTarget,
+  SshConnectionProfile,
   SshConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 
 import { desktopLocalConnectionId } from "../../connection/desktopLocal";
@@ -43,8 +45,31 @@ describe("Computer View machine resolution", () => {
       capabilityAdvertised: true,
       threadMachine: resolveRemoteOpenState({
         target,
-        sshTarget:
-          options.sshAlias === undefined ? null : { alias: options.sshAlias, username: null },
+        routes:
+          options.sshAlias === undefined
+            ? []
+            : [
+                {
+                  target: new SshConnectionTarget({
+                    environmentId,
+                    label: "sol",
+                    connectionId: "ssh-1",
+                  }),
+                  profile: Option.some(
+                    new SshConnectionProfile({
+                      connectionId: "ssh-1",
+                      environmentId,
+                      label: "sol",
+                      target: {
+                        alias: options.sshAlias,
+                        username: null,
+                        hostname: "sol",
+                        port: null,
+                      },
+                    }),
+                  ),
+                },
+              ],
         remoteOpenTargets: undefined,
         isDesktopRenderer: options.isDesktopRenderer ?? true,
         hostEnvironmentId: null,

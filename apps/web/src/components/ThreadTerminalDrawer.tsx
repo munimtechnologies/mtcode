@@ -1,4 +1,5 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
+import { contextMenuSourceOf } from "../contextMenuSource";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { msg, T, useGT, useMessages } from "gt-react";
@@ -984,6 +985,7 @@ function TerminalSessionViewport({
               readOnly: !hasTerminalWriteAccess(),
             }),
             { x: event.clientX, y: event.clientY },
+            contextMenuSourceOf(event),
           );
         } catch (error) {
           reportIfCurrent(requestId, error, m(msg("Unable to open the terminal context menu")));

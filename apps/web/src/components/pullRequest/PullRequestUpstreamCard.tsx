@@ -4,6 +4,7 @@ import { memo } from "react";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 
 import { cn } from "~/lib/utils";
+import { contextMenuSourceOf } from "~/contextMenuSource";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { Button } from "../ui/button";
@@ -69,6 +70,7 @@ function PullRequestUpstreamCardImpl({
           url: entry.url,
           openLabel: openOnHostLabel(sourceControlClients.get(entry.provider)),
           position: { x: event.clientX, y: event.clientY },
+          source: contextMenuSourceOf(event),
         });
       }}
       className={cn(

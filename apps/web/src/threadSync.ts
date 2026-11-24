@@ -3,18 +3,13 @@ import { msg } from "gt-react";
 
 import { m, type MessageResolver } from "./i18n/messages";
 
-export type ThreadSyncPhase = "loading" | "syncing" | "reconnecting";
+export type ThreadSyncPhase = "loading" | "syncing" | "failed";
 
 export function resolveThreadSyncPhase(input: {
   readonly detailExists: boolean;
   readonly shellExists: boolean;
   readonly status: EnvironmentThreadStatus;
-  /**
-   * The thread subscription's unresolved failure. A failed subscription stays on
-   * "cached"/"empty" while it retries, so without this a broken stream would show
-   * "Syncing messages..." forever.
-   */
-  readonly hasError?: boolean;
+  readonly hasError: boolean;
 }): ThreadSyncPhase | null {
   if (!input.shellExists) {
     return null;
@@ -24,7 +19,8 @@ export function resolveThreadSyncPhase(input: {
     case "empty":
     case "cached":
     case "synchronizing":
-      return input.hasError === true ? "reconnecting" : input.detailExists ? "syncing" : "loading";
+      if (!input.detailExists) return "loading";
+      return input.hasError ? "failed" : "syncing";
     case "deleted":
     case "live":
       return null;
@@ -37,7 +33,7 @@ export function threadSyncLabel(phase: ThreadSyncPhase, resolve: MessageResolver
       return resolve(msg("Loading messages..."));
     case "syncing":
       return resolve(msg("Syncing messages..."));
-    case "reconnecting":
-      return resolve(msg("Reconnecting..."));
+    case "failed":
+      return resolve(msg("Could not sync messages"));
   }
 }

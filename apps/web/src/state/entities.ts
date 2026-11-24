@@ -66,9 +66,6 @@ const EMPTY_THREAD_PROJECTION_ATOM = Atom.make<EnvironmentThread | null>(null).p
 const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pipe(
   Atom.withLabel("web-thread-status:empty"),
 );
-const EMPTY_THREAD_ERROR_ATOM = Atom.make<string | null>(null).pipe(
-  Atom.withLabel("web-thread-error:empty"),
-);
 const EMPTY_VISIBLE_TURN_ITEMS_ATOM = Atom.make(EMPTY_VISIBLE_TURN_ITEMS).pipe(
   Atom.withLabel("web-thread-visible-turn-items:empty"),
 );
@@ -80,6 +77,9 @@ const EMPTY_ASSISTANT_MESSAGE_TEXT_ATOM = Atom.make<string | null>(null).pipe(
 );
 const EMPTY_LAST_VISITED_AT_ATOM = Atom.make<DateTime.Utc | null>(null).pipe(
   Atom.withLabel("web-thread-last-visited:empty"),
+);
+const EMPTY_THREAD_ERROR_ATOM = Atom.make<string | null>(null).pipe(
+  Atom.withLabel("web-thread-error:empty"),
 );
 const EMPTY_UPDATED_AT_ATOM = Atom.make<DateTime.Utc | null>(null).pipe(
   Atom.withLabel("web-thread-updated-at:empty"),

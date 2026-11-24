@@ -48,11 +48,13 @@ describe("renderGhosttySnapshot", () => {
       get: (target, key) =>
         key === "canvas"
           ? target.canvas
-          : key === "fillRect"
-            ? () => events.push("fill")
-            : key === "fillText"
-              ? () => events.push("text")
-              : () => {},
+          : key === "getTransform"
+            ? () => ({ a: 1, d: 1 })
+            : key === "fillRect"
+              ? () => events.push("fill")
+              : key === "fillText"
+                ? () => events.push("text")
+                : () => {},
       set: (_target, key, value) => (key === "fillStyle" && styles.push(String(value)), true),
     });
   const highlight = { row: 0, startColumn: 0, endColumn: 0, active: false };

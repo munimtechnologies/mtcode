@@ -48,7 +48,7 @@
 
 ## Introduction
 
-MT Code is a free, open-source desktop app for running and controlling coding agents — Claude Code, Codex, Cursor, Grok Build, OpenCode, Kiro, Pi, Muse Code, Vercel fx, Google Antigravity, and any [ACP](./docs/user/providers-acp.md) agent — from one place. It is [Munim Technologies](https://munimtech.com)' fork of [T3 Code](https://github.com/pingdotgg/t3code) with extra features and fixes, and anyone can download and use it.
+MT Code is a free, open-source desktop app for running and controlling coding agents — Claude Code, Codex, Cursor, Grok Build, OpenCode, Kiro, Pi, Muse Code, Vercel fx, Google Antigravity, and any [ACP](./docs/user/providers-acp.md) agent — from one place. It is [Munim Technologies](https://munimtech.com)' unofficial fork of [T3 Code](https://github.com/pingdotgg/t3code) with extra features and fixes, and anyone can download and use it (see [Trademarks](#trademarks)).
 
 ## Download
 
@@ -127,7 +127,7 @@ This table lists only the differences, roughly in the order of how much they cha
 | **Mobile app** — MT Code has no app of its own; T3 Code's app pairs with an MT Code desktop and works with it                                                                                                                                                                                                                                                                                                                                          |   ❌    | ✅ [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) · [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) |
 | **Hosted web app** — MT Code's own was retired; use T3 Connect or your own tunnel instead                                                                                                                                                                                                                                                                                                                                                              |   ❌    |                                                            ✅ [app.t3.codes](https://app.t3.codes)                                                            |
 
-Everything else T3 Code does — multi-provider agent control, checkpoints and diffs, file previews (office, PDF, fonts, Mermaid, archives, SQLite), the Issues page (GitHub, GitLab, Azure DevOps, Forgejo, and Linear issues, linkable to threads, with a fork's upstream issues listed too), agents opening, updating, and merging pull requests and reading failing CI logs through MCP tools, remote access from T3 Code's [web](https://app.t3.codes) and mobile apps, Connect tunnels, forwarding another environment's ports to this machine, linked environments (Labs beta, several at once), the whole app translated into every supported language in Settings → General → Language & Region (MT Code-only screens stay in English), custom theme CSS and agents restyling the app through the theme tools, approving new T3 Connect devices — works here too.
+Everything else T3 Code does — multi-provider agent control, checkpoints and diffs, projects that cover several repositories, [Workflows](./docs/user/workflows.md) (Labs beta), file previews (office, PDF, fonts, Mermaid, archives, SQLite), the Issues page (GitHub, GitLab, Azure DevOps, Forgejo, and Linear issues, linkable to threads, with GitHub issue statuses, several Linear accounts and teams, and a fork's upstream issues listed too), agents opening, updating, and merging pull requests (a whole stack at once) and reading failing CI logs through MCP tools, outside agents following milestones as MCP events or webhooks, remote access from T3 Code's [web](https://app.t3.codes) and mobile apps, Connect tunnels, forwarding another environment's ports to this machine, the Environments map of your machines, linked environments (Labs beta, several at once), dictation with Apple Speech on a Mac, the whole app translated into every supported language in Settings → General → Language & Region (MT Code-only screens stay in English), custom theme CSS and agents restyling the app through the theme tools, approving new T3 Connect devices — works here too.
 
 ## Documentation
 
@@ -142,6 +142,8 @@ Full docs live in [docs/](./docs):
 - [Voice input](./docs/user/voice-input.md)
 - [Attachments](./docs/user/attachments.md)
 - [Project settings](./docs/user/project-settings.md)
+- [Projects with several repositories](./docs/user/multi-repo-projects.md)
+- [Workflows](./docs/user/workflows.md)
 - [Appearance preferences](./docs/user/appearance.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Thread messaging](./docs/user/thread-messaging.md)
@@ -155,10 +157,14 @@ Full docs live in [docs/](./docs):
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 - [Run T3 Code as a background service](./docs/user/background-service.md)
 
-[All docs](./docs/README.md) has the full list. To build from source, follow the [development runbook](./docs/operations/development.md#first-checkout); the [architecture overview](./docs/internals/overview.md) explains how it works.
+[All docs](./docs/README.md) has the full list. To build from source, follow the [development runbook](./docs/operations/00_development.md#first-checkout); the [architecture overview](./docs/internals/01_architecture.md) explains how it works.
 
 ## Relationship to upstream
 
 MT Code does not auto-merge [pingdotgg/t3code](https://github.com/pingdotgg/t3code). Upstream lands only when you explicitly ask an agent to merge it. Features built here are offered upstream as PRs when they fit; some MT Code features started as unmerged upstream PRs we adopted. Bug reports about MT Code builds belong on [this repo's issues](https://github.com/munimtechnologies/mtcode/issues) — please don't file MT Code problems upstream.
 
 MT Code exists because T3 Code is truly open. Credit and thanks to the T3 team.
+
+## Trademarks
+
+MT Code is an unofficial fork. It is not affiliated with or endorsed by T3 Tools, Inc. The **T3 Code** name, wordmark, logos, and application icons belong to T3 Tools, Inc.; MT Code ships under its own name and branding and mentions T3 Code only to say where it comes from and how the two differ. See [TRADEMARK.md](./TRADEMARK.md) for T3 Tools' trademark and branding policy.

@@ -8,13 +8,16 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentId,
   type ScopedProjectRef,
+  type T3ProjectFile,
   type ThreadId,
 } from "@t3tools/contracts";
 import { type AnyRouter, useRouter } from "@tanstack/react-router";
+import { flushSync } from "react-dom";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
   type DraftId,
+  type DraftSessionState,
   type DraftThreadEnvMode,
   type DraftThreadState,
   useComposerDraftStore,
@@ -24,12 +27,13 @@ import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
+  resolveGroupDefaultProject,
   selectProjectGroupingSettings,
+  type ProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import {
-  readProject,
   readProjects,
   readThreadShell,
   readThreadShells,
@@ -48,7 +52,7 @@ import {
   threadHasStarted,
 } from "../lib/chatThreadActions";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
+import { peekT3ProjectFile, readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { shouldReadProjectFileForNewThreadDefaults } from "../session-logic";
 import { environmentServerConfigsAtom } from "../state/server";
@@ -58,7 +62,7 @@ import {
 } from "../providerInstances";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { getClientSettings } from "./useSettings";
+import { getClientSettings, useClientSettings } from "./useSettings";
 import { getLocalStorageItem, useLocalStorage } from "./useLocalStorage";
 import * as Schema from "effect/Schema";
 import { useAtomValue } from "@effect/atom-react";
@@ -76,6 +80,39 @@ export function readLastUsedProjectKey(): string | null {
   } catch {
     return null;
   }
+}
+
+// Drafts that opened before their project's t3.json was read. A send waits for the file's
+// workspace default unless the user has already chosen a workspace.
+interface ProvisionalWorkspace {
+  readonly envMode: DraftThreadEnvMode;
+  // A reused draft keeps an earlier "manual" marker; only a switch to manual after opening is a choice.
+  readonly openedManual: boolean;
+}
+
+const pendingWorkspaceDefaults = new Map<
+  DraftId,
+  ProvisionalWorkspace & { readonly settled: Promise<void> }
+>();
+
+function keepsProvisionalWorkspace(
+  draft: DraftSessionState | null,
+  provisional: ProvisionalWorkspace,
+): draft is DraftSessionState {
+  return (
+    draft !== null &&
+    draft.promotedTo == null &&
+    draft.envMode === provisional.envMode &&
+    draft.worktreePath === null &&
+    (provisional.openedManual || draft.environmentSelection !== "manual")
+  );
+}
+
+export function readPendingWorkspaceDefault(draftId: DraftId): Promise<void> | null {
+  const pending = pendingWorkspaceDefaults.get(draftId);
+  if (pending === undefined) return null;
+  const draft = useComposerDraftStore.getState().getDraftSession(draftId);
+  return keepsProvisionalWorkspace(draft, pending) ? pending.settled : null;
 }
 
 interface NewThreadWorkspaceOptions {
@@ -145,8 +182,6 @@ export function createNewThreadHandler(router: AnyRouter) {
       if (composerDraftHasUserContent(getComposerDraft(draftId))) return;
       setPrompt(draftId, options.prompt);
     };
-    const requestingRouteHref = router.state.location.href;
-    const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
     const currentRouteTarget = getCurrentRouteTarget();
     // The target project's configured model and permission defaults win.
     // Interaction mode carries from the thread being viewed. Branch,
@@ -212,12 +247,7 @@ export function createNewThreadHandler(router: AnyRouter) {
       ) ?? requestedProject;
     // Read the settings of the environment that will actually host the
     // thread (it may differ from the requested one after retargeting).
-    const targetServerSettings =
-      environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
-    // Removal can land while the project file is read; a draft opened
-    // after that belongs to a project that no longer exists.
-    const abandonedSinceRequest = () =>
-      routeChangedSinceRequest() || (project !== undefined && readProject(projectRef) === null);
+    const targetServerSettings = targetServerConfig?.settings ?? DEFAULT_SERVER_SETTINGS;
     const projectSettings = resolveProjectSettings(
       targetServerSettings,
       project?.id ?? null,
@@ -269,22 +299,8 @@ export function createNewThreadHandler(router: AnyRouter) {
       targetEnvironmentId: projectRef.environmentId,
       options,
     });
-    // The shared resolver owns the priority order. The t3.json read is
-    // skipped entirely when a higher-priority source decides or the
-    // environment cannot serve: executeAtomQuery waits on a live RPC, so
-    // a down machine would leave New Thread hanging.
-    const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-      const connectionPhase = readEnvironmentConnectionPhase(projectRef.environmentId);
-      const consultProjectFile =
-        project !== undefined &&
-        shouldReadProjectFileForNewThreadDefaults(
-          projectSettings.settings.defaultThreadEnvMode,
-          connectionPhase,
-        );
-      const projectFile = consultProjectFile
-        ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
-        : null;
-      return resolveNewThreadEnvMode({
+    const envModeFor = (projectFile: T3ProjectFile | null): DraftThreadEnvMode =>
+      resolveNewThreadEnvMode({
         projectSettings: resolveProjectSettings(
           targetServerSettings,
           project?.id ?? null,
@@ -304,25 +320,61 @@ export function createNewThreadHandler(router: AnyRouter) {
             [],
           ) > 0,
       });
+    const startFromOriginFor = (envMode: DraftThreadEnvMode) =>
+      resolveNewDraftStartFromOrigin({
+        envMode,
+        newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
+      });
+    // The draft opens without waiting on t3.json: a cold read takes seconds on a loaded host.
+    // Its workspace default lands afterwards unless the user picked a workspace or sent first.
+    const resolveDefaultEnvMode = () => {
+      // The shared resolver owns the priority order. Environment queries wait on a live RPC, so
+      // the t3.json read is skipped when a higher-priority source decides or the machine is down.
+      const consultProjectFile =
+        project !== undefined &&
+        shouldReadProjectFileForNewThreadDefaults(
+          projectSettings.settings.defaultThreadEnvMode,
+          readEnvironmentConnectionPhase(projectRef.environmentId),
+        );
+      if (!consultProjectFile) return { envMode: envModeFor(null), applyProjectFile: () => {} };
+      const projectFileRead = readT3ProjectFile(project.environmentId, project.workspaceRoot);
+      const cachedProjectFile = peekT3ProjectFile(project.environmentId, project.workspaceRoot);
+      if (cachedProjectFile !== undefined) {
+        return { envMode: envModeFor(cachedProjectFile), applyProjectFile: () => {} };
+      }
+      const envMode = envModeFor(null);
+      const applyProjectFile = (draftId: DraftId) => {
+        const provisional: ProvisionalWorkspace = {
+          envMode,
+          openedManual: getDraftSession(draftId)?.environmentSelection === "manual",
+        };
+        const settled = projectFileRead
+          .then((projectFile) => {
+            const fileEnvMode = envModeFor(projectFile);
+            const draft = getDraftSession(draftId);
+            if (fileEnvMode === envMode || !keepsProvisionalWorkspace(draft, provisional)) return;
+            // Commit before a waiting send re-reads the composer's workspace.
+            flushSync(() =>
+              setDraftThreadContext(draftId, {
+                envMode: fileEnvMode,
+                ...(draft.startFromOrigin === startFromOriginFor(envMode)
+                  ? { startFromOrigin: startFromOriginFor(fileEnvMode) }
+                  : {}),
+              }),
+            );
+          })
+          .finally(() => {
+            if (pendingWorkspaceDefaults.get(draftId)?.settled === settled) {
+              pendingWorkspaceDefaults.delete(draftId);
+            }
+          });
+        pendingWorkspaceDefaults.set(draftId, { ...provisional, settled });
+      };
+      return { envMode, applyProjectFile };
     };
     const logicalProjectKey = project
       ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
       : scopedProjectKey(projectRef);
-    // Another opener (home's own first-project draft) may have reached this project's draft first.
-    // Matches lag the location during a navigation, so compare against the location.
-    const resultIfAbandoned = () => {
-      const draft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
-      if (draft === null || draft.promotedTo != null || readProject(projectRef) === null) {
-        return null;
-      }
-      const draftHref = router.buildLocation({
-        to: "/draft/$draftId",
-        params: { draftId: draft.draftId },
-      }).href;
-      return router.state.location.href === draftHref
-        ? { draftId: draft.draftId, threadId: draft.threadId }
-        : null;
-    };
     const hasBranchOption = workspaceOptions?.branch !== undefined;
     const hasWorktreePathOption = workspaceOptions?.worktreePath !== undefined;
     const hasEnvModeOption = workspaceOptions?.envMode !== undefined;
@@ -359,37 +411,17 @@ export function createNewThreadHandler(router: AnyRouter) {
         const hasExplicitWorkspaceOption =
           hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasStartFromOriginOption;
         let workspaceContext: NewThreadWorkspaceOptions | null = null;
+        let applyProjectFile: ((draftId: DraftId) => void) | null = null;
         if (hasExplicitWorkspaceOption) {
           workspaceContext = pickExplicitWorkspaceOptions(workspaceOptions);
         } else if (!isDraftAlreadyOpen) {
-          const defaultEnvMode = await resolveDefaultEnvMode();
-          if (abandonedSinceRequest()) {
-            return resultIfAbandoned();
-          }
-          // Concurrent calls may change the draft; stale resets, remaps, or navigation could clobber it.
-          const routeTargetNow = getCurrentRouteTarget();
-          const openedMeanwhile =
-            routeTargetNow?.kind === "draft" &&
-            routeTargetNow.draftId === emptyStoredDraftThread.draftId;
-          const promotedMeanwhile =
-            storedDraftThreadRef !== null && readThreadShell(storedDraftThreadRef) !== null;
-          const remappedMeanwhile =
-            getDraftSessionByLogicalProjectKey(logicalProjectKey)?.draftId !==
-            emptyStoredDraftThread.draftId;
-          const investedMeanwhile = composerDraftHasUserContent(
-            getComposerDraft(emptyStoredDraftThread.draftId),
-          );
-          if (openedMeanwhile || promotedMeanwhile || remappedMeanwhile || investedMeanwhile) {
-            return null;
-          }
+          const defaultEnvMode = resolveDefaultEnvMode();
+          applyProjectFile = defaultEnvMode.applyProjectFile;
           workspaceContext = {
             branch: null,
             worktreePath: null,
-            envMode: defaultEnvMode,
-            startFromOrigin: resolveNewDraftStartFromOrigin({
-              envMode: defaultEnvMode,
-              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-            }),
+            envMode: defaultEnvMode.envMode,
+            startFromOrigin: startFromOriginFor(defaultEnvMode.envMode),
           };
         }
         if (workspaceContext) {
@@ -432,6 +464,7 @@ export function createNewThreadHandler(router: AnyRouter) {
           threadId: emptyStoredDraftThread.threadId,
         };
         seedPrompt(emptyStoredDraftThread.draftId);
+        applyProjectFile?.(emptyStoredDraftThread.draftId);
         const routeTargetAfterWrites = getCurrentRouteTarget();
         if (
           routeTargetAfterWrites?.kind === "draft" &&
@@ -486,44 +519,16 @@ export function createNewThreadHandler(router: AnyRouter) {
     const threadId = newThreadId();
     const createdAt = new Date().toISOString();
     return (async () => {
-      const initialEnvMode = workspaceOptions?.envMode ?? (await resolveDefaultEnvMode());
-      if (abandonedSinceRequest()) {
-        return resultIfAbandoned();
-      }
-      // Reuse drafts registered while awaiting so their pending navigation cannot lose them.
-      const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
-      if (
-        racedDraft &&
-        racedDraft.draftId !== storedDraftThread?.draftId &&
-        readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
-      ) {
-        setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, racedDraft.draftId, {
-          threadId: racedDraft.threadId,
-          createdAt: racedDraft.createdAt,
-          runtimeMode: resolveImplicitRuntimeMode(racedDraft.draftId) ?? racedDraft.runtimeMode,
-          interactionMode: racedDraft.interactionMode,
-          ...pickExplicitWorkspaceOptions(workspaceOptions),
-        });
-        seedPrompt(racedDraft.draftId);
-        await router.navigate({
-          to: "/draft/$draftId",
-          params: { draftId: racedDraft.draftId },
-          replace: options?.replace ?? false,
-        });
-        return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
-      }
+      const defaultEnvMode =
+        workspaceOptions?.envMode === undefined ? resolveDefaultEnvMode() : null;
+      const initialEnvMode = workspaceOptions?.envMode ?? defaultEnvMode?.envMode ?? "local";
       setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
         threadId,
         createdAt,
         branch: workspaceOptions?.branch ?? null,
         worktreePath: workspaceOptions?.worktreePath ?? null,
         envMode: initialEnvMode,
-        startFromOrigin:
-          workspaceOptions?.startFromOrigin ??
-          resolveNewDraftStartFromOrigin({
-            envMode: initialEnvMode,
-            newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
-          }),
+        startFromOrigin: workspaceOptions?.startFromOrigin ?? startFromOriginFor(initialEnvMode),
         runtimeMode: projectSettings.settings.defaultRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
       });
@@ -541,6 +546,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         ),
       });
       seedPrompt(draftId);
+      defaultEnvMode?.applyProjectFile(draftId);
       await router.navigate({
         to: "/draft/$draftId",
         params: { draftId },
@@ -556,6 +562,7 @@ export function resolveDefaultProjectRef(
   projectOrder: readonly string[],
   lastUsedProjectKey: string | null,
   fallbackReady = true,
+  groupingSettings?: ProjectGroupingSettings,
 ): ScopedProjectRef | null {
   const lastUsed = projects.find(
     (project) =>
@@ -564,8 +571,9 @@ export function resolveDefaultProjectRef(
   );
   if (lastUsed) return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
   if (!fallbackReady) return null;
-  const [defaultProject] = orderItemsByPreferredIds({
-    items: projects.filter((project) => project.archivedAt == null),
+  const liveProjects = projects.filter((project) => project.archivedAt == null);
+  const [firstProject] = orderItemsByPreferredIds({
+    items: liveProjects,
     preferredIds: projectOrder,
     getId: getProjectOrderKey,
     getPreferenceIds: (project) => [
@@ -573,7 +581,11 @@ export function resolveDefaultProjectRef(
       legacyProjectCwdPreferenceKey(project.workspaceRoot),
     ],
   });
-  return defaultProject ? scopeProjectRef(defaultProject.environmentId, defaultProject.id) : null;
+  if (!firstProject) return null;
+  const defaultProject = groupingSettings
+    ? resolveGroupDefaultProject(firstProject, liveProjects, groupingSettings)
+    : firstProject;
+  return scopeProjectRef(defaultProject.environmentId, defaultProject.id);
 }
 
 export function useHandleNewThread() {
@@ -600,11 +612,13 @@ export function useHandleNewThread() {
   );
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
+  const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const defaultProjectRef = resolveDefaultProjectRef(
     projects,
     projectOrder,
     lastUsedProjectKey,
     defaultProjectFallbackReady,
+    groupingSettings,
   );
 
   return {

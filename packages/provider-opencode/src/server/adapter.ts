@@ -13,6 +13,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import {
+  type AgentFeedbackMode,
   defaultInstanceIdForDriver,
   type ModelSelection,
   type OrchestrationV2AppThread,
@@ -298,6 +299,7 @@ interface ActiveOpenCodeTurn {
   readonly appThread: OrchestrationV2AppThread;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+  readonly agentFeedback: AgentFeedbackMode;
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
   readonly providerThreadId: OrchestrationV2ProviderTurn["providerThreadId"];
   readonly runOrdinal: number;
@@ -744,6 +746,17 @@ export function openCodePermissionRules(
         }
       }
     }
+  }
+
+  // The thread's other folders count as workspace; `edit` still decides whether writes ask.
+  for (const root of runtimePolicy.workspace?.extraRoots ?? []) {
+    // A glob character in the path would allow sibling folders, so such a root keeps asking.
+    if (/[*?]/.test(root)) continue;
+    rules.push({
+      permission: "external_directory",
+      pattern: `${root.replace(/\/$/, "")}/*`,
+      action: "allow",
+    });
   }
 
   return rules;
@@ -2547,6 +2560,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             appThread: state.appThread,
             modelSelection: state.appThread.modelSelection,
             runtimePolicy: state.parentSubagent.parentTurn.runtimePolicy,
+            agentFeedback: state.parentSubagent.parentTurn.agentFeedback,
             providerTurnId,
             providerThreadId: providerTurn.providerThreadId,
             runOrdinal: state.parentSubagent.parentTurn.runOrdinal,
@@ -3527,7 +3541,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               status: "idle" as const,
               updatedAt: snapshotNow,
             },
-            providerTurns: state === undefined ? [] : [...state.providerTurns.values()],
             messages,
             runtimeRequests: state === undefined ? [] : [...state.runtimeRequests.values()],
             providerPayload: nativeMessages,
@@ -3540,13 +3553,18 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           const agent =
             getModelSelectionStringOptionValue(turn.modelSelection, "agent") ??
             (turn.runtimePolicy.interactionMode === "plan" ? "plan" : undefined);
-          const variant = getModelSelectionStringOptionValue(turn.modelSelection, "variant");
+          const variant = OpenCodeRuntime.openCodeVariant(turn.modelSelection);
           return {
             ...(agent === undefined ? {} : { agent }),
             ...(variant === undefined ? {} : { variant }),
             system: [
               orchestrationSystemPrompt,
-              buildRuntimeInstructions({ harness: "OpenCode", model: turn.modelSelection.model }),
+              buildRuntimeInstructions({
+                harness: "OpenCode",
+                model: turn.modelSelection.model,
+                agentFeedback: hasT3Mcp ? turn.agentFeedback : "off",
+                runtimePolicy: turn.runtimePolicy,
+              }),
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -3818,6 +3836,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 appThread: turnInput.appThread,
                 modelSelection: turnInput.modelSelection,
                 runtimePolicy: turnInput.runtimePolicy,
+                agentFeedback: turnInput.agentFeedback ?? "off",
                 providerTurnId,
                 providerThreadId: turnInput.providerThread.id,
                 runOrdinal: turnInput.runOrdinal,

@@ -74,6 +74,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as MacPermissions from "../permissions/MacPermissions.ts";
 import * as LoopbackTunnel from "../preview/LoopbackTunnel.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as AppleSpeech from "../speech/AppleSpeech.ts";
 // MT Code services the fork's startup also needs.
 import * as ComputerHistoryManager from "../computerHistory/ComputerHistoryManager.ts";
 import * as DesktopDeepLink from "./DesktopDeepLink.ts";
@@ -246,6 +247,7 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
           Layer.mock(DesktopDeepLink.DesktopDeepLink, { configure: Effect.void }),
           Layer.mock(DesktopTray.DesktopTray, { configure: Effect.void }),
           Layer.mock(DesktopNotifications.DesktopNotifications, {}),
+          Layer.mock(AppleSpeech.AppleSpeech, {}),
           Layer.mock(LoopbackTunnel.LoopbackTunnel, {}),
           Layer.mock(PreviewManager.PreviewManager, {
             isBrowserPartition: () => {

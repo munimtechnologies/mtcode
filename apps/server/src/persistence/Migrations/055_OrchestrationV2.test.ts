@@ -15,7 +15,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationManifest.map(([id]) => id),
-        Array.from({ length: 111 }, (_, index) => index + 1),
+        Array.from({ length: 120 }, (_, index) => index + 1),
       );
     }),
   );
@@ -77,6 +77,15 @@ layer("055_OrchestrationV2", (it) => {
         [109, "TurnStartReadIndexes"],
         [110, "DelegatedTaskReadIndexes"],
         [111, "ThreadItemCounts"],
+        [112, "IssueTrackerAdditionalScopes"],
+        [113, "ProjectionProjectsTrackedFolders"],
+        [114, "TaskFolders"],
+        [115, "WorktreePathKeyIndex"],
+        [116, "DeferredSlashCommandIndex"],
+        [117, "AgentFeedback"],
+        [118, "IssueTrackerAccounts"],
+        [119, "Workflows"],
+        [120, "SupersededRunAttemptIndex"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -140,6 +149,15 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 109, name: "TurnStartReadIndexes" },
         { migration_id: 110, name: "DelegatedTaskReadIndexes" },
         { migration_id: 111, name: "ThreadItemCounts" },
+        { migration_id: 112, name: "IssueTrackerAdditionalScopes" },
+        { migration_id: 113, name: "ProjectionProjectsTrackedFolders" },
+        { migration_id: 114, name: "TaskFolders" },
+        { migration_id: 115, name: "WorktreePathKeyIndex" },
+        { migration_id: 116, name: "DeferredSlashCommandIndex" },
+        { migration_id: 117, name: "AgentFeedback" },
+        { migration_id: 118, name: "IssueTrackerAccounts" },
+        { migration_id: 119, name: "Workflows" },
+        { migration_id: 120, name: "SupersededRunAttemptIndex" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

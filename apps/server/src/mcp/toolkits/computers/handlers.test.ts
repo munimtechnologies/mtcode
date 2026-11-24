@@ -52,6 +52,7 @@ const project: ProjectStore.ProjectRow = {
   faviconPath: null,
   projectIcon: null,
   scripts: [],
+  trackedFolders: [],
   createdAt: now,
   updatedAt: now,
   pinnedAt: null,

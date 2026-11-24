@@ -25,6 +25,7 @@ import {
   AuthMcpRegisteredClient,
   AuthMcpRegistrationError,
   AuthMcpTokenError,
+  AuthMcpRevokeRequest,
   AuthMcpTokenRequest,
   AuthMcpTokenResult,
   AuthPairingCredentialResult,
@@ -71,6 +72,7 @@ import {
   EnvironmentSpeechStatus,
   EnvironmentSpeechTranscriptionResult,
 } from "./speech.ts";
+import { PeerLinkClientPairingCredential, PeerLinkClientPairingRequest } from "./peerLink.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
   OrchestrationV2Command,
@@ -279,6 +281,8 @@ export class EnvironmentInternalError extends Schema.TaggedError<EnvironmentInte
   {
     code: Schema.Literal("internal_error"),
     reason: EnvironmentInternalErrorReason,
+    /** A reason safe to show the user, when the failure has one. */
+    detail: Schema.optionalKey(Schema.String),
     traceId: TrimmedNonEmptyString,
   },
   { httpApiStatus: 500 },
@@ -745,6 +749,12 @@ class EnvironmentMcpOAuthHttpApi extends HttpApiGroup.make("mcpOAuth")
       payload: AuthMcpTokenRequest,
       success: AuthMcpTokenResult,
       error: AuthMcpTokenError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("revoke", "/oauth/mcp/revoke", {
+      payload: AuthMcpRevokeRequest,
+      success: HttpApiSchema.Empty(200),
     }),
   ) {}
 
@@ -1242,6 +1252,23 @@ export class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifica
   ) {}
 
 /**
+ * What a linking environment asks of this one over its link, outside `/mcp`. The handler accepts
+ * only a peer link's own session, so no agent's tool list ever carries it.
+ */
+class EnvironmentPeerLinkHttpApi extends HttpApiGroup.make("peerLink").add(
+  HttpApiEndpoint.post("clientPairing", "/api/peer-link/client-pairing", {
+    headers: OptionalBearerHeaders,
+    payload: PeerLinkClientPairingRequest,
+    success: PeerLinkClientPairingCredential,
+    error: [
+      EnvironmentHttpUnauthorizedError,
+      EnvironmentHttpForbiddenError,
+      EnvironmentHttpInternalServerError,
+    ],
+  }),
+) {}
+
+/**
  * Public entry point for webhook tasks. Unauthenticated by design: the token
  * in the path, and an optional body signature, are the credential. The handler
  * reads the raw body itself so a signature is checked over the exact bytes.
@@ -1263,7 +1290,8 @@ class EnvironmentWebhooksHttpApi extends HttpApiGroup.make("webhooks")
   .add(HttpApiEndpoint.post("webhookPost", WEBHOOK_PATH, webhookEndpoint))
   .add(HttpApiEndpoint.put("webhookPut", WEBHOOK_PATH, webhookEndpoint))
   .add(HttpApiEndpoint.patch("webhookPatch", WEBHOOK_PATH, webhookEndpoint))
-  .add(HttpApiEndpoint.get("webhookGet", WEBHOOK_PATH, webhookEndpoint)) {}
+  .add(HttpApiEndpoint.get("webhookGet", WEBHOOK_PATH, webhookEndpoint))
+  .annotate(HttpApi.RedactedNames, { params: ["token"] }) {}
 
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
@@ -1277,4 +1305,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentVoiceHttpApi)
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentNotificationsHttpApi)
-  .add(EnvironmentWebhooksHttpApi) {}
+  .add(EnvironmentWebhooksHttpApi)
+  .add(EnvironmentPeerLinkHttpApi) {}

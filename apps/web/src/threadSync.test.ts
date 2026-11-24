@@ -9,6 +9,7 @@ describe("resolveThreadSyncPhase", () => {
         detailExists: false,
         shellExists: true,
         status: "synchronizing",
+        hasError: false,
       }),
     ).toBe("loading");
   });
@@ -19,11 +20,12 @@ describe("resolveThreadSyncPhase", () => {
         detailExists: true,
         shellExists: true,
         status: "cached",
+        hasError: false,
       }),
     ).toBe("syncing");
   });
 
-  it("reports reconnecting when the subscription is still failing", () => {
+  it("reports a failed sync instead of syncing over cached messages", () => {
     expect(
       resolveThreadSyncPhase({
         detailExists: true,
@@ -31,16 +33,23 @@ describe("resolveThreadSyncPhase", () => {
         status: "cached",
         hasError: true,
       }),
-    ).toBe("reconnecting");
-    // No detail yet either: still reconnecting, not a first-time load.
+    ).toBe("failed");
     expect(
       resolveThreadSyncPhase({
         detailExists: false,
         shellExists: true,
-        status: "empty",
+        status: "synchronizing",
         hasError: true,
       }),
-    ).toBe("reconnecting");
+    ).toBe("loading");
+    expect(
+      resolveThreadSyncPhase({
+        detailExists: true,
+        shellExists: true,
+        status: "synchronizing",
+        hasError: false,
+      }),
+    ).toBe("syncing");
   });
 
   it("clears the error phase once the thread goes live", () => {
@@ -60,6 +69,7 @@ describe("resolveThreadSyncPhase", () => {
         detailExists: false,
         shellExists: false,
         status: "empty",
+        hasError: false,
       }),
     ).toBeNull();
     expect(
@@ -67,6 +77,7 @@ describe("resolveThreadSyncPhase", () => {
         detailExists: true,
         shellExists: true,
         status: "live",
+        hasError: false,
       }),
     ).toBeNull();
   });
@@ -76,5 +87,6 @@ describe("threadSyncLabel", () => {
   it("uses the same loading and syncing language as mobile", () => {
     expect(threadSyncLabel("loading")).toBe("Loading messages...");
     expect(threadSyncLabel("syncing")).toBe("Syncing messages...");
+    expect(threadSyncLabel("failed")).toBe("Could not sync messages");
   });
 });

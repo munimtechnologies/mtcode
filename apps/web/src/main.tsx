@@ -4,13 +4,17 @@ import ReactDOM from "react-dom/client";
 import "@fontsource-variable/inter";
 import "./index.css";
 
+import { trackKeyboardLayout } from "./keyboardLayout";
 import { ConnectProvidersRoot, useConnectProviders } from "./cloud/connectProviderContext";
 import { providerHasRelay } from "./cloud/connectProviders";
 import { hasClerkPublicConfig } from "./cloud/publicConfig";
 import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
 import { whenLocaleReady } from "./i18n/runtime";
-import { reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { chunkLoadState } from "./lib/chunkReloadGuard";
+
+const stopTrackingKeyboardLayout = trackKeyboardLayout();
+import.meta.hot?.dispose(stopTrackingKeyboardLayout);
 
 const router = startAppServices();
 
@@ -45,14 +49,6 @@ function ClerkGate({ children }: { readonly children: React.ReactNode }) {
   );
 }
 
-let reloadScheduled = false;
-window.addEventListener("vite:preloadError", (event) => {
-  if (reloadOnceForChunkLoadError()) {
-    reloadScheduled = true;
-    event.preventDefault();
-  }
-});
-
 const app = <AppRoot router={router} />;
 
 // When Clerk is configured statically, resolve its chunk before the first
@@ -74,7 +70,7 @@ export const startup = Promise.all([
   .then(() => {
     // A route chunk failure still resolves router.load(): the error is parked in
     // the lazy component and surfaces through the route error boundary.
-    if (reloadScheduled) return;
+    if (chunkLoadState.reloadScheduled) return;
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
         <ConnectProvidersRoot>
@@ -84,8 +80,7 @@ export const startup = Promise.all([
     );
   })
   .catch((error: unknown) => {
-    if (reloadScheduled) return;
-    console.error("MT Code failed to load its startup chunks.", error);
-    const bootShell = document.getElementById("boot-shell");
-    if (bootShell) bootShell.textContent = "MT Code could not load. Reload to try again.";
+    if (chunkLoadState.reloadScheduled) return;
+    // bootstrap.ts renders the (MT Code branded) boot error page from this rejection.
+    throw error;
   });
