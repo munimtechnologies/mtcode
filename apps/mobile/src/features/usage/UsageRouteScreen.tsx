@@ -589,10 +589,13 @@ function UsageSummary(props: { readonly merged: MergedUsage; readonly metric: Us
           ? costUnavailable
             ? gt("Token counts are still valid.")
             : gt("* if billed at full API rate")
-          : gt("{count, plural, other {Across {sessions} sessions}}", {
-              count: merged.sessions,
-              sessions: formatCount(merged.sessions),
-            })}
+          : gt(
+              "{count, plural, one {Across {sessions} session} other {Across {sessions} sessions}}",
+              {
+                count: merged.sessions,
+                sessions: formatCount(merged.sessions),
+              },
+            )}
       </Text>
     </View>
   );

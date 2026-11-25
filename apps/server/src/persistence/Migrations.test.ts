@@ -243,14 +243,14 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("upgrades an MT Code database at fork id 120 to 126", () =>
+  it.effect("upgrades an MT Code database at fork id 126 to 128", () =>
     Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 120 });
+      yield* runMigrations({ toMigrationInclusive: 126 });
       assert.deepStrictEqual(
         yield* runMigrations(),
-        migrationManifest.filter(([id]) => id > 120),
+        migrationManifest.filter(([id]) => id > 126),
       );
-      assert.strictEqual(migrationManifest.at(-1)?.[0], 126);
+      assert.strictEqual(migrationManifest.at(-1)?.[0], 128);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

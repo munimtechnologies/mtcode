@@ -37,7 +37,7 @@ import {
   MenuSubPopup,
   MenuTrigger,
 } from "../ui/menu";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 import { type EditorIconOption, editorIconOptions } from "../editorIcons";
 import { announce } from "~/lib/announce";
 import { cn } from "~/lib/utils";
@@ -52,6 +52,7 @@ import {
 } from "./threadDetailsPanelStyles";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useComposerMenuState } from "./useComposerMenuState";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 type OpenInOption = EditorIconOption & { label: string };
 
@@ -315,10 +316,7 @@ export const OpenInPicker = memo(function OpenInPicker({
         ? { className: THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS, ref: panelAnchorRef }
         : {})}
     >
-      <Tooltip>
-        <TooltipTrigger render={primaryControl} />
-        <TooltipPopup side="top">{primaryControlLabel}</TooltipPopup>
-      </Tooltip>
+      <SharedTooltipTrigger render={primaryControl} label={primaryControlLabel} />
       {isPanel ? (
         <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
       ) : (

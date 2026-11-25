@@ -40,8 +40,9 @@ import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, string>> = {
   [ProviderDriverKind.make("codex")]: "gpt-6.7-codex-ultra-preview",
@@ -952,42 +953,42 @@ function ProviderModelRow({
       <span className="flex min-w-[4.5rem] shrink-0 items-center justify-end gap-0.5">
         {model.isCustom ? (
           <>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-micro"
-                    variant="ghost-muted"
-                    disabled={!canManageCustomModels}
-                    aria-label={gt("Edit {name}", { name: model.slug })}
-                    onClick={() => onToggleEdit(model.slug)}
-                  />
-                }
-              >
-                <PencilIcon className="size-3" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">
-                <T>Edit name and options</T>
-              </TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-micro"
-                    variant="ghost-muted"
-                    disabled={!canManageCustomModels}
-                    aria-label={gt("Remove {name}", { name: model.slug })}
-                    onClick={() => onRemove(model.slug)}
-                  />
-                }
-              >
-                <XIcon className="size-3" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">
-                <T>Remove custom model</T>
-              </TooltipPopup>
-            </Tooltip>
+            <SharedTooltipTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="ghost-muted"
+                  disabled={!canManageCustomModels}
+                  aria-label={gt("Edit {name}", { name: model.slug })}
+                  onClick={() => onToggleEdit(model.slug)}
+                />
+              }
+              label={
+                <>
+                  <T>Edit name and options</T>
+                </>
+              }
+            >
+              <PencilIcon className="size-3" />
+            </SharedTooltipTrigger>
+            <SharedTooltipTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="ghost-muted"
+                  disabled={!canManageCustomModels}
+                  aria-label={gt("Remove {name}", { name: model.slug })}
+                  onClick={() => onRemove(model.slug)}
+                />
+              }
+              label={
+                <>
+                  <T>Remove custom model</T>
+                </>
+              }
+            >
+              <XIcon className="size-3" />
+            </SharedTooltipTrigger>
           </>
         ) : null}
         {/* The trigger is a wrapper span: a disabled switch gets no pointer
