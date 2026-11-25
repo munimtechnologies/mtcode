@@ -62,6 +62,7 @@ import {
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
+import { browserThreadTriageOutboxStore } from "./threadTriageOutboxStore";
 import { clientPresentationMetadata } from "./clientMetadata";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { m } from "../i18n/messages";
@@ -847,7 +848,11 @@ const layerEnvironmentOwnedDataCleanup = Layer.succeed(
     clear: Effect.fn("Persistence.EnvironmentOwnedDataCleanup.clear")(function (environmentId) {
       return Effect.sync(() => {
         clearComposerDraftsEnvironment(environmentId);
-      });
+      }).pipe(
+        Effect.andThen(
+          Effect.ignore(browserThreadTriageOutboxStore.clearEnvironment(environmentId)),
+        ),
+      );
     }),
   }),
 );

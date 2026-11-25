@@ -15,7 +15,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationManifest.map(([id]) => id),
-        Array.from({ length: 120 }, (_, index) => index + 1),
+        Array.from({ length: 126 }, (_, index) => index + 1),
       );
     }),
   );
@@ -86,6 +86,12 @@ layer("055_OrchestrationV2", (it) => {
         [118, "IssueTrackerAccounts"],
         [119, "Workflows"],
         [120, "SupersededRunAttemptIndex"],
+        [121, "LayoutCommandApprovals"],
+        [122, "WorkflowSkippedRuns"],
+        [123, "WorkflowRunIndexes"],
+        [124, "WorkflowRunTags"],
+        [125, "ForkHistoryMembership"],
+        [126, "WorkflowMailSender"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -158,6 +164,12 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 118, name: "IssueTrackerAccounts" },
         { migration_id: 119, name: "Workflows" },
         { migration_id: 120, name: "SupersededRunAttemptIndex" },
+        { migration_id: 121, name: "LayoutCommandApprovals" },
+        { migration_id: 122, name: "WorkflowSkippedRuns" },
+        { migration_id: 123, name: "WorkflowRunIndexes" },
+        { migration_id: 124, name: "WorkflowRunTags" },
+        { migration_id: 125, name: "ForkHistoryMembership" },
+        { migration_id: 126, name: "WorkflowMailSender" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

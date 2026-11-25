@@ -257,6 +257,7 @@ import {
   remoteProjectSourceIcon,
   sourceControlHostIcon,
 } from "./CommandPaletteAddProject";
+import { useCommandPaletteThreadActions } from "./CommandPaletteThreadActions";
 import { useCommandPaletteThreadItems } from "./CommandPaletteThreadItems";
 import { useCommandPaletteThemeItems } from "./CommandPaletteThemeItems";
 import {
@@ -346,6 +347,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       <CommandDialog
         open={state.open}
         onOpenChange={(open, eventDetails) => {
+          // Held Escape emits repeat keydowns; only a fresh press should step back or close.
+          if (!open && eventDetails.reason === "escape-key" && eventDetails.event.repeat) {
+            eventDetails.cancel();
+            return;
+          }
           if (!open && eventDetails.reason === "escape-key" && state.mode !== "command") {
             eventDetails.cancel();
             dispatchCommandPalette({ _tag: "BackToCommand" });
@@ -764,6 +770,10 @@ function OpenCommandPaletteDialog(props: {
     currentProjectId,
   );
   const currentProjectCwd = currentProject?.workspaceRoot ?? null;
+  const currentThreadActionItems = useCommandPaletteThreadActions({
+    threadRef: activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
+    projectCwd: currentProjectCwd,
+  });
   const currentProjectCwdForBrowse =
     browseEnvironmentId && currentProjectEnvironmentId === browseEnvironmentId
       ? currentProjectCwd
@@ -850,7 +860,6 @@ function OpenCommandPaletteDialog(props: {
           ),
         )
       : null;
-    // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
     const now = new Date().toISOString();
     const openableThreads = threads.filter(
       (thread) => thread.settledOverride !== "settled" && !effectiveSnoozed(thread, { now }),
@@ -1659,6 +1668,8 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push(...currentThreadActionItems);
+
   actionItems.push({
     kind: "action",
     value: "action:open-file-picker",
@@ -2426,7 +2437,6 @@ function OpenCommandPaletteDialog(props: {
       input: {
         projectId: newProjectId(),
         title: inferProjectTitleFromPath(destinationPath),
-        // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
         createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
@@ -2868,13 +2878,20 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
-    if (event.key === "Backspace" && query === "" && isSubmenu) {
+    if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+
+    if (
+      event.key === "Backspace" &&
+      query === "" &&
+      isSubmenu &&
+      !event.repeat &&
+      !event.nativeEvent.isComposing &&
+      event.keyCode !== 229
+    ) {
       event.preventDefault();
       popView();
       return;
     }
-
-    if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
 
     if (event.key === "Tab" && isBrowsing && !relativePathNeedsActiveProject) {
       if (event.nativeEvent.isComposing || event.keyCode === 229) return;

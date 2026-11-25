@@ -68,6 +68,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "terminal.new",
   "terminal.close",
   "terminal.find",
+  "terminal.previous",
+  "terminal.next",
   "rightPanel.toggle",
   "rightPanel.new",
   "threadPanel.toggle",

@@ -69,6 +69,7 @@ import {
   isTerminalClearShortcut,
   isTerminalFindShortcut,
   isTerminalNewShortcut,
+  isTerminalCycleShortcut,
   isTerminalSplitShortcut,
   isTerminalSplitVerticalShortcut,
   isTerminalToggleShortcut,
@@ -187,6 +188,15 @@ export function writeTerminalOutputUpdate(
   } else if (update.type === "append") {
     terminal.write(update.data);
   }
+}
+
+// Full-screen apps such as vim read their own modified arrows; shell motions would break them.
+export function terminalPromptNavigationData(
+  terminal: Pick<GhosttyTerminalSurface, "isAlternateScreen">,
+  event: KeyboardEvent,
+  platform?: string,
+): string | null {
+  return terminal.isAlternateScreen() ? null : terminalNavigationShortcutData(event, platform);
 }
 
 // Avoid formatting unbounded scrollback selections on every output update.
@@ -1104,6 +1114,7 @@ function TerminalSessionViewport({
           isTerminalSplitShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
           isTerminalSplitVerticalShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
           isTerminalNewShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
+          isTerminalCycleShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
           isDiffToggleShortcut(event, currentKeybindings, TERMINAL_SHORTCUT_OPTIONS) ||
           // Match Sidebar's context, or a key it will reject skips the shell.
           isThreadNavigationShortcut(event, currentKeybindings, {
@@ -1113,7 +1124,10 @@ function TerminalSessionViewport({
           return false;
         }
 
-        const navigationData = terminalNavigationShortcutData(event);
+        const activeTerminal = terminalRef.current;
+        const navigationData = activeTerminal
+          ? terminalPromptNavigationData(activeTerminal, event)
+          : null;
         if (navigationData !== null) {
           event.preventDefault();
           event.stopPropagation();

@@ -494,6 +494,15 @@
         filter: invert(1);
       }
 
+      #boot-shell-progress {
+        position: absolute;
+        top: 100%;
+        width: min(360px, 80vw);
+        text-align: center;
+        font: 13px system-ui;
+        opacity: 0.7;
+      }
+
       /* App CSS locks body and #root scrolling once main loads, so the error screen scrolls itself. */
       #boot-shell:has(> #boot-error) {
         height: 100%;
@@ -744,6 +753,7 @@
             onload="document.documentElement.classList.add('boot-has-wordmark')"
             onerror="this.remove()"
           />
+          <p id="boot-shell-progress" role="status" aria-live="polite"></p>
         </div>
         <script>
           (function () {
@@ -755,6 +765,25 @@
         </script>
       </div>
     </div>
+    <script>
+      const migrationLabel = document.getElementById("boot-shell-progress");
+      const readMigrationProgress = window.desktopBridge?.getDatabaseMigrationProgress;
+      if (readMigrationProgress && migrationLabel) {
+        const updateMigrationProgress = async () => {
+          if (!migrationLabel.isConnected) return;
+          try {
+            const progress = await readMigrationProgress();
+            migrationLabel.textContent = progress
+              ? `Upgrading database (${progress.current} of ${progress.total})`
+              : "";
+          } catch {
+            migrationLabel.textContent = "";
+          }
+          if (migrationLabel.isConnected) setTimeout(updateMigrationProgress, 1000);
+        };
+        void updateMigrationProgress();
+      }
+    </script>
     <script type="module" src="/src/bootstrap.ts"></script>
   </body>
 </html>

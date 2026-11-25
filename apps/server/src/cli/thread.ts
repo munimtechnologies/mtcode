@@ -42,6 +42,7 @@ import { expandHomePath } from "../os-jank.ts";
 import { readProviderStatusCache } from "../provider/providerStatusCache.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { readLiveServerRuntimeState } from "../serverRuntimeState.ts";
+import { unsetInheritedRepositoryEnv } from "../vcs/VcsProcess.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 /**
@@ -355,19 +356,18 @@ const resolveModelSelection = Effect.fn("cli.thread.resolveModelSelection")(func
     return undefined;
   }
   const settings = yield* readServerSettings(config.settingsPath);
-  const offered = (yield* readCachedProviders(config.providerStatusCacheDir)).flatMap(
-    (candidate) =>
-      candidate.enabled && candidate.installed
-        ? candidate.models
-            .map((entry) => ({
-              entry,
-              selection: {
-                instanceId: candidate.instanceId,
-                model: entry.slug,
-              } satisfies ModelSelection,
-            }))
-            .filter(({ selection }) => isModelSelectionProviderEnabled(settings, selection))
-        : [],
+  const offered = (yield* readCachedProviders(config.providerStatusCacheDir)).flatMap((candidate) =>
+    candidate.enabled && candidate.installed
+      ? candidate.models
+          .map((entry) => ({
+            entry,
+            selection: {
+              instanceId: candidate.instanceId,
+              model: entry.slug,
+            } satisfies ModelSelection,
+          }))
+          .filter(({ selection }) => isModelSelectionProviderEnabled(settings, selection))
+      : [],
   );
   const scoped =
     provider === undefined
@@ -430,9 +430,15 @@ const listAllProjects = Effect.fn("cli.thread.listAllProjects")(function* (tools
 /** The checkouts of the git repository at `directory`, or none outside a repository. */
 const listGitCheckouts = Effect.fn("cli.thread.listGitCheckouts")(function* (directory: string) {
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const env = unsetInheritedRepositoryEnv(process.env, yield* HostProcess.Platform);
   const list = (args: ReadonlyArray<string>) =>
     processRunner
-      .run({ command: "git", args: ["worktree", "list", "--porcelain", ...args], cwd: directory })
+      .run({
+        command: "git",
+        args: ["worktree", "list", "--porcelain", ...args],
+        cwd: directory,
+        env,
+      })
       .pipe(
         Effect.option,
         Effect.map((result) =>
