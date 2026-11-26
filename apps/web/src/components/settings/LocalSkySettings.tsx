@@ -210,8 +210,8 @@ export function LocalSkySettings() {
     <div className="w-full max-w-sm space-y-2 text-left text-xs">
       <p className="text-muted-foreground">
         Use a city or this device’s location — and if the device will not say, its network address
-        is looked up instead. Approximate coordinates are sent to Open-Meteo for daylight and
-        weather, and saved only on this device.
+        is looked up instead. Approximate coordinates are sent to Open-Meteo for weather (MET
+        Norway, then wttr.in, if it does not answer), and saved only on this device.
       </p>
       <div className="flex gap-2">
         <input
@@ -281,12 +281,12 @@ export function LocalSkySettings() {
         {message ?? `${sky.location ? `${sky.location.name}. ` : ""}${sky.status}`}
       </p>
       <a
-        href="https://open-meteo.com/"
+        href={sky.source?.site ?? "https://open-meteo.com/"}
         target="_blank"
         rel="noreferrer"
         className="text-muted-foreground underline"
       >
-        Weather data by Open-Meteo
+        Weather data by {sky.source?.name ?? "Open-Meteo"}
       </a>
     </div>
   );

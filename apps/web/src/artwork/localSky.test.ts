@@ -141,6 +141,92 @@ describe("local sky lifecycle", () => {
     expect(hook.read!()).toMatchObject({ location: null, ready: false });
     expect(saved.size).toBe(0);
   });
+  it("falls back to MET Norway when Open-Meteo is rate-limited", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("open-meteo")
+        ? { ok: false, status: 429, json: async () => ({ error: true }) }
+        : {
+            ok: true,
+            json: async () => ({
+              properties: {
+                timeseries: [
+                  {
+                    time: "2026-09-20T17:00:00Z",
+                    data: {
+                      instant: { details: { cloud_area_fraction: 0, wind_speed: 2 } },
+                      next_1_hours: { summary: { symbol_code: "clearsky_day" } },
+                    },
+                  },
+                  {
+                    time: "2026-09-20T18:00:00Z",
+                    data: {
+                      instant: {
+                        details: {
+                          cloud_area_fraction: 100,
+                          cloud_area_fraction_low: 90,
+                          wind_speed: 5,
+                        },
+                      },
+                      next_1_hours: { summary: { symbol_code: "heavysnow" } },
+                    },
+                  },
+                ],
+              },
+            }),
+          },
+    );
+    const store = await start();
+    store.setSkyLocation(location);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(hook.read!()).toMatchObject({
+      ready: true,
+      weather: "snow",
+      source: { name: "MET Norway" },
+      conditions: { low: 0.9 },
+    });
+  });
+  it("falls back to wttr.in when the others are down", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (!url.includes("wttr.in")) throw new TypeError("Failed to fetch");
+      return {
+        ok: true,
+        json: async () => ({
+          current_condition: [
+            { weatherCode: "119", cloudcover: "80", windspeedKmph: "12", visibility: "10" },
+          ],
+        }),
+      };
+    });
+    const store = await start();
+    store.setSkyLocation(location);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(hook.read!()).toMatchObject({
+      ready: true,
+      weather: "cloudy",
+      source: { name: "wttr.in" },
+      conditions: { low: 0.8 },
+    });
+  });
+  it("moves on from a provider that never answers", async () => {
+    fetchMock.mockImplementation((url: string, init: { signal: AbortSignal }) =>
+      url.includes("open-meteo")
+        ? new Promise((_, reject) =>
+            init.signal.addEventListener("abort", () => reject(new Error("aborted"))),
+          )
+        : Promise.resolve({
+            ok: true,
+            json: async () => ({
+              current_condition: [{ weatherCode: "113", cloudcover: "0" }],
+            }),
+          }),
+    );
+    const store = await start();
+    store.setSkyLocation(location);
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(hook.read!()).toMatchObject({ ready: true, source: { name: "wttr.in" } });
+  });
   it("rejects malformed weather rather than showing a false sunny sky", async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ current: { cloud_cover: 20 } }) });
     const store = await start();

@@ -9,6 +9,7 @@ import {
   type SkyPhase,
   type SkyWeather,
 } from "./skyConditions";
+import { WEATHER_PROVIDERS } from "./weatherProviders";
 
 export type SkyLocation = { latitude: number; longitude: number; name: string };
 type Forecast = SkyForecast & { fetchedAt: number };
@@ -21,6 +22,8 @@ type Snapshot = {
   status: string;
   /** A forecast has arrived, so `conditions` carries real weather. */
   ready: boolean;
+  /** Which provider the current forecast came from, for attribution. */
+  source: { name: string; site: string } | null;
 };
 const storageKey = "mt-code.sky-location.v1";
 const listeners = new Set<() => void>();
@@ -31,6 +34,7 @@ let snapshot: Snapshot = {
   weather: "clear",
   status: "Choose a location to enable the local sky.",
   ready: false,
+  source: null,
 };
 let forecast: Forecast | null = null;
 let initialized = false;
@@ -90,6 +94,7 @@ export function setSkyLocation(location: SkyLocation | null) {
     location: approximate,
     conditions: null,
     ready: false,
+    source: null,
     status: approximate ? "Updating local sky…" : "Choose a location to enable the local sky.",
   });
   if (listeners.size) void tick();
@@ -119,12 +124,33 @@ function updateSky() {
   });
 }
 
-/** Open-Meteo omits a layer when its model has none; the code still says how grey it is. */
-const coverFromCode = (code: number) => (code <= 0 ? 0 : code === 1 ? 20 : code === 2 ? 50 : 95);
-const percent = (value: unknown, fallback: number) =>
-  typeof value === "number" && Number.isFinite(value)
-    ? Math.min(100, Math.max(0, value))
-    : fallback;
+/** Asks each provider in turn; the first usable answer wins. */
+async function fetchForecast(location: SkyLocation, controller: AbortController) {
+  for (const provider of WEATHER_PROVIDERS) {
+    if (controller.signal.aborted) return null;
+    // Each provider gets its own deadline so one that hangs still leaves time for the rest.
+    const attempt = new AbortController();
+    const cancel = () => attempt.abort();
+    controller.signal.addEventListener("abort", cancel);
+    const timeout = setTimeout(cancel, 8_000);
+    try {
+      const response = await fetch(provider.url(location), {
+        signal: attempt.signal,
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+      });
+      if (!response.ok) continue;
+      const parsed = provider.parse(await response.json(), Date.now());
+      if (parsed) return { ...parsed, provider };
+    } catch {
+      // Network error, timeout or malformed body: try the next provider.
+    } finally {
+      clearTimeout(timeout);
+      controller.signal.removeEventListener("abort", cancel);
+    }
+  }
+  return null;
+}
 
 async function tick() {
   if (typeof document !== "undefined" && document.hidden) return;
@@ -140,54 +166,26 @@ async function tick() {
   const controller = new AbortController();
   request = controller;
   if (!forecast) emit({ status: "Updating local sky…" });
-  const timeout = setTimeout(() => controller.abort(), 12_000);
   try {
-    const params = new URLSearchParams({
-      latitude: String(location.latitude),
-      longitude: String(location.longitude),
-      current:
-        "weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,wind_speed_10m,visibility",
-      timeformat: "unixtime",
-    });
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
-      signal: controller.signal,
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-    });
-    if (!response.ok) throw new Error("Weather unavailable");
-    const data = (await response.json()) as { current?: Record<string, unknown> };
-    const current = data.current;
-    const code = current?.weather_code;
-    if (typeof code !== "number" || !Number.isFinite(code))
-      throw new Error("Invalid weather response");
+    const result = await fetchForecast(location, controller);
     if (request !== controller) return;
-    const total = percent(current!.cloud_cover, coverFromCode(code));
-    forecast = {
-      code,
-      cloudCover: total,
-      cloudLow: percent(current!.cloud_cover_low, 0),
-      cloudMid: percent(current!.cloud_cover_mid, 0),
-      cloudHigh: percent(current!.cloud_cover_high, 0),
-      wind: percent(current!.wind_speed_10m, 8),
-      visibility:
-        typeof current!.visibility === "number" && Number.isFinite(current!.visibility)
-          ? current!.visibility
-          : null,
-      fetchedAt: Date.now(),
-    };
-    updateSky();
-    emit({ status: "Local sky is up to date." });
-  } catch {
-    if (request === controller) {
+    if (!result) {
       retryAt = Date.now() + 5 * 60_000;
       emit({
         status: forecast
           ? "Weather is unavailable. Showing the last update; retrying shortly."
-          : "Weather is unavailable. Showing Night sky; retrying shortly.",
+          : "Weather is unavailable. Showing the sky without weather; retrying shortly.",
       });
+      return;
     }
+    const { provider, ...next } = result;
+    forecast = { ...next, fetchedAt: Date.now() };
+    updateSky();
+    emit({
+      status: "Local sky is up to date.",
+      source: { name: provider.name, site: provider.site },
+    });
   } finally {
-    clearTimeout(timeout);
     if (request === controller) request = null;
   }
 }
@@ -206,6 +204,7 @@ const onStorage = (event: StorageEvent) => {
     location,
     conditions: null,
     ready: false,
+    source: null,
     status: location ? "Updating local sky…" : "Choose a location to enable the local sky.",
   });
   void tick();
