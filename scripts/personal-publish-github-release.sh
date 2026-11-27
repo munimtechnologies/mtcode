@@ -5,8 +5,9 @@
 # updater feed points at this fork. Then uploads assets for munimtech.com.
 #
 # Mac: Developer ID sign when available. Windows: unsigned in v1.
-# Linux x64 (AppImage + .deb): unsigned, built in the Windows build host's
-# WSL2 Ubuntu by personal-linux-build.sh. T3_MUNIM_SKIP_LINUX=1 skips it.
+# Linux x64 (AppImage + .deb): unsigned, built in an ubuntu:24.04 container
+# (glibc 2.39) under the Windows build host's WSL2 Ubuntu by
+# personal-linux-build.sh. T3_MUNIM_SKIP_LINUX=1 skips it.
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/node@24/bin:$HOME/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -80,8 +81,9 @@ else
 fi
 
 # --- Linux x64 in the build host's WSL2 Ubuntu, overlapping the other two ---
-# personal-linux-build.sh runs inside the distro and builds on the Linux
-# filesystem; it and its toolchain setup travel over scp like the Windows .ps1.
+# personal-linux-build.sh runs inside the distro and builds in an ubuntu:24.04
+# Docker container there, so the installers need no newer glibc than 2.39; it
+# and its toolchain setup travel over scp like the Windows .ps1.
 # The ssh shell on the Windows hosts is Git Bash, which rewrites any absolute
 # /mnt/... argument, so the build starts in C:/Users/<user>/dev and every path
 # it is given is relative to that. The Dell (dell-ts, Ubuntu too) can stand in.

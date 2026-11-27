@@ -4,8 +4,9 @@
 #
 #   personal-linux-build.sh --version 0.0.97 [--ref <sha|branch>] [--out <dir>]
 #
-# Builds in a checkout on the Linux filesystem ($MTCODE_LINUX_WORKDIR, default
-# ~/dev/mtcode-linux): a WSL build under /mnt/c is several times slower. The
+# The build itself runs in an ubuntu:24.04 Docker container (glibc 2.39, see
+# below), so the host only needs docker. It builds in a checkout on a Docker
+# volume, never under /mnt/c: a WSL build there is several times slower. The
 # result is the same munim distro the Mac and Windows publish builds produce:
 # MT-Code-<version>-x86_64.AppImage, MT-Code-<version>-amd64.deb, and
 # latest-linux.yml listing both. The .deb alone carries electron-builder's
@@ -45,11 +46,69 @@ fi
 
 log() { printf '[linux-build %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 STARTED=$(date +%s)
-log "MT Code $VERSION from $REF on $(hostname) ($(nproc) cpus, $(free -g | awk '/^Mem:/ { print $2 }') GB)"
 
 # WSL appends the Windows PATH; a Windows node/pnpm must never win.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/' | paste -sd: -)"
 export PATH
+
+# --- Build inside Ubuntu 24.04 (glibc 2.39) ---
+# Native modules (node-pty is compiled from source) link against the build
+# host's glibc. Blade's WSL Ubuntu has glibc 2.43, and the 0.1.61-0.1.67
+# installers built there needed libc6 >= 2.42, so they would not install on
+# Ubuntu 24.04, Debian 13 or most other distros. The build therefore runs in an
+# ubuntu:24.04 container, the same glibc as upstream's release runners and the
+# 2.39 ceiling in scripts/linux-glibc.ts. The toolchain is baked into a local
+# image (rebuilt from cache when the setup script changes); the checkout,
+# node_modules, the pnpm store and Rust targets live in a named volume so warm
+# builds stay fast. MTCODE_LINUX_BUILD_CONTAINER=0 builds on the host itself,
+# which only passes the glibc check on a host with glibc 2.39 or older.
+GLIBC_CEILING="2.39"
+CONTAINER_IMAGE="${MTCODE_LINUX_BUILD_IMAGE:-mtcode-linux-build:ubuntu-24.04}"
+CONTAINER_NAME="mtcode-linux-build"
+CONTAINER_VOLUME="${MTCODE_LINUX_BUILD_VOLUME:-mtcode-linux-build-dev}"
+if [[ "${MTCODE_LINUX_IN_CONTAINER:-}" != "1" && "${MTCODE_LINUX_BUILD_CONTAINER:-1}" != "0" ]]; then
+  command -v docker >/dev/null 2>&1 || {
+    echo "docker is required to build in ubuntu:24.04 (MTCODE_LINUX_BUILD_CONTAINER=0 builds on the host)" >&2
+    exit 1
+  }
+  log "building image $CONTAINER_IMAGE (ubuntu:24.04 + toolchain)"
+  # The context holds only the setup script: SCRIPT_DIR is the Windows user's
+  # whole dev folder when the publish script starts this.
+  context="$(mktemp -d)"
+  cp "$SCRIPT_DIR/personal-linux-build-host-setup.sh" "$context/"
+  cat >"$context/Dockerfile" <<'DOCKERFILE'
+FROM ubuntu:24.04
+COPY personal-linux-build-host-setup.sh /opt/mtcode/personal-linux-build-host-setup.sh
+RUN bash /opt/mtcode/personal-linux-build-host-setup.sh
+DOCKERFILE
+  docker build -t "$CONTAINER_IMAGE" "$context"
+  rm -rf "$context"
+  # A build orphaned by a dropped ssh session would race this one on the volume.
+  docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  args=(--version "$VERSION" --ref "$REF" --update-repository "$UPDATE_REPOSITORY" --update-url "$UPDATE_URL")
+  # /root/.cache keeps Electron and node-gyp downloads between builds.
+  mounts=(-v "$CONTAINER_VOLUME:/root/dev" -v "$CONTAINER_VOLUME-cache:/root/.cache" -v "$SCRIPT_DIR:/opt/mtcode/scripts:ro")
+  if [[ -n "$OUT" ]]; then
+    mkdir -p "$OUT"
+    mounts+=(-v "$OUT:/out")
+    args+=(--out /out)
+  fi
+  log "running the build in container $CONTAINER_NAME"
+  exec docker run --rm --init --name "$CONTAINER_NAME" \
+    -e MTCODE_LINUX_IN_CONTAINER=1 \
+    -e MTCODE_LINUX_REPO_URL="$REPO_URL" \
+    -e MTCODE_LINUX_WORKDIR=/root/dev/mtcode-linux \
+    -e npm_config_store_dir=/root/dev/.pnpm-store \
+    "${mounts[@]}" "$CONTAINER_IMAGE" \
+    bash /opt/mtcode/scripts/personal-linux-build.sh "${args[@]}"
+fi
+
+host_glibc="$(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
+if [[ "$(printf '%s\n%s\n' "$host_glibc" "$GLIBC_CEILING" | sort -V | tail -1)" != "$GLIBC_CEILING" ]]; then
+  echo "this build environment has glibc $host_glibc; the installers must build against glibc <= $GLIBC_CEILING" >&2
+  exit 1
+fi
+log "MT Code $VERSION from $REF on $(hostname) (glibc $host_glibc, $(nproc) cpus, $(free -g | awk '/^Mem:/ { print $2 }') GB)"
 
 # --- Checkout at the release commit ---
 if [[ ! -d "$WORKDIR/.git" ]]; then
@@ -103,10 +162,9 @@ export T3CODE_DESKTOP_UPDATE_REPOSITORY="$UPDATE_REPOSITORY"
 export T3CODE_DESKTOP_UPDATE_URL="$UPDATE_URL"
 export GITHUB_REPOSITORY="$UPDATE_REPOSITORY"
 unset T3CODE_DESKTOP_SIGNED || true
-# Upstream's glibc ceiling (2.39) matches its Ubuntu 24.04 CI. This host's native
-# modules link against its own glibc, so the ceiling is the host's version.
-T3CODE_LINUX_GLIBC_BUILD_CEILING="$(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
-export T3CODE_LINUX_GLIBC_BUILD_CEILING
+# scripts/linux-glibc.ts fails the build on any packaged ELF needing glibc
+# newer than 2.39; this is what keeps the installers working on Ubuntu 24.04.
+unset T3CODE_LINUX_GLIBC_BUILD_CEILING || true
 
 log "building desktop artifacts"
 node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --build-version "$VERSION" --verbose
@@ -138,6 +196,13 @@ if [[ -z "$app_update" ]] || ! grep -qF "url: $UPDATE_URL" "$app_update"; then
   exit 1
 fi
 log "deb: $(dpkg-deb --field "$DEB" Package Version Architecture | paste -sd' ' -)"
+# scripts/linux-after-pack.ts writes the libc6 floor from the packaged ELFs.
+libc_floor="$(dpkg-deb --field "$DEB" Depends | grep -oE 'libc6 \(>= [0-9.]+\)' | grep -oE '[0-9]+\.[0-9]+' || true)"
+log "deb Depends libc6 >= ${libc_floor:-none}"
+if [[ -n "$libc_floor" && "$(printf '%s\n%s\n' "$libc_floor" "$GLIBC_CEILING" | sort -V | tail -1)" != "$GLIBC_CEILING" ]]; then
+  echo "the .deb depends on libc6 >= $libc_floor, above $GLIBC_CEILING: it would not install on Ubuntu 24.04" >&2
+  exit 1
+fi
 
 # Smoke: the AppImage unpacks (no FUSE needed) and its bundled server starts
 # under the packaged Electron as Node and reports this version.
