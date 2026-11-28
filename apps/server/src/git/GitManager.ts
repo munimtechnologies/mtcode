@@ -578,7 +578,8 @@ function limitContext(value: string, maxChars: number): string {
 function limitCommandOutput(item: OrchestrationV2TurnItem): OrchestrationV2TurnItem {
   if (item.type !== "command_execution" || item.output === undefined) return item;
   if (item.output.length <= PR_THREAD_COMMAND_OUTPUT_CHARS) return item;
-  return { ...item, output: `[truncated]\n${item.output.slice(-PR_THREAD_COMMAND_OUTPUT_CHARS)}` };
+  const tail = item.output.slice(-PR_THREAD_COMMAND_OUTPUT_CHARS).replace(/^[\uDC00-\uDFFF]/u, "");
+  return { ...item, output: `[truncated]\n${tail}` };
 }
 
 function shortenSha(sha: string | undefined): string | null {
@@ -593,7 +594,10 @@ function truncateText(
   if (!value) return undefined;
   if (value.length <= maxLength) return value;
   if (maxLength <= 3) return "...".slice(0, maxLength);
-  return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+  return `${value
+    .slice(0, Math.max(0, maxLength - 3))
+    .replace(/[\uD800-\uDBFF]$/u, "")
+    .trimEnd()}...`;
 }
 
 function withDescription(title: string, description: string | undefined) {
@@ -666,6 +670,7 @@ function sanitizeCommitMessage(
         : trimmedSubject
       )
         .slice(0, 72)
+        .replace(/[\uD800-\uDBFF]$/u, "")
         .trimEnd();
   const safeSubject = subject.length > 0 ? subject : "Update project files";
   return {
@@ -683,7 +688,10 @@ function sanitizeProgressText(value: string): string | null {
   if (trimmed.length <= MAX_PROGRESS_TEXT_LENGTH) {
     return trimmed;
   }
-  return trimmed.slice(0, MAX_PROGRESS_TEXT_LENGTH).trimEnd();
+  return trimmed
+    .slice(0, MAX_PROGRESS_TEXT_LENGTH)
+    .replace(/[\uD800-\uDBFF]$/u, "")
+    .trimEnd();
 }
 
 interface CommitAndBranchSuggestion {
@@ -4196,6 +4204,7 @@ export const make = Effect.gen(function* () {
     settings: SourceControlTextGenerationSettings,
     cwd: string,
     branch: string | null,
+    recordCheckout: (branch: string) => Effect.Effect<void>,
     commitMessage?: string,
     filePaths?: readonly string[],
   ) {
@@ -4220,7 +4229,18 @@ export const make = Effect.gen(function* () {
     const resolvedBranch = resolveAutoFeatureBranchName(existingBranchNames, preferredBranch);
 
     yield* gitCore.createRef({ cwd, refName: resolvedBranch });
-    yield* Effect.scoped(gitCore.switchRef({ cwd, refName: resolvedBranch }));
+    yield* Effect.scoped(gitCore.switchRef({ cwd, refName: resolvedBranch })).pipe(
+      Effect.tap(() => recordCheckout(resolvedBranch)),
+      // A failing post-checkout hook can leave HEAD on the new branch.
+      Effect.tapError(() =>
+        gitCore.readCurrentBranch(cwd).pipe(
+          Effect.flatMap((branch) =>
+            branch === resolvedBranch ? recordCheckout(resolvedBranch) : Effect.void,
+          ),
+          Effect.ignore,
+        ),
+      ),
+    );
 
     return {
       branchStep: { status: "created" as const, name: resolvedBranch },
@@ -4233,6 +4253,7 @@ export const make = Effect.gen(function* () {
     function* (input, options) {
       const progress = yield* createProgressEmitter(input, options);
       const currentPhase = yield* Ref.make<Option.Option<GitActionProgressPhase>>(Option.none());
+      const createdBranch = yield* Ref.make<string | undefined>(undefined);
 
       const runAction = Effect.fn("runStackedAction.runAction")(function* (): Effect.fn.Return<
         GitRunStackedActionResult,
@@ -4328,6 +4349,7 @@ export const make = Effect.gen(function* () {
             textGenerationSettings,
             input.cwd,
             initialStatus.branch,
+            (branch) => Ref.set(createdBranch, branch),
             input.commitMessage,
             input.filePaths,
           );
@@ -4432,13 +4454,16 @@ export const make = Effect.gen(function* () {
       return yield* runAction().pipe(
         Effect.ensuring(invalidateStatus(input.cwd)),
         Effect.tapError((error) =>
-          Effect.flatMap(Ref.get(currentPhase), (phase) =>
-            progress.emit({
+          Effect.gen(function* () {
+            const phase = yield* Ref.get(currentPhase);
+            const branch = yield* Ref.get(createdBranch);
+            yield* progress.emit({
               kind: "action_failed",
               phase: Option.getOrNull(phase),
               message: error.message,
-            }),
-          ),
+              ...(branch !== undefined ? { createdBranch: branch } : {}),
+            });
+          }),
         ),
       );
     },

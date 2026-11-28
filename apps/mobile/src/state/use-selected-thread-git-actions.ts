@@ -6,6 +6,7 @@ import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
   createVcsStatusRevalidationAtomFamily,
   type GitActionRequestInput,
+  type RunVcsStackedActionInput,
   type VcsActionOperation,
   type VcsRef,
 } from "@t3tools/client-runtime/state/vcs";
@@ -403,7 +404,7 @@ export function useSelectedThreadGitActions(repository?: GitRepositoryTarget) {
   };
 
   const onRunSelectedThreadGitAction = async (
-    input: GitActionRequestInput,
+    input: GitActionRequestInput & Pick<RunVcsStackedActionInput, "onProgress">,
   ): Promise<GitRunStackedActionResult | null> => {
     const actionId = uuidv4();
     return await runSelectedThreadGitMutation(
@@ -420,6 +421,7 @@ export function useSelectedThreadGitActions(repository?: GitRepositoryTarget) {
           ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
           // A pull request the action opens is linked to the thread it ran beside.
           threadId: thread.id,
+          ...(input.onProgress ? { onProgress: input.onProgress } : {}),
         }).finally(sshPasswordPrompts.cancel);
         if (AsyncResult.isFailure(result)) {
           return result;

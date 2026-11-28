@@ -75,11 +75,14 @@ const usageByWindowAtom = Atom.family((key: string) =>
       const connectionResult = get(environmentCatalog.stateAtom(environmentId));
       const sessionResult = get(environmentSession.sessionStateAtom(environmentId));
       const session = AsyncResult.getOrElse(sessionResult, () => null);
-      const access = resolveUsageAccess({
-        connectionPhase: option.phase,
-        session,
-        hasSessionError: sessionResult._tag === "Failure",
-      });
+      const access = resolveUsageAccess(
+        {
+          connectionPhase: option.phase,
+          session,
+          hasSessionError: sessionResult._tag === "Failure",
+        },
+        m,
+      );
       if (!access.canReadDiagnostics) {
         // A session that has not arrived yet waits only through the first
         // connection attempt, like the usage query below, so a down machine

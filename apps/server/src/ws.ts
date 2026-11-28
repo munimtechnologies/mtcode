@@ -2621,6 +2621,16 @@ export const layerWsRpc = (
             yield* providerRegistry.refreshModelCatalog;
             return { providers: [] };
           }
+          if (input.limitsOnly === true) {
+            yield* Effect.all(
+              [
+                input.instanceId === undefined ? usageLimitSources.refresh : Effect.void,
+                providerRegistry.refreshUsageLimits(input.instanceId),
+              ],
+              { concurrency: "unbounded", discard: true },
+            );
+            return { providers: [] };
+          }
           // Only explicit catalog refreshes bypass T3's caches. Workspace
           // discovery and background status checks retain their timers.
           if (input.refreshModels) {
@@ -2716,6 +2726,14 @@ export const layerWsRpc = (
               }),
           };
         }),
+      [WS_METHODS.serverGetProviderRuntimeModeLimits]: Effect.fnUntraced(function* (input) {
+        return {
+          limits: yield* providerRegistry.runtimeModeLimits({
+            instanceId: input.instanceId,
+            scanCwd: yield* projectService.workspaceScanDirectory(input.cwd),
+          }),
+        };
+      }),
       [WS_METHODS.serverLoginProviderAccount]: (input) => providerAccountLogin.login(input),
       [WS_METHODS.serverSubmitProviderLoginCode]: (input) => providerAccountLogin.submitCode(input),
       [WS_METHODS.serverLogoutProviderAccount]: (input) => providerAccountLogin.logout(input),

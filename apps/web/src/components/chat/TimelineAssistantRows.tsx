@@ -77,6 +77,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                       key={part.key}
                       text={part.text}
                       renderInsights
+                      previewMarkdownFences
                       cwd={ctx.markdownCwd}
                       agentDirectories={agentDirectories}
                       threadRef={threadRef}
@@ -96,6 +97,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
               <ChatMarkdown
                 text={messageText}
                 renderInsights
+                previewMarkdownFences
                 cwd={ctx.markdownCwd}
                 agentDirectories={agentDirectories}
                 threadRef={ctx.threadRef ?? undefined}
@@ -151,6 +153,7 @@ export function SentMessageTimelineRow({
       >
         <ChatMarkdown
           text={row.text}
+          previewMarkdownFences
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
           lineBreaks={shouldPreserveAssistantLineBreaks(row.text)}

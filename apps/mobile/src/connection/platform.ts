@@ -127,10 +127,8 @@ const layerWakeups = Wakeups.layer({
             );
             return AppState.addEventListener("change", (state) => {
               if (state === "active") {
-                Queue.offerUnsafe(
-                  queue,
-                  mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()),
-                );
+                const wakeup = mobileApplicationActiveWakeup(backgroundedAtMs, Date.now());
+                if (wakeup !== null) Queue.offerUnsafe(queue, wakeup);
               }
               backgroundedAtMs = mobileSuspensionStartedAtMs(backgroundedAtMs, state, Date.now());
             });

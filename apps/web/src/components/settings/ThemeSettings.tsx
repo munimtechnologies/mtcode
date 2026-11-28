@@ -958,7 +958,7 @@ export function ThemeLibrary({
           toastManager.add(
             stackedThreadToast({
               type: "success",
-              title: `${importedTheme.label} added`,
+              title: gt("{label} added", { label: importedTheme.label }),
               description: gt("It’s now active."),
             }),
           );

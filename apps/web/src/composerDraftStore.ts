@@ -436,6 +436,7 @@ const PersistedDraftThreadState = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  workspaceExplicit: Schema.optionalKey(Schema.Boolean),
   checkoutPullRequest: Schema.optionalKey(
     Schema.Struct({ url: Schema.String, branch: Schema.String }),
   ),
@@ -537,6 +538,8 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  /** The user chose the workspace; without it a draft moving machine takes the new project's default. */
+  workspaceExplicit?: true;
   /** Linked to the thread when the draft is sent on this branch. */
   checkoutPullRequest?: DraftCheckoutPullRequest;
   /**
@@ -612,6 +615,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      workspaceExplicit?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -629,6 +633,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      workspaceExplicit?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -645,6 +650,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      workspaceExplicit?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -1775,6 +1781,7 @@ function createDraftThreadState(
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
     startFromOrigin?: boolean;
+    workspaceExplicit?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
@@ -1838,6 +1845,9 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    ...((options?.workspaceExplicit ?? existingThread?.workspaceExplicit)
+      ? { workspaceExplicit: true as const }
+      : {}),
     ...(checkoutPullRequest ? { checkoutPullRequest } : {}),
     ...(!projectChanged && existingThread?.worktreeRepositories !== undefined
       ? { worktreeRepositories: existingThread.worktreeRepositories }
@@ -1902,6 +1912,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    left.workspaceExplicit === right.workspaceExplicit &&
     checkoutPullRequestsEqual(left.checkoutPullRequest, right.checkoutPullRequest) &&
     worktreeRepositoriesEqual(left.worktreeRepositories, right.worktreeRepositories) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
@@ -2066,6 +2077,7 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        ...(candidateDraftThread.workspaceExplicit === true ? { workspaceExplicit: true } : {}),
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
@@ -2894,6 +2906,7 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    ...(persistedDraftThread.workspaceExplicit ? { workspaceExplicit: true } : {}),
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
@@ -3203,6 +3216,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              ...((options.workspaceExplicit ?? existing.workspaceExplicit)
+                ? { workspaceExplicit: true as const }
+                : {}),
               ...(checkoutPullRequest ? { checkoutPullRequest } : {}),
               ...(worktreeRepositories ? { worktreeRepositories } : {}),
               promotedTo: existing.promotedTo ?? null,
@@ -3220,6 +3236,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              nextDraftThread.workspaceExplicit === existing.workspaceExplicit &&
               checkoutPullRequestsEqual(
                 nextDraftThread.checkoutPullRequest,
                 existing.checkoutPullRequest,

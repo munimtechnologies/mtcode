@@ -20,7 +20,10 @@ import { isTriagePrompt } from "@t3tools/shared/triagePrompt";
 import { isComputerHomeWorkspace } from "~/lib/chatThreadActions";
 import { resolveNewThreadRuntimeMode } from "@t3tools/shared/serverSettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  groupIconFallbacks,
+  pickableProjectGroups,
+} from "@t3tools/client-runtime/state/project-grouping";
 import { resolveDefaultProviderModelSelection } from "~/providerInstances";
 import {
   buildSidebarProjectPickerEntries,
@@ -334,7 +337,11 @@ export function DraftHeroHeadline({
                 {item.value === ADD_PROJECT_VALUE ? (
                   <FolderPlusIcon className="size-4 shrink-0" />
                 ) : entry ? (
-                  <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
+                  <ProjectFavicon
+                    project={entry.group}
+                    fallbackProjects={groupIconFallbacks(entry.group.memberProjects, entry.group)}
+                    className="size-4 shrink-0"
+                  />
                 ) : null}
                 <SharedTooltipTrigger
                   render={<span className="min-w-0 flex-1 text-sm" />}

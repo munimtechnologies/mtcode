@@ -501,6 +501,7 @@ const GitActionFailedEvent = Schema.Struct({
   kind: Schema.Literal("action_failed"),
   phase: Schema.NullOr(GitActionProgressPhase),
   message: TrimmedNonEmptyStringSchema,
+  createdBranch: Schema.optional(GitRefName),
 });
 const GitActionSshPasswordPromptEvent = Schema.Struct({
   ...GitActionProgressBase.fields,

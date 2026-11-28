@@ -153,6 +153,7 @@ import {
   CloudRemoteEnvironmentRows,
   ConnectAccountsSection,
   EnvironmentLabelControl,
+  LocalEnvironmentMcpUrlRow,
   SavedBackendListRow,
 } from "./SavedEnvironmentRows";
 import { AddEnvironmentDialog } from "./AddEnvironmentDialog";
@@ -1450,6 +1451,9 @@ function ConnectionsSettingsContent({
                       }
                 }
               />
+            ) : null}
+            {isPrimaryAccess && accessEnvironment ? (
+              <LocalEnvironmentMcpUrlRow entry={accessEnvironment.entry} />
             ) : null}
             {accessServerConfig?.environment.capabilities.previewTunnelSetting ? (
               <SettingsRow

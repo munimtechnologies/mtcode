@@ -1653,6 +1653,12 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    // Short-lived so opening a mode picker shows a setting changed a moment ago.
+    providerRuntimeModeLimits: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:provider-runtime-mode-limits",
+      tag: WS_METHODS.serverGetProviderRuntimeModeLimits,
+      staleTimeMs: 5_000,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,
@@ -1880,6 +1886,7 @@ export function createServerEnvironmentAtoms<R, E>(
             input.fresh ?? false,
             input.refreshModels ?? false,
             input.modelCatalogOnly ?? false,
+            input.limitsOnly ?? false,
           ]),
       },
     }),

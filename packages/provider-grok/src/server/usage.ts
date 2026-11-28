@@ -28,9 +28,9 @@ interface GrokUsageTotals {
   readonly cachedReadTokens: number;
   readonly cacheCreationTokens: number;
   readonly reasoningTokens: number;
+  readonly modelCalls: number;
   readonly costUsdTicks: number | null;
   readonly costIsPartial: boolean;
-  readonly modelCalls: number;
 }
 
 function readGrokUsageTotals(value: unknown): GrokUsageTotals | null {
@@ -43,6 +43,7 @@ function readGrokUsageTotals(value: unknown): GrokUsageTotals | null {
     cachedReadTokens: tokenCount(record["cachedReadTokens"] ?? record["cacheReadInputTokens"]),
     cacheCreationTokens: tokenCount(record["cacheCreationTokens"]),
     reasoningTokens: tokenCount(record["reasoningTokens"]),
+    modelCalls: tokenCount(record["modelCalls"]),
     costUsdTicks:
       typeof record["costUsdTicks"] === "number" && Number.isFinite(record["costUsdTicks"])
         ? record["costUsdTicks"]
@@ -50,7 +51,6 @@ function readGrokUsageTotals(value: unknown): GrokUsageTotals | null {
           ? dollars * GROK_COST_USD_TICKS_PER_DOLLAR
           : null,
     costIsPartial: record["costIsPartial"] === true,
-    modelCalls: Math.max(1, tokenCount(record["modelCalls"])),
   };
 }
 
@@ -171,9 +171,10 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
         model: "grok",
         sessionId,
         totals: grokTotalsToUsage(topLevel),
-        recordCount: topLevel.modelCalls,
+        recordCount: Math.max(1, topLevel.modelCalls),
         reportedCostUsd: topLevel.costIsPartial ? null : grokCostTicksToUsd(topLevel.costUsdTicks),
         speed: "standard",
+        ...(topLevel.modelCalls > 1 ? { modelCalls: topLevel.modelCalls } : {}),
         // No turn id means we cannot tell two same-second updates apart.
         dedupeKey: dedupeKeyFor("grok"),
       },
@@ -219,6 +220,12 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
     ) {
       reportedCostUsd = remainingCostUsd * (totalTokens(totals) / untickedTokenDenominator);
     }
+    const calls =
+      entry.totals.modelCalls > 0
+        ? entry.totals.modelCalls
+        : modelEntries.length === 1
+          ? topLevel.modelCalls
+          : 1;
 
     results.push({
       provider: "grok",
@@ -226,9 +233,10 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
       model: entry.model,
       sessionId,
       totals,
-      recordCount: entry.totals.modelCalls,
+      recordCount: Math.max(1, calls),
       reportedCostUsd,
       speed: "standard",
+      ...(calls > 1 ? { modelCalls: calls } : {}),
       dedupeKey: dedupeKeyFor(entry.model),
     });
   }

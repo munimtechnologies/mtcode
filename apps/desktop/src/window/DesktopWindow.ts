@@ -755,6 +755,9 @@ export const make = Effect.gen(function* () {
       // capturePage stay usable after the user leaves the thread.
       webPreferences.backgroundThrottling = false;
       webPreferences.disableHtmlFullscreenWindowResize = true;
+      // Default mode keys zoom by host across the partition and resets it to app zoom on every
+      // cross-document commit; isolated keeps each tab's zoom on its own frame across navigations.
+      webPreferences.zoomMode = "isolated";
       if (previewPasskeys.bridgeEnabled) {
         webPreferences.additionalArguments = [
           ...(webPreferences.additionalArguments ?? []),

@@ -19,8 +19,8 @@ import {
   getProviderOptionCurrentLabel,
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
-  normalizeModelSlug,
   resolveReasoningTransition,
+  resolveSelectableModel,
 } from "@t3tools/shared/model";
 import { msg, T, useMessages } from "gt-react";
 import { memo } from "react";
@@ -57,6 +57,7 @@ export function readPromptUltrathink(prompt: string): PromptUltrathink {
 }
 
 function representativeUltrathinkPrompt(promptUltrathink: PromptUltrathink | undefined): string {
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- provider prompt keyword, never shown as UI copy
   if (promptUltrathink === "prefix") return "Ultrathink:\n";
   if (promptUltrathink === "body") return "ultrathink";
   return "";
@@ -164,7 +165,7 @@ function getSelectedTraits(
   const caps = getProviderModelCapabilities(models, model, provider, includePlanAgent);
   const modelIsUnavailable =
     keepsUnavailableModelOptions(provider, model) &&
-    !models.some((candidate) => candidate.slug === normalizeModelSlug(model, provider));
+    resolveSelectableModel(provider, model, models) === null;
   const descriptors = modelIsUnavailable
     ? buildUnavailableModelOptionDescriptors(
         includePlanAgent
